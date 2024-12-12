@@ -1,0 +1,26 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DesktopOrganizer.App", "src\DesktopOrganizer.App\DesktopOrganizer.App.csproj", "{6DC25754-1309-4D7C-A268-B776B0A81913}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "app", "app", "{3DE8C21A-31E2-4E14-AE16-BF93218D74FB}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".build", ".build", "{30FF7129-1CDE-4819-8BF0-77E04ED75EC4}"
+	ProjectSection(SolutionItems) = preProject
+		linters\linter.ruleset = linters\linter.ruleset
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6DC25754-1309-4D7C-A268-B776B0A81913}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6DC25754-1309-4D7C-A268-B776B0A81913}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6DC25754-1309-4D7C-A268-B776B0A81913}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6DC25754-1309-4D7C-A268-B776B0A81913}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{6DC25754-1309-4D7C-A268-B776B0A81913} = {3DE8C21A-31E2-4E14-AE16-BF93218D74FB}
+	EndGlobalSection
+EndGlobal

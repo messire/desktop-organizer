@@ -1,7 +1,10 @@
 ﻿using System.IO;
 using System.Windows;
+using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Providers;
 
-namespace DesktopOrganizer.App;
+namespace DesktopOrganizer.UI.Views;
 
 /// <summary>
 /// Interaction logic for MainWindow.xaml.
@@ -9,13 +12,16 @@ namespace DesktopOrganizer.App;
 public partial class MainWindow : Window
 {
     private readonly List<FileItem> _fileItems = [];
+    private readonly IIconProvider _iconProvider;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MainWindow"/> class.
     /// </summary>
-    public MainWindow()
+    /// <param name="iconProvider"><see cref="IIconProvider"/> instance.</param>
+    public MainWindow(IIconProvider iconProvider)
     {
         InitializeComponent();
+        _iconProvider = iconProvider;
         LoadFileList();
     }
 
@@ -24,14 +30,6 @@ public partial class MainWindow : Window
     {
         SaveFileList();
         base.OnClosing(e);
-    }
-
-    private void DeleteFile_Click(object sender, RoutedEventArgs e)
-    {
-        if (FileListBox.SelectedItem is not FileItem selectedItem) return;
-
-        _fileItems.Remove(selectedItem);
-        RefreshFileList();
     }
 
     private void FileListBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -75,7 +73,7 @@ public partial class MainWindow : Window
             FileListBox.Items.Add(new
             {
                 item.FileName,
-                Icon = FileIconHelper.GetFileIcon(item.FilePath),
+                Icon = _iconProvider.GetIcon(item.FilePath),
             });
         }
 

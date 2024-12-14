@@ -1,13 +1,30 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DesktopOrganizer.App", "src\DesktopOrganizer.App\DesktopOrganizer.App.csproj", "{6DC25754-1309-4D7C-A268-B776B0A81913}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "app", "app", "{3DE8C21A-31E2-4E14-AE16-BF93218D74FB}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".build", ".build", "{30FF7129-1CDE-4819-8BF0-77E04ED75EC4}"
 	ProjectSection(SolutionItems) = preProject
 		linters\linter.ruleset = linters\linter.ruleset
+		.editorconfig = .editorconfig
 	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "app", "app", "{3DE8C21A-31E2-4E14-AE16-BF93218D74FB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DesktopOrganizer.UI", "src\DesktopOrganizer.UI\DesktopOrganizer.UI.csproj", "{4CA11A6B-75B1-4399-9EB2-B92442C7A53B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "core", "core", "{409FEDCA-03B3-420A-9C72-C66B308103A3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DesktopOrganizer.Core", "src\DesktopOrganizer.Core\DesktopOrganizer.Core.csproj", "{16F84402-7B5E-4B54-B28B-6663B66E21F9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DesktopOrganizer.Services", "src\DesktopOrganizer.Services\DesktopOrganizer.Services.csproj", "{441F20C5-75B0-42D8-99BF-E0CEC54553FD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DesktopOrganizer.Services.Abstractions", "src\DesktopOrganizer.Services.Abstractions\DesktopOrganizer.Services.Abstractions.csproj", "{3247D645-120E-426E-A8A0-F40232F9DCB9}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{B00F0BC5-4DBC-4AA4-BCC3-24F511648D11}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DesktopOrganizer.Tests", "tests\DesktopOrganizer.Tests\DesktopOrganizer.Tests.csproj", "{54C85F05-DABA-4A3D-92EC-145CAD905100}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{373B72A9-3E14-46FE-AAF5-D31D26F746D6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DesktopOrganizer.Attributes", "src\DesktopOrganizer.Attributes\DesktopOrganizer.Attributes.csproj", "{B93F3531-BDD6-4BF0-875E-0F373427E3EC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,12 +32,37 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{6DC25754-1309-4D7C-A268-B776B0A81913}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6DC25754-1309-4D7C-A268-B776B0A81913}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6DC25754-1309-4D7C-A268-B776B0A81913}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6DC25754-1309-4D7C-A268-B776B0A81913}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4CA11A6B-75B1-4399-9EB2-B92442C7A53B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4CA11A6B-75B1-4399-9EB2-B92442C7A53B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4CA11A6B-75B1-4399-9EB2-B92442C7A53B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4CA11A6B-75B1-4399-9EB2-B92442C7A53B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{16F84402-7B5E-4B54-B28B-6663B66E21F9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{16F84402-7B5E-4B54-B28B-6663B66E21F9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{16F84402-7B5E-4B54-B28B-6663B66E21F9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{16F84402-7B5E-4B54-B28B-6663B66E21F9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{441F20C5-75B0-42D8-99BF-E0CEC54553FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{441F20C5-75B0-42D8-99BF-E0CEC54553FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{441F20C5-75B0-42D8-99BF-E0CEC54553FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{441F20C5-75B0-42D8-99BF-E0CEC54553FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{54C85F05-DABA-4A3D-92EC-145CAD905100}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{54C85F05-DABA-4A3D-92EC-145CAD905100}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{54C85F05-DABA-4A3D-92EC-145CAD905100}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{54C85F05-DABA-4A3D-92EC-145CAD905100}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3247D645-120E-426E-A8A0-F40232F9DCB9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3247D645-120E-426E-A8A0-F40232F9DCB9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3247D645-120E-426E-A8A0-F40232F9DCB9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3247D645-120E-426E-A8A0-F40232F9DCB9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B93F3531-BDD6-4BF0-875E-0F373427E3EC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B93F3531-BDD6-4BF0-875E-0F373427E3EC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B93F3531-BDD6-4BF0-875E-0F373427E3EC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B93F3531-BDD6-4BF0-875E-0F373427E3EC}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{6DC25754-1309-4D7C-A268-B776B0A81913} = {3DE8C21A-31E2-4E14-AE16-BF93218D74FB}
+		{4CA11A6B-75B1-4399-9EB2-B92442C7A53B} = {3DE8C21A-31E2-4E14-AE16-BF93218D74FB}
+		{16F84402-7B5E-4B54-B28B-6663B66E21F9} = {409FEDCA-03B3-420A-9C72-C66B308103A3}
+		{441F20C5-75B0-42D8-99BF-E0CEC54553FD} = {409FEDCA-03B3-420A-9C72-C66B308103A3}
+		{54C85F05-DABA-4A3D-92EC-145CAD905100} = {B00F0BC5-4DBC-4AA4-BCC3-24F511648D11}
+		{3247D645-120E-426E-A8A0-F40232F9DCB9} = {409FEDCA-03B3-420A-9C72-C66B308103A3}
+		{B93F3531-BDD6-4BF0-875E-0F373427E3EC} = {373B72A9-3E14-46FE-AAF5-D31D26F746D6}
 	EndGlobalSection
 EndGlobal

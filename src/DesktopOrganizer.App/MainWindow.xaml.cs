@@ -1,14 +1,5 @@
 ﻿using System.IO;
-using System.Text;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
 
 namespace DesktopOrganizer.App;
 
@@ -43,6 +34,15 @@ public partial class MainWindow : Window
         RefreshFileList();
     }
 
+    private void FileListBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Delete && FileListBox.SelectedItem is FileItem selectedItem)
+        {
+            _fileItems.Remove(selectedItem);
+            RefreshFileList();
+        }
+    }
+
     private void Window_DragEnter(object sender, DragEventArgs e)
     {
         e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
@@ -72,8 +72,14 @@ public partial class MainWindow : Window
         FileListBox.Items.Clear();
         foreach (var item in _fileItems)
         {
-            FileListBox.Items.Add(item);
+            FileListBox.Items.Add(new
+            {
+                item.FileName,
+                Icon = FileIconHelper.GetFileIcon(item.FilePath),
+            });
         }
+
+        FileCountTextBlock.Text = $"Количество файлов: {_fileItems.Count}";
     }
 
     private void SaveFileList()

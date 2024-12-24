@@ -1,29 +1,26 @@
-﻿using System.IO;
+﻿using System.Windows.Media;
 
 namespace DesktopOrganizer.Core.Models;
 
 /// <summary>
 /// File data content.
 /// </summary>
-public class FileItem
+/// <param name="Path">The file path.</param>
+/// <param name="Icon">The file icon.</param>
+public record FileItem(string Path, ImageSource? Icon)
 {
-    /// <summary>
-    /// The file path.
-    /// </summary>
-    public required string FilePath { get; init; }
-
     /// <summary>
     /// The file name extracted from the file path.
     /// </summary>
-    public string FileName => Path.GetFileName(FilePath) ?? string.Empty;
+    public string Name => System.IO.Path.GetFileName(Path);
 
     /// <summary>
     /// The file extension extracted from the file path.
     /// </summary>
-    public string FileType => Path.GetExtension(FilePath) ?? string.Empty;
+    public string Type => System.IO.Path.GetExtension(Path);
 
     /// <summary>
     /// The file name as a string representation of the object.
     /// </summary>
-    public override string ToString() => FileName;
+    public override string ToString() => Name;
 }

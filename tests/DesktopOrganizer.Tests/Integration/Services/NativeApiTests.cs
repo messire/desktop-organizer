@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.IO;
+using System.Runtime.InteropServices;
 using DesktopOrganizer.Services.Enums;
 using DesktopOrganizer.Services.Models;
 using DesktopOrganizer.Tests.Resources;
@@ -6,20 +7,19 @@ using static DesktopOrganizer.Services.Enums.FileFlag;
 
 namespace DesktopOrganizer.Tests.Integration.Services;
 
-
 /// <summary>
 /// Integration tests for <see cref="NativeApi"/>.
 /// </summary>
 [Trait(IntegrationTests, nameof(Services))]
 public class NativeApiTests
 {
-    private readonly NativeApi _nativeApi = new ();
     private const FileAttribute Attributes = FileAttribute.Normal;
+    private readonly NativeApi _nativeApi = new ();
 
     public static IEnumerable<object[]> FileInfoTestData => new List<object[]>
     {
-        new object[] { Path.GetFullPath("Resources/TestFile.txt"), true, Icon | UseFileAttributes},
-        new object[] { Path.GetFullPath("Resources/NonExistentFile.txt"), false, Icon }
+        new object[] { Path.GetFullPath("Resources/TestFile.txt"), true, Icon | UseFileAttributes },
+        new object[] { Path.GetFullPath("Resources/NonExistentFile.txt"), false, Icon },
     };
 
     /// <summary>

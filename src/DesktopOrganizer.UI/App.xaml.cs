@@ -1,5 +1,4 @@
-﻿using System.Windows;
-using DesktopOrganizer.Services.Configuration;
+﻿using DesktopOrganizer.Services.Configuration;
 using DesktopOrganizer.UI.Views;
 using Microsoft.Extensions.DependencyInjection;
 

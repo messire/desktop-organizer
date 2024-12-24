@@ -1,6 +1,4 @@
-﻿using DesktopOrganizer.Services.Interfaces;
-
-namespace DesktopOrganizer.Services.Tools;
+﻿namespace DesktopOrganizer.Services.Tools;
 
 /// <inheritdoc />
 internal partial class NativeApi: INativeApi

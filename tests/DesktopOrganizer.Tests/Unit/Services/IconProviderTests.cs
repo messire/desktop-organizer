@@ -1,4 +1,5 @@
-﻿using DesktopOrganizer.Services.Enums;
+﻿using System.IO;
+using DesktopOrganizer.Services.Enums;
 using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.Services.Models;
 using Moq;
@@ -13,12 +14,13 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class IconProviderTests
 {
-    private static readonly IntPtr ValidIconHandle = new (12345);
-    private static readonly IntPtr InvalidIconHandle = IntPtr.Zero;
     private const string InvalidFilePath = "InvalidFilePath.txt";
     private const string ValidFilePath = "Resources/TestFile.txt";
     private const FileFlag IconFlags = Icon | ShellIconSize | UseFileAttributes;
     private const FileAttribute FileAttributes = Normal;
+
+    private static readonly IntPtr ValidIconHandle = new (12345);
+    private static readonly IntPtr InvalidIconHandle = IntPtr.Zero;
 
     private readonly IconProvider _iconProvider;
     private readonly Mock<IIconHandler> _iconHandlerMock;
@@ -34,7 +36,7 @@ public class IconProviderTests
     public static IEnumerable<object[]> GetIconTestData => new List<object[]>
     {
         new object[] { ValidFilePath, ValidIconHandle },
-        new object[] { InvalidFilePath, InvalidIconHandle }
+        new object[] { InvalidFilePath, InvalidIconHandle },
     };
 
     /// <summary>
@@ -107,7 +109,7 @@ public class IconProviderTests
 
     private ShellFileInfo SetupMocks(string filePath, IntPtr iconHandle, DrawingImage expectedIcon)
     {
-        var shellFileInfo = new ShellFileInfo();
+        var shellFileInfo = default(ShellFileInfo);
 
         _iconHandlerMock
             .Setup(handler => handler.GetIconHandle(filePath, ref shellFileInfo, FileAttributes, IconFlags))

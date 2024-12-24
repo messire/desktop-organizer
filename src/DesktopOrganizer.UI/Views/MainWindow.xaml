@@ -4,26 +4,29 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:DesktopOrganizer.UI"
+        xmlns:models="clr-namespace:DesktopOrganizer.Core.Models;assembly=DesktopOrganizer.Core"
         mc:Ignorable="d"
         Title="MainWindow" Height="450" Width="800"
         AllowDrop="True"
         DragEnter="Window_DragEnter"
         Drop="Window_Drop">
     <Grid>
-        <ListBox x:Name="FileListBox"
-                 HorizontalAlignment="Stretch"
-                 VerticalAlignment="Stretch"
-                 Margin="10"
-                 KeyDown="FileListBox_KeyDown">
-            <ListBox.ItemTemplate>
-                <DataTemplate>
-                    <StackPanel Orientation="Horizontal" Margin="5">
-                        <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,5,0" />
-                        <TextBlock Text="{Binding FileName}" VerticalAlignment="Center" />
-                    </StackPanel>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
-        <TextBlock x:Name="FileCountTextBlock" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="10" />
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="5">
+            <Button Content="Сменить вид" Command="{Binding SwitchViewCommand}" Margin="0,0,5,0"/>
+            <TextBlock Text="{Binding FileCountText}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+        </StackPanel>
+
+        <ContentControl Content="{Binding FileItems}"
+                        ContentTemplate="{Binding CurrentViewTemplate}"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        Margin="10"
+                        Grid.Row="1"/>
     </Grid>
 </Window>

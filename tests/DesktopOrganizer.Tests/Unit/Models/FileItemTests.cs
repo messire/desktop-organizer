@@ -11,25 +11,25 @@ public class FileItemTests
     public static IEnumerable<object[]> FileItemTestData => new List<object[]>
     {
         new object[] { "Resources/File.txt", "File.txt", ".txt" },
-        new object[] { "Resources/FileWithoutExtension", "FileWithoutExtension", "" },
+        new object[] { "Resources/FileWithoutExtension", "FileWithoutExtension", string.Empty },
         new object[] { "FileWithoutPath.txt", "FileWithoutPath.txt", ".txt" },
-        new object[] { "", "", "" },
-        new object[] { null!, "", "" }
+        new object[] { string.Empty, string.Empty, string.Empty },
+        new object[] { null!, string.Empty, string.Empty },
     };
 
     /// <summary>
-    /// Ensures that <see cref="FileItem.FileName"/> and <see cref="FileItem.FileType"/> return correct values.
+    /// Ensures that <see cref="FileItem.Name"/> and <see cref="FileItem.Type"/> return correct values.
     /// </summary>
     [Theory]
     [MemberData(nameof(FileItemTestData))]
     public void FileItem_Properties_ReturnCorrectValues(string? filePath, string expectedFileName, string expectedFileType)
     {
         // Arrange
-        var fileItem = new FileItem { FilePath = filePath ?? string.Empty };
+        var fileItem = new FileItem(filePath ?? string.Empty, null);
 
         // Act & Assert
-        Assert.Equal(expectedFileName, fileItem.FileName);
-        Assert.Equal(expectedFileType, fileItem.FileType);
+        Assert.Equal(expectedFileName, fileItem.Name);
+        Assert.Equal(expectedFileType, fileItem.Type);
     }
 
     /// <summary>
@@ -40,7 +40,7 @@ public class FileItemTests
     public void ToString_ReturnsCorrectFileName(string? filePath, string expectedFileName, string _)
     {
         // Arrange
-        var fileItem = new FileItem { FilePath = filePath ?? string.Empty };
+        var fileItem = new FileItem(filePath ?? string.Empty, null);
 
         // Act
         var result = fileItem.ToString();

@@ -1,15 +1,12 @@
 ﻿using System.IO;
 using DesktopOrganizer.Services.Abstractions;
-using DesktopOrganizer.Services.Interfaces;
 using static DesktopOrganizer.Services.Enums.FileAttribute;
 using static DesktopOrganizer.Services.Enums.FileFlag;
 using Directory = System.IO.Directory;
 
 namespace DesktopOrganizer.Services.Providers;
 
-/// <summary>
-/// Provides functionality to cache file icons for improved performance.
-/// </summary>
+/// <inheritdoc />
 internal class IconProvider(IIconHandler iconHandler, IIconFactory iconFactory)
     : IIconProvider
 {

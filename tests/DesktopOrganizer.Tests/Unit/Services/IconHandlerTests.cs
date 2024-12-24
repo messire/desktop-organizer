@@ -1,4 +1,5 @@
-﻿using DesktopOrganizer.Services.Enums;
+﻿using System.IO;
+using DesktopOrganizer.Services.Enums;
 using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.Services.Models;
 using Moq;
@@ -11,13 +12,18 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class IconHandlerTests
 {
-    private static readonly IntPtr ValidIconHandle = new (12345);
-    private static readonly IntPtr InvalidIconHandle = IntPtr.Zero;
     private const string InvalidFilePath = "InvalidFilePath.txt";
     private const string ValidFilePath = "Resources/TestFile.txt";
+
+    private static readonly IntPtr ValidIconHandle = new (12345);
+    private static readonly IntPtr InvalidIconHandle = IntPtr.Zero;
+
     private readonly IconHandler _iconHandler;
     private readonly Mock<INativeApi> _nativeApiMock;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IconHandlerTests"/> class.
+    /// </summary>
     public IconHandlerTests()
     {
         _nativeApiMock = new Mock<INativeApi>();
@@ -26,14 +32,14 @@ public class IconHandlerTests
 
     public static IEnumerable<object[]> GetIconHandlerData => new List<object[]>
     {
-        new object[] { ValidFilePath, ValidIconHandle},
-        new object[] { InvalidFilePath, InvalidIconHandle }
+        new object[] { ValidFilePath, ValidIconHandle },
+        new object[] { InvalidFilePath, InvalidIconHandle },
     };
 
     public static IEnumerable<object[]> DestroyIconData => new List<object[]>
     {
-        new object[] { true, ""},
-        new object[] { false, "Failed to destroy icon handle: {0}" }
+        new object[] { true, string.Empty },
+        new object[] { false, "Failed to destroy icon handle: {0}" },
     };
 
     /// <summary>
@@ -44,7 +50,7 @@ public class IconHandlerTests
     public void GetIconHandle_ReturnsExpectedHandle_ForGivenFilePath(string filePath, IntPtr expectedHandle)
     {
         // Arrange
-        var shellFileInfo = new ShellFileInfo();
+        var shellFileInfo = default(ShellFileInfo);
         SetupNativeApiMock(filePath, expectedHandle, true);
 
         // Act
@@ -101,7 +107,7 @@ public class IconHandlerTests
     /// </summary>
     private void SetupNativeApiMock(string filePath, nint iconHandle, bool destroyResult)
     {
-        var shellFileInfo = new ShellFileInfo();
+        var shellFileInfo = default(ShellFileInfo);
 
         _nativeApiMock
             .Setup(api => api.GetFileInfo(filePath, It.IsAny<uint>(), ref shellFileInfo, It.IsAny<uint>(), It.IsAny<uint>()))

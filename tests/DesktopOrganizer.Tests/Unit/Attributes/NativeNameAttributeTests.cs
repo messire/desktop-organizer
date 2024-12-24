@@ -48,6 +48,5 @@ public class NativeNameAttributeTests
     [InlineData(null)]
     [InlineData("")]
     public void Constructor_ThrowsException_WhenNameIsNullOrEmpty(string invalidName) =>
-        // Act & Assert
         Assert.Throws<ArgumentException>(() => new NativeNameAttribute(invalidName));
 }

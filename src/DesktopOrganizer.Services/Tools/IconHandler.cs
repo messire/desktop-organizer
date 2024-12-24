@@ -1,6 +1,4 @@
-﻿using DesktopOrganizer.Services.Interfaces;
-
-namespace DesktopOrganizer.Services.Tools;
+﻿namespace DesktopOrganizer.Services.Tools;
 
 /// <inheritdoc />
 /// <remarks>
@@ -23,14 +21,7 @@ internal class IconHandler(INativeApi nativeApi) : IIconHandler
     /// <inheritdoc />
     public void DestroyIconHandle(IntPtr iconHandle)
     {
-        if (iconHandle == IntPtr.Zero)
-        {
-            return;
-        }
-
-        if (!nativeApi.DestroyIcon(iconHandle))
-        {
-            Console.Error.WriteLine($"Failed to destroy icon handle: {iconHandle}");
-        }
+        if (iconHandle == IntPtr.Zero || nativeApi.DestroyIcon(iconHandle)) return;
+        Console.Error.WriteLine($"Failed to destroy icon handle: {iconHandle}");
     }
 }

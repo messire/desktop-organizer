@@ -1,5 +1,4 @@
 ﻿using System.Windows.Interop;
-using DesktopOrganizer.Services.Interfaces;
 
 namespace DesktopOrganizer.Services.Tools;
 

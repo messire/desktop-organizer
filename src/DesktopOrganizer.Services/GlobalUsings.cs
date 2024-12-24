@@ -1,8 +1,10 @@
-﻿global using System.Collections.Concurrent;
+﻿global using System;
+global using System.Collections.Concurrent;
 global using System.Runtime.InteropServices;
 global using System.Windows;
 global using System.Windows.Media;
 global using System.Windows.Media.Imaging;
 global using DesktopOrganizer.Services.Enums;
+global using DesktopOrganizer.Services.Interfaces;
 global using DesktopOrganizer.Services.Models;
 global using DesktopOrganizer.Services.Tools;

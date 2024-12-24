@@ -1,5 +1,4 @@
 ﻿using DesktopOrganizer.Services.Abstractions;
-using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.Services.Providers;
 using Microsoft.Extensions.DependencyInjection;
 

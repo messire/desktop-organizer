@@ -1,11 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net8.0-windows</TargetFramework>
-        <LangVersion>latest</LangVersion>
-        <Nullable>enable</Nullable>
-        <UseWPF>true</UseWPF>
-        <ImplicitUsings>enable</ImplicitUsings>
+        <CodeAnalysisRuleSet>.\..\..\linters\linter.ruleset</CodeAnalysisRuleSet>
+        <DocumentationFile>.\DesktopOrganizer.Core.xml</DocumentationFile>
     </PropertyGroup>
 
 </Project>

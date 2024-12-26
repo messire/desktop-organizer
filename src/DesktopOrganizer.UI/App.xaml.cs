@@ -1,5 +1,5 @@
-﻿using DesktopOrganizer.Services.Configuration;
-using DesktopOrganizer.UI.Views;
+﻿using DesktopOrganizer.UI.Configuration;
+using DesktopOrganizer.UI.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DesktopOrganizer.UI;
@@ -10,6 +10,14 @@ namespace DesktopOrganizer.UI;
 public partial class App : Application
 {
     private readonly ServiceProvider _serviceProvider;
+    private ITrayIconManager? _trayIconManager;
+    private IWindowManager? _windowManager;
+
+    private ITrayIconManager TrayIconManager
+        => (_trayIconManager ??= _serviceProvider.GetService<ITrayIconManager>())!;
+
+    private IWindowManager WindowManager
+        => (_windowManager ??= _serviceProvider.GetService<IWindowManager>())!;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="App"/> class.
@@ -17,7 +25,7 @@ public partial class App : Application
     public App()
     {
         ServiceCollection services = new ServiceCollection();
-        ConfigureServices(services);
+        services.ConfigureServices();
         _serviceProvider = services.BuildServiceProvider();
     }
 
@@ -28,19 +36,19 @@ public partial class App : Application
         base.OnExit(e);
     }
 
-    /// <summary>
-    /// Register services.
-    /// </summary>
-    /// <param name="services"><see cref="IServiceCollection"/> instance.</param>
-    private static void ConfigureServices(IServiceCollection services)
+    private void StartApp(object? sender, StartupEventArgs e)
     {
-        services.RegisterServices();
-        services.AddSingleton<MainWindow>();
+        InitTrayIcon();
+        ShowMainWindow(sender, e);
     }
 
-    private void StartApp(object sender, StartupEventArgs e)
+    private void ShowMainWindow(object? sender, EventArgs e)
+        => Current.Dispatcher.Invoke(() => WindowManager.ShowMainWindow());
+
+    private void InitTrayIcon()
     {
-        var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
-        mainWindow.Show();
+        TrayIconManager.Initialize();
+        TrayIconManager.OnShowMainWindowRequested += ShowMainWindow;
+        TrayIconManager.OnExitRequested += (_, _) => Shutdown();
     }
 }

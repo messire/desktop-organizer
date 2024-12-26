@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <CodeAnalysisRuleSet>.\..\..\linters\linter.ruleset</CodeAnalysisRuleSet>
+        <UseWindowsForms>true</UseWindowsForms>
         <DocumentationFile>.\DesktopOrganizer.Services.xml</DocumentationFile>
     </PropertyGroup>
 

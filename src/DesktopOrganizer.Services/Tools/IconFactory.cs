@@ -1,4 +1,6 @@
 ﻿using System.Windows.Interop;
+using Brushes = System.Windows.Media.Brushes;
+using Pen = System.Windows.Media.Pen;
 
 namespace DesktopOrganizer.Services.Tools;
 

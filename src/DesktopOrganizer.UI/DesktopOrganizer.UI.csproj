@@ -6,6 +6,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <Content Include="Resources\app.ico" CopyToOutputDirectory="PreserveNewest"/>
+    </ItemGroup>
+
+    <ItemGroup>
         <Compile Update="Properties\Settings.Designer.cs">
             <DesignTimeSharedInput>True</DesignTimeSharedInput>
             <AutoGen>True</AutoGen>

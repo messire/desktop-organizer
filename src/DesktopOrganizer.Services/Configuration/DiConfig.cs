@@ -19,8 +19,10 @@ public static class DiConfig
         services.AddSingleton<IIconHandler, IconHandler>();
         services.AddSingleton<IIconFactory, IconFactory>();
         services.AddSingleton<INativeApi, NativeApi>();
+        services.AddSingleton<INotifyIconAdapter, NotifyIconAdapter>();
 
         // Services
         services.AddTransient<IIconProvider, IconProvider>();
+        services.AddSingleton<ITrayIconManager, TrayIconManager>();
     }
 }

@@ -10,7 +10,7 @@ namespace DesktopOrganizer.Services.Providers;
 internal class IconProvider(IIconHandler iconHandler, IIconFactory iconFactory)
     : IIconProvider
 {
-    private const FileFlag IconFlags = Icon | ShellIconSize | UseFileAttributes;
+    private const FileFlag IconFlags = FileFlag.Icon | ShellIconSize | UseFileAttributes;
     private const FileAttribute FileAttributes = Normal;
 
     private readonly ConcurrentDictionary<string, ImageSource> _iconCache = new();

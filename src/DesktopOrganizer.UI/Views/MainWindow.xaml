@@ -7,9 +7,7 @@
         xmlns:models="clr-namespace:DesktopOrganizer.Core.Models;assembly=DesktopOrganizer.Core"
         mc:Ignorable="d"
         Title="MainWindow" Height="450" Width="800"
-        AllowDrop="True"
-        DragEnter="Window_DragEnter"
-        Drop="Window_Drop">
+        AllowDrop="True">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>

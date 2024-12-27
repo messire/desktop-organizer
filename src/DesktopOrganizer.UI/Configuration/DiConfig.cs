@@ -1,6 +1,7 @@
 ﻿using DesktopOrganizer.Services.Configuration;
 using DesktopOrganizer.Services.Providers;
 using DesktopOrganizer.UI.Services;
+using DesktopOrganizer.UI.ViewModels;
 using DesktopOrganizer.UI.Views;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,6 +19,11 @@ public static class DiConfig
     public static void ConfigureServices(this IServiceCollection services)
     {
         services.RegisterServices();
+
+        // ViewModels
+        services.AddSingleton<MainWindowViewModel>();
+        services.AddTransient<ChildWindowViewModel>();
+
         services.AddSingleton<IWindowManager, WindowManager>();
         services.AddTransient<MainWindow>();
     }

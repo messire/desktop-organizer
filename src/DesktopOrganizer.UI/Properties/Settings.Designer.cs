@@ -34,5 +34,17 @@ namespace DesktopOrganizer.UI.Properties {
                 this["SavedFiles"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string ChildWindowsState {
+            get {
+                return ((string)(this["ChildWindowsState"]));
+            }
+            set {
+                this["ChildWindowsState"] = value;
+            }
+        }
     }
 }

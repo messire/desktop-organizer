@@ -6,7 +6,7 @@
         <Nullable>enable</Nullable>
         <UseWPF>true</UseWPF>
         <ImplicitUsings>enable</ImplicitUsings>
-        <CodeAnalysisRuleSet>..\..\linters\linter.ruleset</CodeAnalysisRuleSet>
+        <CodeAnalysisRuleSet>$(SolutionDir)linters\linter.ruleset</CodeAnalysisRuleSet>
     </PropertyGroup>
 
     <ItemGroup>

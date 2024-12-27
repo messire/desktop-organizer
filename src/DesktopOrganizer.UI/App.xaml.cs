@@ -39,16 +39,16 @@ public partial class App : Application
     private void StartApp(object? sender, StartupEventArgs e)
     {
         InitTrayIcon();
-        ShowMainWindow(sender, e);
+        StartAppWindow(sender, e);
     }
 
-    private void ShowMainWindow(object? sender, EventArgs e)
-        => Current.Dispatcher.Invoke(() => WindowManager.ShowMainWindow());
+    private void StartAppWindow(object? sender, EventArgs e)
+        => Current.Dispatcher.Invoke(() => WindowManager.StartMainWindow());
 
     private void InitTrayIcon()
     {
         TrayIconManager.Initialize();
-        TrayIconManager.OnShowMainWindowRequested += ShowMainWindow;
+        TrayIconManager.OnShowMainWindowRequested += StartAppWindow;
         TrayIconManager.OnExitRequested += (_, _) => Shutdown();
     }
 }

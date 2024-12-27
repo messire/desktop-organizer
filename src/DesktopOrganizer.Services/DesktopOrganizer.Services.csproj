@@ -3,7 +3,6 @@
     <PropertyGroup>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <UseWindowsForms>true</UseWindowsForms>
-        <DocumentationFile>.\DesktopOrganizer.Services.xml</DocumentationFile>
     </PropertyGroup>
 
     <ItemGroup>

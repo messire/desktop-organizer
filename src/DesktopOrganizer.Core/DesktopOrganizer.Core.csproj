@@ -1,8 +1,1 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-    <PropertyGroup>
-        <CodeAnalysisRuleSet>.\..\..\linters\linter.ruleset</CodeAnalysisRuleSet>
-        <DocumentationFile>.\DesktopOrganizer.Core.xml</DocumentationFile>
-    </PropertyGroup>
-
-</Project>
+<Project Sdk="Microsoft.NET.Sdk" />

@@ -34,12 +34,14 @@ public partial class MainWindow : Window
         _viewModel.LoadSavedFiles();
     }
 
-    private void Window_DragEnter(object sender, DragEventArgs e) =>
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
+    /// <inheritdoc />
+    protected override void OnDragEnter(DragEventArgs e)
+        => e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
             ? DragDropEffects.Copy
             : DragDropEffects.None;
 
-    private void Window_Drop(object sender, DragEventArgs e)
+    /// <inheritdoc />
+    protected override void OnDrop(DragEventArgs e)
     {
         if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
         _viewModel.AddFiles(files);

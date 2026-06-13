@@ -3,25 +3,34 @@
 /// <summary>
 /// A simple implementation of relay command.
 /// </summary>
-/// <param name="execute">The delegate that contains the logic to be executed when the command is triggered. </param>
-public class RelayCommand(Action execute) : ICommand
+public class RelayCommand : ICommand
 {
+    private readonly Action _execute;
+    private readonly Func<bool>? _canExecute;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RelayCommand"/> class.
+    /// </summary>
+    /// <param name="execute">The delegate that contains the logic to be executed when the command is triggered.</param>
+    /// <param name="canExecute">Optional delegate that determines whether the command can execute.</param>
+    public RelayCommand(Action execute, Func<bool>? canExecute = null)
+    {
+        _execute = execute;
+        _canExecute = canExecute;
+    }
+
     /// <summary>
     /// Occurs when changes require the <see cref="CanExecute"/> method to be reevaluated.
-    /// Used to notify the UI that execution capability might have been updated.
     /// </summary>
-    public event EventHandler? CanExecuteChanged;
+    public event EventHandler? CanExecuteChanged
+    {
+        add => CommandManager.RequerySuggested += value;
+        remove => CommandManager.RequerySuggested -= value;
+    }
 
-    /// <summary>
-    /// Defines whether the command can execute in its current state.
-    /// </summary>
-    /// <param name="parameter">Command parameter. Not used in this implementation.</param>
-    /// <returns><c>true</c> to indicate the command can always execute.</returns>
-    public bool CanExecute(object? parameter) => true;
+    /// <inheritdoc/>
+    public bool CanExecute(object? parameter) => _canExecute?.Invoke() ?? true;
 
-    /// <summary>
-    /// Executes the command's logic.
-    /// </summary>
-    /// <param name="parameter">Command parameter. Not used in this implementation.</param>
-    public void Execute(object? parameter) => execute.Invoke();
+    /// <inheritdoc/>
+    public void Execute(object? parameter) => _execute.Invoke();
 }

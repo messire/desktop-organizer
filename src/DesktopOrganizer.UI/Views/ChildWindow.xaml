@@ -3,35 +3,116 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:DesktopOrganizer.UI"
-        xmlns:models="clr-namespace:DesktopOrganizer.Core.Models;assembly=DesktopOrganizer.Core"
         mc:Ignorable="d"
-        Title="{Binding Title}"
+        Title="{Binding Model.Title}"
+        Height="300" Width="260"
+        MinHeight="32" MinWidth="120"
         WindowStartupLocation="Manual"
-        Left="{Binding Position.X}"
-        Top="{Binding Position.Y}"
-        Width="{Binding Size.Width}"
-        Height="{Binding Size.Height}"
-        WindowState="{Binding WindowState}"
-        Visibility="{Binding IsVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
+        WindowStyle="None"
+        ShowInTaskbar="False"
+        AllowsTransparency="True"
+        Background="Transparent"
         AllowDrop="True">
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+    <Border CornerRadius="6"
+            BorderThickness="0">
+        <Border.Background>
+            <MultiBinding Converter="{StaticResource ColorOpacityBrush}">
+                <Binding Path="Model.BackgroundColor"/>
+                <Binding Path="Model.BackgroundOpacity"/>
+            </MultiBinding>
+        </Border.Background>
+        <Grid>
+            <!-- Panel content -->
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="32"/>
+                    <RowDefinition x:Name="ContentRow" Height="*"/>
+                </Grid.RowDefinitions>
 
-        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="5">
-            <Button Content="Сменить вид" Command="{Binding SwitchViewCommand}" Margin="0,0,5,0"/>
-            <TextBlock Text="{Binding FileCountText}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-        </StackPanel>
+                <!-- Title bar — drag zone (single click = move, double click = roll up) -->
+                <Border Grid.Row="0"
+                        Background="Transparent"
+                        CornerRadius="6,6,0,0"
+                        MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                    <Border.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Переименовать" Click="RenameMenu_Click"/>
+                            <MenuItem Header="Свернуть / развернуть" Click="RollUpMenu_Click"/>
+                        </ContextMenu>
+                    </Border.ContextMenu>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
 
-        <ContentControl Content="{Binding FileItems}"
-                        ContentTemplate="{Binding CurrentViewTemplate}"
-                        HorizontalAlignment="Stretch"
-                        VerticalAlignment="Stretch"
-                        Margin="10"
-                        Grid.Row="1"/>
-    </Grid>
+                        <TextBlock x:Name="TitleText"
+                                   Grid.Column="0"
+                                   Text="{Binding Model.Title}"
+                                   Foreground="{Binding Model.TextColor, Converter={StaticResource HexBrush}}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   Margin="10,0,0,0"/>
+
+                        <TextBox x:Name="TitleEditBox"
+                                 Grid.Column="0"
+                                 Text="{Binding Model.Title, UpdateSourceTrigger=PropertyChanged}"
+                                 Visibility="Collapsed"
+                                 FontSize="12"
+                                 FontWeight="SemiBold"
+                                 VerticalAlignment="Center"
+                                 VerticalContentAlignment="Center"
+                                 Margin="8,2,4,2"
+                                 KeyDown="TitleEditBox_KeyDown"
+                                 LostKeyboardFocus="TitleEditBox_LostKeyboardFocus"/>
+
+                        <Button Grid.Column="1"
+                                Content="⊞"
+                                Foreground="#AAAAAA"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                FontSize="14"
+                                Width="28" Height="28"
+                                VerticalAlignment="Center"
+                                Margin="0,0,4,0"
+                                Command="{Binding SwitchViewCommand}"
+                                ToolTip="Сменить вид"/>
+                    </Grid>
+                </Border>
+
+                <!-- File list -->
+                <ContentControl x:Name="FileListHost"
+                                Grid.Row="1"
+                                Content="{Binding FileItems}"
+                                ContentTemplate="{Binding CurrentViewTemplate}"
+                                MouseDoubleClick="FileList_MouseDoubleClick"
+                                Margin="4,0,4,4"/>
+            </Grid>
+
+            <!-- Resize overlay: transparent thumbs on edges/corners; centre cell is empty so
+                 clicks pass through to the content underneath. -->
+            <Grid x:Name="ResizeOverlay">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="6"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="6"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="6"/>
+                </Grid.RowDefinitions>
+
+                <Thumb Grid.Row="0" Grid.Column="0" Tag="TopLeft"     Cursor="SizeNWSE" Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="0" Grid.Column="1" Tag="Top"         Cursor="SizeNS"   Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="0" Grid.Column="2" Tag="TopRight"    Cursor="SizeNESW" Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="1" Grid.Column="0" Tag="Left"        Cursor="SizeWE"   Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="1" Grid.Column="2" Tag="Right"       Cursor="SizeWE"   Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="2" Grid.Column="0" Tag="BottomLeft"  Cursor="SizeNESW" Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="2" Grid.Column="1" Tag="Bottom"      Cursor="SizeNS"   Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="2" Grid.Column="2" Tag="BottomRight" Cursor="SizeNWSE" Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+            </Grid>
+        </Grid>
+    </Border>
 </Window>

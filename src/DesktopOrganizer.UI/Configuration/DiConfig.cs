@@ -1,5 +1,4 @@
 ﻿using DesktopOrganizer.Services.Configuration;
-using DesktopOrganizer.Services.Providers;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
 using DesktopOrganizer.UI.Views;
@@ -21,10 +20,18 @@ public static class DiConfig
         services.RegisterServices();
 
         // ViewModels
-        services.AddSingleton<MainWindowViewModel>();
-        services.AddTransient<ChildWindowViewModel>();
+        services.AddSingleton<MainWindowViewModel>();        // Settings VM — no file state
+        services.AddTransient<ChildWindowViewModel>();       // Per-panel VM — has file state
+        services.AddSingleton<LayoutSnapshotsViewModel>();  // Snapshots section VM
 
+        services.AddSingleton<IConfirmationService, ConfirmationService>();
+        services.AddSingleton<IAppSettings, AppSettings>();
+        services.AddSingleton<IAutostartService, AutostartService>();
         services.AddSingleton<IWindowManager, WindowManager>();
-        services.AddTransient<MainWindow>();
+        services.AddSingleton<IPageManager, PageManagerService>();
+        services.AddSingleton<ILayoutSnapshotService, LayoutSnapshotService>();
+        services.AddSingleton<ISortingRuleService, SortingRuleService>();
+        services.AddSingleton<MainWindow>();   // Singleton: hidden, not re-created
+        services.AddTransient<ChildWindow>();
     }
 }

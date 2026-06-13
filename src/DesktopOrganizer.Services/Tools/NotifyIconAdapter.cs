@@ -1,8 +1,10 @@
 ﻿using System.IO;
 
+namespace DesktopOrganizer.Services.Tools;
+
 internal class NotifyIconAdapter : INotifyIconAdapter
 {
-    private readonly NotifyIcon _notifyIcon = new NotifyIcon { Visible = true, };
+    private readonly NotifyIcon _notifyIcon = new () { Visible = true, };
 
     public event EventHandler DoubleClick
     {

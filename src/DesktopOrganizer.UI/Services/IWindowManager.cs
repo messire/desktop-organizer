@@ -61,4 +61,10 @@ public interface IWindowManager
     /// Loads the state of all windows.
     /// </summary>
     void LoadWindowsState();
+
+    /// <summary>
+    /// Applies the <see cref="Models.ChildWindowModel.IsVisible"/> flag of <paramref name="model"/>
+    /// to the actual <see cref="Views.ChildWindow"/> (shows or hides it).
+    /// </summary>
+    void ApplyPanelVisibility(Models.ChildWindowModel model);
 }

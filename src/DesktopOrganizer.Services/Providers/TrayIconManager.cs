@@ -5,13 +5,20 @@ namespace DesktopOrganizer.Services.Providers;
 /// <inheritdoc />
 public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconManager
 {
-    private bool _isMainWindowVisible = true;
+    // Settings window starts hidden (app lives in the tray) — see ADR-002.
+    private bool _isMainWindowVisible;
 
     /// <inheritdoc />
     public event EventHandler? OnExitRequested;
 
     /// <inheritdoc />
     public event EventHandler? OnShowMainWindowRequested;
+
+    /// <inheritdoc />
+    public event EventHandler? OnToggleDesktopIconsRequested;
+
+    /// <inheritdoc />
+    public event EventHandler? OnCaptureDesktopRequested;
 
     /// <inheritdoc />
     public void Initialize()
@@ -32,11 +39,18 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
         var contextMenu = new ContextMenuStrip();
 
         contextMenu.Items.Add(
-            _isMainWindowVisible ? "Hide Main Window" : "Show Main Window",
+            _isMainWindowVisible ? "Скрыть настройки" : "Настройки",
             null,
             (_, _) => ToggleMainWindowVisibility());
 
-        contextMenu.Items.Add("Exit", null, ExitRequested);
+        contextMenu.Items.Add(new ToolStripSeparator());
+        contextMenu.Items.Add("Скрыть / показать значки рабочего стола", null,
+            (_, _) => OnToggleDesktopIconsRequested?.Invoke(this, EventArgs.Empty));
+        contextMenu.Items.Add("Собрать значки рабочего стола", null,
+            (_, _) => OnCaptureDesktopRequested?.Invoke(this, EventArgs.Empty));
+        contextMenu.Items.Add(new ToolStripSeparator());
+
+        contextMenu.Items.Add("Выход", null, ExitRequested);
 
         notifyIconAdapter.SetContextMenu(contextMenu);
     }

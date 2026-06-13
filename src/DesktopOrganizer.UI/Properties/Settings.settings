@@ -3,11 +3,35 @@
               GeneratedClassNamespace="DesktopOrganizer.UI.Properties" GeneratedClassName="Settings">
     <Profiles/>
     <Settings>
-        <Setting Name="SavedFiles" Type="System.String" Scope="User">
-            <Value Profile="(Default)"/>
-        </Setting>
         <Setting Name="ChildWindowsState" Type="System.String" Scope="User">
             <Value Profile="(Default)"/>
+        </Setting>
+        <Setting Name="GridSize" Type="System.Int32" Scope="User">
+            <Value Profile="(Default)">1</Value>
+        </Setting>
+        <Setting Name="DefaultBackgroundColor" Type="System.String" Scope="User">
+            <Value Profile="(Default)">#1E1E1E</Value>
+        </Setting>
+        <Setting Name="DefaultTextColor" Type="System.String" Scope="User">
+            <Value Profile="(Default)">#DDDDDD</Value>
+        </Setting>
+        <Setting Name="DefaultOpacity" Type="System.Double" Scope="User">
+            <Value Profile="(Default)">0.8</Value>
+        </Setting>
+        <Setting Name="DefaultIconSize" Type="System.Double" Scope="User">
+            <Value Profile="(Default)">48</Value>
+        </Setting>
+        <Setting Name="Pages" Type="System.String" Scope="User">
+            <Value Profile="(Default)">["default"]</Value>
+        </Setting>
+        <Setting Name="CurrentPage" Type="System.String" Scope="User">
+            <Value Profile="(Default)">default</Value>
+        </Setting>
+        <Setting Name="SortingRules" Type="System.String" Scope="User">
+            <Value Profile="(Default)">[]</Value>
+        </Setting>
+        <Setting Name="LayoutSnapshots" Type="System.String" Scope="User">
+            <Value Profile="(Default)">[]</Value>
         </Setting>
     </Settings>
 </SettingsFile>

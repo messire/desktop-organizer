@@ -20,6 +20,12 @@ public record FileItem(string Path, ImageSource? Icon)
     public string Type => System.IO.Path.GetExtension(Path);
 
     /// <summary>
+    /// Whether the underlying file or folder currently exists on disk.
+    /// Evaluated on access; used by the UI to grey out broken entries.
+    /// </summary>
+    public bool Exists => System.IO.File.Exists(Path) || System.IO.Directory.Exists(Path);
+
+    /// <summary>
     /// The file name as a string representation of the object.
     /// </summary>
     public override string ToString() => Name;

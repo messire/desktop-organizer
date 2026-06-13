@@ -45,7 +45,9 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     /// <param name="files">Array of file paths to be added.</param>
     protected internal void AddFiles(string[] files)
     {
-        foreach (var file in files.Where(System.IO.File.Exists))
+        // Keep entries even if the path is currently missing — they render greyed out
+        // (a file on an unmounted drive shouldn't silently vanish from the panel).
+        foreach (var file in files.Where(path => !string.IsNullOrWhiteSpace(path)))
         {
             if (FileItems.Any(fileItem => fileItem.Path == file)) continue;
 
@@ -54,7 +56,6 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
             FileItems.Add(item);
         }
 
-        SaveFileList();
         OnPropertyChanged(nameof(FileCountText));
     }
 
@@ -66,30 +67,31 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     {
         if (!FileItems.Contains(file)) return;
         FileItems.Remove(file);
-        SaveFileList();
         OnPropertyChanged(nameof(FileCountText));
     }
 
     /// <summary>
-    /// Saves the current file list to the application settings.
+    /// Removes the <see cref="FileItem"/> whose <see cref="FileItem.Path"/> matches
+    /// <paramref name="path"/>. No-op when no matching item is found.
     /// </summary>
-    protected internal void SaveFileList()
+    /// <param name="path">The file-system path of the item to remove.</param>
+    protected internal void RemoveFileByPath(string path)
     {
-        var filePaths = string.Join("\n", FileItems.Select(item => item.Path));
-        Properties.Settings.Default.SavedFiles = filePaths;
-        Properties.Settings.Default.Save();
+        var item = FileItems.FirstOrDefault(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase));
+        if (item is null) return;
+        FileItems.Remove(item);
+        OnPropertyChanged(nameof(FileCountText));
     }
 
     /// <summary>
-    /// Loads saved file paths from settings and adds them to the collection.
+    /// Replaces the entire <see cref="FileItems"/> collection with items built from
+    /// <paramref name="paths"/>. Used for a full resync after a watcher buffer overflow.
     /// </summary>
-    protected internal void LoadSavedFiles()
+    /// <param name="paths">The new set of file-system paths.</param>
+    protected internal void ReplaceAll(IEnumerable<string> paths)
     {
-        var savedFiles = Properties.Settings.Default.SavedFiles;
-        if (string.IsNullOrWhiteSpace(savedFiles)) return;
-
-        var filePaths = savedFiles.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        AddFiles(filePaths);
+        FileItems.Clear();
+        AddFiles(paths.ToArray());
     }
 
     /// <summary>

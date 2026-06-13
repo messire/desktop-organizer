@@ -22,7 +22,15 @@ public static class DiConfig
         services.AddSingleton<INotifyIconAdapter, NotifyIconAdapter>();
 
         // Services
-        services.AddTransient<IIconProvider, IconProvider>();
+        services.AddSingleton<IIconProvider, IconProvider>();
         services.AddSingleton<ITrayIconManager, TrayIconManager>();
+        services.AddSingleton<IDesktopIntegrationService, DesktopIntegrationService>();
+        services.AddSingleton<IFileLauncher, FileLauncher>();
+        services.AddSingleton<IDesktopIconsService, DesktopIconsService>();
+        services.AddSingleton<IDesktopGestureService, DesktopGestureService>();
+        services.AddSingleton<IFolderWatcherFactory, FolderWatcherFactory>();
+
+        // Multi-monitor: self-contained service (owns its own WM_DISPLAYCHANGE listener).
+        services.AddSingleton<IMonitorService, MonitorService>();
     }
 }

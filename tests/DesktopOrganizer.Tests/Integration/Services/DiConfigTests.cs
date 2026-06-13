@@ -45,26 +45,15 @@ public class DiConfigTests
         // Act
         var firstIconHandler = _serviceProvider.GetRequiredService<IIconHandler>();
         var secondIconHandler = _serviceProvider.GetRequiredService<IIconHandler>();
+        var firstIconProvider = _serviceProvider.GetRequiredService<IIconProvider>();
 
         var firstIconFactory = _serviceProvider.GetRequiredService<IIconFactory>();
         var secondIconFactory = _serviceProvider.GetRequiredService<IIconFactory>();
+        var secondIconProvider = _serviceProvider.GetRequiredService<IIconProvider>();
 
         // Assert
         Assert.Same(firstIconHandler, secondIconHandler);
         Assert.Same(firstIconFactory, secondIconFactory);
-    }
-
-    /// <summary>
-    /// Ensures that transient services are resolved as new instances.
-    /// </summary>
-    [Fact]
-    public void RegisterServices_TransientServicesAreUnique()
-    {
-        // Act
-        var firstIconProvider = _serviceProvider.GetRequiredService<IIconProvider>();
-        var secondIconProvider = _serviceProvider.GetRequiredService<IIconProvider>();
-
-        // Assert
-        Assert.NotSame(firstIconProvider, secondIconProvider);
+        Assert.Same(firstIconProvider, secondIconProvider);
     }
 }

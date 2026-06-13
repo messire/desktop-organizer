@@ -1,14 +1,79 @@
-﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:models="clr-namespace:DesktopOrganizer.Core.Models;assembly=DesktopOrganizer.Core">
+                    xmlns:models="clr-namespace:DesktopOrganizer.Core.Models;assembly=DesktopOrganizer.Core"
+                    xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters">
+
+    <conv:HexBrushConverter x:Key="HexBrush"/>
+    <conv:ColorOpacityBrushConverter x:Key="ColorOpacityBrush"/>
+    <conv:EqualityToBoolConverter x:Key="EqualityToBool"/>
+
+    <!--
+        Shared context menu for a file item.
+        PlacementTarget is the item root element:
+          .Tag         → ChildWindowViewModel (set on the item root via the Window ancestor)
+          .DataContext → the FileItem the menu was opened on
+    -->
+    <ContextMenu x:Key="FileContextMenu">
+        <MenuItem Header="Открыть"
+                  Command="{Binding PlacementTarget.Tag.OpenFileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+        <MenuItem Header="Открыть папку с файлом"
+                  Command="{Binding PlacementTarget.Tag.OpenContainingFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+        <Separator/>
+        <MenuItem Header="Свойства"
+                  Command="{Binding PlacementTarget.Tag.ShowPropertiesCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+        <Separator/>
+        <MenuItem Header="Убрать из панели"
+                  Command="{Binding PlacementTarget.Tag.RemoveFileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+    </ContextMenu>
+
+    <!-- Transparent but hit-testable resize handle (used by the panel edge/corner thumbs). -->
+    <Style x:Key="ResizeThumbStyle" TargetType="Thumb">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border Background="{TemplateBinding Background}"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Greys out items whose file/folder no longer exists on disk. -->
+    <Style x:Key="FileItemRootStyle" TargetType="StackPanel">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"/>
+        <Setter Property="ContextMenu" Value="{StaticResource FileContextMenu}"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Exists}" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
 
     <DataTemplate x:Key="ListViewTemplate">
-        <ListBox ItemsSource="{Binding}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+        <ListBox ItemsSource="{Binding}"
+                 Background="Transparent"
+                 BorderThickness="0"
+                 HorizontalAlignment="Stretch"
+                 VerticalAlignment="Stretch">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Foreground" Value="#DDDDDD"/>
+                    <Setter Property="Padding"    Value="2,1"/>
+                </Style>
+            </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate DataType="{x:Type models:FileItem}">
-                    <StackPanel Orientation="Horizontal" Margin="5">
-                        <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,5,0"/>
-                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" Margin="2" Style="{StaticResource FileItemRootStyle}">
+                        <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"/>
+                        <TextBlock Text="{Binding Name}"
+                                   Foreground="{Binding DataContext.Model.TextColor, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource HexBrush}}"
+                                   VerticalAlignment="Center"/>
                     </StackPanel>
                 </DataTemplate>
             </ListBox.ItemTemplate>
@@ -16,7 +81,8 @@
     </DataTemplate>
 
     <DataTemplate x:Key="WrapViewTemplate">
-        <ItemsControl ItemsSource="{Binding}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ItemsControl ItemsSource="{Binding}" Background="Transparent">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <WrapPanel/>
@@ -24,13 +90,22 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
                 <DataTemplate DataType="{x:Type models:FileItem}">
-                    <StackPanel Orientation="Vertical" Margin="5">
-                        <Image Source="{Binding Icon}" Width="64" Height="64" Margin="0,0,5,0"/>
-                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextAlignment="Center"/>
+                    <StackPanel Orientation="Vertical" Margin="6" Width="72" Style="{StaticResource FileItemRootStyle}">
+                        <Image Source="{Binding Icon}"
+                               Width="{Binding DataContext.Model.IconSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                               Height="{Binding DataContext.Model.IconSize, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                        <TextBlock Text="{Binding Name}"
+                                   Foreground="{Binding DataContext.Model.TextColor, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource HexBrush}}"
+                                   FontSize="11"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   MaxHeight="32"
+                                   TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
                 </DataTemplate>
             </ItemsControl.ItemTemplate>
         </ItemsControl>
+        </ScrollViewer>
     </DataTemplate>
 
 </ResourceDictionary>

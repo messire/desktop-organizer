@@ -26,24 +26,120 @@ namespace DesktopOrganizer.UI.Properties {
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("")]
-        public string SavedFiles {
-            get {
-                return ((string)(this["SavedFiles"]));
-            }
-            set {
-                this["SavedFiles"] = value;
-            }
-        }
-
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("")]
         public string ChildWindowsState {
             get {
                 return ((string)(this["ChildWindowsState"]));
             }
             set {
                 this["ChildWindowsState"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("1")]
+        public int GridSize {
+            get {
+                return ((int)(this["GridSize"]));
+            }
+            set {
+                this["GridSize"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("#1E1E1E")]
+        public string DefaultBackgroundColor {
+            get {
+                return ((string)(this["DefaultBackgroundColor"]));
+            }
+            set {
+                this["DefaultBackgroundColor"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("#DDDDDD")]
+        public string DefaultTextColor {
+            get {
+                return ((string)(this["DefaultTextColor"]));
+            }
+            set {
+                this["DefaultTextColor"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0.8")]
+        public double DefaultOpacity {
+            get {
+                return ((double)(this["DefaultOpacity"]));
+            }
+            set {
+                this["DefaultOpacity"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("48")]
+        public double DefaultIconSize {
+            get {
+                return ((double)(this["DefaultIconSize"]));
+            }
+            set {
+                this["DefaultIconSize"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("[\"default\"]")]
+        public string Pages {
+            get {
+                return ((string)(this["Pages"]));
+            }
+            set {
+                this["Pages"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("default")]
+        public string CurrentPage {
+            get {
+                return ((string)(this["CurrentPage"]));
+            }
+            set {
+                this["CurrentPage"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("[]")]
+        public string SortingRules {
+            get {
+                return ((string)(this["SortingRules"]));
+            }
+            set {
+                this["SortingRules"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("[]")]
+        public string LayoutSnapshots {
+            get {
+                return ((string)(this["LayoutSnapshots"]));
+            }
+            set {
+                this["LayoutSnapshots"] = value;
             }
         }
     }

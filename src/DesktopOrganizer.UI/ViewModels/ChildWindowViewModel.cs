@@ -3,6 +3,7 @@ using System.IO;
 using DesktopOrganizer.Core.Models;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Models;
+using DesktopOrganizer.UI.Services;
 using Microsoft.Win32;
 
 namespace DesktopOrganizer.UI.ViewModels;
@@ -16,10 +17,19 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private const string ListViewTemplate = nameof(ListViewTemplate);
     private const string WrapViewTemplate = nameof(WrapViewTemplate);
 
+    /// <summary>
+    /// Interval for the background existence-liveness poll. Matches the poll cadence already used
+    /// by <c>SystemShellService</c>'s Recycle Bin watcher, so panel behavior stays consistent.
+    /// </summary>
+    private const int ExistenceCheckIntervalMs = 3000;
+
     private readonly IFileLauncher _fileLauncher;
     private readonly IFolderWatcherFactory _folderWatcherFactory;
+    private readonly IPanelItemStorageService _itemStorage;
+    private readonly IAppSettings _appSettings;
     private readonly DataTemplate _listTemplate;
     private readonly DataTemplate _wrapTemplate;
+    private readonly System.Threading.Timer _existenceTimer;
 
     private DataTemplate _currentViewTemplate;
     private ChildWindowModel _model = new();
@@ -42,7 +52,20 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         private set
         {
             if (ReferenceEquals(_model, value)) return;
+
+            // A disposed VM must never re-subscribe: Dispose() already unsubscribed from _model once,
+            // and doing it again here would attach a live subscription with no matching Dispose() left
+            // to remove it (Dispose only runs once, guarded by _disposed).
+            if (_disposed) return;
+
+            // Unsubscribe from the outgoing model before attaching to the new one — otherwise a
+            // second LoadFromModel call would double-subscribe, and the very first subscription would
+            // never be released once this ViewModel is disposed (the Model routinely outlives its
+            // ViewModel, e.g. via WindowManager snapshots/state lists).
+            _model.PropertyChanged -= OnModelPropertyChanged;
             _model = value;
+            _model.PropertyChanged += OnModelPropertyChanged;
+
             OnPropertyChanged(nameof(Model));
         }
     }
@@ -95,10 +118,24 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     public ICommand SelectSourceFolderCommand { get; }
 
     /// <summary>
+    /// Sets the panel's content filter. Accepts a <see cref="PanelContentFilter"/> value as the command parameter.
+    /// </summary>
+    public ICommand SetContentFilterCommand { get; }
+
+    /// <summary>
     /// Raised when the user changes the panel state (removes a file, switches view),
     /// so the view layer can persist it.
     /// </summary>
     public event EventHandler? FilesChanged;
+
+    /// <summary>
+    /// Raised at most once per install, the first time a live drag-drop
+    /// (<see cref="AddDroppedFiles"/>) actually moves a file/folder into app-managed storage. The
+    /// view layer shows a brief, non-blocking hint explaining that the original was removed from
+    /// its source location — not just copied. Never raised for Folder Portal content
+    /// (<see cref="LoadFromModel"/>/<see cref="OnFolderChanged"/>), which never moves anything.
+    /// </summary>
+    public event EventHandler? MoveHintRequested;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChildWindowViewModel"/> class.
@@ -106,11 +143,25 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// <param name="iconProvider">Provider for fetching file icons.</param>
     /// <param name="fileLauncher">Service for opening files via the Windows shell.</param>
     /// <param name="folderWatcherFactory">Factory that creates per-panel folder watchers.</param>
-    public ChildWindowViewModel(IIconProvider iconProvider, IFileLauncher fileLauncher, IFolderWatcherFactory folderWatcherFactory)
+    /// <param name="itemStorage">
+    /// Moves manually dropped files into app-managed storage so panel items survive the user
+    /// deleting the original (e.g. a desktop shortcut) after dragging it in.
+    /// </param>
+    /// <param name="appSettings">
+    /// Backs the one-time <see cref="MoveHintRequested"/> guard (<see cref="IAppSettings.HasShownMoveHint"/>).
+    /// </param>
+    public ChildWindowViewModel(
+        IIconProvider iconProvider,
+        IFileLauncher fileLauncher,
+        IFolderWatcherFactory folderWatcherFactory,
+        IPanelItemStorageService itemStorage,
+        IAppSettings appSettings)
         : base(iconProvider)
     {
         _fileLauncher = fileLauncher;
         _folderWatcherFactory = folderWatcherFactory;
+        _itemStorage = itemStorage;
+        _appSettings = appSettings;
         _listTemplate = GetTemplate(ListViewTemplate);
         _wrapTemplate = GetTemplate(WrapViewTemplate);
         _currentViewTemplate = _listTemplate;
@@ -121,6 +172,14 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         ShowPropertiesCommand = new RelayCommand<FileItem>(ShowProperties);
         RemoveFileCommand = new RelayCommand<FileItem>(RemoveFileItem, _ => !IsPortal);
         SelectSourceFolderCommand = new RelayCommand(SelectSourceFolder);
+        SetContentFilterCommand = new RelayCommand<PanelContentFilter>(filter => Model.ContentFilter = filter);
+
+        // Folder Portals already get live deletion events from the FileSystemWatcher (OnFolderChanged).
+        // Items added via manual drag-drop have no such watcher, so a deleted/restored file (e.g. a
+        // desktop shortcut removed via Explorer after being dropped into the panel) never re-evaluates
+        // FileItem.Exists and the item stays looking "alive" — clickable but silently does nothing.
+        // This timer keeps every panel's liveness state in sync regardless of source.
+        _existenceTimer = new System.Threading.Timer(RefreshExistence, null, ExistenceCheckIntervalMs, ExistenceCheckIntervalMs);
     }
 
     /// <summary>
@@ -147,7 +206,72 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         if (item is null) return;
 
         RemoveFile(item);
+
+        var outcome = _itemStorage.Restore(item.Path);
+        if (outcome == RestoreOutcome.OriginalPathUnknown)
+            _itemStorage.Release(item.Path); // legacy managed copy with no manifest entry — old behavior
+        // NotManaged: Restore already no-op'd. Failed: logged inside the service; item stays removed from UI
+        // even though the managed copy is orphaned in storage — acceptable, documented in the plan (risk table).
+
         FilesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Adds files dropped onto the panel from an external source (desktop, Explorer). Unlike
+    /// <see cref="BaseViewModel.AddFiles"/> — which is also used to mirror a live Folder Portal and
+    /// must keep pointing at the real files — this moves each dropped file or folder into
+    /// app-managed storage first (see <see cref="IPanelItemStorageService"/>), so the original is
+    /// removed from its source location immediately (the whole point of dragging it in: decluttering
+    /// the desktop) and the panel item survives independently of where it came from. A moved-in
+    /// folder keeps its structure but is no longer live-linked to its old location — for a folder the
+    /// user wants kept in sync, a Folder Portal (<see cref="SelectSourceFolderCommand"/>) is the right
+    /// tool. Whatever <see cref="IPanelItemStorageService"/> can't or won't move (very large folders,
+    /// locked files, etc.) falls back to referencing the original path in place — same as before this
+    /// fix, still trackable live via <see cref="FileItem.Refresh"/>.
+    /// </summary>
+    /// <param name="paths">Raw file-system paths from the drop (<c>DataFormats.FileDrop</c>).</param>
+    public void AddDroppedFiles(string[] paths)
+    {
+        var sources = paths.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
+        var resolved = new string[sources.Length];
+        var anyMoved = false;
+
+        for (var i = 0; i < sources.Length; i++)
+        {
+            var source = sources[i];
+            var result = Directory.Exists(source)
+                ? _itemStorage.MoveInDirectory(source) ?? source
+                : _itemStorage.MoveIn(source) ?? source;
+
+            resolved[i] = result;
+
+            if (!string.Equals(result, source, StringComparison.OrdinalIgnoreCase) && _itemStorage.IsManaged(result))
+                anyMoved = true;
+        }
+
+        AddFiles(resolved);
+
+        MaybeRaiseMoveHint(anyMoved);
+    }
+
+    /// <summary>
+    /// Shows the one-time Move-semantics hint the first time <paramref name="anyMoved"/> is
+    /// <see langword="true"/> for a live drag-drop (<see cref="AddDroppedFiles"/>), then flips
+    /// <see cref="IAppSettings.HasShownMoveHint"/> permanently so it never shows again — including
+    /// across app restarts, since the flag is a user-scoped setting.
+    /// </summary>
+    /// <param name="anyMoved">
+    /// <see langword="true"/> if at least one of the just-dropped paths was actually moved into
+    /// app-managed storage (as opposed to falling back to referencing the original path in place).
+    /// </param>
+    private void MaybeRaiseMoveHint(bool anyMoved)
+    {
+        if (!anyMoved || _appSettings.HasShownMoveHint) return;
+
+        _appSettings.HasShownMoveHint = true;
+        _appSettings.Save();
+
+        MoveHintRequested?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -157,10 +281,13 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// <param name="model">The model to load state from.</param>
     public void LoadFromModel(ChildWindowModel model)
     {
-        Model = model;
-        Model.PropertyChanged += OnModelPropertyChanged;
+        Model = model; // subscribes to Model.PropertyChanged; unsubscribes any previous model first
 
-        AddFiles(GetSourceFiles(model));
+        // ReplaceAll (not AddFiles): re-binding to a different model must replace the file set, not
+        // accumulate onto whatever was already loaded — otherwise a second LoadFromModel call leaves
+        // the panel showing the union of both models' files, and SyncToModel would persist that union
+        // back onto the new model's FilePaths.
+        ReplaceAll(GetSourceFiles(model));
         ApplyViewMode();
 
         if (!string.IsNullOrWhiteSpace(model.SourceFolderPath) && Directory.Exists(model.SourceFolderPath))
@@ -254,14 +381,13 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private void OnFolderChanged(object? sender, FolderChangeEventArgs e)
     {
         var app = Application.Current;
-        if (app is null) return;
 
-        app.Dispatcher.Invoke(() =>
+        app?.Dispatcher.Invoke(() =>
         {
             switch (e.Kind)
             {
                 case FolderChangeKind.Created:
-                    AddFiles(new[] { e.Path });
+                    AddFiles([e.Path]);
                     break;
 
                 case FolderChangeKind.Deleted:
@@ -270,7 +396,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
                 case FolderChangeKind.Renamed:
                     if (e.OldPath is not null) RemoveFileByPath(e.OldPath);
-                    AddFiles(new[] { e.Path });
+                    AddFiles([e.Path]);
                     break;
 
                 case FolderChangeKind.ResyncRequired:
@@ -281,12 +407,40 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         });
     }
 
+    /// <summary>
+    /// Re-validates <see cref="FileItem.Exists"/>/<see cref="FileItem.IsDirectory"/> for every item in
+    /// this panel against the current file-system state. Runs on a thread-pool timer; marshals to the
+    /// UI thread before touching <see cref="FileItem"/> instances (they're bound to the live UI) and
+    /// must never throw or it takes the timer down silently.
+    /// </summary>
+    private void RefreshExistence(object? state)
+    {
+        if (_disposed) return;
+
+        var app = Application.Current;
+        app?.Dispatcher.Invoke(() =>
+        {
+            if (_disposed) return;
+
+            try
+            {
+                foreach (var item in AllItems) item.Refresh();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Existence refresh failed: {ex.Message}");
+            }
+        });
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
+        _model.PropertyChanged -= OnModelPropertyChanged;
+        _existenceTimer.Dispose();
         DetachWatcher();
     }
 
@@ -309,14 +463,45 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         }
     }
 
+    /// <inheritdoc/>
+    protected override void OnSourceChanged() => ApplyFilter();
+
     private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ChildWindowModel.ViewMode))
             ApplyViewMode();
+
+        if (e.PropertyName == nameof(ChildWindowModel.ContentFilter))
+        {
+            ApplyFilter();
+            FilesChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void ApplyViewMode()
         => CurrentViewTemplate = Model.ViewMode == PanelViewMode.Wrap ? _wrapTemplate : _listTemplate;
+
+    /// <summary>
+    /// Rebuilds <see cref="BaseViewModel.FileItems"/> from <see cref="BaseViewModel.AllItems"/>
+    /// according to the current <see cref="ChildWindowModel.ContentFilter"/>. Uses
+    /// <see cref="BaseViewModel.ReplaceFileItems"/> so the rebuild raises a single batched
+    /// <c>CollectionChanged</c> (<c>Reset</c>) notification instead of a <c>Clear()</c> + N
+    /// individual <c>Add()</c> calls.
+    /// </summary>
+    private void ApplyFilter()
+    {
+        var predicate = BuildFilterPredicate(Model.ContentFilter);
+        ReplaceFileItems(AllItems.Where(predicate));
+    }
+
+    private static Func<FileItem, bool> BuildFilterPredicate(PanelContentFilter filter) =>
+        filter switch
+        {
+            PanelContentFilter.HideAll => _ => false,
+            PanelContentFilter.HideShortcuts => item => !item.IsShortcut,
+            PanelContentFilter.FoldersOnly => item => item.IsDirectory,
+            _ => _ => true, // ShowAll
+        };
 
     private static DataTemplate GetTemplate(string templateName)
         => Application.Current.FindResource(templateName) as DataTemplate ?? new DataTemplate();

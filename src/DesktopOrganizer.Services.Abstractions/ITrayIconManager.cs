@@ -16,16 +16,6 @@ public interface ITrayIconManager : IDisposable
     event EventHandler? OnExitRequested;
 
     /// <summary>
-    /// Event triggered when the user requests to hide/show the desktop icons.
-    /// </summary>
-    event EventHandler? OnToggleDesktopIconsRequested;
-
-    /// <summary>
-    /// Event triggered when the user requests to collect the desktop icons into a panel.
-    /// </summary>
-    event EventHandler? OnCaptureDesktopRequested;
-
-    /// <summary>
     /// Initializes the system tray icon.
     /// </summary>
     void Initialize();

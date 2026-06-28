@@ -21,6 +21,8 @@ public class ChildWindowModel : INotifyPropertyChanged
     private string _textColor = "#DDDDDD";
     private double _iconSize = 48;
     private PanelViewMode _viewMode = PanelViewMode.List;
+    private PanelContentFilter _contentFilter = PanelContentFilter.ShowAll;
+    private bool _isRolledUp;
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -85,6 +87,16 @@ public class ChildWindowModel : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Which item types the panel shows. Serialised to JSON; missing field deserialises to
+    /// <see cref="PanelContentFilter.ShowAll"/> (backwards-compatible default).
+    /// </summary>
+    public PanelContentFilter ContentFilter
+    {
+        get => _contentFilter;
+        set => SetField(ref _contentFilter, value);
+    }
+
+    /// <summary>
     /// Stable device name of the monitor the panel belongs to (e.g. <c>\\.\DISPLAY1</c>).
     /// Used to restore the panel onto the same physical monitor across sessions. If the monitor
     /// no longer exists, positioning falls back to the saved <see cref="Position"/> coordinates.
@@ -115,7 +127,11 @@ public class ChildWindowModel : INotifyPropertyChanged
     /// Gets or sets whether the panel is rolled up (collapsed to its title bar).
     /// While rolled up, <see cref="Size"/> keeps the expanded height for restore.
     /// </summary>
-    public bool IsRolledUp { get; set; }
+    public bool IsRolledUp
+    {
+        get => _isRolledUp;
+        set => SetField(ref _isRolledUp, value);
+    }
 
     /// <summary>
     /// Gets or sets the page this panel belongs to. Default is <c>"default"</c>.

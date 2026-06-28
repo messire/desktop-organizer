@@ -9,6 +9,15 @@
         <Setting Name="GridSize" Type="System.Int32" Scope="User">
             <Value Profile="(Default)">1</Value>
         </Setting>
+        <Setting Name="SnapResizeToIconGrid" Type="System.Boolean" Scope="User">
+            <Value Profile="(Default)">True</Value>
+        </Setting>
+        <Setting Name="GridSnapDistance" Type="System.Int32" Scope="User">
+            <Value Profile="(Default)">12</Value>
+        </Setting>
+        <Setting Name="HasShownMoveHint" Type="System.Boolean" Scope="User">
+            <Value Profile="(Default)">False</Value>
+        </Setting>
         <Setting Name="DefaultBackgroundColor" Type="System.String" Scope="User">
             <Value Profile="(Default)">#1E1E1E</Value>
         </Setting>
@@ -27,11 +36,11 @@
         <Setting Name="CurrentPage" Type="System.String" Scope="User">
             <Value Profile="(Default)">default</Value>
         </Setting>
-        <Setting Name="SortingRules" Type="System.String" Scope="User">
-            <Value Profile="(Default)">[]</Value>
-        </Setting>
         <Setting Name="LayoutSnapshots" Type="System.String" Scope="User">
             <Value Profile="(Default)">[]</Value>
+        </Setting>
+        <Setting Name="SystemIconsPanel" Type="System.String" Scope="User">
+            <Value Profile="(Default)"/>
         </Setting>
     </Settings>
 </SettingsFile>

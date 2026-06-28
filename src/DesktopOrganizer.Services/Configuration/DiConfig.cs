@@ -29,6 +29,8 @@ public static class DiConfig
         services.AddSingleton<IDesktopIconsService, DesktopIconsService>();
         services.AddSingleton<IDesktopGestureService, DesktopGestureService>();
         services.AddSingleton<IFolderWatcherFactory, FolderWatcherFactory>();
+        services.AddSingleton<ISystemShellService, SystemShellService>();
+        services.AddSingleton<IPanelItemStorageService, PanelItemStorageService>();
 
         // Multi-monitor: self-contained service (owns its own WM_DISPLAYCHANGE listener).
         services.AddSingleton<IMonitorService, MonitorService>();

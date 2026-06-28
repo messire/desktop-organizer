@@ -20,6 +20,7 @@ public partial class App : Application
     private IDesktopGestureService? _desktopGestures;
     private IMonitorService? _monitorService;
     private IAppSettings? _appSettings;
+    private ISystemIconsPanelManager? _systemIconsPanel;
 
     private ITrayIconManager TrayIconManager
         => (_trayIconManager ??= _serviceProvider.GetService<ITrayIconManager>())!;
@@ -39,6 +40,9 @@ public partial class App : Application
     private IAppSettings AppSettings
         => (_appSettings ??= _serviceProvider.GetService<IAppSettings>())!;
 
+    private ISystemIconsPanelManager SystemIconsPanel
+        => (_systemIconsPanel ??= _serviceProvider.GetService<ISystemIconsPanelManager>())!;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="App"/> class.
     /// </summary>
@@ -52,9 +56,33 @@ public partial class App : Application
     /// <inheritdoc />
     protected override void OnExit(ExitEventArgs e)
     {
-        WindowManager.SaveWindowsState();
+        RestoreDesktopIcons();
+        SystemIconsPanel.Save();
+
+        // Structural (app exit): must write synchronously, before disposing the DI container, or the
+        // last action the user took right before closing (which SaveWindowsState may have only just
+        // scheduled, debounced) would be silently lost.
+        WindowManager.SaveWindowsStateNow();
         _serviceProvider.Dispose();
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// Re-shows the real desktop icons on shutdown. The app can hide them (desktop double-click
+    /// gesture, settings checkbox), so without this the user is left with an empty desktop
+    /// after closing the app. Failures are swallowed — shutdown must not be blocked.
+    /// </summary>
+    private void RestoreDesktopIcons()
+    {
+        try
+        {
+            if (!DesktopIcons.AreIconsVisible)
+                DesktopIcons.SetIconsVisible(true);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to restore desktop icons on exit: {ex.Message}");
+        }
     }
 
     private void StartApp(object? sender, StartupEventArgs e)
@@ -63,6 +91,9 @@ public partial class App : Application
         MonitorService.Start(); // begin listening for display changes before panels load
         LoadPanels();
         InitDesktopGestures();
+
+        SystemIconsPanel.Load();
+        SystemIconsPanel.Apply();
     }
 
     private void InitDesktopGestures()
@@ -90,8 +121,6 @@ public partial class App : Application
         TrayIconManager.Initialize();
         TrayIconManager.OnShowMainWindowRequested += ShowSettingsWindow;
         TrayIconManager.OnExitRequested += (_, _) => Shutdown();
-        TrayIconManager.OnToggleDesktopIconsRequested += (_, _) => Current.Dispatcher.Invoke(DesktopIcons.Toggle);
-        TrayIconManager.OnCaptureDesktopRequested += (_, _) => Current.Dispatcher.Invoke(CaptureDesktop);
     }
 
     /// <summary>
@@ -105,25 +134,9 @@ public partial class App : Application
         model.Size = new System.Drawing.Size(Math.Max(MinPanelSize, args.Width), Math.Max(MinPanelSize, args.Height));
 
         WindowManager.CreateChildWindow(model);
-        WindowManager.SaveWindowsState();
-    }
 
-    /// <summary>
-    /// Creates a folder-portal panel mirroring the Desktop folder and hides the real icons.
-    /// </summary>
-    private void CaptureDesktop()
-    {
-        var model = NewPanelWithDefaults();
-        model.Title = "Рабочий стол";
-        model.SourceFolderPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        model.ViewMode = PanelViewMode.Wrap;
-        model.Position = new System.Drawing.Point(100, 100);
-        model.Size = new System.Drawing.Size(420, 520);
-
-        WindowManager.CreateChildWindow(model);
-        WindowManager.SaveWindowsState();
-
-        DesktopIcons.SetIconsVisible(false);
+        // Structural (new panel created via lasso gesture) — write synchronously.
+        WindowManager.SaveWindowsStateNow();
     }
 
     private ChildWindowModel NewPanelWithDefaults() => new()

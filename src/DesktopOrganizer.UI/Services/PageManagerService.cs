@@ -93,7 +93,16 @@ public class PageManagerService : IPageManager
 
         foreach (var id in toRemove)
         {
-            _windowManager.RemoveChildWindow(id);
+            // Deleting a page permanently destroys every panel on it, so release their app-managed
+            // item copies too (see RemoveChildWindow remarks in WindowManager). deferSave: true avoids
+            // one synchronous full-state write per removed panel (Phase 7 / Block C, M4) —
+            // SaveWindowsStateNow() below flushes the debounced writes once for the whole page.
+            _windowManager.RemoveChildWindow(id, releaseManagedItems: true, deferSave: true);
+        }
+
+        if (toRemove.Count > 0)
+        {
+            _windowManager.SaveWindowsStateNow();
         }
 
         _pages.Remove(pageId);

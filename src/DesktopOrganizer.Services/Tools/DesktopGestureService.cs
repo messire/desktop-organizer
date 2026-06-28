@@ -8,26 +8,13 @@ namespace DesktopOrganizer.Services.Tools;
 /// See ADR-003. The hook only observes input; it suppresses a single right-button-up
 /// when a lasso drag completes, so the desktop context menu does not appear.
 /// </summary>
-internal sealed class DesktopGestureService : IDesktopGestureService
+internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGestureEnvironment
 {
     private const int WhMouseLl = 14;
-    private const int WmMouseMove = 0x0200;
-    private const int WmLButtonDown = 0x0201;
-    private const int WmRButtonDown = 0x0204;
-    private const int WmRButtonUp = 0x0205;
-
-    private const int DragThreshold = 8;
-    private const int DoubleClickSlop = 4;
 
     private readonly NativeMethods.LowLevelMouseProc _proc;
+    private readonly DesktopGestureStateMachine _state;
     private IntPtr _hookHandle;
-
-    private int _lastLeftDownTime;
-    private NativeMethods.POINT _lastLeftDownPos;
-
-    private bool _rightDown;
-    private bool _rightDragging;
-    private NativeMethods.POINT _rightStart;
 
     /// <inheritdoc />
     public event EventHandler? DesktopDoubleClicked;
@@ -38,7 +25,17 @@ internal sealed class DesktopGestureService : IDesktopGestureService
     /// <summary>
     /// Initializes a new instance of the <see cref="DesktopGestureService"/> class.
     /// </summary>
-    public DesktopGestureService() => _proc = HookCallback;
+    public DesktopGestureService()
+    {
+        _proc = HookCallback;
+        _state = new DesktopGestureStateMachine(this);
+    }
+
+    /// <inheritdoc />
+    int IDesktopGestureEnvironment.TickCount => Environment.TickCount;
+
+    /// <inheritdoc />
+    uint IDesktopGestureEnvironment.DoubleClickTime => NativeMethods.GetDoubleClickTime();
 
     /// <inheritdoc />
     public void Start()
@@ -55,78 +52,75 @@ internal sealed class DesktopGestureService : IDesktopGestureService
         _hookHandle = IntPtr.Zero;
     }
 
+    /// <summary>
+    /// The WH_MOUSE_LL callback. This runs on every mouse event of the whole OS, so it does the
+    /// absolute minimum and — critically — must never let an exception escape into the hook chain:
+    /// an unhandled exception here stalls input system-wide. All real work lives in
+    /// <see cref="ProcessMessage"/> / <see cref="DesktopGestureStateMachine"/> behind a try/catch.
+    /// </summary>
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
         if (nCode < 0)
             return NativeMethods.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
 
-        var data = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
         var swallow = false;
 
-        switch ((int)wParam)
+        try
         {
-            case WmLButtonDown:
-                HandleLeftDown(data.pt);
-                break;
-
-            case WmRButtonDown:
-                if (IsDesktopPoint(data.pt))
-                {
-                    _rightDown = true;
-                    _rightDragging = false;
-                    _rightStart = data.pt;
-                }
-
-                break;
-
-            case WmMouseMove:
-                if (_rightDown && !_rightDragging && Chebyshev(_rightStart, data.pt) > DragThreshold)
-                    _rightDragging = true;
-
-                break;
-
-            case WmRButtonUp:
-                if (_rightDown && _rightDragging)
-                {
-                    RaiseLasso(_rightStart, data.pt);
-                    swallow = true; // hide the desktop context menu for a completed drag
-                }
-
-                _rightDown = false;
-                _rightDragging = false;
-                break;
+            swallow = ProcessMessage(wParam, lParam);
+        }
+        catch (Exception ex)
+        {
+            // Defensive: never swallow the event on failure — a bug here must not turn into a
+            // "right click stopped working" for the entire system. Also covers a garbage lParam.
+            Console.Error.WriteLine($"Desktop gesture hook failed: {ex.Message}");
+            swallow = false;
         }
 
         var next = NativeMethods.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
         return swallow ? (IntPtr)1 : next;
     }
 
-    private void HandleLeftDown(NativeMethods.POINT pt)
+    /// <summary>
+    /// Marshals the hook payload, advances the gesture state machine and notifies subscribers.
+    /// </summary>
+    /// <returns>Whether the message must be suppressed.</returns>
+    private bool ProcessMessage(IntPtr wParam, IntPtr lParam)
     {
-        var now = Environment.TickCount;
-        var isDouble = now - _lastLeftDownTime <= NativeMethods.GetDoubleClickTime()
-                       && Chebyshev(_lastLeftDownPos, pt) <= DoubleClickSlop;
+        var data = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
 
-        _lastLeftDownTime = now;
-        _lastLeftDownPos = pt;
+        // The state machine has already reset its own state by the time it returns a decision,
+        // so a throwing subscriber below cannot leave the gesture latched.
+        var decision = _state.Process((int)wParam, data.pt.X, data.pt.Y);
+        if (decision.RaisesEvent) RaiseSubscribers(decision);
 
-        if (!isDouble || !IsEmptyDesktopPoint(pt)) return;
-
-        _lastLeftDownTime = 0; // consume so a triple click isn't a second double
-        DesktopDoubleClicked?.Invoke(this, EventArgs.Empty);
+        return decision.Swallow;
     }
 
-    private void RaiseLasso(NativeMethods.POINT start, NativeMethods.POINT end)
+    /// <summary>
+    /// Notifies subscribers inside its own guard: a throwing subscriber must not change the
+    /// suppression decision, nor propagate out of the hook.
+    /// </summary>
+    private void RaiseSubscribers(DesktopGestureDecision decision)
     {
-        var x = Math.Min(start.X, end.X);
-        var y = Math.Min(start.Y, end.Y);
-        var w = Math.Abs(end.X - start.X);
-        var h = Math.Abs(end.Y - start.Y);
-        LassoCompleted?.Invoke(this, new DesktopLassoEventArgs(x, y, w, h));
+        try
+        {
+            if (decision.RaiseDoubleClick) DesktopDoubleClicked?.Invoke(this, EventArgs.Empty);
+            if (decision.Lasso is { } lasso) LassoCompleted?.Invoke(this, lasso);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Desktop gesture subscriber failed: {ex.Message}");
+        }
     }
 
-    private static int Chebyshev(NativeMethods.POINT a, NativeMethods.POINT b)
-        => Math.Max(Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
+    /// <inheritdoc />
+    bool IDesktopGestureEnvironment.IsDesktopPoint(int x, int y)
+        => IsDesktopPoint(new NativeMethods.POINT { X = x, Y = y });
+
+    /// <inheritdoc />
+    bool IDesktopGestureEnvironment.IsEmptyDesktopPoint(int x, int y)
+        => IsEmptyDesktopPoint(new NativeMethods.POINT { X = x, Y = y });
 
     /// <summary>Whether the point is over the desktop (background or icon view), not over an app/panel.</summary>
     private static bool IsDesktopPoint(NativeMethods.POINT pt)

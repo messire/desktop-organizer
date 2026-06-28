@@ -1,0 +1,305 @@
+using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Media;
+using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.UI.Models;
+using DesktopOrganizer.UI.ViewModels;
+
+namespace DesktopOrganizer.UI.Views;
+
+/// <summary>
+/// System icons panel window. Chromeless, embedded into the desktop layer.
+/// Desktop embedding happens in <see cref="OnSourceInitialized"/> — before the first Show —
+/// so the window is never briefly visible above all other windows.
+/// </summary>
+public partial class SystemIconsPanelWindow : Window
+{
+    private readonly SystemIconsPanelViewModel _viewModel;
+    private readonly IDesktopIntegrationService _desktopIntegration;
+
+    // Drag-reorder state
+    private Point _dragStartPoint;
+    private SystemIconItemModel? _dragItem;
+    private bool _isDragging;
+
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="SystemIconsPanelWindow"/>.
+    /// </summary>
+    public SystemIconsPanelWindow(
+        SystemIconsPanelViewModel viewModel,
+        IDesktopIntegrationService desktopIntegration)
+    {
+        _viewModel = viewModel;
+        _desktopIntegration = desktopIntegration;
+        DataContext = viewModel;
+        InitializeComponent();
+    }
+
+    /// <inheritdoc />
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+
+        // Embed into the desktop layer BEFORE the window becomes visible.
+        // OnSourceInitialized fires after the HWND is created but before Show() renders.
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero)
+        {
+            try
+            {
+                _desktopIntegration.EmbedInDesktop(hwnd);
+            }
+            catch
+            {
+                // Degrade silently — panel is still usable without embedding.
+            }
+        }
+
+        // Load icons now that we have a window handle.
+        _viewModel.LoadIcons();
+    }
+
+    /// <inheritdoc />
+    protected override void OnClosed(EventArgs e)
+    {
+        _viewModel.Dispose();
+        base.OnClosed(e);
+    }
+
+    // -------------------------------------------------------------------------
+    // Right-click → native shell context menu
+    // -------------------------------------------------------------------------
+
+    private void IconButton_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.DataContext is SystemIconItemModel item)
+        {
+            // Convert WPF logical coordinates to physical screen pixels for the native menu.
+            var source = PresentationSource.FromVisual(this);
+            var dpiX = source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+            var dpiY = source?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
+
+            var logicalPos = e.GetPosition(this);
+            var screenX = (int)((Left + logicalPos.X) * dpiX);
+            var screenY = (int)((Top  + logicalPos.Y) * dpiY);
+
+            var hwnd = new WindowInteropHelper(this).Handle;
+
+            // Suppress the default WPF context menu on the button.
+            e.Handled = true;
+
+            _viewModel.ShowContextMenu(item.Kind, hwnd, screenX, screenY);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Drag-reorder: initiated from PreviewMouseLeftButtonDown + PreviewMouseMove
+    // -------------------------------------------------------------------------
+
+    private void IconsItemsControl_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragStartPoint = e.GetPosition(null);
+        _dragItem = null;
+        _isDragging = false;
+
+        // Walk up to find the data item.
+        if (e.OriginalSource is DependencyObject source)
+        {
+            var button = FindAncestorOrSelf<Button>(source);
+            if (button?.DataContext is SystemIconItemModel item)
+            {
+                _dragItem = item;
+            }
+        }
+    }
+
+    private void IconsItemsControl_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _dragItem is null || _isDragging)
+            return;
+
+        var pos = e.GetPosition(null);
+        var delta = pos - _dragStartPoint;
+
+        // Only start drag after the system drag threshold is exceeded.
+        if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        _isDragging = true;
+
+        var data = new DataObject("SystemIconKind", _dragItem.Kind);
+        DragDrop.DoDragDrop(IconsItemsControl, data, DragDropEffects.Move);
+
+        _isDragging = false;
+        _dragItem = null;
+    }
+
+    private void IconsItemsControl_DragOver(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent("SystemIconKind"))
+        {
+            e.Effects = DragDropEffects.None;
+            HideInsertionIndicator();
+        }
+        else
+        {
+            e.Effects = DragDropEffects.Move;
+
+            // Show insertion indicator at the computed insertion position.
+            var panel = FindVisualChild<StackPanel>(IconsItemsControl);
+            if (panel is not null)
+            {
+                var dropPos = e.GetPosition(panel);
+                double yPos = GetInsertionYOffset(panel, dropPos);
+
+                // Convert panel-relative Y to PanelGrid-relative Y.
+                var panelOrigin = panel.TranslatePoint(new Point(0, 0), PanelGrid);
+                InsertionIndicator.Margin = new Thickness(0, panelOrigin.Y + yPos - 1, 0, 0);
+                InsertionIndicator.Visibility = Visibility.Visible;
+            }
+        }
+
+        e.Handled = true;
+    }
+
+    private void IconsItemsControl_DragLeave(object sender, DragEventArgs e)
+    {
+        HideInsertionIndicator();
+    }
+
+    private void IconsItemsControl_Drop(object sender, DragEventArgs e)
+    {
+        HideInsertionIndicator();
+
+        if (!e.Data.GetDataPresent("SystemIconKind")) return;
+
+        var sourceKind = (SystemIconKind)e.Data.GetData("SystemIconKind");
+
+        // Determine target index from mouse position within ItemsControl.
+        var panel = FindVisualChild<StackPanel>(IconsItemsControl);
+        if (panel is null) return;
+
+        var dropPos = e.GetPosition(panel);
+        int newIndex = GetInsertionIndex(panel, dropPos);
+
+        _viewModel.Reorder(sourceKind, newIndex);
+        e.Handled = true;
+    }
+
+    private void HideInsertionIndicator()
+    {
+        InsertionIndicator.Visibility = Visibility.Collapsed;
+    }
+
+    // -------------------------------------------------------------------------
+    // Per-item drag-over / drop for Recycle Bin file drop
+    // -------------------------------------------------------------------------
+
+    private void IconButton_DragOver(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement fe &&
+            fe.DataContext is SystemIconItemModel item &&
+            item.Kind == SystemIconKind.RecycleBin &&
+            e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            e.Effects = DragDropEffects.Move;
+        }
+        else
+        {
+            // Allow reorder drag to fall through to the parent ItemsControl.
+            e.Effects = e.Data.GetDataPresent("SystemIconKind")
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+        }
+
+        e.Handled = true;
+    }
+
+    private void IconButton_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement fe) return;
+        if (fe.DataContext is not SystemIconItemModel item) return;
+
+        if (item.Kind == SystemIconKind.RecycleBin &&
+            e.Data.GetDataPresent(DataFormats.FileDrop) &&
+            e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            _viewModel.SendToRecycleBin(paths, hwnd);
+            e.Handled = true;
+        }
+        // else: reorder drops bubble to the parent ItemsControl handler
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns the zero-based insertion index inside a vertical StackPanel given a drop position.
+    /// </summary>
+    private static int GetInsertionIndex(StackPanel panel, Point dropPos)
+    {
+        int index = 0;
+        foreach (UIElement child in panel.Children)
+        {
+            if (child is not FrameworkElement fe) { index++; continue; }
+            var childPos = fe.TranslatePoint(new Point(0, 0), panel);
+            double midY = childPos.Y + fe.ActualHeight / 2.0;
+            if (dropPos.Y < midY) break;
+            index++;
+        }
+
+        return index;
+    }
+
+    /// <summary>
+    /// Returns the Y offset (relative to <paramref name="panel"/>) where the insertion
+    /// line should be drawn. Matches the top edge of the item the cursor is above, or
+    /// the bottom edge of the last item when the cursor is below all items.
+    /// </summary>
+    private static double GetInsertionYOffset(StackPanel panel, Point dropPos)
+    {
+        double lastBottom = 0;
+        foreach (UIElement child in panel.Children)
+        {
+            if (child is not FrameworkElement fe) continue;
+            var childPos = fe.TranslatePoint(new Point(0, 0), panel);
+            double midY = childPos.Y + fe.ActualHeight / 2.0;
+            if (dropPos.Y < midY)
+                return childPos.Y;
+            lastBottom = childPos.Y + fe.ActualHeight;
+        }
+
+        return lastBottom;
+    }
+
+    private static T? FindAncestorOrSelf<T>(DependencyObject obj)
+        where T : DependencyObject
+    {
+        while (obj is not null)
+        {
+            if (obj is T t) return t;
+            obj = VisualTreeHelper.GetParent(obj);
+        }
+
+        return null;
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent)
+        where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T t) return t;
+            var result = FindVisualChild<T>(child);
+            if (result is not null) return result;
+        }
+
+        return null;
+    }
+}

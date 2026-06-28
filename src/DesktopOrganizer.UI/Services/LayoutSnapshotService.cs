@@ -37,6 +37,13 @@ internal sealed class LayoutSnapshotService : ILayoutSnapshotService
     /// <inheritdoc />
     public LayoutSnapshot Capture(string name)
     {
+        // Ensure every live window's model reflects its current on-screen/file state before reading it
+        // below. WindowManager's regular save (SaveWindowsState) is debounced up to 500ms (Phase 7 /
+        // Block C), so without this a snapshot captured shortly after e.g. removing a file from a panel
+        // would serialize the panel's stale, pre-removal FilePaths — see phase-7-performance-hardening.md
+        // Block C review finding M3. This only syncs in-memory models; it does not write to disk.
+        _windowManager.SyncAllWindowsToModels();
+
         // Deep-clone all panels via JSON round-trip so changes after capture don't affect the snapshot.
         var panelJsonItems = _windowManager.GetAllChildWindows()
             .Select(m => JsonSerializer.Serialize(m, SerializerOptions))
@@ -68,10 +75,14 @@ internal sealed class LayoutSnapshotService : ILayoutSnapshotService
         var snapshot = _snapshots.FirstOrDefault(s => s.Id == snapshotId);
         if (snapshot is null) return;
 
-        // Remove all current panels.
+        // Remove all current panels. This is NOT a permanent deletion — the panels are immediately
+        // recreated below from the snapshot's JSON, which references the very same app-managed
+        // paths, so releaseManagedItems must stay false or the recreated panels would point to
+        // files that were just deleted. deferSave: true avoids one synchronous full-state write per
+        // removed panel (Phase 7 / Block C, M4) — SaveWindowsStateNow() below flushes it once.
         var currentIds = _windowManager.GetAllChildWindows().Select(m => m.Id).ToList();
         foreach (var id in currentIds)
-            _windowManager.RemoveChildWindow(id);
+            _windowManager.RemoveChildWindow(id, releaseManagedItems: false, deferSave: true);
 
         // Re-create panels from the snapshot.
         foreach (var json in snapshot.PanelJsonItems)
@@ -96,7 +107,9 @@ internal sealed class LayoutSnapshotService : ILayoutSnapshotService
             _windowManager.CreateChildWindow(model);
         }
 
-        _windowManager.SaveWindowsState();
+        // Structural (whole panel set replaced by the snapshot) — write synchronously so the restored
+        // layout survives even if the app is closed moments later.
+        _windowManager.SaveWindowsStateNow();
     }
 
     /// <inheritdoc />

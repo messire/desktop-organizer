@@ -6,7 +6,7 @@ namespace DesktopOrganizer.UI.Services;
 public sealed class ConfirmationService : IConfirmationService
 {
     /// <inheritdoc />
-    public bool Confirm(string message, string title = "")
-        => MessageBox.Show(message, title, MessageBoxButton.YesNo, MessageBoxImage.Question)
+    public bool Confirm(string message, string title = "", MessageBoxImage icon = MessageBoxImage.Question)
+        => MessageBox.Show(message, title, MessageBoxButton.YesNo, icon)
            == MessageBoxResult.Yes;
 }

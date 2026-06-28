@@ -15,12 +15,6 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
     public event EventHandler? OnShowMainWindowRequested;
 
     /// <inheritdoc />
-    public event EventHandler? OnToggleDesktopIconsRequested;
-
-    /// <inheritdoc />
-    public event EventHandler? OnCaptureDesktopRequested;
-
-    /// <inheritdoc />
     public void Initialize()
     {
         notifyIconAdapter.SetIcon("Resources/app.ico");
@@ -44,12 +38,6 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
             (_, _) => ToggleMainWindowVisibility());
 
         contextMenu.Items.Add(new ToolStripSeparator());
-        contextMenu.Items.Add("Скрыть / показать значки рабочего стола", null,
-            (_, _) => OnToggleDesktopIconsRequested?.Invoke(this, EventArgs.Empty));
-        contextMenu.Items.Add("Собрать значки рабочего стола", null,
-            (_, _) => OnCaptureDesktopRequested?.Invoke(this, EventArgs.Empty));
-        contextMenu.Items.Add(new ToolStripSeparator());
-
         contextMenu.Items.Add("Выход", null, ExitRequested);
 
         notifyIconAdapter.SetContextMenu(contextMenu);

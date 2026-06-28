@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:uimodels="clr-namespace:DesktopOrganizer.UI.Models"
         mc:Ignorable="d"
         Title="{Binding Model.Title}"
         Height="300" Width="260"
@@ -33,11 +34,56 @@
                 <Border Grid.Row="0"
                         Background="Transparent"
                         CornerRadius="6,6,0,0"
-                        MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                        MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"
+                        MouseMove="TitleBar_MouseMove"
+                        MouseLeftButtonUp="TitleBar_MouseLeftButtonUp"
+                        LostMouseCapture="TitleBar_LostMouseCapture">
                     <Border.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="Переименовать" Click="RenameMenu_Click"/>
                             <MenuItem Header="Свернуть / развернуть" Click="RollUpMenu_Click"/>
+                            <Separator/>
+                            <MenuItem Header="Содержимое" IsEnabled="False" FontWeight="SemiBold"/>
+                            <MenuItem Header="Показать всё"
+                                      IsCheckable="True"
+                                      IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
+                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                          Converter={StaticResource EnumEquals},
+                                                          ConverterParameter={x:Static uimodels:PanelContentFilter.ShowAll},
+                                                          Mode=OneWay}"
+                                      Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{x:Static uimodels:PanelContentFilter.ShowAll}"/>
+                            <MenuItem Header="Скрыть содержимое"
+                                      IsCheckable="True"
+                                      IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
+                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                          Converter={StaticResource EnumEquals},
+                                                          ConverterParameter={x:Static uimodels:PanelContentFilter.HideAll},
+                                                          Mode=OneWay}"
+                                      Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{x:Static uimodels:PanelContentFilter.HideAll}"/>
+                            <MenuItem Header="Скрыть ярлыки"
+                                      IsCheckable="True"
+                                      IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
+                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                          Converter={StaticResource EnumEquals},
+                                                          ConverterParameter={x:Static uimodels:PanelContentFilter.HideShortcuts},
+                                                          Mode=OneWay}"
+                                      Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{x:Static uimodels:PanelContentFilter.HideShortcuts}"/>
+                            <MenuItem Header="Только папки"
+                                      IsCheckable="True"
+                                      IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
+                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                          Converter={StaticResource EnumEquals},
+                                                          ConverterParameter={x:Static uimodels:PanelContentFilter.FoldersOnly},
+                                                          Mode=OneWay}"
+                                      Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{x:Static uimodels:PanelContentFilter.FoldersOnly}"/>
                         </ContextMenu>
                     </Border.ContextMenu>
                     <Grid>
@@ -67,17 +113,28 @@
                                  KeyDown="TitleEditBox_KeyDown"
                                  LostKeyboardFocus="TitleEditBox_LostKeyboardFocus"/>
 
-                        <Button Grid.Column="1"
-                                Content="⊞"
-                                Foreground="#AAAAAA"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                FontSize="14"
-                                Width="28" Height="28"
-                                VerticalAlignment="Center"
-                                Margin="0,0,4,0"
-                                Command="{Binding SwitchViewCommand}"
-                                ToolTip="Сменить вид"/>
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Center"
+                                    Margin="0,0,4,0">
+                            <Button x:Name="RollUpToggleButton"
+                                    Width="28" Height="28" FontSize="12"
+                                    FontFamily="Segoe MDL2 Assets"
+                                    Foreground="#AAAAAA"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Content="{Binding Model.IsRolledUp, Converter={StaticResource RollUpGlyph}}"
+                                    ToolTip="{Binding Model.IsRolledUp, Converter={StaticResource RollUpTooltip}, ConverterParameter=tooltip}"
+                                    Click="RollUpMenu_Click"/>
+                            <Button Content="⊞"
+                                    Foreground="#AAAAAA"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    FontSize="14"
+                                    Width="28" Height="28"
+                                    Command="{Binding SwitchViewCommand}"
+                                    ToolTip="Сменить вид"/>
+                        </StackPanel>
                     </Grid>
                 </Border>
 
@@ -104,15 +161,38 @@
                     <RowDefinition Height="6"/>
                 </Grid.RowDefinitions>
 
-                <Thumb Grid.Row="0" Grid.Column="0" Tag="TopLeft"     Cursor="SizeNWSE" Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="0" Grid.Column="1" Tag="Top"         Cursor="SizeNS"   Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="0" Grid.Column="2" Tag="TopRight"    Cursor="SizeNESW" Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="1" Grid.Column="0" Tag="Left"        Cursor="SizeWE"   Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="1" Grid.Column="2" Tag="Right"       Cursor="SizeWE"   Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="2" Grid.Column="0" Tag="BottomLeft"  Cursor="SizeNESW" Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="2" Grid.Column="1" Tag="Bottom"      Cursor="SizeNS"   Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="2" Grid.Column="2" Tag="BottomRight" Cursor="SizeNWSE" Style="{StaticResource ResizeThumbStyle}" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="0" Grid.Column="0" Tag="TopLeft"     Cursor="SizeNWSE" Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="0" Grid.Column="1" Tag="Top"         Cursor="SizeNS"   Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="0" Grid.Column="2" Tag="TopRight"    Cursor="SizeNESW" Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="1" Grid.Column="0" Tag="Left"        Cursor="SizeWE"   Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="1" Grid.Column="2" Tag="Right"       Cursor="SizeWE"   Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="2" Grid.Column="0" Tag="BottomLeft"  Cursor="SizeNESW" Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="2" Grid.Column="1" Tag="Bottom"      Cursor="SizeNS"   Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+                <Thumb Grid.Row="2" Grid.Column="2" Tag="BottomRight" Cursor="SizeNWSE" Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
             </Grid>
+
+            <!-- One-time, non-blocking Move-semantics hint (see ChildWindowViewModel.MoveHintRequested).
+                 Not a modal dialog: StaysOpen=false, no hit-testing, doesn't steal focus from the drop
+                 gesture or any in-progress rename. Auto-dismissed from code-behind after ~4s. -->
+            <Popup x:Name="MoveHintPopup"
+                   PlacementTarget="{Binding ElementName=TitleText}"
+                   Placement="Bottom"
+                   AllowsTransparency="True"
+                   StaysOpen="False"
+                   Focusable="False"
+                   IsHitTestVisible="False">
+                <Border Background="#EE1E1E1E"
+                        BorderBrush="#33FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="10,7"
+                        MaxWidth="260">
+                    <TextBlock TextWrapping="Wrap"
+                               Foreground="White"
+                               FontSize="11"
+                               Text="Файл перемещён в панель — оригинал убран с рабочего стола."/>
+                </Border>
+            </Popup>
         </Grid>
     </Border>
 </Window>

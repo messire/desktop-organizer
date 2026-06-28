@@ -78,4 +78,46 @@ internal interface INativeApi
     /// Returns whether the specified window is currently visible.
     /// </summary>
     bool IsWindowVisible(IntPtr hwnd);
+
+    /// <summary>
+    /// Returns the absolute PIDL for the given known-folder / CLSID GUID, or <see cref="IntPtr.Zero"/> on failure.
+    /// Caller must release it via <see cref="FreePidl"/>.
+    /// </summary>
+    IntPtr GetKnownFolderPidl(Guid knownFolderId);
+
+    /// <summary>
+    /// Frees a PIDL previously obtained from <see cref="GetKnownFolderPidl"/> (CoTaskMemFree).
+    /// </summary>
+    void FreePidl(IntPtr pidl);
+
+    /// <summary>
+    /// Returns the native shell icon for the given absolute PIDL, or <see langword="null"/> on failure.
+    /// The underlying HICON is destroyed before returning.
+    /// </summary>
+    System.Windows.Media.ImageSource? GetShellIconByPidl(IntPtr pidl, int sizePx);
+
+    /// <summary>
+    /// Shell-executes the item identified by the given absolute PIDL. Returns <see langword="false"/> on failure.
+    /// </summary>
+    bool ShellExecutePidl(IntPtr pidl, IntPtr ownerHwnd);
+
+    /// <summary>
+    /// Shows the native shell context menu for the given absolute PIDL at the supplied screen coordinates.
+    /// </summary>
+    void ShowShellContextMenu(IntPtr pidl, IntPtr ownerHwnd, int screenX, int screenY);
+
+    /// <summary>
+    /// Queries the Recycle Bin contents across all drives.
+    /// </summary>
+    RecycleBinNativeState QueryRecycleBin();
+
+    /// <summary>
+    /// Moves the given paths to the Recycle Bin (FO_DELETE | FOF_ALLOWUNDO).
+    /// </summary>
+    bool SendToRecycleBin(string[] paths, IntPtr ownerHwnd);
 }
+
+/// <summary>
+/// Native Recycle Bin query result.
+/// </summary>
+internal readonly record struct RecycleBinNativeState(long ItemCount, long TotalSize);

@@ -28,6 +28,9 @@ public class PageManagerServiceTests
         _windowManagerMock.Setup(wm => wm.GetAllChildWindows()).Returns(panelList);
         _windowManagerMock.Setup(wm => wm.ApplyPanelVisibility(It.IsAny<ChildWindowModel>()));
         _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>()));
+        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>()));
+        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()));
+        _windowManagerMock.Setup(wm => wm.SaveWindowsStateNow());
 
         return new PageManagerService(_windowManagerMock.Object, _appSettingsMock.Object);
     }
@@ -97,8 +100,39 @@ public class PageManagerServiceTests
         // Act
         sut.RemovePage("work");
 
-        // Assert — RemoveChildWindow must have been called for the panel on that page
-        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(panelId), Times.Once);
+        // Assert — RemoveChildWindow must have been called for the panel on that page, with
+        // releaseManagedItems: true since deleting a page permanently destroys its panels, and
+        // deferSave: true since RemovePage batches the removals and flushes once at the end (M4).
+        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(panelId, true, true), Times.Once);
+    }
+
+    [Fact]
+    public void RemovePage_ClosesAllPanelsOnPage_FlushesStateOnceAfterTheLoop()
+    {
+        // Regression test for the Phase 7 / Block C M4 review finding: bulk panel removal must defer
+        // the per-panel persistence write and flush synchronously exactly once for the whole page,
+        // instead of once per removed panel.
+        var panel1 = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work" };
+        var panel2 = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work" };
+        var sut = BuildSut(panels: [panel1, panel2]);
+        sut.AddPage("work");
+
+        sut.RemovePage("work");
+
+        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), true, true), Times.Exactly(2));
+        _windowManagerMock.Verify(wm => wm.SaveWindowsStateNow(), Times.Once);
+    }
+
+    [Fact]
+    public void RemovePage_NoPanelsOnPage_DoesNotFlushState()
+    {
+        // No RemoveChildWindow calls happened, so there is nothing to flush.
+        var sut = BuildSut();
+        sut.AddPage("empty");
+
+        sut.RemovePage("empty");
+
+        _windowManagerMock.Verify(wm => wm.SaveWindowsStateNow(), Times.Never);
     }
 
     [Fact]

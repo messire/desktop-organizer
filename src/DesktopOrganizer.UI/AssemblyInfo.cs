@@ -3,3 +3,4 @@ ResourceDictionaryLocation.None, // where theme specific resource dictionaries a
 ResourceDictionaryLocation.SourceAssembly // where the generic resource dictionary is located (used if resource is not found in the page, app, or any theme specific resource dictionaries)
  */
 [assembly: ThemeInfo(ResourceDictionaryLocation.None, ResourceDictionaryLocation.SourceAssembly)]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("DesktopOrganizer.Tests")]

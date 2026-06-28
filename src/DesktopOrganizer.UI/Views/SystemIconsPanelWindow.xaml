@@ -1,0 +1,96 @@
+<Window x:Class="DesktopOrganizer.UI.Views.SystemIconsPanelWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:DesktopOrganizer.UI.ViewModels"
+        mc:Ignorable="d"
+        Title="SystemIconsPanel"
+        SizeToContent="Width"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        AllowsTransparency="True"
+        Background="Transparent"
+        WindowStartupLocation="Manual">
+    <d:Window.DataContext>
+        <d:DesignInstance Type="vm:SystemIconsPanelViewModel" IsDesignTimeCreatable="False"/>
+    </d:Window.DataContext>
+
+    <!--
+        Outer border provides a semi-transparent dark background strip for the panel.
+        Width is auto (SizeToContent=Width on the Window drives this).
+    -->
+    <Border Background="#55000000" Padding="4,8">
+        <!--
+            Grid wraps ItemsControl + insertion indicator so the indicator
+            can be positioned absolutely over the items list during drag-reorder.
+        -->
+        <Grid x:Name="PanelGrid">
+            <ItemsControl x:Name="IconsItemsControl"
+                          ItemsSource="{Binding VisibleItems}"
+                          AllowDrop="True"
+                          PreviewMouseLeftButtonDown="IconsItemsControl_PreviewMouseLeftButtonDown"
+                          PreviewMouseMove="IconsItemsControl_PreviewMouseMove"
+                          DragOver="IconsItemsControl_DragOver"
+                          Drop="IconsItemsControl_Drop"
+                          DragLeave="IconsItemsControl_DragLeave">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Vertical"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <!--
+                            Each item uses a Border + MouseBinding instead of Button so that
+                            DoubleClick does NOT also fire a Click event (FIX 5).
+                            Right-click and drag wiring is unchanged.
+                        -->
+                        <Border x:Name="IconBorder"
+                                Background="Transparent"
+                                Padding="4"
+                                ToolTip="{Binding Label}"
+                                PreviewMouseRightButtonUp="IconButton_PreviewMouseRightButtonUp"
+                                AllowDrop="True"
+                                DragOver="IconButton_DragOver"
+                                Drop="IconButton_Drop">
+                            <Border.InputBindings>
+                                <MouseBinding Gesture="LeftDoubleClick"
+                                              Command="{Binding DataContext.OpenItemCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                              CommandParameter="{Binding Kind}"/>
+                            </Border.InputBindings>
+                            <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
+                                <Image Source="{Binding Icon}"
+                                       Width="{Binding DataContext.IconSizePx, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                       Height="{Binding DataContext.IconSizePx, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       Stretch="Uniform"/>
+                                <TextBlock Text="{Binding Label}"
+                                           Foreground="White"
+                                           FontSize="10"
+                                           TextAlignment="Center"
+                                           HorizontalAlignment="Center"
+                                           TextWrapping="NoWrap"
+                                           Margin="0,3,0,0"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!--
+                Insertion indicator: a 2 px horizontal line shown during drag-reorder.
+                Hidden by default; shown/positioned in DragOver, hidden in Drop/DragLeave.
+            -->
+            <Border x:Name="InsertionIndicator"
+                    Background="#FF4080FF"
+                    Height="2"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Top"
+                    Margin="0,0,0,0"
+                    Visibility="Collapsed"
+                    IsHitTestVisible="False"/>
+        </Grid>
+    </Border>
+</Window>

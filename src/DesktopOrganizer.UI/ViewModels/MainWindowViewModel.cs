@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using DesktopOrganizer.Core.Models;
+using System.Linq;
+using System.Windows;
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
@@ -17,18 +19,16 @@ public class MainWindowViewModel : INotifyPropertyChanged
     private readonly IAppSettings _appSettings;
     private readonly IAutostartService _autostart;
     private readonly IPageManager _pageManager;
-    private readonly ISortingRuleService _sortingRuleService;
+    private readonly ISystemIconsPanelManager _systemIconsPanelManager;
+    private readonly IConfirmationService _confirmation;
+    private readonly IPanelItemStorageService _itemStorage;
+    private readonly IDesktopIconsService _desktopIcons;
     private ChildWindowModel? _selectedPanel;
 
     /// <summary>
     /// ViewModel for the "Снапшоты раскладки" section.
     /// </summary>
     public LayoutSnapshotsViewModel LayoutSnapshots { get; }
-
-    // Fields for new-rule inline editor.
-    private SortingCriterion _newRuleCriterion;
-    private string _newRuleValue = string.Empty;
-    private ChildWindowModel? _newRuleTargetPanel;
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -47,44 +47,6 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// Available view modes for the panel view-mode selector.
     /// </summary>
     public IReadOnlyList<PanelViewMode> ViewModes { get; } = Enum.GetValues<PanelViewMode>();
-
-    // ── Sorting rules ────────────────────────────────────────────────────────
-
-    /// <summary>Observable collection of current sorting rules (mirrors ISortingRuleService.Rules).</summary>
-    public ObservableCollection<SortingRule> SortingRules { get; } = [];
-
-    /// <summary>Available sorting criteria for the new-rule editor.</summary>
-    public IReadOnlyList<SortingCriterion> SortingCriteria { get; } = Enum.GetValues<SortingCriterion>();
-
-    /// <summary>Selected criterion for the new rule being created.</summary>
-    public SortingCriterion NewRuleCriterion
-    {
-        get => _newRuleCriterion;
-        set { _newRuleCriterion = value; OnPropertyChanged(nameof(NewRuleCriterion)); }
-    }
-
-    /// <summary>Pattern value for the new rule being created.</summary>
-    public string NewRuleValue
-    {
-        get => _newRuleValue;
-        set { _newRuleValue = value; OnPropertyChanged(nameof(NewRuleValue)); }
-    }
-
-    /// <summary>Target panel selected for the new rule.</summary>
-    public ChildWindowModel? NewRuleTargetPanel
-    {
-        get => _newRuleTargetPanel;
-        set { _newRuleTargetPanel = value; OnPropertyChanged(nameof(NewRuleTargetPanel)); }
-    }
-
-    /// <summary>Command to add a new sorting rule from the inline editor fields.</summary>
-    public ICommand AddSortingRuleCommand { get; private set; } = null!;
-
-    /// <summary>Command to remove a sorting rule. Parameter is the rule Id (string).</summary>
-    public ICommand RemoveSortingRuleCommand { get; private set; } = null!;
-
-    /// <summary>Command to immediately apply all sorting rules to existing panels.</summary>
-    public ICommand ApplySortingRulesCommand { get; private set; } = null!;
 
     /// <summary>The currently active page identifier.</summary>
     public string CurrentPage => _pageManager.CurrentPage;
@@ -164,6 +126,37 @@ public class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// When <see langword="true"/>, resizing snaps panel dimensions to the icon-grid cell size.
+    /// </summary>
+    public bool SnapResizeToIconGrid
+    {
+        get => _appSettings.SnapResizeToIconGrid;
+        set
+        {
+            if (_appSettings.SnapResizeToIconGrid == value) return;
+            _appSettings.SnapResizeToIconGrid = value;
+            _appSettings.Save();
+            OnPropertyChanged(nameof(SnapResizeToIconGrid));
+        }
+    }
+
+    /// <summary>
+    /// Magnetic pull distance (px) applied while dragging a panel. 0 disables the live drag-time
+    /// magnet (movement stays free until drop, where <see cref="GridSize"/> quantisation still applies).
+    /// </summary>
+    public int GridSnapDistance
+    {
+        get => _appSettings.GridSnapDistance;
+        set
+        {
+            if (_appSettings.GridSnapDistance == value) return;
+            _appSettings.GridSnapDistance = value;
+            _appSettings.Save();
+            OnPropertyChanged(nameof(GridSnapDistance));
+        }
+    }
+
     /// <summary>Default background colour (hex) for new panels.</summary>
     public string DefaultBackgroundColor
     {
@@ -204,6 +197,18 @@ public class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>Whether the real desktop icons are currently visible.</summary>
+    public bool DesktopIconsVisible
+    {
+        get => _desktopIcons.AreIconsVisible;
+        set
+        {
+            if (_desktopIcons.AreIconsVisible == value) return;
+            _desktopIcons.SetIconsVisible(value);
+            OnPropertyChanged(nameof(DesktopIconsVisible));
+        }
+    }
+
     /// <summary>
     /// Command to add a new desktop panel.
     /// </summary>
@@ -230,6 +235,43 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// </summary>
     public ICommand RemovePageCommand { get; }
 
+    // ── System Icons Panel ───────────────────────────────────────────────────
+
+    /// <summary>Whether the system icons panel is shown on the desktop.</summary>
+    public bool SystemIconsPanelEnabled
+    {
+        get => _systemIconsPanelManager.Model.IsEnabled;
+        set
+        {
+            if (_systemIconsPanelManager.Model.IsEnabled == value) return;
+            _systemIconsPanelManager.Model.IsEnabled = value;
+            _systemIconsPanelManager.Apply();
+            _systemIconsPanelManager.Save();
+            OnPropertyChanged(nameof(SystemIconsPanelEnabled));
+        }
+    }
+
+    /// <summary>The ordered list of system icon items (for per-item visibility checkboxes).</summary>
+    public ObservableCollection<SystemIconItemModel> SystemIconsItems
+        => _systemIconsPanelManager.Model.Items;
+
+    /// <summary>Size (Small / Medium / Large) for system icon items.</summary>
+    public SystemIconSize SystemIconsSize
+    {
+        get => _systemIconsPanelManager.Model.IconSize;
+        set
+        {
+            if (_systemIconsPanelManager.Model.IconSize == value) return;
+            _systemIconsPanelManager.Model.IconSize = value;
+            _systemIconsPanelManager.Apply();
+            _systemIconsPanelManager.Save();
+            OnPropertyChanged(nameof(SystemIconsSize));
+        }
+    }
+
+    /// <summary>Available icon size options for the ComboBox.</summary>
+    public IReadOnlyList<SystemIconSize> SystemIconSizeOptions { get; } = Enum.GetValues<SystemIconSize>();
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MainWindowViewModel"/> class.
     /// </summary>
@@ -238,15 +280,21 @@ public class MainWindowViewModel : INotifyPropertyChanged
         IAppSettings appSettings,
         IAutostartService autostart,
         IPageManager pageManager,
-        ISortingRuleService sortingRuleService,
-        LayoutSnapshotsViewModel layoutSnapshots)
+        LayoutSnapshotsViewModel layoutSnapshots,
+        ISystemIconsPanelManager systemIconsPanelManager,
+        IConfirmationService confirmation,
+        IPanelItemStorageService itemStorage,
+        IDesktopIconsService desktopIcons)
     {
-        _windowManager      = windowManager;
-        _appSettings        = appSettings;
-        _autostart          = autostart;
-        _pageManager        = pageManager;
-        _sortingRuleService = sortingRuleService;
-        LayoutSnapshots     = layoutSnapshots;
+        _windowManager              = windowManager;
+        _appSettings                = appSettings;
+        _autostart                  = autostart;
+        _pageManager                = pageManager;
+        _systemIconsPanelManager    = systemIconsPanelManager;
+        _confirmation               = confirmation;
+        _itemStorage                = itemStorage;
+        _desktopIcons               = desktopIcons;
+        LayoutSnapshots             = layoutSnapshots;
 
         AddPanelCommand    = new RelayCommand(AddPanel);
         RemovePanelCommand = new RelayCommand(RemovePanel, CanRemovePanel);
@@ -254,16 +302,11 @@ public class MainWindowViewModel : INotifyPropertyChanged
         AddPageCommand     = new RelayCommand(AddPage);
         RemovePageCommand  = new RelayCommand<string>(RemovePage, CanRemovePage);
 
-        AddSortingRuleCommand    = new RelayCommand(AddSortingRule, CanAddSortingRule);
-        RemoveSortingRuleCommand = new RelayCommand<string>(RemoveSortingRule);
-        ApplySortingRulesCommand = new RelayCommand(ApplySortingRules);
-
         _windowManager.OnChildWindowAdded   += OnPanelAdded;
         _windowManager.OnChildWindowRemoved += OnPanelRemoved;
         _pageManager.PageChanged            += OnPageChanged;
 
         SyncPages();
-        SyncSortingRules();
     }
 
     /// <summary>
@@ -341,7 +384,22 @@ public class MainWindowViewModel : INotifyPropertyChanged
     private void RemovePanel()
     {
         if (_selectedPanel is null) return;
-        _windowManager.RemoveChildWindow(_selectedPanel.Id);
+
+        var hasManagedFiles = _selectedPanel.FilePaths.Any(_itemStorage.IsManaged);
+
+        var confirmed = hasManagedFiles
+            ? _confirmation.Confirm(
+                "Панель будет удалена безвозвратно. Файлы, перемещённые в неё, будут удалены с диска " +
+                "без возможности восстановления через Корзину. Продолжить?",
+                "Удалить панель",
+                MessageBoxImage.Warning)
+            : _confirmation.Confirm(
+                "Панель будет удалена. Продолжить?",
+                "Удалить панель");
+
+        if (!confirmed) return;
+
+        _windowManager.RemoveChildWindow(_selectedPanel.Id, releaseManagedItems: true);
     }
 
     private bool CanRemovePanel() => _selectedPanel is not null;
@@ -389,48 +447,6 @@ public class MainWindowViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(SelectedPanelIconSize));
         OnPropertyChanged(nameof(SelectedPanelViewMode));
     }
-
-    // ── Sorting rules ────────────────────────────────────────────────────────
-
-    /// <summary>Syncs the observable collection from the service.</summary>
-    public void SyncSortingRules()
-    {
-        SortingRules.Clear();
-        foreach (var rule in _sortingRuleService.Rules)
-            SortingRules.Add(rule);
-    }
-
-    private bool CanAddSortingRule()
-        => !string.IsNullOrWhiteSpace(NewRuleValue) && NewRuleTargetPanel is not null;
-
-    private void AddSortingRule()
-    {
-        if (NewRuleTargetPanel is null) return;
-
-        var rule = new SortingRule
-        {
-            Criterion     = NewRuleCriterion,
-            Value         = NewRuleValue.Trim(),
-            TargetPanelId = NewRuleTargetPanel.Id.ToString(),
-            IgnoreCase    = true,
-        };
-
-        _sortingRuleService.AddRule(rule);
-        SyncSortingRules();
-
-        // Reset editor fields.
-        NewRuleValue       = string.Empty;
-        NewRuleTargetPanel = null;
-    }
-
-    private void RemoveSortingRule(string? ruleId)
-    {
-        if (string.IsNullOrWhiteSpace(ruleId)) return;
-        _sortingRuleService.RemoveRule(ruleId);
-        SyncSortingRules();
-    }
-
-    private void ApplySortingRules() => _sortingRuleService.ApplyRules();
 
     /// <summary>
     /// Notifies about property changes.

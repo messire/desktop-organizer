@@ -119,17 +119,6 @@ namespace DesktopOrganizer.UI.Properties {
             }
         }
 
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("[]")]
-        public string SortingRules {
-            get {
-                return ((string)(this["SortingRules"]));
-            }
-            set {
-                this["SortingRules"] = value;
-            }
-        }
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
@@ -140,6 +129,54 @@ namespace DesktopOrganizer.UI.Properties {
             }
             set {
                 this["LayoutSnapshots"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool SnapResizeToIconGrid {
+            get {
+                return ((bool)(this["SnapResizeToIconGrid"]));
+            }
+            set {
+                this["SnapResizeToIconGrid"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("12")]
+        public int GridSnapDistance {
+            get {
+                return ((int)(this["GridSnapDistance"]));
+            }
+            set {
+                this["GridSnapDistance"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool HasShownMoveHint {
+            get {
+                return ((bool)(this["HasShownMoveHint"]));
+            }
+            set {
+                this["HasShownMoveHint"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string SystemIconsPanel {
+            get {
+                return ((string)(this["SystemIconsPanel"]));
+            }
+            set {
+                this["SystemIconsPanel"] = value;
             }
         }
     }

@@ -11,6 +11,27 @@ internal class AppSettings : IAppSettings
     }
 
     /// <inheritdoc />
+    public bool SnapResizeToIconGrid
+    {
+        get => Properties.Settings.Default.SnapResizeToIconGrid;
+        set => Properties.Settings.Default.SnapResizeToIconGrid = value;
+    }
+
+    /// <inheritdoc />
+    public int GridSnapDistance
+    {
+        get => Properties.Settings.Default.GridSnapDistance;
+        set => Properties.Settings.Default.GridSnapDistance = value;
+    }
+
+    /// <inheritdoc />
+    public bool HasShownMoveHint
+    {
+        get => Properties.Settings.Default.HasShownMoveHint;
+        set => Properties.Settings.Default.HasShownMoveHint = value;
+    }
+
+    /// <inheritdoc />
     public string DefaultBackgroundColor
     {
         get => Properties.Settings.Default.DefaultBackgroundColor;
@@ -53,17 +74,17 @@ internal class AppSettings : IAppSettings
     }
 
     /// <inheritdoc />
-    public string SortingRules
-    {
-        get => Properties.Settings.Default.SortingRules;
-        set => Properties.Settings.Default.SortingRules = value;
-    }
-
-    /// <inheritdoc />
     public string LayoutSnapshots
     {
         get => Properties.Settings.Default.LayoutSnapshots;
         set => Properties.Settings.Default.LayoutSnapshots = value;
+    }
+
+    /// <inheritdoc />
+    public string SystemIconsPanel
+    {
+        get => Properties.Settings.Default.SystemIconsPanel;
+        set => Properties.Settings.Default.SystemIconsPanel = value;
     }
 
     /// <inheritdoc />

@@ -31,8 +31,13 @@ public static class DiConfig
         services.AddSingleton<IFolderWatcherFactory, FolderWatcherFactory>();
         services.AddSingleton<ISystemShellService, SystemShellService>();
         services.AddSingleton<IPanelItemStorageService, PanelItemStorageService>();
+        services.AddSingleton<IFileItemRenameService, FileItemRenameService>();
 
         // Multi-monitor: self-contained service (owns its own WM_DISPLAYCHANGE listener).
         services.AddSingleton<IMonitorService, MonitorService>();
+
+        // Windows virtual desktops (Task View) — NOT physical monitors. Degrades silently
+        // to IsSupported == false when the shell COM object is unavailable.
+        services.AddSingleton<IVirtualDesktopService, VirtualDesktopService>();
     }
 }

@@ -5,7 +5,7 @@ using DesktopOrganizer.UI.Models;
 namespace DesktopOrganizer.UI.Converters;
 
 /// <summary>
-/// Converts an icon size (double) to the StackPanel box width used in WrapViewTemplate.
+/// Converts an icon size (double) to the StackPanel box width used in GridViewTemplate.
 /// Returns <see cref="GridMetrics.BoxSize"/> so the template and the quantisation logic
 /// share one source of truth.
 /// </summary>

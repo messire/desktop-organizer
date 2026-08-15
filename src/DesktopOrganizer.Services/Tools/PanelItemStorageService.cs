@@ -103,7 +103,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
 
             if (!forceCrossVolume && SameVolume(fullSource, _storageRoot))
             {
-                // Atomic rename — nothing is copied, so there's no partial-copy window to guard.
+                // destPath now lives under a per-item GUID directory (root\{guid}\{originalName}) —
+                // that directory doesn't exist yet, and File.Move requires its parent to. Nothing is
+                // copied here, so creating an empty directory ahead of an atomic rename is safe (no
+                // partial-copy window to guard).
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
                 File.Move(fullSource, destPath);
             }
             else
@@ -112,6 +116,7 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 {
                     TryDeletePartialFile(destPath);
                     RemoveManifestEntry(destPath);
+                    TryCleanupEmptyItemDirectory(destPath);
                     return null;
                 }
 
@@ -123,7 +128,12 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            if (destPath is not null) RemoveManifestEntry(destPath);
+            if (destPath is not null)
+            {
+                RemoveManifestEntry(destPath);
+                TryCleanupEmptyItemDirectory(destPath);
+            }
+
             Console.Error.WriteLine($"PanelItemStorageService.MoveIn failed for '{sourcePath}': {ex.Message}");
             return null;
         }
@@ -165,6 +175,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                     return null;
                 }
 
+                // destRoot now lives under a per-item GUID directory (root\{guid}\{originalName}).
+                // Directory.Move requires the parent to exist but the destination itself to NOT
+                // exist (it performs the rename) — so only the GUID directory is created here, never
+                // destRoot itself.
+                Directory.CreateDirectory(Path.GetDirectoryName(destRoot)!);
                 Directory.Move(fullSource, destRoot);
             }
             else
@@ -224,6 +239,7 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                             Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory verified copy failed for '{file}' while copying '{sourcePath}'");
                             TryDeletePartialDirectory(destRoot);
                             RemoveManifestEntry(destRoot);
+                            TryCleanupEmptyItemDirectory(destRoot);
                             return null;
                         }
                     }
@@ -233,6 +249,7 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                     Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to copy '{sourcePath}': {ex.Message}");
                     TryDeletePartialDirectory(destRoot);
                     RemoveManifestEntry(destRoot);
+                    TryCleanupEmptyItemDirectory(destRoot);
                     return null;
                 }
 
@@ -245,7 +262,12 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            if (destRoot is not null) RemoveManifestEntry(destRoot);
+            if (destRoot is not null)
+            {
+                RemoveManifestEntry(destRoot);
+                TryCleanupEmptyItemDirectory(destRoot);
+            }
+
             Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed for '{sourcePath}': {ex.Message}");
             return null;
         }
@@ -345,6 +367,7 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             }
 
             RemoveManifestEntry(fullStored);
+            TryCleanupEmptyItemDirectory(fullStored);
             return RestoreOutcome.Restored;
         }
         catch (Exception ex)
@@ -361,15 +384,63 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
 
         try
         {
-            if (Directory.Exists(storedPath)) Directory.Delete(storedPath, recursive: true);
-            else if (File.Exists(storedPath)) File.Delete(storedPath);
+            var fullStored = Path.GetFullPath(storedPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-            RemoveManifestEntry(Path.GetFullPath(storedPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (Directory.Exists(fullStored)) Directory.Delete(fullStored, recursive: true);
+            else if (File.Exists(fullStored)) File.Delete(fullStored);
+
+            RemoveManifestEntry(fullStored);
+            TryCleanupEmptyItemDirectory(fullStored);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"PanelItemStorageService.Release failed for '{storedPath}': {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Deletes the per-item GUID directory a moved-in file/folder lived under (see
+    /// <see cref="BuildDestinationPath"/>/<see cref="BuildDestinationDirectoryPath"/>) once it's
+    /// orphaned by a successful <see cref="Restore(string)"/>/<see cref="Release"/> — <b>only</b> if
+    /// that directory is a direct child of <see cref="_storageRoot"/> and is now empty. Never deletes
+    /// <see cref="_storageRoot"/> itself, and never deletes a non-empty directory. A legacy flat-layout
+    /// item (pre-GUID-directory) has no per-item directory to clean up — its parent already IS the
+    /// storage root, which this deliberately never touches, so it's a safe no-op for those.
+    /// </summary>
+    /// <param name="fullStoredPath">
+    /// The full, already-normalized path of the item that was just moved away/deleted (whether the
+    /// item was a file or a directory — either way, its parent is the per-item GUID directory).
+    /// </param>
+    private void TryCleanupEmptyItemDirectory(string fullStoredPath)
+    {
+        try
+        {
+            var itemDir = Path.GetDirectoryName(fullStoredPath);
+            if (string.IsNullOrEmpty(itemDir) || !Directory.Exists(itemDir)) return;
+
+            var itemDirFull = Path.GetFullPath(itemDir)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var root = Path.GetFullPath(_storageRoot)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // Guard against ever deleting the storage root: only a directory whose OWN parent is the
+            // root qualifies (i.e. itemDir must be exactly one level below root). This also correctly
+            // skips legacy flat items, whose "item directory" as computed above already IS the root.
+            var parentOfItemDir = Path.GetDirectoryName(itemDirFull);
+            if (parentOfItemDir is null) return;
+
+            var parentOfItemDirFull = Path.GetFullPath(parentOfItemDir)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (!string.Equals(parentOfItemDirFull, root, StringComparison.OrdinalIgnoreCase)) return;
+
+            if (Directory.EnumerateFileSystemEntries(itemDirFull).Any()) return; // not empty — leave it
+
+            Directory.Delete(itemDirFull);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"PanelItemStorageService: failed to clean up item directory for '{fullStoredPath}': {ex.Message}");
         }
     }
 
@@ -402,26 +473,221 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
     }
 
+    /// <inheritdoc />
+    public RenameResult RenameManaged(string storedPath, string newName)
+    {
+        if (!IsManaged(storedPath)) return new RenameResult(RenameOutcome.Failed, null);
+        if (string.IsNullOrWhiteSpace(newName)) return new RenameResult(RenameOutcome.InvalidName, null);
+
+        // Defense in depth: IFileItemRenameService already validates newName before ever calling
+        // this method, but this is a public interface member on its own — a caller that skips that
+        // validation must not be able to smuggle a path separator (or "..") into what's meant to be
+        // a bare name and escape the item's own directory. GetInvalidFileNameChars() already
+        // includes both separators.
+        if (newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return new RenameResult(RenameOutcome.InvalidName, null);
+
+        string fullStored;
+        try
+        {
+            fullStored = Path.GetFullPath(storedPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception)
+        {
+            return new RenameResult(RenameOutcome.Failed, null);
+        }
+
+        var isDirectory = Directory.Exists(fullStored);
+        var isFile = !isDirectory && File.Exists(fullStored);
+        if (!isDirectory && !isFile) return new RenameResult(RenameOutcome.NotFound, null);
+
+        try
+        {
+            var itemDir = Path.GetDirectoryName(fullStored);
+            if (string.IsNullOrEmpty(itemDir)) return new RenameResult(RenameOutcome.Failed, null);
+
+            var root = Path.GetFullPath(_storageRoot)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // A legacy flat-layout item (moved in before per-item GUID directories existed — see
+            // BuildDestinationPath/BuildDestinationDirectoryPath remarks) has the storage root
+            // itself as its "directory". There's no per-item directory to rename within, so instead
+            // it's relocated into a brand-new one — curing the legacy layout for good, per ADR-013
+            // Decision 3.
+            var isLegacyFlat = string.Equals(itemDir, root, StringComparison.OrdinalIgnoreCase);
+
+            var nameBase = isFile ? Path.GetFileNameWithoutExtension(newName) : newName;
+            var nameExt = isFile ? Path.GetExtension(newName) : string.Empty;
+
+            string targetDir;
+            if (isLegacyFlat)
+            {
+                targetDir = Path.Combine(_storageRoot, Guid.NewGuid().ToString("N"));
+            }
+            else
+            {
+                targetDir = itemDir;
+            }
+
+            var candidate = Path.Combine(targetDir, newName);
+            var newPath = TruncateNameIfPathTooLong(candidate, targetDir, nameBase, nameExt);
+
+            // Exact same path (same case, same directory) — nothing to do.
+            if (!isLegacyFlat && string.Equals(newPath, fullStored, StringComparison.Ordinal))
+                return new RenameResult(RenameOutcome.Renamed, fullStored);
+
+            // A case-only rename of the same path (e.g. "Report.pdf" -> "report.pdf") must not be
+            // rejected as a collision against itself — File/Directory.Exists is case-insensitive on
+            // Windows and would otherwise always find "the file" at its own new (differently-cased)
+            // path.
+            var sameIgnoringCase = !isLegacyFlat
+                && string.Equals(newPath, fullStored, StringComparison.OrdinalIgnoreCase);
+
+            if (!sameIgnoringCase && (File.Exists(newPath) || Directory.Exists(newPath)))
+                return new RenameResult(RenameOutcome.NameTaken, null); // collision at the resolved destination
+
+            // The manifest name actually landed on disk may differ from the raw newName if the
+            // truncate-guard above shortened it (see TruncateNameIfPathTooLong) — always record the
+            // name that will actually be on disk (Path.GetFileName(newPath)), not the untruncated
+            // newName, so a later Restore doesn't diverge from what's actually there (N4).
+            var actualNewName = Path.GetFileName(newPath);
+
+            // The manifest's new entry is added — leaving the OLD entry for fullStored untouched —
+            // before the physical move; see TryRenameManifestEntry remarks / ADR-013 Decision 5 for
+            // why this is no longer an atomic re-key. On failure (untrusted cache or a disk write
+            // failure) this aborts before any file-system mutation happens.
+            if (!TryRenameManifestEntry(fullStored, newPath, actualNewName, out var hadOldEntry))
+            {
+                Console.Error.WriteLine($"PanelItemStorageService.RenameManaged: manifest write failed, aborting rename of '{storedPath}'");
+                return new RenameResult(RenameOutcome.Failed, null);
+            }
+
+            try
+            {
+                Directory.CreateDirectory(targetDir);
+                if (isDirectory) Directory.Move(fullStored, newPath);
+                else File.Move(fullStored, newPath);
+            }
+            catch (Exception ex)
+            {
+                // The physical move failed. Unlike the old "atomic re-key" scheme, no rollback is
+                // needed: TryRenameManifestEntry above deliberately left the OLD entry for fullStored
+                // in place untouched, so Restore(fullStored) still works exactly as it did before this
+                // call. The NEW entry it added (if hadOldEntry) is now stray — it maps newPath to an
+                // original path, but newPath was never actually created since the move failed — so
+                // it's removed here as a best-effort cleanup; if that removal itself fails, the stray
+                // entry is harmless (Restore is only ever invoked with a managed path that actually
+                // exists on disk, so it can never be looked up — see TryRenameManifestEntry remarks).
+                if (hadOldEntry) RemoveManifestEntry(newPath);
+                Console.Error.WriteLine($"PanelItemStorageService.RenameManaged: move failed for '{storedPath}' -> '{newPath}': {ex.Message}");
+                return new RenameResult(RenameOutcome.Failed, null);
+            }
+
+            // Physical move succeeded — only now is it safe to drop the OLD manifest entry; the item
+            // is fully described by the new entry TryRenameManifestEntry already wrote above.
+            if (hadOldEntry) RemoveManifestEntry(fullStored);
+
+            return new RenameResult(RenameOutcome.Renamed, newPath);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"PanelItemStorageService.RenameManaged failed for '{storedPath}': {ex.Message}");
+            return new RenameResult(RenameOutcome.Failed, null);
+        }
+    }
+
     // ── Destination naming ──────────────────────────────────────────────────
 
+    // Soft cap on the full destination path length. Windows' legacy MAX_PATH (260) is the hard
+    // constraint; 240 leaves headroom for Restore's own path composition (parent directory,
+    // Explorer-style " (2)" collision suffix) without itself running the guid-directory scheme's
+    // hard limits. See ADR-013 Decision 2, trade-off.
+    private const int MaxDestinationPathLength = 240;
+
+    /// <summary>
+    /// Builds a collision-free destination for a moved-in file: a per-item GUID directory holding
+    /// the file under its <b>original</b> name — <c>{storageRoot}\{guid}\{originalName}{ext}</c>.
+    /// The GUID guarantees collision-free placement in one shot (no racy check-then-create loop, no
+    /// "(2)"-style counter) while leaving the file's own name untouched, so
+    /// <see cref="System.IO.Path.GetFileName(string)"/> on the result is exactly the original name
+    /// (see ADR-013 Decision 2). The base name is truncated — keeping the extension intact — only if
+    /// the resulting full path would exceed <see cref="MaxDestinationPathLength"/>; otherwise it is
+    /// never shortened.
+    /// </summary>
     private string BuildDestinationPath(string fullSourcePath)
     {
         var name = Path.GetFileNameWithoutExtension(fullSourcePath);
         var ext = Path.GetExtension(fullSourcePath);
-        if (name.Length > 40) name = name[..40];
+        var guid = Guid.NewGuid().ToString("N");
+        var itemDir = Path.Combine(_storageRoot, guid);
 
-        // A GUID suffix guarantees a collision-free destination in one shot — no need for a
-        // check-then-create loop (which would itself be racy) or an "(2)"-style counter.
-        return Path.Combine(_storageRoot, $"{name}_{Guid.NewGuid():N}{ext}");
+        var candidate = Path.Combine(itemDir, name + ext);
+        return TruncateNameIfPathTooLong(candidate, itemDir, name, ext);
     }
 
+    /// <summary>
+    /// Directory counterpart of <see cref="BuildDestinationPath"/>: <c>{storageRoot}\{guid}\{originalFolderName}</c>.
+    /// </summary>
     private string BuildDestinationDirectoryPath(string fullSourcePath)
     {
         var name = Path.GetFileName(fullSourcePath);
         if (string.IsNullOrEmpty(name)) name = "folder";
-        if (name.Length > 40) name = name[..40];
+        var guid = Guid.NewGuid().ToString("N");
+        var itemDir = Path.Combine(_storageRoot, guid);
 
-        return Path.Combine(_storageRoot, $"{name}_{Guid.NewGuid():N}");
+        var candidate = Path.Combine(itemDir, name);
+        return TruncateNameIfPathTooLong(candidate, itemDir, name, ext: string.Empty);
+    }
+
+    /// <summary>
+    /// If <paramref name="candidate"/> exceeds <see cref="MaxDestinationPathLength"/>, truncates only
+    /// <paramref name="baseName"/> (preserving <paramref name="ext"/> and the fixed
+    /// <paramref name="parentDir"/> prefix) and rebuilds the path; otherwise returns
+    /// <paramref name="candidate"/> unchanged. Shared by the "new item" naming above and by
+    /// <see cref="RenameManaged"/>, which truncates against an existing per-item directory instead
+    /// of a freshly generated one.
+    /// <para>
+    /// Two things beyond a plain <c>[..maxNameLength]</c> slice are handled so the truncated name is
+    /// still a name Windows will actually create verbatim: (1) the cut point is nudged back one char
+    /// if it would otherwise land inside a UTF-16 surrogate pair, so a truncated name never ends in
+    /// a lone (invalid) high surrogate; (2) trailing spaces/dots left exposed by the cut are trimmed,
+    /// since Windows silently strips those from the final path segment — for a directory (empty
+    /// <paramref name="ext"/>) an untrimmed trailing dot/space would make the path this method
+    /// returns diverge from the path actually created on disk once <see cref="Directory.CreateDirectory(string)"/>
+    /// runs.
+    /// </para>
+    /// <para>
+    /// <b>Known edge case:</b> the ≤<see cref="MaxDestinationPathLength"/> guarantee assumes
+    /// <paramref name="parentDir"/> + <paramref name="ext"/> alone (the "fixed" part of the path that
+    /// can't be shortened here) leave at least 1 character of budget for the name. In the extreme —
+    /// an unusually deep/long per-user storage root combined with an unusually long file extension —
+    /// that budget could itself already exceed the cap; <c>Math.Max(1, …)</c> below intentionally
+    /// still produces a 1-character name rather than an empty/negative one in that case, but the
+    /// overall path can then exceed the cap. This is considered acceptable: it requires an
+    /// environmental path length pre-existing near the Windows MAX_PATH boundary regardless of
+    /// anything this service does, which is already outside what a 240-char soft cap can fully
+    /// guard against.
+    /// </para>
+    /// </summary>
+    private static string TruncateNameIfPathTooLong(string candidate, string parentDir, string baseName, string ext)
+    {
+        if (candidate.Length <= MaxDestinationPathLength) return candidate;
+
+        var fixedLength = candidate.Length - baseName.Length;
+        var maxNameLength = Math.Max(1, MaxDestinationPathLength - fixedLength);
+        var truncated = baseName.Length > maxNameLength ? baseName[..maxNameLength] : baseName;
+
+        // Never split a UTF-16 surrogate pair: if the cut landed right after a high surrogate (i.e.
+        // the low surrogate that completes it was cut off), drop the now-lone high surrogate too.
+        if (truncated.Length > 0 && char.IsHighSurrogate(truncated[^1]))
+            truncated = truncated[..^1];
+
+        // Windows silently strips a trailing space or dot from the final path segment — trim it here
+        // so the path this method returns matches what's actually created on disk.
+        truncated = truncated.TrimEnd(' ', '.');
+        if (truncated.Length == 0) truncated = "_"; // degenerate case: nothing survived trimming
+
+        return Path.Combine(parentDir, truncated + ext);
     }
 
     /// <summary>
@@ -584,6 +850,84 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             var (manifest, trusted) = EnsureManifestCacheUnlocked();
             if (!trusted) return;
             if (manifest.Remove(managedPath)) WriteManifestUnlocked(manifest);
+        }
+    }
+
+    /// <summary>
+    /// Adds the new manifest entry for a <see cref="RenameManaged"/> destination, leaving the OLD
+    /// entry for <paramref name="oldManagedPath"/> (if any) completely untouched — deliberately NOT
+    /// an atomic re-key. Both entries can exist in the manifest simultaneously after this returns
+    /// successfully; the caller (<see cref="RenameManaged"/>) is responsible for removing the old
+    /// entry via <see cref="RemoveManifestEntry"/>, but only <b>after</b> the physical move that
+    /// follows this call has actually succeeded.
+    /// <para>
+    /// This "add first, remove-old later" sequencing (rather than a single atomic write that both
+    /// removes the old key and adds the new one) exists specifically so a physical move that fails
+    /// AFTER this method returns can never strand the manifest without a valid entry for the item's
+    /// current (still physically present, unchanged) path: the old key is simply still there, so
+    /// <see cref="Restore"/> against <paramref name="oldManagedPath"/> keeps working exactly as
+    /// before, with no rollback logic needed at all. The "extra" new key this leaves behind in that
+    /// failure case is harmless garbage: it maps a managed path that was never actually created
+    /// (the move never happened) to an original path, and <see cref="Restore"/> is only ever invoked
+    /// by callers holding a managed path that actually exists on disk — that stray key can never be
+    /// looked up. <see cref="RenameManaged"/> still makes a best-effort attempt to remove it anyway
+    /// so it doesn't linger, but a failure to do so is not itself a data-loss risk (see ADR-012
+    /// Block F / the code-quality-reviewer finding this replaces).
+    /// </para>
+    /// </summary>
+    /// <param name="oldManagedPath">The item's current managed path (its existing manifest key, if any).</param>
+    /// <param name="newManagedPath">The item's managed path after the rename (the new manifest key to add).</param>
+    /// <param name="newName">
+    /// The bare file/folder name that will actually land on disk (already truncated if the
+    /// truncate-guard applied — see <see cref="TruncateNameIfPathTooLong"/>), substituted into the
+    /// recorded original path.
+    /// </param>
+    /// <param name="hadOldEntry">
+    /// <see langword="true"/> if <paramref name="oldManagedPath"/> had a manifest entry (in which case
+    /// the new entry was written, and the caller must remove the old one once the physical move
+    /// succeeds). <see langword="false"/> if there was no entry to begin with (e.g. a legacy item —
+    /// see <see cref="RestoreOutcome.OriginalPathUnknown"/>), in which case nothing was written and
+    /// there is nothing for the caller to do either way.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> if it's safe to proceed to the physical move — either the new entry was
+    /// successfully added, or there was no old entry to begin with (nothing to add).
+    /// <see langword="false"/> if the manifest cache is currently untrusted or the write-through to
+    /// disk failed: nothing was mutated on disk, and the caller MUST NOT perform the physical move.
+    /// </returns>
+    private bool TryRenameManifestEntry(string oldManagedPath, string newManagedPath, string newName, out bool hadOldEntry)
+    {
+        lock (_manifestLock)
+        {
+            var (manifest, trusted) = EnsureManifestCacheUnlocked();
+            if (!trusted)
+            {
+                hadOldEntry = false;
+                return false;
+            }
+
+            if (!manifest.TryGetValue(oldManagedPath, out var existingOriginal))
+            {
+                hadOldEntry = false;
+                return true;
+            }
+
+            var originalDir = Path.GetDirectoryName(existingOriginal);
+            var newOriginal = string.IsNullOrEmpty(originalDir) ? newName : Path.Combine(originalDir, newName);
+
+            manifest[newManagedPath] = newOriginal;
+
+            if (WriteManifestUnlocked(manifest))
+            {
+                hadOldEntry = true;
+                return true;
+            }
+
+            // Roll back the in-memory mutation so the cache matches what's actually still on disk.
+            // The old entry was never touched, so there's nothing to restore for it.
+            manifest.Remove(newManagedPath);
+            hadOldEntry = false;
+            return false;
         }
     }
 

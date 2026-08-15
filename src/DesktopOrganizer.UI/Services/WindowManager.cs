@@ -84,6 +84,10 @@ public class WindowManager : IWindowManager
     }
 
     /// <inheritdoc />
+    public void ShowMainWindow()
+        => ShowWindow(GetOrCreateMainWindow());
+
+    /// <inheritdoc />
     public ChildWindow CreateChildWindow(ChildWindowModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -119,6 +123,51 @@ public class WindowManager : IWindowManager
             entry.Window.Show();
         else
             entry.Window.Hide();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Not practically unit-testable: constructing a real <see cref="ChildWindow"/> requires the full
+    /// DI graph (see <see cref="CreateChildWindow"/>) and a live dispatcher, mirroring
+    /// <see cref="OnMonitorsChanged"/>'s remarks. The filtering rules themselves
+    /// (exclude self, exclude hidden, skip degenerate geometry) are a straight-line pass-through over
+    /// <see cref="Window"/> properties with no branching worth isolating — see
+    /// <c>docs/PLANS/panel-anti-overlap.md</c> §3.3/§6 item 4. Manual verify (Win10/Win11).
+    /// </remarks>
+    public void CollectOtherPanelBounds(Guid excludingId, IList<Rect> buffer)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        buffer.Clear();
+
+        foreach (var (id, entry) in _childWindows)
+        {
+            if (id == excludingId) continue;
+
+            var window = entry.Window;
+
+            // Different page / otherwise not currently shown → blocks nothing the user can see.
+            if (!window.IsVisible) continue;
+
+            // Live geometry only — never the model's Position/Size (see the interface XML-doc for why
+            // a rolled-up panel's model Size is unusable here). Height is the one exception: while a
+            // roll-up/roll-down toggle is mid-animation (ChildWindow.ApplyRollUp, 150ms HeightProperty
+            // animation), window.ActualHeight is a moving in-between value, not the panel's real
+            // resting height — freezing whatever it happens to read as an obstacle for an entire
+            // concurrent drag gesture on another panel would block/allow movement based on a height
+            // that never actually persists (finalization MAJOR M-2). Model.IsRolledUp already flips to
+            // its target value synchronously, before the animation starts, so it reflects the panel's
+            // settled height even mid-animation; fall back to live geometry only when the panel isn't
+            // rolled up.
+            var width = window.ActualWidth > 0 ? window.ActualWidth : window.Width;
+            var height = entry.Model.IsRolledUp
+                ? ChildWindow.TitleBarHeight
+                : window.ActualHeight > 0 ? window.ActualHeight : window.Height;
+            if (double.IsNaN(window.Left) || double.IsNaN(window.Top) || double.IsNaN(width) || double.IsNaN(height))
+                continue;
+            if (width <= 0 || height <= 0) continue; // not yet measured / degenerate
+
+            buffer.Add(new Rect(window.Left, window.Top, width, height));
+        }
     }
 
     /// <inheritdoc />

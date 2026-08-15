@@ -185,12 +185,10 @@ DocProject/Help/*.hhp
 DocProject/Help/Html2
 DocProject/Help/html
 
-# Click-Once directory
-publish/
-
-# Inno Setup installer output
-installer/
-scripts/
+# Installer build artifacts only — installer/DesktopOrganizer.iss, installer/build.ps1 and
+# installer/README.md are checked in.
+installer/publish/
+installer/Output/
 
 # Publish Web Output
 *.[Pp]ublish.xml

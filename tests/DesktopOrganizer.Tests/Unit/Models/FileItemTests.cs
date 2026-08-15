@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Windows.Media.Imaging;
 using DesktopOrganizer.Core.Models;
 
 namespace DesktopOrganizer.Tests.Unit.Models;
@@ -48,6 +49,65 @@ public class FileItemTests
 
         // Assert
         Assert.Equal(expectedFileName, result);
+    }
+
+    // ---------------------------------------------------------------------------
+    // DisplayName hides a shortcut's .lnk extension, matching Explorer's default
+    // "hide extensions" behavior — Name/Path/Type stay unaffected (they reflect the
+    // real on-disk state), only the rendering-only DisplayName is trimmed.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// A shortcut's <see cref="FileItem.DisplayName"/> omits the trailing <c>.lnk</c>, while
+    /// <see cref="FileItem.Name"/> still carries it — only the rendering concern is affected.
+    /// </summary>
+    [Fact]
+    public void DisplayName_Shortcut_OmitsLnkExtension()
+    {
+        var item = new FileItem(@"C:\fake\Chrome.lnk", null);
+
+        Assert.True(item.IsShortcut);
+        Assert.Equal("Chrome", item.DisplayName);
+        Assert.Equal("Chrome.lnk", item.Name);
+    }
+
+    /// <summary>
+    /// The <c>.lnk</c> match is case-insensitive, same as <see cref="FileItem.IsShortcut"/> itself.
+    /// </summary>
+    [Fact]
+    public void DisplayName_ShortcutWithUppercaseExtension_OmitsExtension()
+    {
+        var item = new FileItem(@"C:\fake\Chrome.LNK", null);
+
+        Assert.True(item.IsShortcut);
+        Assert.Equal("Chrome", item.DisplayName);
+    }
+
+    /// <summary>
+    /// A non-shortcut whose name merely contains <c>.lnk</c> in the middle (not as its actual
+    /// extension) must not have anything stripped — <see cref="FileItem.IsShortcut"/> is false, so
+    /// <see cref="FileItem.DisplayName"/> falls back to the plain <see cref="FileItem.Name"/>-equal path.
+    /// </summary>
+    [Fact]
+    public void DisplayName_NonShortcutNameContainingLnk_IsUnaffected()
+    {
+        var item = new FileItem(@"C:\fake\file.lnk.txt", null);
+
+        Assert.False(item.IsShortcut);
+        Assert.Equal("file.lnk.txt", item.DisplayName);
+    }
+
+    /// <summary>
+    /// A cosmetic <c>displayName</c> override (see ADR-013 Decision 3, legacy GUID-suffix stripping)
+    /// on a managed shortcut still gets its <c>.lnk</c> stripped — the override only replaces
+    /// <see cref="FileItem.Name"/> as the base, the shortcut-extension trim applies on top of it.
+    /// </summary>
+    [Fact]
+    public void DisplayName_ShortcutWithDisplayNameOverride_OmitsLnkExtension()
+    {
+        var item = new FileItem(@"C:\fake\Chrome_9f3c1a2b3c4d5e6f7a8b9c0d1e2f3a4b.lnk", null, displayName: "Chrome.lnk");
+
+        Assert.Equal("Chrome", item.DisplayName);
     }
 
     // ---------------------------------------------------------------------------
@@ -173,6 +233,135 @@ public class FileItemTests
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Relocate (ADR-013 Decision 4/6): updates a FileItem in place after a physical rename, instead
+    // of the caller discarding and recreating it — so bound UI state (selection, container) survives.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Every derived property (<see cref="FileItem.Path"/>, <see cref="FileItem.Icon"/>,
+    /// <see cref="FileItem.Name"/>, <see cref="FileItem.DisplayName"/>, <see cref="FileItem.Type"/>,
+    /// <see cref="FileItem.IsShortcut"/>) reflects the new path after <see cref="FileItem.Relocate"/>,
+    /// and each raises <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/>.
+    /// </summary>
+    [Fact]
+    public void Relocate_UpdatesAllDerivedProperties_AndRaisesPropertyChangedForEach()
+    {
+        var oldPath = Path.Combine(Path.GetTempPath(), $"DOrgRelocateOld_{Guid.NewGuid():N}.txt");
+        var newPath = Path.Combine(Path.GetTempPath(), $"DOrgRelocateNew_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(newPath, string.Empty); // exists at the destination, unlike the old path
+
+        try
+        {
+            var item = new FileItem(oldPath, null);
+            Assert.False(item.Exists);
+
+            var newIcon = new BitmapImage();
+            var raised = new List<string?>();
+            item.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+            item.Relocate(newPath, newIcon);
+
+            Assert.Equal(newPath, item.Path);
+            Assert.Same(newIcon, item.Icon);
+            Assert.Equal(Path.GetFileName(newPath), item.Name);
+            Assert.Equal(".lnk", item.Type);
+            Assert.True(item.IsShortcut);
+            // DisplayName hides the .lnk extension for shortcuts (Explorer parity) — Name still has it.
+            Assert.Equal(Path.GetFileNameWithoutExtension(newPath), item.DisplayName);
+            Assert.NotEqual(item.Name, item.DisplayName);
+            Assert.True(item.Exists);
+            Assert.False(item.IsDirectory);
+
+            Assert.Contains(nameof(FileItem.Path), raised);
+            Assert.Contains(nameof(FileItem.Icon), raised);
+            Assert.Contains(nameof(FileItem.Name), raised);
+            Assert.Contains(nameof(FileItem.DisplayName), raised);
+            Assert.Contains(nameof(FileItem.Type), raised);
+            Assert.Contains(nameof(FileItem.IsShortcut), raised);
+        }
+        finally
+        {
+            File.Delete(newPath);
+        }
+    }
+
+    /// <summary>
+    /// A cosmetic <c>displayName</c> override passed at construction (see ADR-013 Decision 3, legacy
+    /// GUID-suffix stripping) must be cleared by <see cref="FileItem.Relocate"/> — after a rename the
+    /// on-disk name IS the name the user chose, so <see cref="FileItem.DisplayName"/> must reflect the
+    /// new path directly rather than keep showing a stale override computed from the old path.
+    /// </summary>
+    [Fact]
+    public void Relocate_ClearsDisplayNameOverride_DisplayNameFallsBackToNewName()
+    {
+        var oldPath = @"C:\fake\Report_9f3c1a2b3c4d5e6f7a8b9c0d1e2f3a4b.docx";
+        var newPath = @"C:\fake\Renamed.docx";
+        var item = new FileItem(oldPath, null, displayName: "Report.docx");
+        Assert.Equal("Report.docx", item.DisplayName); // override active before Relocate
+
+        item.Relocate(newPath, null);
+
+        Assert.Equal("Renamed.docx", item.DisplayName);
+        Assert.Equal(item.Name, item.DisplayName);
+    }
+
+    /// <summary>
+    /// <see cref="FileItem.Exists"/>/<see cref="FileItem.IsDirectory"/> are re-evaluated against the
+    /// new path, not merely copied from the old one — relocating into a live directory must flip
+    /// <see cref="FileItem.IsDirectory"/> to <see langword="true"/>.
+    /// </summary>
+    [Fact]
+    public void Relocate_ToExistingDirectory_UpdatesExistsAndIsDirectory()
+    {
+        var oldPath = Path.Combine(Path.GetTempPath(), $"DOrgRelocateOldFile_{Guid.NewGuid():N}.txt");
+        var newDir = Path.Combine(Path.GetTempPath(), $"DOrgRelocateNewDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(newDir);
+
+        try
+        {
+            var item = new FileItem(oldPath, null);
+            Assert.False(item.Exists);
+            Assert.False(item.IsDirectory);
+
+            item.Relocate(newDir, null);
+
+            Assert.True(item.Exists);
+            Assert.True(item.IsDirectory);
+        }
+        finally
+        {
+            Directory.Delete(newDir);
+        }
+    }
+
+    /// <summary>
+    /// Relocating to a path that doesn't exist on disk must flip <see cref="FileItem.Exists"/> back
+    /// to <see langword="false"/> if the old path had existed — Relocate re-checks the file system,
+    /// it doesn't assume the new path is necessarily live.
+    /// </summary>
+    [Fact]
+    public void Relocate_ToNonExistentPath_ExistsBecomesFalse()
+    {
+        var oldPath = Path.Combine(Path.GetTempPath(), $"DOrgRelocateOldExists_{Guid.NewGuid():N}.txt");
+        File.WriteAllText(oldPath, string.Empty);
+        var newPath = Path.Combine(Path.GetTempPath(), $"DOrgRelocateGhost_{Guid.NewGuid():N}.txt");
+
+        try
+        {
+            var item = new FileItem(oldPath, null);
+            Assert.True(item.Exists);
+
+            item.Relocate(newPath, null);
+
+            Assert.False(item.Exists);
+        }
+        finally
+        {
+            File.Delete(oldPath);
         }
     }
 }

@@ -43,10 +43,13 @@ public class NativeNameAttributeTests
 
     /// <summary>
     /// Ensures that the constructor throws an exception when the name is null or empty.
+    /// The parameter is nullable so the <see langword="null"/> case can be expressed without
+    /// tripping xUnit1012; the null-forgiving operator at the call site is what makes the
+    /// (non-nullable) constructor parameter actually receive it.
     /// </summary>
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    public void Constructor_ThrowsException_WhenNameIsNullOrEmpty(string invalidName) =>
-        Assert.Throws<ArgumentException>(() => new NativeNameAttribute(invalidName));
+    public void Constructor_ThrowsException_WhenNameIsNullOrEmpty(string? invalidName) =>
+        Assert.Throws<ArgumentException>(() => new NativeNameAttribute(invalidName!));
 }

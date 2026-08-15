@@ -96,4 +96,40 @@ public interface IPanelItemStorageService
     /// </summary>
     /// <param name="path">The path to check.</param>
     bool IsManaged(string path);
+
+    /// <summary>
+    /// Renames a previously moved-in file or folder (<see cref="MoveIn"/>/<see cref="MoveInDirectory"/>)
+    /// to <paramref name="newName"/> (a bare name — no directory component), keeping it inside its
+    /// existing per-item storage directory. A legacy flat-layout item (moved in before per-item
+    /// directories existed — see <see cref="MoveIn"/> remarks on storage layout) has no per-item
+    /// directory of its own to rename within, so instead it is relocated into a brand-new one,
+    /// curing the legacy layout for good.
+    /// </summary>
+    /// <remarks>
+    /// <b>Invariant:</b> the manifest is always rewritten <i>before</i> the file/folder is physically
+    /// moved — never after. <paramref name="storedPath"/>'s manifest entry (managed path → original
+    /// path) is re-keyed to the new managed path, and the recorded original path has its own file
+    /// name portion replaced with <paramref name="newName"/> (its directory portion is unchanged),
+    /// so a later <see cref="Restore"/> puts the item back under its new name. If the manifest
+    /// cache is currently untrusted, or the write-through to disk fails, the rename is aborted
+    /// <i>before</i> any file-system mutation — the source is left completely untouched and
+    /// <see langword="null"/> is returned. This mirrors the same "manifest before destructive step"
+    /// discipline <see cref="MoveIn"/>/<see cref="MoveInDirectory"/> already use: losing the origin
+    /// mapping would silently turn a future <see cref="Restore"/> into data loss.
+    /// </remarks>
+    /// <param name="storedPath">A path previously returned by <see cref="MoveIn"/>, <see cref="MoveInDirectory"/>, or this method.</param>
+    /// <param name="newName">The desired new bare name (including extension for files).</param>
+    /// <returns>
+    /// A <see cref="RenameResult"/> describing what happened. Never throws. On any outcome other
+    /// than <see cref="RenameOutcome.Renamed"/> the original file/folder is left exactly as it was:
+    /// <see cref="RenameOutcome.InvalidName"/> when <paramref name="newName"/> is empty/whitespace or
+    /// smuggles a path separator (defense in depth — real callers go through
+    /// <see cref="IFileItemRenameService.Rename"/>, which already validates <paramref name="newName"/>
+    /// before ever reaching here); <see cref="RenameOutcome.NotFound"/> when <paramref name="storedPath"/>
+    /// doesn't exist on disk; <see cref="RenameOutcome.NameTaken"/> when a file/folder already exists
+    /// at the resolved destination; <see cref="RenameOutcome.Failed"/> for anything else (not managed,
+    /// the manifest cache is untrusted, the manifest write failed, or the physical move itself
+    /// failed).
+    /// </returns>
+    RenameResult RenameManaged(string storedPath, string newName);
 }

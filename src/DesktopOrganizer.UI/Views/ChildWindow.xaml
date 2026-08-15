@@ -1,3 +1,10 @@
+<!-- MinWidth below is a hard WPF coercion on Window.Width and cannot be data-bound to a C# constant
+     from code-behind/a resource without a converter/extra code, so it stays a literal. It MUST stay
+     numerically equal to DesktopOrganizer.UI.Models.GridMetrics.MinPanelSize (also used by
+     ChildWindow.xaml.cs's own MinPanelSize and App.xaml.cs's lasso-drawn panel minimum) — if one
+     changes, change all three by hand, or ChildWindow.Resize_DragDelta's Left/Width math for the
+     LEFT resize handle can desync when this coercion silently clamps a computed Width below what the
+     code assumed (finalization MAJOR M-1). -->
 <Window x:Class="DesktopOrganizer.UI.Views.ChildWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -13,7 +20,8 @@
         ShowInTaskbar="False"
         AllowsTransparency="True"
         Background="Transparent"
-        AllowDrop="True">
+        AllowDrop="True"
+        PreviewKeyDown="ChildWindow_PreviewKeyDown">
     <Border CornerRadius="6"
             BorderThickness="0">
         <Border.Background>
@@ -40,11 +48,11 @@
                         LostMouseCapture="TitleBar_LostMouseCapture">
                     <Border.ContextMenu>
                         <ContextMenu>
-                            <MenuItem Header="Переименовать" Click="RenameMenu_Click"/>
-                            <MenuItem Header="Свернуть / развернуть" Click="RollUpMenu_Click"/>
+                            <MenuItem Header="Rename" Click="RenameMenu_Click"/>
+                            <MenuItem Header="Roll up / down" Click="RollUpMenu_Click"/>
                             <Separator/>
-                            <MenuItem Header="Содержимое" IsEnabled="False" FontWeight="SemiBold"/>
-                            <MenuItem Header="Показать всё"
+                            <MenuItem Header="Content" IsEnabled="False" FontWeight="SemiBold"/>
+                            <MenuItem Header="Show all"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -54,7 +62,7 @@
                                       Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelContentFilter.ShowAll}"/>
-                            <MenuItem Header="Скрыть содержимое"
+                            <MenuItem Header="Hide content"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -64,7 +72,7 @@
                                       Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelContentFilter.HideAll}"/>
-                            <MenuItem Header="Скрыть ярлыки"
+                            <MenuItem Header="Hide shortcuts"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -74,7 +82,7 @@
                                       Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelContentFilter.HideShortcuts}"/>
-                            <MenuItem Header="Только папки"
+                            <MenuItem Header="Folders only"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -84,6 +92,28 @@
                                       Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelContentFilter.FoldersOnly}"/>
+                            <Separator/>
+                            <MenuItem Header="Arrange icons" IsEnabled="False" FontWeight="SemiBold"/>
+                            <MenuItem Header="Manual"
+                                      IsCheckable="True"
+                                      IsChecked="{Binding PlacementTarget.DataContext.EffectiveSortMode,
+                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                          Converter={StaticResource EnumEquals},
+                                                          ConverterParameter={x:Static uimodels:PanelSortMode.Manual},
+                                                          Mode=OneWay}"
+                                      Command="{Binding PlacementTarget.DataContext.SetSortModeCommand,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{x:Static uimodels:PanelSortMode.Manual}"/>
+                            <MenuItem Header="By name"
+                                      IsCheckable="True"
+                                      IsChecked="{Binding PlacementTarget.DataContext.EffectiveSortMode,
+                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                          Converter={StaticResource EnumEquals},
+                                                          ConverterParameter={x:Static uimodels:PanelSortMode.Name},
+                                                          Mode=OneWay}"
+                                      Command="{Binding PlacementTarget.DataContext.SetSortModeCommand,
+                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{x:Static uimodels:PanelSortMode.Name}"/>
                         </ContextMenu>
                     </Border.ContextMenu>
                     <Grid>
@@ -113,38 +143,73 @@
                                  KeyDown="TitleEditBox_KeyDown"
                                  LostKeyboardFocus="TitleEditBox_LostKeyboardFocus"/>
 
+                        <!-- Header buttons: Sort → View → RollUp (roll up/down is the outermost, most
+                             "closing"-like action — ui-polishing-1 §4.1). All three share
+                             PanelHeaderButtonStyle for a single visual language (font, size, color,
+                             hover) instead of repeating the same attributes on each Button. -->
                         <StackPanel Grid.Column="1"
                                     Orientation="Horizontal"
                                     VerticalAlignment="Center"
-                                    Margin="0,0,4,0">
+                                    Margin="0,0,4,0"
+                                    PreviewMouseLeftButtonDown="HeaderButtons_PreviewMouseLeftButtonDown">
+                            <!-- Sort: the glyph is constant (Sort, &#xE8CB; — same glyph the "Name"
+                                 branch already used before this button had a highlight state).
+                                 Function (toggle Manual/Name) never changes on click, only the
+                                 highlight does — PanelHeaderToggleButtonStyle's DataTrigger on
+                                 IsSortedByName (ui-polishing-1 §4.3). In a Folder Portal,
+                                 ToggleSortModeCommand.CanExecute is false while EffectiveSortMode is
+                                 forced to Name, so the button renders highlighted AND disabled at once
+                                 — expected: "sorted by name, portal content can't be re-ordered". -->
+                            <Button x:Name="SortModeToggleButton"
+                                    Style="{StaticResource PanelHeaderToggleButtonStyle}"
+                                    Content="&#xE8CB;"
+                                    ToolTip="{Binding EffectiveSortMode, Converter={StaticResource SortModeTooltip}}"
+                                    Command="{Binding ToggleSortModeCommand}"/>
+                            <!-- View: the glyph shows the TARGET mode — what a click switches TO, not
+                                 the mode currently active (ui-polishing-1 §4.2), matching the ToolTip. -->
+                            <Button x:Name="ViewModeToggleButton"
+                                    Style="{StaticResource PanelHeaderButtonStyle}"
+                                    Content="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}}"
+                                    ToolTip="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}, ConverterParameter=tooltip}"
+                                    Command="{Binding SwitchViewCommand}"/>
                             <Button x:Name="RollUpToggleButton"
-                                    Width="28" Height="28" FontSize="12"
-                                    FontFamily="Segoe MDL2 Assets"
-                                    Foreground="#AAAAAA"
-                                    Background="Transparent"
-                                    BorderThickness="0"
+                                    Style="{StaticResource PanelHeaderButtonStyle}"
                                     Content="{Binding Model.IsRolledUp, Converter={StaticResource RollUpGlyph}}"
                                     ToolTip="{Binding Model.IsRolledUp, Converter={StaticResource RollUpTooltip}, ConverterParameter=tooltip}"
                                     Click="RollUpMenu_Click"/>
-                            <Button Content="⊞"
-                                    Foreground="#AAAAAA"
-                                    Background="Transparent"
-                                    BorderThickness="0"
-                                    FontSize="14"
-                                    Width="28" Height="28"
-                                    Command="{Binding SwitchViewCommand}"
-                                    ToolTip="Сменить вид"/>
                         </StackPanel>
                     </Grid>
                 </Border>
 
-                <!-- File list -->
+                <!-- File list. AllowDrop is duplicated here (on top of the Window-level AllowDrop
+                     used for incoming desktop/Explorer file drops) so this element itself becomes
+                     the nearest drop-target recipient for drag-reorder gestures that start/end
+                     directly over the list content (ADR-014 Blocks C). DragOver/Drop below leave
+                     e.Effects/e.Handled completely untouched for a foreign format, so an incoming
+                     DataFormats.FileDrop still bubbles up to Window.OnDragEnter/OnDrop with exactly
+                     the effect WPF/OLE computed for it — never overwritten to None here (critical
+                     risk R1). PreviewMouseLeftButtonUp resets the drag-to-reorder candidate so a
+                     plain click without a following drag never leaves it dangling (see
+                     FileListHost_PreviewMouseLeftButtonUp). No left/right margin (ui-polishing-1
+                     §3.5): the icon grid item itself already contributes GridMetrics.ItemMargin (6px)
+                     of chrome on each side, which is exactly half the 12px inter-column seam — adding
+                     host-level margin on top of that would make the left/right edge look thicker than
+                     the seam between two columns. Bottom margin (4) is unrelated chrome (kept as-is;
+                     not part of GridMetrics.FileListHPadding, which only tracks horizontal chrome). -->
                 <ContentControl x:Name="FileListHost"
                                 Grid.Row="1"
                                 Content="{Binding FileItems}"
                                 ContentTemplate="{Binding CurrentViewTemplate}"
                                 MouseDoubleClick="FileList_MouseDoubleClick"
-                                Margin="4,0,4,4"/>
+                                PreviewMouseLeftButtonDown="FileListHost_PreviewMouseLeftButtonDown"
+                                PreviewMouseLeftButtonUp="FileListHost_PreviewMouseLeftButtonUp"
+                                PreviewMouseRightButtonDown="FileListHost_PreviewMouseRightButtonDown"
+                                PreviewMouseMove="FileListHost_PreviewMouseMove"
+                                AllowDrop="True"
+                                DragOver="FileListHost_DragOver"
+                                DragLeave="FileListHost_DragLeave"
+                                Drop="FileListHost_Drop"
+                                Margin="0,0,0,4"/>
             </Grid>
 
             <!-- Resize overlay: transparent thumbs on edges/corners; centre cell is empty so
@@ -171,6 +236,18 @@
                 <Thumb Grid.Row="2" Grid.Column="2" Tag="BottomRight" Cursor="SizeNWSE" Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
             </Grid>
 
+            <!-- Drag-to-reorder insertion indicator (ADR-014 Decision 5, Block C5). Lives in the same
+                 outer Grid as FileListHost so it can be positioned above it via Margin. A thin line —
+                 vertical between columns in Grid mode, horizontal between rows in List mode — shown
+                 and positioned from FileListHost_DragOver, hidden from FileListHost_DragLeave/Drop
+                 and after DoDragDrop returns. Never a hit-test target itself. -->
+            <Border x:Name="ReorderInsertionIndicator"
+                    Background="#FF4080FF"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Visibility="Collapsed"
+                    IsHitTestVisible="False"/>
+
             <!-- One-time, non-blocking Move-semantics hint (see ChildWindowViewModel.MoveHintRequested).
                  Not a modal dialog: StaysOpen=false, no hit-testing, doesn't steal focus from the drop
                  gesture or any in-progress rename. Auto-dismissed from code-behind after ~4s. -->
@@ -190,7 +267,30 @@
                     <TextBlock TextWrapping="Wrap"
                                Foreground="White"
                                FontSize="11"
-                               Text="Файл перемещён в панель — оригинал убран с рабочего стола."/>
+                               Text="The file was moved into the panel — the original was removed from the desktop."/>
+                </Border>
+            </Popup>
+
+            <!-- Non-blocking rename-error hint (ChildWindowViewModel.RenameError). Same pattern as
+                 MoveHintPopup above — never a MessageBox: the panel carries WS_EX_NOACTIVATE, so a
+                 modal dialog would never receive activation/input either (ADR-013 risk R1). -->
+            <Popup x:Name="RenameErrorPopup"
+                   PlacementTarget="{Binding ElementName=FileListHost}"
+                   Placement="Center"
+                   AllowsTransparency="True"
+                   StaysOpen="False"
+                   Focusable="False"
+                   IsHitTestVisible="False">
+                <Border Background="#EE1E1E1E"
+                        BorderBrush="#33FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="10,7"
+                        MaxWidth="260">
+                    <TextBlock x:Name="RenameErrorText"
+                               TextWrapping="Wrap"
+                               Foreground="White"
+                               FontSize="11"/>
                 </Border>
             </Popup>
         </Grid>

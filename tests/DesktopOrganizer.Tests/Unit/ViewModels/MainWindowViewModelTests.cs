@@ -32,6 +32,11 @@ public class MainWindowViewModelTests
         _pageManagerMock.Setup(p => p.Pages).Returns([]);
         _layoutSnapshotServiceMock.Setup(s => s.Snapshots).Returns([]);
 
+        // MainWindowViewModel's constructor subscribes to Model.PropertyChanged (finalization MAJOR
+        // M-3: SystemIconsVirtualDesktopFeatureIneffective forwarding) — an un-stubbed Mock<T> property
+        // of reference type returns null, which would NRE there.
+        _systemIconsPanelManagerMock.Setup(m => m.Model).Returns(new SystemIconsPanelModel());
+
         var layoutSnapshots = new LayoutSnapshotsViewModel(_layoutSnapshotServiceMock.Object, _confirmationMock.Object);
 
         return new MainWindowViewModel(
@@ -123,7 +128,7 @@ public class MainWindowViewModelTests
         // Assert
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => m.Contains("удалены с диска")),
+                It.Is<string>(m => m.Contains("deleted from disk")),
                 It.IsAny<string>(),
                 MessageBoxImage.Warning),
             Times.Once);
@@ -148,7 +153,7 @@ public class MainWindowViewModelTests
         // Assert — neutral overload (default Question icon), not the Warning one.
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => !m.Contains("удалены с диска")),
+                It.Is<string>(m => !m.Contains("deleted from disk")),
                 It.IsAny<string>(),
                 MessageBoxImage.Question),
             Times.Once);
@@ -198,5 +203,100 @@ public class MainWindowViewModelTests
 
         // Assert
         _desktopIconsMock.Verify(d => d.SetIconsVisible(It.IsAny<bool>()), Times.Never);
+    }
+
+    // ── ADR-014 Block B1: SelectedPanelSortMode / SelectedPanelSupportsManualOrder ─────────────────
+
+    [Fact]
+    public void SelectedPanelSortMode_Get_ReturnsSelectedPanelsSortMode()
+    {
+        var sut = BuildSut();
+        var panel = new ChildWindowModel { SortMode = PanelSortMode.Name };
+        sut.SelectedPanel = panel;
+
+        Assert.Equal(PanelSortMode.Name, sut.SelectedPanelSortMode);
+    }
+
+    [Fact]
+    public void SelectedPanelSortMode_Get_NoSelectedPanel_DefaultsToManual()
+    {
+        var sut = BuildSut();
+
+        Assert.Equal(PanelSortMode.Manual, sut.SelectedPanelSortMode);
+    }
+
+    [Fact]
+    public void SelectedPanelSortMode_Set_WritesToModelAndSavesWindowsState()
+    {
+        // Same persistence pattern as SelectedPanelViewMode/SelectedPanelTitle (SetSelectedPanel).
+        var sut = BuildSut();
+        var panel = new ChildWindowModel();
+        sut.SelectedPanel = panel;
+
+        sut.SelectedPanelSortMode = PanelSortMode.Name;
+
+        Assert.Equal(PanelSortMode.Name, panel.SortMode);
+        _windowManagerMock.Verify(w => w.SaveWindowsState(), Times.Once);
+    }
+
+    [Fact]
+    public void SelectedPanelSortMode_Set_RaisesPropertyChanged()
+    {
+        var sut = BuildSut();
+        var panel = new ChildWindowModel();
+        sut.SelectedPanel = panel;
+
+        var raisedProperties = new List<string?>();
+        sut.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName);
+
+        sut.SelectedPanelSortMode = PanelSortMode.Name;
+
+        Assert.Contains(nameof(MainWindowViewModel.SelectedPanelSortMode), raisedProperties);
+    }
+
+    [Fact]
+    public void SelectedPanelSupportsManualOrder_PanelWithSourceFolderPath_IsFalse()
+    {
+        var sut = BuildSut();
+        var panel = new ChildWindowModel { SourceFolderPath = @"C:\fake\portal" };
+        sut.SelectedPanel = panel;
+
+        Assert.False(sut.SelectedPanelSupportsManualOrder);
+    }
+
+    [Fact]
+    public void SelectedPanelSupportsManualOrder_PanelWithoutSourceFolderPath_IsTrue()
+    {
+        var sut = BuildSut();
+        var panel = new ChildWindowModel();
+        sut.SelectedPanel = panel;
+
+        Assert.True(sut.SelectedPanelSupportsManualOrder);
+    }
+
+    [Fact]
+    public void SelectedPanelSupportsManualOrder_NoSelectedPanel_IsFalse()
+    {
+        var sut = BuildSut();
+
+        Assert.False(sut.SelectedPanelSupportsManualOrder);
+    }
+
+    [Fact]
+    public void SelectedPanel_Changed_RaisesPropertyChangedForBothNewSortProperties()
+    {
+        // Regression guard: RaiseSelectedPanelProperties must include both new properties, or the
+        // settings UI silently shows stale sort-order state after switching the selected panel — the
+        // plan explicitly flags this as a typical mistake in this method.
+        var sut = BuildSut();
+        var panel = new ChildWindowModel();
+
+        var raisedProperties = new List<string?>();
+        sut.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName);
+
+        sut.SelectedPanel = panel;
+
+        Assert.Contains(nameof(MainWindowViewModel.SelectedPanelSortMode), raisedProperties);
+        Assert.Contains(nameof(MainWindowViewModel.SelectedPanelSupportsManualOrder), raisedProperties);
     }
 }

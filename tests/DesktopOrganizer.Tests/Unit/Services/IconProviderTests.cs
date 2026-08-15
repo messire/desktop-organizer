@@ -18,6 +18,7 @@ public class IconProviderTests
     private const string ValidFilePath = "Resources/TestFile.txt";
     private const FileFlag IconFlags = Icon | ShellIconSize | UseFileAttributes;
     private const FileAttribute FileAttributes = Normal;
+    private const FileAttribute DirectoryAttributes = FileAttribute.Directory;
 
     private static readonly IntPtr ValidIconHandle = new (12345);
     private static readonly IntPtr InvalidIconHandle = IntPtr.Zero;
@@ -228,7 +229,7 @@ public class IconProviderTests
         System.IO.Directory.CreateDirectory(directoryPath);
         try
         {
-            SetupIconHandlerForPath(directoryPath, ValidIconHandle);
+            SetupIconHandlerForPath(directoryPath, ValidIconHandle, DirectoryAttributes);
             _iconFactoryMock
                 .Setup(factory => factory.CreateBitmap(It.IsAny<IntPtr>()))
                 .Returns(() => new DrawingImage());
@@ -244,7 +245,7 @@ public class IconProviderTests
             // Assert: the icon handle is fetched only once — the cache hit is honored regardless of
             // the directory's timestamp having changed.
             _iconHandlerMock.Verify(
-                h => h.GetIconHandle(directoryPath, ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags),
+                h => h.GetIconHandle(directoryPath, ref It.Ref<ShellFileInfo>.IsAny, DirectoryAttributes, IconFlags),
                 Times.Once);
         }
         finally
@@ -354,9 +355,9 @@ public class IconProviderTests
     /// against <paramref name="filePath"/>, regardless of the <c>ref</c> <see cref="ShellFileInfo"/>
     /// value passed in.
     /// </summary>
-    private void SetupIconHandlerForPath(string filePath, IntPtr iconHandle)
+    private void SetupIconHandlerForPath(string filePath, IntPtr iconHandle, FileAttribute fileAttributes = FileAttributes)
         => _iconHandlerMock
-            .Setup(handler => handler.GetIconHandle(filePath, ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags))
+            .Setup(handler => handler.GetIconHandle(filePath, ref It.Ref<ShellFileInfo>.IsAny, fileAttributes, IconFlags))
             .Returns(iconHandle);
 
     private ShellFileInfo SetupMocks(string filePath, IntPtr iconHandle, DrawingImage expectedIcon)

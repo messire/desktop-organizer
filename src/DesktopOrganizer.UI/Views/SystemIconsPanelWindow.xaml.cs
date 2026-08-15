@@ -2,21 +2,27 @@ using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using DesktopOrganizer.Core.Models;
-using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.ViewModels;
 
 namespace DesktopOrganizer.UI.Views;
 
 /// <summary>
-/// System icons panel window. Chromeless, embedded into the desktop layer.
-/// Desktop embedding happens in <see cref="OnSourceInitialized"/> — before the first Show —
-/// so the window is never briefly visible above all other windows.
+/// System icons panel window. Chromeless, top-level, and deliberately <b>not</b> <c>Topmost</c>:
+/// <c>SystemIconsPanelManager</c> keeps re-asserting, on a timer, the Z-order slot directly above the
+/// shell desktop window (<c>Progman</c>), so the panel sinks back behind ordinary application windows
+/// instead of floating over them, while still staying above the wallpaper and the desktop icons (this
+/// revises ADR-019's original <c>Topmost="True"</c> trade-off). It is no longer re-parented into the
+/// desktop's <c>WorkerW</c> layer — that mechanism made the window invisible to
+/// <see cref="DesktopOrganizer.Services.Abstractions.IVirtualDesktopService"/>, which broke the
+/// "show on all virtual desktops" setting. <c>SystemIconsPanelManager.OpenPanel</c> applies the
+/// <c>WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE</c> styles itself, strictly AFTER <see cref="Window.Show"/>
+/// — applying them earlier (e.g. here, in <see cref="OnSourceInitialized"/>) would exclude the
+/// window from virtual-desktop tracking forever (ADR-019 §R0.5).
 /// </summary>
 public partial class SystemIconsPanelWindow : Window
 {
     private readonly SystemIconsPanelViewModel _viewModel;
-    private readonly IDesktopIntegrationService _desktopIntegration;
 
     // Drag-reorder state
     private Point _dragStartPoint;
@@ -27,12 +33,9 @@ public partial class SystemIconsPanelWindow : Window
     /// <summary>
     /// Initializes a new instance of <see cref="SystemIconsPanelWindow"/>.
     /// </summary>
-    public SystemIconsPanelWindow(
-        SystemIconsPanelViewModel viewModel,
-        IDesktopIntegrationService desktopIntegration)
+    public SystemIconsPanelWindow(SystemIconsPanelViewModel viewModel)
     {
         _viewModel = viewModel;
-        _desktopIntegration = desktopIntegration;
         DataContext = viewModel;
         InitializeComponent();
     }
@@ -41,21 +44,6 @@ public partial class SystemIconsPanelWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-
-        // Embed into the desktop layer BEFORE the window becomes visible.
-        // OnSourceInitialized fires after the HWND is created but before Show() renders.
-        var hwnd = new WindowInteropHelper(this).Handle;
-        if (hwnd != IntPtr.Zero)
-        {
-            try
-            {
-                _desktopIntegration.EmbedInDesktop(hwnd);
-            }
-            catch
-            {
-                // Degrade silently — panel is still usable without embedding.
-            }
-        }
 
         // Load icons now that we have a window handle.
         _viewModel.LoadIcons();
@@ -96,26 +84,44 @@ public partial class SystemIconsPanelWindow : Window
 
     // -------------------------------------------------------------------------
     // Drag-reorder: initiated from PreviewMouseLeftButtonDown + PreviewMouseMove
+    // Also owns click-to-select / click-empty-space-to-deselect (ui-polishing-1 §5.4/§5.5, Block D).
     // -------------------------------------------------------------------------
 
-    private void IconsItemsControl_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    /// <summary>
+    /// Records the drag-reorder candidate for the upcoming <see cref="IconsListBox_PreviewMouseMove"/>,
+    /// and clears the sidebar's own selection when the click lands on the panel's empty space (its own
+    /// padding, past the last item) rather than on an item (ui-polishing-1 §5.5) — the sidebar
+    /// equivalent of <c>ChildWindow.FileListHost_PreviewMouseLeftButtonDown</c>'s deselect-on-miss
+    /// behavior. Deliberately does not set <c>e.Handled</c> anywhere: doing so would break the
+    /// <see cref="ListBox"/>'s own built-in click-to-select handling, which still needs to run on the
+    /// bubbling phase right after this <c>Preview</c> handler.
+    /// </summary>
+    private void IconsListBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         _dragStartPoint = e.GetPosition(null);
         _dragItem = null;
         _isDragging = false;
 
-        // Walk up to find the data item.
-        if (e.OriginalSource is DependencyObject source)
+        if (e.OriginalSource is not DependencyObject source) return;
+
+        // Walk up to the ListBoxItem container, not a specific content element type — before the
+        // ItemsControl -> ListBox migration (§5.3) this looked for an ancestor Button, but the item
+        // template stopped containing one when it moved to a Border + MouseBinding (FIX 5, see
+        // IconBorder below), which silently made _dragItem always null and drag-reorder dead code
+        // (ui-polishing-1 §5.2 — the bug this fixes). ListBoxItem is the right ancestor type
+        // post-migration, matching the same pattern already used in ChildWindow.xaml.cs.
+        var container = FindAncestorOrSelf<ListBoxItem>(source);
+        if (container is null)
         {
-            var button = FindAncestorOrSelf<Button>(source);
-            if (button?.DataContext is SystemIconItemModel item)
-            {
-                _dragItem = item;
-            }
+            _viewModel.SelectedItem = null;
+            return;
         }
+
+        if (container.DataContext is SystemIconItemModel item)
+            _dragItem = item;
     }
 
-    private void IconsItemsControl_PreviewMouseMove(object sender, MouseEventArgs e)
+    private void IconsListBox_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed || _dragItem is null || _isDragging)
             return;
@@ -131,13 +137,13 @@ public partial class SystemIconsPanelWindow : Window
         _isDragging = true;
 
         var data = new DataObject("SystemIconKind", _dragItem.Kind);
-        DragDrop.DoDragDrop(IconsItemsControl, data, DragDropEffects.Move);
+        DragDrop.DoDragDrop(IconsListBox, data, DragDropEffects.Move);
 
         _isDragging = false;
         _dragItem = null;
     }
 
-    private void IconsItemsControl_DragOver(object sender, DragEventArgs e)
+    private void IconsListBox_DragOver(object sender, DragEventArgs e)
     {
         if (!e.Data.GetDataPresent("SystemIconKind"))
         {
@@ -149,7 +155,7 @@ public partial class SystemIconsPanelWindow : Window
             e.Effects = DragDropEffects.Move;
 
             // Show insertion indicator at the computed insertion position.
-            var panel = FindVisualChild<StackPanel>(IconsItemsControl);
+            var panel = FindVisualChild<StackPanel>(IconsListBox);
             if (panel is not null)
             {
                 var dropPos = e.GetPosition(panel);
@@ -165,12 +171,12 @@ public partial class SystemIconsPanelWindow : Window
         e.Handled = true;
     }
 
-    private void IconsItemsControl_DragLeave(object sender, DragEventArgs e)
+    private void IconsListBox_DragLeave(object sender, DragEventArgs e)
     {
         HideInsertionIndicator();
     }
 
-    private void IconsItemsControl_Drop(object sender, DragEventArgs e)
+    private void IconsListBox_Drop(object sender, DragEventArgs e)
     {
         HideInsertionIndicator();
 
@@ -178,8 +184,8 @@ public partial class SystemIconsPanelWindow : Window
 
         var sourceKind = (SystemIconKind)e.Data.GetData("SystemIconKind");
 
-        // Determine target index from mouse position within ItemsControl.
-        var panel = FindVisualChild<StackPanel>(IconsItemsControl);
+        // Determine target index from mouse position within the ListBox.
+        var panel = FindVisualChild<StackPanel>(IconsListBox);
         if (panel is null) return;
 
         var dropPos = e.GetPosition(panel);
@@ -209,7 +215,7 @@ public partial class SystemIconsPanelWindow : Window
         }
         else
         {
-            // Allow reorder drag to fall through to the parent ItemsControl.
+            // Allow reorder drag to fall through to the parent ListBox.
             e.Effects = e.Data.GetDataPresent("SystemIconKind")
                 ? DragDropEffects.Move
                 : DragDropEffects.None;
@@ -231,7 +237,7 @@ public partial class SystemIconsPanelWindow : Window
             _viewModel.SendToRecycleBin(paths, hwnd);
             e.Handled = true;
         }
-        // else: reorder drops bubble to the parent ItemsControl handler
+        // else: reorder drops bubble to the parent ListBox handler
     }
 
     // -------------------------------------------------------------------------

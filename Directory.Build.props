@@ -1,6 +1,19 @@
 <Project>
 
     <PropertyGroup>
+        <Version>0.2.1</Version>
+        <!-- DesktopOrganizer.UI's user settings (ChildWindowsState, panel layout, etc. — see
+             Properties\Settings.settings) are System.Configuration "User"-scoped, which .NET keys by
+             AssemblyVersion: %LocalAppData%\...\<AssemblyVersion>\user.config. If AssemblyVersion moved
+             with every release (the SDK default when only <Version> is set), each bump would silently
+             orphan every panel/setting the user had under the previous version's folder. Pinned here so
+             it never changes across releases; <Version> above still drives FileVersion/
+             InformationalVersion (what ships in the installer name and Add/Remove Programs).
+             FileVersion must be set explicitly too: the SDK defaults it from AssemblyVersion (not
+             Version) once AssemblyVersion is set explicitly, so without this line it would silently
+             stay pinned at 1.0.0.0 right along with it. -->
+        <AssemblyVersion>1.0.0.0</AssemblyVersion>
+        <FileVersion>$(Version)</FileVersion>
         <TargetFramework>net8.0-windows</TargetFramework>
         <LangVersion>latest</LangVersion>
         <Nullable>enable</Nullable>

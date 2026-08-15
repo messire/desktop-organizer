@@ -29,4 +29,15 @@ public interface ISystemIconsPanelManager
     /// Must be called on the UI thread.
     /// </summary>
     void Apply();
+
+    /// <summary>
+    /// Applies a change of <see cref="SystemIconsPanelModel.ShowOnAllVirtualDesktops"/> alone.
+    /// </summary>
+    /// <remarks>
+    /// That setting only governs the virtual desktop poll timer / anchor placement, so it must not
+    /// go through <see cref="Apply"/>: recreating the panel window for it would produce a visible
+    /// flicker. When no panel window exists this falls back to <see cref="Apply"/>. Must be called
+    /// on the UI thread.
+    /// </remarks>
+    void ApplyVirtualDesktopSetting();
 }

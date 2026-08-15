@@ -7,7 +7,7 @@ using DesktopOrganizer.UI.Services;
 namespace DesktopOrganizer.UI.ViewModels;
 
 /// <summary>
-/// ViewModel for the "Снапшоты раскладки" section in the settings window.
+/// ViewModel for the "Layout snapshots" section in the settings window.
 /// Exposes commands and an observable snapshot list to the view.
 /// </summary>
 public class LayoutSnapshotsViewModel : INotifyPropertyChanged
@@ -57,7 +57,7 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
 
     private void CaptureSnapshot()
     {
-        var name = $"Раскладка {DateTime.Now:dd.MM HH:mm}";
+        var name = $"Layout {DateTime.Now:dd.MM HH:mm}";
         _service.Capture(name);
         RefreshList();
     }
@@ -67,8 +67,8 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
         if (string.IsNullOrWhiteSpace(snapshotId)) return;
 
         if (!_confirmation.Confirm(
-                "Текущая раскладка будет заменена снапшотом. Продолжить?",
-                "Восстановить раскладку")) return;
+                "The current layout will be replaced by this snapshot. Continue?",
+                "Restore Layout")) return;
 
         _service.Restore(snapshotId);
     }

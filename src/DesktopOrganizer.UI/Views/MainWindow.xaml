@@ -4,19 +4,22 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="DesktopOrganizer — Настройки"
+        Title="DesktopOrganizer — Settings"
         Icon="/Resources/app.ico"
         Height="720" Width="600"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanMinimize">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+    </Window.Resources>
     <DockPanel>
 
-        <!-- Полоска страниц -->
+        <!-- Page tab strip -->
         <Border DockPanel.Dock="Top" Background="#F0F0F0" BorderBrush="#CCCCCC" BorderThickness="0,0,0,1">
             <DockPanel>
                 <Button DockPanel.Dock="Right"
                         Content="+"
-                        ToolTip="Добавить страницу"
+                        ToolTip="Add page"
                         Command="{Binding AddPageCommand}"
                         Padding="10,4" Margin="4,4"
                         FontSize="14" FontWeight="Bold"/>
@@ -81,7 +84,7 @@
                                             Padding="4,6"
                                             BorderThickness="0"
                                             FontSize="11"
-                                            ToolTip="Удалить страницу"
+                                            ToolTip="Remove page"
                                             Cursor="Hand">
                                         <Button.Style>
                                             <Style TargetType="Button">
@@ -106,23 +109,33 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="16">
 
-            <!-- Автозапуск и рабочий стол -->
-            <Expander Header="Автозапуск и рабочий стол" IsExpanded="True" Margin="0,0,0,12">
+            <!-- Autostart and desktop -->
+            <Expander Header="Autostart and desktop" IsExpanded="True" Margin="0,0,0,12">
                 <StackPanel Margin="0,10,0,0">
-                    <CheckBox Content="Запускать вместе с Windows"
+                    <CheckBox Content="Start with Windows"
                               IsChecked="{Binding AutostartEnabled, Mode=TwoWay}"/>
-                    <CheckBox Content="Показывать значки рабочего стола"
+                    <CheckBox Content="Show desktop icons"
                               IsChecked="{Binding DesktopIconsVisible, Mode=TwoWay}"
                               Margin="0,10,0,0"/>
 
-                    <Grid Margin="0,10,0,0">
+                    <!--
+                        Label/tooltip clarified per ui-polishing-1 §3.4 (D-B1, variant A): this slider
+                        controls IAppSettings.GridSize, which snaps a panel WINDOW's position on
+                        drag/drop — it is a completely different grid from GridMetrics (the icon layout
+                        grid inside a panel, driven by IconSize). The old "Desktop icon grid cell size"
+                        wording conflated the two and was the actual source of the user's "remove
+                        desktop grid size" request; GridSize itself is intentionally kept (see §3.4).
+                    -->
+                    <TextBlock Text="Panel position grid"
+                               Foreground="#666666" FontSize="11" Margin="0,10,0,4"/>
+                    <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="60"/>
                         </Grid.ColumnDefinitions>
                         <Slider Grid.Column="0" Minimum="1" Maximum="128" Value="{Binding GridSize, Mode=TwoWay}"
                                 TickFrequency="4" IsSnapToTickEnabled="False" VerticalAlignment="Center" Margin="0,0,12,0"
-                                ToolTip="Размер ячейки сетки иконок рабочего стола, в пикселях. 1 — привязка к сетке выключена."/>
+                                ToolTip="Snap step for panel window position, in pixels. 1 disables snapping. Does not affect icon spacing inside a panel."/>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="{Binding GridSize}" FontWeight="SemiBold" MinWidth="28" TextAlignment="Right"/>
                             <TextBlock Text=" px" Foreground="#666666"/>
@@ -131,9 +144,9 @@
 
                     <CheckBox Margin="0,10,0,0"
                               IsChecked="{Binding SnapResizeToIconGrid, Mode=TwoWay}"
-                              Content="Привязывать размер панели к сетке иконок"/>
+                              Content="Snap panel size to icon grid"/>
 
-                    <TextBlock Text="Дистанция прилипания при перетаскивании"
+                    <TextBlock Text="Snap distance while dragging"
                                Foreground="#666666" FontSize="11" Margin="0,10,0,4"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -142,7 +155,7 @@
                         </Grid.ColumnDefinitions>
                         <Slider Grid.Column="0" Minimum="0" Maximum="64" Value="{Binding GridSnapDistance, Mode=TwoWay}"
                                 TickFrequency="4" IsSnapToTickEnabled="False" VerticalAlignment="Center" Margin="0,0,12,0"
-                                ToolTip="Дистанция прилипания панели к сетке при перетаскивании. 0 — магнит выключен, привязка только при отпускании."/>
+                                ToolTip="Distance at which a dragged panel snaps to the grid. 0 disables the live magnet; snapping still applies on drop."/>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="{Binding GridSnapDistance}" FontWeight="SemiBold" MinWidth="28" TextAlignment="Right"/>
                             <TextBlock Text=" px" Foreground="#666666"/>
@@ -151,14 +164,34 @@
                 </StackPanel>
             </Expander>
 
-            <!-- Системная панель иконок -->
-            <Expander Header="Системная панель иконок" IsExpanded="True" Margin="0,0,0,12">
+            <!-- System icons panel -->
+            <Expander Header="System icons panel" IsExpanded="True" Margin="0,0,0,12">
                 <StackPanel Margin="0,10,0,0">
-                    <CheckBox Content="Показывать системную панель иконок"
+                    <CheckBox Content="Show system icons panel"
                               IsChecked="{Binding SystemIconsPanelEnabled, Mode=TwoWay}"
                               Margin="0,0,0,10"/>
 
-                    <GroupBox Header="Видимые иконки" Padding="8" Margin="0,0,0,10"
+                    <CheckBox Content="Show on all virtual desktops"
+                              IsChecked="{Binding SystemIconsPanelOnAllVirtualDesktops, Mode=TwoWay}"
+                              IsEnabled="{Binding SystemIconsPanelEnabled}"
+                              ToolTip="Keep the panel visible when you switch Windows virtual desktops (Task View). When off, the panel stays on your first virtual desktop."
+                              Margin="0,0,0,10"/>
+
+                    <!-- Circuit-breaker feedback (finalization MAJOR M-3): the checkbox above stays
+                         checked even after SystemIconsPanelManager's background poll gives up moving
+                         the panel across virtual desktops on this system (ADR-016) — without this hint
+                         that state was invisible, and the checkbox silently did nothing. -->
+                    <StackPanel Orientation="Horizontal"
+                                Margin="0,-6,0,10"
+                                Visibility="{Binding SystemIconsVirtualDesktopFeatureIneffective,
+                                                      Converter={StaticResource BooleanToVisibilityConverter}}"
+                                ToolTip="This feature isn't working on this system and has been disabled.">
+                        <TextBlock Text="⚠" Foreground="#B8860B" FontWeight="Bold" Margin="0,0,4,0"/>
+                        <TextBlock Text="This feature isn't working on this system and has been disabled."
+                                   Foreground="#B8860B" FontSize="11" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <GroupBox Header="Visible icons" Padding="8" Margin="0,0,0,10"
                               IsEnabled="{Binding SystemIconsPanelEnabled}">
                         <ItemsControl ItemsSource="{Binding SystemIconsItems}">
                             <ItemsControl.ItemTemplate>
@@ -176,7 +209,7 @@
                             <ColumnDefinition Width="150"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="Размер иконок" VerticalAlignment="Center" Margin="0,4"/>
+                        <TextBlock Grid.Column="0" Text="Icon size" VerticalAlignment="Center" Margin="0,4"/>
                         <ComboBox  Grid.Column="1" Margin="0,4"
                                    ItemsSource="{Binding SystemIconSizeOptions}"
                                    SelectedItem="{Binding SystemIconsSize, Mode=TwoWay}"/>
@@ -184,8 +217,8 @@
                 </StackPanel>
             </Expander>
 
-            <!-- Панели -->
-            <Expander Header="Панели на рабочем столе" IsExpanded="True" Margin="0,0,0,12">
+            <!-- Panels -->
+            <Expander Header="Desktop panels" IsExpanded="True" Margin="0,0,0,12">
                 <StackPanel Margin="0,10,0,0">
                     <Border BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="4" Height="150">
                         <ListBox ItemsSource="{Binding Panels}"
@@ -200,14 +233,14 @@
                     </Border>
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
-                        <Button Content="Добавить панель" Command="{Binding AddPanelCommand}" Padding="12,6" Margin="0,0,8,0"/>
-                        <Button Content="Удалить" Command="{Binding RemovePanelCommand}" Padding="12,6"/>
+                        <Button Content="Add panel" Command="{Binding AddPanelCommand}" Padding="12,6" Margin="0,0,8,0"/>
+                        <Button Content="Remove" Command="{Binding RemovePanelCommand}" Padding="12,6"/>
                     </StackPanel>
                 </StackPanel>
             </Expander>
 
-            <!-- Настройки выбранной панели -->
-            <Expander Header="Настройки выбранной панели" IsExpanded="True" Margin="0,0,0,12">
+            <!-- Selected panel settings -->
+            <Expander Header="Selected panel settings" IsExpanded="True" Margin="0,0,0,12">
                 <Grid IsEnabled="{Binding HasSelectedPanel}" Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150"/>
@@ -221,47 +254,55 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Заголовок" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Title" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
                                Text="{Binding SelectedPanelTitle, UpdateSourceTrigger=PropertyChanged}"/>
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Цвет фона (hex)" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Background color (hex)" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="1" Grid.Column="1" Margin="0,4"
                                Text="{Binding SelectedPanelBackgroundColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border    Grid.Row="1" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
                                BorderBrush="#888" BorderThickness="1"
                                Background="{Binding SelectedPanelBackgroundColor, Converter={StaticResource HexBrush}}"/>
 
-                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Цвет текста (hex)" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Text color (hex)" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="2" Grid.Column="1" Margin="0,4"
                                Text="{Binding SelectedPanelTextColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border    Grid.Row="2" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
                                BorderBrush="#888" BorderThickness="1"
                                Background="{Binding SelectedPanelTextColor, Converter={StaticResource HexBrush}}"/>
 
-                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Прозрачность" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Opacity" VerticalAlignment="Center" Margin="0,4"/>
                     <Slider    Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" Margin="0,4"
                                Minimum="0" Maximum="1" TickFrequency="1" Value="{Binding SelectedPanelOpacity, Mode=TwoWay}"/>
                     <TextBlock Grid.Row="3" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center"
                                Text="{Binding SelectedPanelOpacity, StringFormat={}{0:P0}}"/>
 
-                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Размер иконок" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Icon size" VerticalAlignment="Center" Margin="0,4"/>
                     <Slider    Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" Margin="0,4"
-                               Minimum="16" Maximum="96" TickFrequency="4" Value="{Binding SelectedPanelIconSize, Mode=TwoWay}"/>
+                               Minimum="16" Maximum="96" TickFrequency="4" IsSnapToTickEnabled="True" Value="{Binding SelectedPanelIconSize, Mode=TwoWay}"/>
                     <TextBlock Grid.Row="4" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center"
                                Text="{Binding SelectedPanelIconSize, StringFormat={}{0:F0} px}"/>
 
-                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Вид" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="View" VerticalAlignment="Center" Margin="0,4"/>
                     <ComboBox  Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
                                ItemsSource="{Binding ViewModes}"
                                SelectedItem="{Binding SelectedPanelViewMode, Mode=TwoWay}"/>
+
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Sort order" VerticalAlignment="Center" Margin="0,4"/>
+                    <ComboBox  Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
+                               ItemsSource="{Binding SortModes}"
+                               SelectedItem="{Binding SelectedPanelSortMode, Mode=TwoWay}"
+                               IsEnabled="{Binding SelectedPanelSupportsManualOrder}"
+                               ToolTip="Folder Portal panels always sort by name."/>
                 </Grid>
             </Expander>
 
-            <!-- Глобальные дефолты -->
-            <Expander Header="Дефолты для новых панелей" IsExpanded="True" Margin="0,0,0,12">
+            <!-- Global defaults -->
+            <Expander Header="Defaults for new panels" IsExpanded="True" Margin="0,0,0,12">
                 <Grid Margin="0,10,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150"/>
@@ -275,36 +316,36 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Цвет фона (hex)" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Background color (hex)" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="0" Grid.Column="1" Margin="0,4"
                                Text="{Binding DefaultBackgroundColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border    Grid.Row="0" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
                                BorderBrush="#888" BorderThickness="1"
                                Background="{Binding DefaultBackgroundColor, Converter={StaticResource HexBrush}}"/>
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Цвет текста (hex)" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Text color (hex)" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="1" Grid.Column="1" Margin="0,4"
                                Text="{Binding DefaultTextColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border    Grid.Row="1" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
                                BorderBrush="#888" BorderThickness="1"
                                Background="{Binding DefaultTextColor, Converter={StaticResource HexBrush}}"/>
 
-                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Прозрачность" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Opacity" VerticalAlignment="Center" Margin="0,4"/>
                     <Slider    Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="0,4"
                                Minimum="0" Maximum="1" Value="{Binding DefaultOpacity, Mode=TwoWay}"/>
                     <TextBlock Grid.Row="2" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center"
                                Text="{Binding DefaultOpacity, StringFormat={}{0:P0}}"/>
 
-                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Размер иконок" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Icon size" VerticalAlignment="Center" Margin="0,4"/>
                     <Slider    Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" Margin="0,4"
-                               Minimum="16" Maximum="96" Value="{Binding DefaultIconSize, Mode=TwoWay}"/>
+                               Minimum="16" Maximum="96" TickFrequency="4" IsSnapToTickEnabled="True" Value="{Binding DefaultIconSize, Mode=TwoWay}"/>
                     <TextBlock Grid.Row="3" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center"
                                Text="{Binding DefaultIconSize, StringFormat={}{0:F0} px}"/>
                 </Grid>
             </Expander>
 
-            <!-- Снапшоты раскладки -->
-            <Expander Header="Снапшоты раскладки" IsExpanded="True" Margin="0,0,0,12">
+            <!-- Layout snapshots -->
+            <Expander Header="Layout snapshots" IsExpanded="True" Margin="0,0,0,12">
                 <StackPanel Margin="0,10,0,0">
                     <Border BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="4" Height="160">
                         <ListView ItemsSource="{Binding LayoutSnapshots.Snapshots}"
@@ -312,14 +353,14 @@
                                   SelectionMode="Single">
                             <ListView.View>
                                 <GridView>
-                                    <GridViewColumn Header="Название" Width="200">
+                                    <GridViewColumn Header="Name" Width="200">
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
                                             </DataTemplate>
                                         </GridViewColumn.CellTemplate>
                                     </GridViewColumn>
-                                    <GridViewColumn Header="Дата" Width="130">
+                                    <GridViewColumn Header="Date" Width="130">
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding CreatedAt, StringFormat={}{0:dd.MM.yyyy HH:mm}}"
@@ -331,12 +372,12 @@
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
                                                 <StackPanel Orientation="Horizontal">
-                                                    <Button Content="Восстановить"
+                                                    <Button Content="Restore"
                                                             Command="{Binding DataContext.LayoutSnapshots.RestoreSnapshotCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                             CommandParameter="{Binding Id}"
                                                             Padding="6,3" Margin="0,0,4,0"
                                                             FontSize="11"/>
-                                                    <Button Content="Удалить"
+                                                    <Button Content="Delete"
                                                             Command="{Binding DataContext.LayoutSnapshots.DeleteSnapshotCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                             CommandParameter="{Binding Id}"
                                                             Padding="6,3"
@@ -351,7 +392,7 @@
                     </Border>
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-                        <Button Content="Сохранить снапшот"
+                        <Button Content="Save snapshot"
                                 Command="{Binding LayoutSnapshots.CaptureSnapshotCommand}"
                                 Padding="12,6"/>
                     </StackPanel>

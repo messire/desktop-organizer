@@ -19,8 +19,8 @@ public sealed class BoolToGlyphConverter : IValueConverter
 
         return isTooltip
             ? isRolledUp
-                ? "Развернуть"
-                : "Свернуть"
+                ? "Expand"
+                : "Collapse"
             : isRolledUp
                 ? ""
                 : "";

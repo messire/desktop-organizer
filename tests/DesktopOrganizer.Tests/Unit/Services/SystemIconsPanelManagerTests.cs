@@ -21,12 +21,25 @@ public class SystemIconsPanelManagerTests
     private readonly Mock<IAppSettings> _settingsMock = new();
     private readonly Mock<IDesktopIntegrationService> _desktopMock = new();
     private readonly Mock<IMonitorService> _monitorMock = new();
+    private readonly Mock<IVirtualDesktopService> _virtualDesktopMock = new();
 
     // Tracks whether the factory delegate was invoked.
     private bool _factoryInvoked;
 
-    private SystemIconsPanelManager BuildSut(string settingsJson = "")
+    private SystemIconsPanelManager BuildSut(
+        string settingsJson = "",
+        bool virtualDesktopSupported = true)
     {
+        _virtualDesktopMock.SetupGet(v => v.IsSupported).Returns(virtualDesktopSupported);
+        _virtualDesktopMock.Setup(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>())).Returns(true);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>())).Returns(false);
+
+        // Anchor-resolution members (ADR-019 §3.2): default to "nothing available" so tests that
+        // don't care about EnforceAnchorDesktopOnce see it degrade to a complete no-op.
+        _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns((Guid?)null);
+        _virtualDesktopMock.Setup(v => v.TryGetDefaultDesktopId()).Returns((Guid?)null);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>())).Returns(false);
+
         _settingsMock.SetupProperty(s => s.SystemIconsPanel, settingsJson);
         _settingsMock.Setup(s => s.Save());
 
@@ -42,8 +55,14 @@ public class SystemIconsPanelManagerTests
         _factoryInvoked = false;
 
         // The window factory is a Func<SystemIconsPanelWindow>; we never call it successfully
-        // (no real WPF dispatcher), so the manager's Apply() will swallow the exception and
-        // _window stays null.  We just track that the factory was invoked.
+        // (a real WPF window needs an STA thread + dispatcher, which this test project does not
+        // set up), so the manager's Apply() swallows the exception and _window stays null. We just
+        // track that the factory was invoked.
+        //
+        // Because of that, everything that depends on a live window is tested through the two
+        // extracted seams instead of through the timer: ShouldPollVirtualDesktop (pure policy,
+        // takes hasWindow as a parameter) and PollVirtualDesktopOnce (tick body, takes the HWND as
+        // a parameter). See the "poll policy" and "poll step" regions below.
 #pragma warning disable CA1416 // Platform check not needed in unit tests
         SystemIconsPanelWindow FactoryDelegate()
         {
@@ -58,15 +77,23 @@ public class SystemIconsPanelManagerTests
             _settingsMock.Object,
             _desktopMock.Object,
             _monitorMock.Object,
+            _virtualDesktopMock.Object,
             FactoryDelegate);
     }
 
     /// <summary>
     /// Builds a JSON string in the format expected by SystemIconsPanelManager.
     /// Mirrors the private PanelDto / ItemDto structure.
+    /// <para>
+    /// When <paramref name="showOnAllVirtualDesktops"/> is <see langword="null"/> the key is
+    /// omitted entirely — that is exactly the shape of a settings file written by a build from
+    /// before the virtual desktop setting existed.
+    /// </para>
     /// </summary>
     private static string BuildJson(bool isEnabled, string iconSize = "Medium",
-        IEnumerable<(SystemIconKind Kind, bool Visible, int Order)>? items = null)
+        IEnumerable<(SystemIconKind Kind, bool Visible, int Order)>? items = null,
+        bool? showOnAllVirtualDesktops = null,
+        string? anchorVirtualDesktopId = null)
     {
         var itemList = (items ?? DefaultItemTuples()).Select(t => new
         {
@@ -75,11 +102,36 @@ public class SystemIconsPanelManagerTests
             t.Order,
         });
 
-        var dto = new
+        object dto = (showOnAllVirtualDesktops, anchorVirtualDesktopId) switch
         {
-            IsEnabled = isEnabled,
-            IconSize = iconSize,
-            Items = itemList,
+            (null, null) => new
+            {
+                IsEnabled = isEnabled,
+                IconSize = iconSize,
+                Items = itemList,
+            },
+            (not null, null) => new
+            {
+                IsEnabled = isEnabled,
+                ShowOnAllVirtualDesktops = showOnAllVirtualDesktops.Value,
+                IconSize = iconSize,
+                Items = itemList,
+            },
+            (null, not null) => new
+            {
+                IsEnabled = isEnabled,
+                IconSize = iconSize,
+                AnchorVirtualDesktopId = anchorVirtualDesktopId,
+                Items = itemList,
+            },
+            (not null, not null) => new
+            {
+                IsEnabled = isEnabled,
+                ShowOnAllVirtualDesktops = showOnAllVirtualDesktops.Value,
+                IconSize = iconSize,
+                AnchorVirtualDesktopId = anchorVirtualDesktopId,
+                Items = itemList,
+            },
         };
 
         return JsonSerializer.Serialize(dto);
@@ -296,5 +348,998 @@ public class SystemIconsPanelManagerTests
         // Assert — fell back to defaults (IsEnabled=false, 5 items)
         Assert.False(sut.Model.IsEnabled);
         Assert.Equal(Enum.GetValues<SystemIconKind>().Length, sut.Model.Items.Count);
+    }
+
+    // ── Block E: "Show on all virtual desktops" persistence ──────────────────
+
+    [Fact]
+    public void Load_WithEmptySettings_ShowOnAllVirtualDesktopsIsFalseByDefault()
+    {
+        // Arrange
+        var sut = BuildSut(settingsJson: "");
+
+        // Act
+        sut.Load();
+
+        // Assert — opt-in feature, off unless the user turned it on
+        Assert.False(sut.Model.ShowOnAllVirtualDesktops);
+    }
+
+    [Fact]
+    public void Load_LegacyJsonWithoutVirtualDesktopKey_DefaultsToFalse()
+    {
+        // Arrange — settings written before the setting existed: the key is simply absent
+        var json = BuildJson(isEnabled: true, showOnAllVirtualDesktops: null);
+        Assert.DoesNotContain("ShowOnAllVirtualDesktops", json);
+        var sut = BuildSut(settingsJson: json);
+
+        // Act
+        sut.Load();
+
+        // Assert — reads without error, missing key means false (no migration needed)
+        Assert.True(sut.Model.IsEnabled);
+        Assert.False(sut.Model.ShowOnAllVirtualDesktops);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Load_WithSavedJson_RestoresShowOnAllVirtualDesktops(bool stored)
+    {
+        // Arrange
+        var json = BuildJson(isEnabled: true, showOnAllVirtualDesktops: stored);
+        var sut = BuildSut(settingsJson: json);
+
+        // Act
+        sut.Load();
+
+        // Assert
+        Assert.Equal(stored, sut.Model.ShowOnAllVirtualDesktops);
+    }
+
+    [Fact]
+    public void Save_SerializesShowOnAllVirtualDesktops()
+    {
+        // Arrange
+        var sut = BuildSut(settingsJson: "");
+        sut.Load();
+        sut.Model.ShowOnAllVirtualDesktops = true;
+
+        // Act
+        sut.Save();
+
+        // Assert
+        using var doc = JsonDocument.Parse(_settingsMock.Object.SystemIconsPanel);
+        Assert.True(doc.RootElement.GetProperty("ShowOnAllVirtualDesktops").GetBoolean());
+    }
+
+    [Fact]
+    public void SaveThenLoad_RoundTripsShowOnAllVirtualDesktops()
+    {
+        // Arrange — write with the flag on
+        var writer = BuildSut(settingsJson: "");
+        writer.Load();
+        writer.Model.IsEnabled = true;
+        writer.Model.ShowOnAllVirtualDesktops = true;
+        writer.Save();
+
+        var persisted = _settingsMock.Object.SystemIconsPanel;
+
+        // Act — a fresh manager reads the very same JSON back
+        var reader = BuildSut(settingsJson: persisted);
+        reader.Load();
+
+        // Assert — survives an application restart
+        Assert.True(reader.Model.ShowOnAllVirtualDesktops);
+    }
+
+    // ── Block E: virtual desktop poll timer policy (risk E-R4) ───────────────
+
+    [Fact]
+    public void Apply_WhenSettingOff_DoesNotStartVirtualDesktopTimer()
+    {
+        // Arrange — panel on, "all virtual desktops" off
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load();
+
+        // Act
+        sut.Apply();
+
+        // Assert
+        Assert.False(sut.IsVirtualDesktopTimerRunning);
+    }
+
+    [Fact]
+    public void Apply_WhenPanelDisabled_DoesNotStartVirtualDesktopTimer()
+    {
+        // Arrange — setting on, but the panel itself is off, so there is no window to follow
+        var sut = BuildSut(BuildJson(isEnabled: false, showOnAllVirtualDesktops: true));
+        sut.Load();
+
+        // Act
+        sut.Apply();
+
+        // Assert
+        Assert.False(sut.IsVirtualDesktopTimerRunning);
+    }
+
+    [Fact]
+    public void Apply_WhenWindowMissing_DoesNotStartVirtualDesktopTimer()
+    {
+        // Arrange — everything enabled, but window creation fails in unit tests (_window stays null)
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+
+        // Act
+        sut.Apply();
+
+        // Assert — no window => nothing to poll for
+        Assert.True(_factoryInvoked);
+        Assert.False(sut.IsVirtualDesktopTimerRunning);
+    }
+
+    [Fact]
+    public void Apply_WhenVirtualDesktopsUnsupported_DoesNotStartVirtualDesktopTimer()
+    {
+        // Arrange — COM object unavailable on this system
+        var sut = BuildSut(
+            BuildJson(isEnabled: true, showOnAllVirtualDesktops: true),
+            virtualDesktopSupported: false);
+        sut.Load();
+
+        // Act
+        sut.Apply();
+
+        // Assert
+        Assert.False(sut.IsVirtualDesktopTimerRunning);
+    }
+
+    [Fact]
+    public void Dispose_LeavesVirtualDesktopTimerStopped()
+    {
+        // Arrange
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+        sut.Apply();
+
+        // Act
+        sut.Dispose();
+
+        // Assert
+        Assert.False(sut.IsVirtualDesktopTimerRunning);
+    }
+
+    // ── Block E: silent degradation when the COM object is unavailable ───────
+
+    [Fact]
+    public void UnsupportedVirtualDesktops_DoesNotBreakManagerLifecycle()
+    {
+        // Arrange — IsSupported == false for every call
+        var sut = BuildSut(
+            BuildJson(isEnabled: true, showOnAllVirtualDesktops: true),
+            virtualDesktopSupported: false);
+
+        // Act & Assert — load / apply / save / dispose all stay silent
+        var ex = Record.Exception(() =>
+        {
+            sut.Load();
+            sut.Apply();
+            sut.Save();
+            sut.Dispose();
+        });
+
+        Assert.Null(ex);
+        Assert.True(sut.Model.ShowOnAllVirtualDesktops); // setting is still persisted, just inert
+    }
+
+    [Fact]
+    public void UnsupportedVirtualDesktops_NeverQueriesWindowPosition()
+    {
+        // Arrange
+        var sut = BuildSut(
+            BuildJson(isEnabled: true, showOnAllVirtualDesktops: true),
+            virtualDesktopSupported: false);
+        sut.Load();
+
+        // Act
+        sut.Apply();
+
+        // Assert — no polling at all when the feature is unsupported
+        _virtualDesktopMock.Verify(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>()), Times.Never);
+        _virtualDesktopMock.Verify(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    // ── Poll policy: ShouldPollVirtualDesktop truth table ────────────────────
+    //
+    // The timer policy lives in a pure static so it can be tested for every combination,
+    // including the "a window exists" leg that a unit test cannot produce for real.
+
+    [Theory]
+    // panelEnabled, showOnAll, hasWindow, supported  =>  expected
+    [InlineData(true,  true,  true,  true,  true)]   // the one and only case that polls
+    [InlineData(false, true,  true,  true,  false)]  // panel off
+    [InlineData(true,  false, true,  true,  false)]  // setting off
+    [InlineData(true,  true,  false, true,  false)]  // no window to follow
+    [InlineData(true,  true,  true,  false, false)]  // no virtual desktop COM object
+    [InlineData(false, false, true,  true,  false)]
+    [InlineData(false, true,  false, true,  false)]
+    [InlineData(false, true,  true,  false, false)]
+    [InlineData(true,  false, false, true,  false)]
+    [InlineData(true,  false, true,  false, false)]
+    [InlineData(true,  true,  false, false, false)]
+    [InlineData(false, false, false, true,  false)]
+    [InlineData(false, false, true,  false, false)]
+    [InlineData(false, true,  false, false, false)]
+    [InlineData(true,  false, false, false, false)]
+    [InlineData(false, false, false, false, false)]
+    public void ShouldPollVirtualDesktop_TruthTable(
+        bool panelEnabled, bool showOnAll, bool hasWindow, bool supported, bool expected)
+    {
+        var actual = SystemIconsPanelManager.ShouldPollVirtualDesktop(
+            panelEnabled, showOnAll, hasWindow, supported);
+
+        Assert.Equal(expected, actual);
+    }
+
+    // ── Z-order policy: ShouldReassertZOrder truth table ─────────────────────
+    //
+    // Same shape as the poll policy above: a pure static, so the "a window exists" leg a unit test
+    // cannot produce for real is still covered.
+
+    [Theory]
+    // panelEnabled, hasWindow  =>  expected
+    [InlineData(true,  true,  true)]   // the one and only case that re-asserts the Z-order
+    [InlineData(false, true,  false)]  // panel off — the window is gone anyway
+    [InlineData(true,  false, false)]  // no window to push back
+    [InlineData(false, false, false)]
+    public void ShouldReassertZOrder_TruthTable(bool panelEnabled, bool hasWindow, bool expected)
+    {
+        var actual = SystemIconsPanelManager.ShouldReassertZOrder(panelEnabled, hasWindow);
+
+        Assert.Equal(expected, actual);
+    }
+
+    /// <summary>
+    /// The Z-order timer and the virtual desktop poll timer are orthogonal: "stay behind other
+    /// windows" is a property of the panel itself and must keep working while "show on all virtual
+    /// desktops" is OFF (where the poll timer is deliberately not running) and on systems with no
+    /// virtual desktop manager at all. Expressed as a policy comparison because
+    /// <see cref="SystemIconsPanelManager.ShouldReassertZOrder"/> does not take either input — that
+    /// absence IS the invariant, and this test fails the moment someone adds them.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true)]   // checkbox OFF, virtual desktops supported
+    [InlineData(false, false)]  // checkbox OFF, no virtual desktop manager
+    [InlineData(true,  false)]  // checkbox ON, but the shell cannot honour it
+    public void ShouldReassertZOrder_IsIndependentOfTheVirtualDesktopFeature(
+        bool showOnAllVirtualDesktops, bool virtualDesktopsSupported)
+    {
+        // Precondition: in each of these combinations the virtual desktop timer stays stopped …
+        Assert.False(SystemIconsPanelManager.ShouldPollVirtualDesktop(
+            panelEnabled: true,
+            showOnAllVirtualDesktops,
+            hasWindow: true,
+            virtualDesktopsSupported));
+
+        // … while the Z-order timer must keep running regardless.
+        Assert.True(SystemIconsPanelManager.ShouldReassertZOrder(panelEnabled: true, hasWindow: true));
+    }
+
+    // ── Poll step: PollVirtualDesktopOnce (the tick body) ────────────────────
+
+    private const nint PanelHwnd = 0x1234;
+
+    /// <summary>
+    /// Feeds <see cref="IVirtualDesktopService.IsWindowOnCurrentDesktop"/> a scripted sequence of
+    /// answers; the last one repeats once the script runs out. One poll step asks twice: once as
+    /// the guard, once to verify the move actually had an effect.
+    /// </summary>
+    private void ScriptOnCurrentDesktop(params bool[] answers)
+    {
+        var queue = new Queue<bool>(answers);
+        _virtualDesktopMock
+            .Setup(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>()))
+            .Returns(() => queue.Count > 0 ? queue.Dequeue() : answers[^1]);
+    }
+
+    [Fact]
+    public void PollVirtualDesktopOnce_WithZeroHandle_TouchesNothing()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+
+        sut.PollVirtualDesktopOnce(IntPtr.Zero);
+
+        _virtualDesktopMock.Verify(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>()), Times.Never);
+        _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    [Fact]
+    public void PollVirtualDesktopOnce_WhenAlreadyOnCurrentDesktop_DoesNotMoveOrEmbed()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+        ScriptOnCurrentDesktop(true);
+
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+
+        _virtualDesktopMock.Verify(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>()), Times.Never);
+        _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    [Fact]
+    public void PollVirtualDesktopOnce_WhenMoveIsRejected_DoesNotEmbed()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+        ScriptOnCurrentDesktop(false);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>())).Returns(false);
+
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+
+        _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
+        Assert.Equal(0, sut.IneffectiveMoveCount);
+    }
+
+    [Fact]
+    public void PollVirtualDesktopOnce_AfterEffectiveMove_ResetsCounterAndNeverEmbeds()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+
+        // Guard says "left behind", the post-move check says "arrived" => the move worked.
+        ScriptOnCurrentDesktop(false, true);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>())).Returns(true);
+
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+
+        // ADR-019: the panel is never re-parented into WorkerW, so there is no "re-embed after a
+        // successful move" step left at all (that step used to exist and re-triggered the original
+        // bug — see V-R11 in the plan). An effective move just resets the counter.
+        Assert.Equal(0, sut.IneffectiveMoveCount);
+        _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    [Fact]
+    public void PollVirtualDesktopOnce_WhenMoveIsSilentNoOp_NeverEmbeds()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+
+        // MoveWindowToDesktop returns S_OK but does nothing (ADR-016 §E0.2): the window is never
+        // reported as being on the current desktop.
+        ScriptOnCurrentDesktop(false);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>())).Returns(true);
+
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+
+        Assert.Equal(1, sut.IneffectiveMoveCount);
+        _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    [Fact]
+    public void PollVirtualDesktopOnce_AfterThreeIneffectiveMoves_TripsCircuitBreaker()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+
+        ScriptOnCurrentDesktop(false);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>())).Returns(true);
+
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+        Assert.False(sut.Model.VirtualDesktopFeatureIneffective); // still trying
+
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+
+        // Third strike: stop asking the shell to do something it demonstrably will not do.
+        Assert.True(sut.Model.VirtualDesktopFeatureIneffective);
+        Assert.False(sut.IsVirtualDesktopTimerRunning);
+        _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    [Fact]
+    public void PollVirtualDesktopOnce_ResetsCounterWhenPanelIsBackOnCurrentDesktop()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+
+        // Two ineffective rounds (2 answers each: guard + verify), then the panel is found on the
+        // active desktop again — the breaker must not latch on non-consecutive failures.
+        ScriptOnCurrentDesktop(false, false, false, false, true);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>())).Returns(true);
+
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+        Assert.Equal(2, sut.IneffectiveMoveCount);
+
+        sut.PollVirtualDesktopOnce(PanelHwnd);
+
+        Assert.Equal(0, sut.IneffectiveMoveCount);
+        Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
+    }
+
+    [Fact]
+    public void PollVirtualDesktopOnce_WhenServiceThrows_DoesNotPropagate()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        sut.Load();
+        _virtualDesktopMock
+            .Setup(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>()))
+            .Throws(new InvalidOperationException("COM went away"));
+
+        // This runs on the UI thread from a DispatcherTimer — an escaping exception would kill the app.
+        var ex = Record.Exception(() => sut.PollVirtualDesktopOnce(PanelHwnd));
+
+        Assert.Null(ex);
+    }
+
+    // ── Z-order step: SendPanelToBackOnce (the tick body) ────────────────────
+
+    [Fact]
+    public void SendPanelToBackOnce_WithZeroHandle_TouchesNothing()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true));
+        sut.Load();
+
+        sut.SendPanelToBackOnce(IntPtr.Zero);
+
+        _desktopMock.Verify(d => d.SendToBackOfZOrder(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    /// <summary>
+    /// The panel must be pushed behind other windows in BOTH states of the "show on all virtual
+    /// desktops" checkbox — the two features are unrelated (see
+    /// <see cref="ShouldReassertZOrder_IsIndependentOfTheVirtualDesktopFeature"/>).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SendPanelToBackOnce_PushesPanelBack_RegardlessOfVirtualDesktopSetting(bool showOnAll)
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: showOnAll));
+        sut.Load();
+
+        sut.SendPanelToBackOnce(PanelHwnd);
+
+        _desktopMock.Verify(d => d.SendToBackOfZOrder(PanelHwnd), Times.Once);
+    }
+
+    /// <summary>
+    /// Regression guard on ADR-019 / V-R11, matching the ones on the two virtual desktop seams: the
+    /// Z-order path must never fall back to the old WorkerW re-parenting, which would make the panel
+    /// unconditionally visible on every virtual desktop again.
+    /// </summary>
+    [Fact]
+    public void SendPanelToBackOnce_NeverCallsEmbedInDesktop()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true));
+        sut.Load();
+
+        sut.SendPanelToBackOnce(PanelHwnd);
+
+        _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    [Fact]
+    public void SendPanelToBackOnce_WhenServiceThrows_DoesNotPropagate()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true));
+        sut.Load();
+        _desktopMock
+            .Setup(d => d.SendToBackOfZOrder(It.IsAny<IntPtr>()))
+            .Throws(new InvalidOperationException("USER32 went away"));
+
+        // Runs on the UI thread from a DispatcherTimer — an escaping exception would kill the app.
+        var ex = Record.Exception(() => sut.SendPanelToBackOnce(PanelHwnd));
+
+        Assert.Null(ex);
+    }
+
+    // ── Z-order timer lifecycle (no leak past the window it drives) ──────────
+
+    /// <summary>
+    /// The real start/stop truth table, driven through
+    /// <c>SystemIconsPanelManager.UpdateZOrderTimerCore</c>. The <c>Apply</c>-based tests below can
+    /// only ever reach the <c>hasWindow == false</c> row — a unit test has no WPF
+    /// <c>Application</c> to build a panel window against, so the factory always fails and
+    /// <c>_window</c> stays null — which means without this test the timer would never be created in
+    /// any test at all and every "…LeavesZOrderTimerStopped" assertion below would be vacuous (M1).
+    /// </summary>
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, false)]
+    public void UpdateZOrderTimerCore_RunsOnlyWhenPanelEnabledAndWindowExists(
+        bool panelEnabled, bool hasWindow, bool expectedRunning)
+    {
+        var sut = BuildSut(BuildJson(isEnabled: panelEnabled));
+        sut.Load();
+
+        sut.UpdateZOrderTimerCore(panelEnabled, hasWindow);
+
+        Assert.Equal(expectedRunning, sut.IsZOrderTimerRunning);
+    }
+
+    /// <summary>
+    /// The transition the vacuous tests could not cover: a timer that really is running must be
+    /// stopped when either input goes away, not merely "never started" (risk E-R4 — a timer left
+    /// ticking against a closed panel calls <c>SendToBackOfZOrder</c> on a dead handle forever).
+    /// </summary>
+    [Theory]
+    [InlineData(false, true)]  // panel switched off
+    [InlineData(true, false)]  // window closed
+    [InlineData(false, false)] // both
+    public void UpdateZOrderTimerCore_StopsARunningTimer_WhenEitherInputGoesAway(
+        bool panelEnabled, bool hasWindow)
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true));
+        sut.Load();
+        sut.UpdateZOrderTimerCore(true, true);
+        Assert.True(sut.IsZOrderTimerRunning); // precondition, not the assertion under test
+
+        sut.UpdateZOrderTimerCore(panelEnabled, hasWindow);
+
+        Assert.False(sut.IsZOrderTimerRunning);
+    }
+
+    /// <summary>
+    /// <c>Dispose</c> against a timer that is genuinely running — the non-vacuous counterpart of
+    /// <see cref="Dispose_LeavesZOrderTimerStopped"/>.
+    /// </summary>
+    [Fact]
+    public void Dispose_StopsARunningZOrderTimer()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true));
+        sut.Load();
+        sut.UpdateZOrderTimerCore(true, true);
+        Assert.True(sut.IsZOrderTimerRunning); // precondition, not the assertion under test
+
+        sut.Dispose();
+
+        Assert.False(sut.IsZOrderTimerRunning);
+    }
+
+    /// <summary>
+    /// Switching the panel off routes through <c>ClosePanel</c>, which must stop a genuinely running
+    /// Z-order timer — the non-vacuous counterpart of
+    /// <see cref="Apply_AfterDisablingPanel_LeavesZOrderTimerStopped"/>.
+    /// </summary>
+    [Fact]
+    public void Apply_AfterDisablingPanel_StopsARunningZOrderTimer()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true));
+        sut.Load();
+        sut.UpdateZOrderTimerCore(true, true);
+        Assert.True(sut.IsZOrderTimerRunning); // precondition, not the assertion under test
+
+        sut.Model.IsEnabled = false;
+        sut.Apply();
+
+        Assert.False(sut.IsZOrderTimerRunning);
+    }
+
+    /// <summary>
+    /// Re-applying the same state must reuse the existing <c>DispatcherTimer</c> rather than leak a
+    /// new one on every call (<c>Apply</c> runs on every settings change).
+    /// </summary>
+    [Fact]
+    public void UpdateZOrderTimerCore_IsIdempotent_AcrossRepeatedCalls()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true));
+        sut.Load();
+
+        sut.UpdateZOrderTimerCore(true, true);
+        sut.UpdateZOrderTimerCore(true, true);
+        sut.UpdateZOrderTimerCore(true, true);
+
+        Assert.True(sut.IsZOrderTimerRunning);
+
+        sut.Dispose();
+        Assert.False(sut.IsZOrderTimerRunning);
+    }
+
+    [Fact]
+    public void Apply_WhenPanelDisabled_DoesNotStartZOrderTimer()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: false));
+        sut.Load();
+
+        sut.Apply();
+
+        Assert.False(sut.IsZOrderTimerRunning);
+        _desktopMock.Verify(d => d.SendToBackOfZOrder(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    [Fact]
+    public void Apply_WhenWindowMissing_DoesNotStartZOrderTimer()
+    {
+        // Window creation fails in unit tests (_window stays null) — nothing to push back.
+        var sut = BuildSut(BuildJson(isEnabled: true));
+        sut.Load();
+
+        sut.Apply();
+
+        Assert.True(_factoryInvoked);
+        Assert.False(sut.IsZOrderTimerRunning);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Dispose_LeavesZOrderTimerStopped(bool showOnAll)
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: showOnAll));
+        sut.Load();
+        sut.Apply();
+
+        sut.Dispose();
+
+        Assert.False(sut.IsZOrderTimerRunning);
+    }
+
+    /// <summary>
+    /// Switching the panel off goes through <c>ClosePanel</c>, which must stop the Z-order timer
+    /// before dropping the window reference — a timer left ticking against a closed panel is the
+    /// same leak the virtual desktop timer guards against (risk E-R4).
+    /// </summary>
+    [Fact]
+    public void Apply_AfterDisablingPanel_LeavesZOrderTimerStopped()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true));
+        sut.Load();
+        sut.Apply();
+
+        sut.Model.IsEnabled = false;
+        sut.Apply();
+
+        Assert.False(sut.IsZOrderTimerRunning);
+    }
+
+    // ── ApplyVirtualDesktopSetting: toggling must not recreate the window ────
+
+    [Fact]
+    public void ApplyVirtualDesktopSetting_WhenPanelDisabled_DoesNotCreateWindow()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: false, showOnAllVirtualDesktops: true));
+        sut.Load();
+
+        sut.ApplyVirtualDesktopSetting();
+
+        Assert.False(_factoryInvoked);
+        Assert.False(sut.IsVirtualDesktopTimerRunning);
+    }
+
+    [Fact]
+    public void ApplyVirtualDesktopSetting_ClearsTheIneffectiveLatch()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: false, showOnAllVirtualDesktops: true));
+        sut.Load();
+        sut.Model.VirtualDesktopFeatureIneffective = true;
+
+        // Re-applying the setting is an explicit user action and therefore a retry point.
+        sut.ApplyVirtualDesktopSetting();
+
+        Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
+    }
+
+    [Fact]
+    public void Apply_ClearsTheIneffectiveLatch()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: false, showOnAllVirtualDesktops: true));
+        sut.Load();
+        sut.Model.VirtualDesktopFeatureIneffective = true;
+
+        sut.Apply();
+
+        Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
+    }
+
+    // ── ResolveAnchorDesktopId: pure policy truth table (ADR-019 §3.2) ───────
+
+    private static readonly Guid PersistedGuid = new("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid SystemDefaultGuid = new("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid PanelCurrentGuid = new("33333333-3333-3333-3333-333333333333");
+
+    public static IEnumerable<object?[]> ResolveAnchorDesktopIdCases()
+    {
+        // persisted, systemDefault, panelCurrent, expected
+        yield return new object?[] { null, null, null, null };
+        yield return new object?[] { PersistedGuid, null, null, PersistedGuid };
+        yield return new object?[] { null, SystemDefaultGuid, null, SystemDefaultGuid };
+        yield return new object?[] { null, null, PanelCurrentGuid, PanelCurrentGuid };
+        yield return new object?[] { PersistedGuid, SystemDefaultGuid, null, SystemDefaultGuid };
+        yield return new object?[] { PersistedGuid, null, PanelCurrentGuid, PersistedGuid };
+        yield return new object?[] { null, SystemDefaultGuid, PanelCurrentGuid, SystemDefaultGuid };
+        yield return new object?[] { PersistedGuid, SystemDefaultGuid, PanelCurrentGuid, SystemDefaultGuid };
+    }
+
+    [Theory]
+    [MemberData(nameof(ResolveAnchorDesktopIdCases))]
+    public void ResolveAnchorDesktopId_TruthTable(
+        Guid? persisted, Guid? systemDefault, Guid? panelCurrent, Guid? expected)
+    {
+        var actual = SystemIconsPanelManager.ResolveAnchorDesktopId(persisted, systemDefault, panelCurrent);
+
+        Assert.Equal(expected, actual);
+    }
+
+    // ── EnforceAnchorDesktopOnce: OFF-mode anchor placement (ADR-019 §3.2/§3.3) ──
+
+    [Fact]
+    public void EnforceAnchorDesktopOnce_WithZeroHandle_TouchesNothing()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load();
+
+        sut.EnforceAnchorDesktopOnce(IntPtr.Zero);
+
+        _virtualDesktopMock.VerifyGet(v => v.IsSupported, Times.Never);
+        _virtualDesktopMock.Verify(v => v.TryGetDefaultDesktopId(), Times.Never);
+        _virtualDesktopMock.Verify(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>()), Times.Never);
+        _virtualDesktopMock.Verify(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>()), Times.Never);
+    }
+
+    /// <summary>
+    /// M5: on a system where the virtual desktop manager is unavailable, the method must return
+    /// immediately after reading <see cref="IVirtualDesktopService.IsSupported"/> — it must not touch
+    /// the registry or make any other COM call.
+    /// </summary>
+    [Fact]
+    public void EnforceAnchorDesktopOnce_WhenUnsupported_ReturnsImmediately()
+    {
+        var sut = BuildSut(
+            BuildJson(isEnabled: true, showOnAllVirtualDesktops: false),
+            virtualDesktopSupported: false);
+        sut.Load();
+
+        sut.EnforceAnchorDesktopOnce(PanelHwnd);
+
+        _virtualDesktopMock.Verify(v => v.TryGetDefaultDesktopId(), Times.Never);
+        _virtualDesktopMock.Verify(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>()), Times.Never);
+        _virtualDesktopMock.Verify(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>()), Times.Never);
+        _virtualDesktopMock.Verify(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>()), Times.Never);
+        _virtualDesktopMock.Verify(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    /// <summary>
+    /// M2 regression: the "already on the anchor desktop" branch must reset the shared
+    /// <see cref="SystemIconsPanelManager.IneffectiveMoveCount"/> streak, not merely skip
+    /// incrementing it — otherwise a prior OFF-mode failure streak would still trip once the panel
+    /// later drifts again, even though it was demonstrably fine in between.
+    /// </summary>
+    [Fact]
+    public void EnforceAnchorDesktopOnce_AlreadyOnAnchor_DoesNotMove_AndResetsIneffectiveCounter()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load();
+        sut.Model.AnchorVirtualDesktopId = PersistedGuid;
+
+        // Build up a non-zero streak first, so the reset below is actually observable.
+        _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns(PanelCurrentGuid);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(PanelHwnd, PersistedGuid)).Returns(false);
+        sut.EnforceAnchorDesktopOnce(PanelHwnd);
+        Assert.Equal(1, sut.IneffectiveMoveCount); // precondition: streak is non-zero
+
+        // Now the panel reports being on its anchor desktop already.
+        _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns(PersistedGuid);
+
+        sut.EnforceAnchorDesktopOnce(PanelHwnd);
+
+        _virtualDesktopMock.Verify(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>()), Times.Once); // only the earlier attempt
+        Assert.Equal(0, sut.IneffectiveMoveCount);
+        Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
+    }
+
+    [Fact]
+    public void EnforceAnchorDesktopOnce_NotOnAnchor_SuccessfulMove_MovesOnceAndResetsCounter()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load();
+        sut.Model.AnchorVirtualDesktopId = PersistedGuid;
+
+        _virtualDesktopMock.SetupSequence(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>()))
+            .Returns(PanelCurrentGuid)   // panelCurrent, read before the move
+            .Returns(PersistedGuid);     // afterMove, once the move succeeded
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(PanelHwnd, PersistedGuid)).Returns(true);
+
+        sut.EnforceAnchorDesktopOnce(PanelHwnd);
+
+        _virtualDesktopMock.Verify(v => v.TryMoveWindowToDesktop(PanelHwnd, PersistedGuid), Times.Once);
+        Assert.Equal(0, sut.IneffectiveMoveCount);
+        Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
+    }
+
+    /// <summary>
+    /// "Never guess" invariant (ADR-019 §3.2): when persisted, R2 and R1 all come back
+    /// <see langword="null"/>, the method must not call <see cref="IVirtualDesktopService.TryMoveWindowToDesktop"/>
+    /// with an arbitrary desktop, and it must not write an anchor to settings.
+    /// </summary>
+    [Fact]
+    public void EnforceAnchorDesktopOnce_WhenAllSourcesNull_NeverMoves()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load(); // Model.AnchorVirtualDesktopId stays null: no anchor was ever persisted
+
+        sut.EnforceAnchorDesktopOnce(PanelHwnd);
+
+        _virtualDesktopMock.Verify(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>()), Times.Never);
+        _settingsMock.Verify(s => s.Save(), Times.Never);
+        Assert.Null(sut.Model.AnchorVirtualDesktopId);
+    }
+
+    /// <summary>
+    /// M3 self-heal (§3.3): a persisted/R1 anchor that fails to take for
+    /// <see cref="SystemIconsPanelManager"/>'s <c>SelfHealMinConsecutiveFailures</c> (2) consecutive
+    /// rounds — including an explicit refusal, not just a silent no-op — is recaptured from the
+    /// window's actual (tracked) desktop and persisted exactly once. Never applies while R2
+    /// (<c>systemDefault</c>) is available.
+    /// </summary>
+    [Fact]
+    public void EnforceAnchorDesktopOnce_SelfHeal_AfterTwoConsecutiveFailures_RecapturesAnchorAndSavesOnce()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load();
+        sut.Model.AnchorVirtualDesktopId = PersistedGuid;
+
+        // systemDefault (R2) stays null throughout: self-heal only applies to a persisted/R1 anchor.
+        _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns(PanelCurrentGuid);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(PanelHwnd, PersistedGuid)).Returns(false);
+
+        sut.EnforceAnchorDesktopOnce(PanelHwnd); // failure #1 — below the self-heal threshold
+        Assert.Equal(PersistedGuid, sut.Model.AnchorVirtualDesktopId);
+        _settingsMock.Verify(s => s.Save(), Times.Never);
+
+        sut.EnforceAnchorDesktopOnce(PanelHwnd); // failure #2 — self-heal threshold reached
+
+        Assert.Equal(PanelCurrentGuid, sut.Model.AnchorVirtualDesktopId);
+        _settingsMock.Verify(s => s.Save(), Times.Once);
+        Assert.Equal(0, sut.IneffectiveMoveCount);
+        Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
+    }
+
+    [Fact]
+    public void EnforceAnchorDesktopOnce_WhenAnchorUnchanged_DoesNotCallSave()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load();
+        sut.Model.AnchorVirtualDesktopId = SystemDefaultGuid;
+        _virtualDesktopMock.Setup(v => v.TryGetDefaultDesktopId()).Returns(SystemDefaultGuid);
+        _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns(SystemDefaultGuid);
+
+        sut.EnforceAnchorDesktopOnce(PanelHwnd);
+        sut.EnforceAnchorDesktopOnce(PanelHwnd);
+
+        _settingsMock.Verify(s => s.Save(), Times.Never);
+    }
+
+    /// <summary>
+    /// M1 regression: unlike <see cref="SystemIconsPanelManager.PollVirtualDesktopOnce"/>'s ON-mode
+    /// circuit breaker, this OFF-mode seam must never raise
+    /// <see cref="DesktopOrganizer.UI.Models.SystemIconsPanelModel.VirtualDesktopFeatureIneffective"/>
+    /// — that banner is worded for the poll timer and would otherwise appear for a checkbox the user
+    /// may have just switched off. Keeping <c>systemDefault</c> non-null on every call disables
+    /// self-heal too, so the failure streak keeps growing well past
+    /// <see cref="SystemIconsPanelManager.PollVirtualDesktopOnce"/>'s own threshold (3) without ever
+    /// resetting.
+    /// </summary>
+    [Fact]
+    public void EnforceAnchorDesktopOnce_NeverRaisesVirtualDesktopFeatureIneffective_EvenAfterManyFailures()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load();
+        sut.Model.AnchorVirtualDesktopId = SystemDefaultGuid;
+
+        _virtualDesktopMock.Setup(v => v.TryGetDefaultDesktopId()).Returns(SystemDefaultGuid);
+        _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns(PanelCurrentGuid);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>())).Returns(false);
+
+        for (var i = 0; i < 10; i++)
+        {
+            sut.EnforceAnchorDesktopOnce(PanelHwnd);
+        }
+
+        Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
+        Assert.Equal(10, sut.IneffectiveMoveCount);
+    }
+
+    /// <summary>
+    /// Regression guard on the first-cause fix (V-R11): this OFF-mode seam must never fall back to
+    /// the old WorkerW re-parenting path.
+    /// </summary>
+    [Fact]
+    public void EnforceAnchorDesktopOnce_NeverCallsEmbedInDesktop()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load();
+        sut.Model.AnchorVirtualDesktopId = PersistedGuid;
+        _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns(PanelCurrentGuid);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>())).Returns(true);
+
+        sut.EnforceAnchorDesktopOnce(PanelHwnd);
+
+        _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    [Fact]
+    public void EnforceAnchorDesktopOnce_WhenServiceThrows_DoesNotPropagate()
+    {
+        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        sut.Load();
+        _virtualDesktopMock
+            .Setup(v => v.TryGetDefaultDesktopId())
+            .Throws(new InvalidOperationException("COM went away"));
+
+        var ex = Record.Exception(() => sut.EnforceAnchorDesktopOnce(PanelHwnd));
+
+        Assert.Null(ex);
+    }
+
+    // ── Persistence: AnchorVirtualDesktopId (ADR-019 §7) ──────────────────────
+
+    [Fact]
+    public void SaveThenLoad_RoundTripsAnchorVirtualDesktopId()
+    {
+        var writer = BuildSut(settingsJson: "");
+        writer.Load();
+        writer.Model.IsEnabled = true;
+        writer.Model.AnchorVirtualDesktopId = PersistedGuid;
+        writer.Save();
+
+        var persisted = _settingsMock.Object.SystemIconsPanel;
+
+        var reader = BuildSut(settingsJson: persisted);
+        reader.Load();
+
+        Assert.Equal(PersistedGuid, reader.Model.AnchorVirtualDesktopId);
+    }
+
+    [Fact]
+    public void Load_WithoutAnchorKey_LeavesAnchorNull()
+    {
+        var json = BuildJson(isEnabled: true); // anchor argument omitted -> key absent from JSON
+        Assert.DoesNotContain("AnchorVirtualDesktopId", json);
+        var sut = BuildSut(settingsJson: json);
+
+        sut.Load();
+
+        Assert.Null(sut.Model.AnchorVirtualDesktopId);
+    }
+
+    [Fact]
+    public void Load_WithGarbageAnchorValue_AnchorIsNull_ButOtherSettingsLoadNormally()
+    {
+        var items = new[]
+        {
+            (SystemIconKind.ThisPc,       true,  0),
+            (SystemIconKind.ControlPanel, false, 1),
+            (SystemIconKind.RecycleBin,   true,  2),
+            (SystemIconKind.Network,      true,  3),
+            (SystemIconKind.UserFolder,   true,  4),
+        };
+        var json = BuildJson(
+            isEnabled: true, iconSize: "Large", items: items, anchorVirtualDesktopId: "not-a-guid");
+        var sut = BuildSut(settingsJson: json);
+
+        sut.Load();
+
+        Assert.Null(sut.Model.AnchorVirtualDesktopId);
+        Assert.True(sut.Model.IsEnabled);
+        Assert.Equal(SystemIconSize.Large, sut.Model.IconSize);
+        Assert.False(sut.Model.Items.Single(i => i.Kind == SystemIconKind.ControlPanel).IsVisible);
+        Assert.Equal(Enum.GetValues<SystemIconKind>().Length, sut.Model.Items.Count);
+    }
+
+    [Fact]
+    public void Save_DoesNotWriteAnchorKey_WhenAnchorIsNull()
+    {
+        var sut = BuildSut(settingsJson: "");
+        sut.Load(); // Model.AnchorVirtualDesktopId stays null
+
+        sut.Save();
+
+        using var doc = JsonDocument.Parse(_settingsMock.Object.SystemIconsPanel);
+        Assert.False(doc.RootElement.TryGetProperty("AnchorVirtualDesktopId", out _));
     }
 }

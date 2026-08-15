@@ -22,6 +22,7 @@ public class ChildWindowModel : INotifyPropertyChanged
     private double _iconSize = 48;
     private PanelViewMode _viewMode = PanelViewMode.List;
     private PanelContentFilter _contentFilter = PanelContentFilter.ShowAll;
+    private PanelSortMode _sortMode = PanelSortMode.Manual;
     private bool _isRolledUp;
 
     /// <inheritdoc />
@@ -94,6 +95,20 @@ public class ChildWindowModel : INotifyPropertyChanged
     {
         get => _contentFilter;
         set => SetField(ref _contentFilter, value);
+    }
+
+    /// <summary>
+    /// How the panel orders its items — manual (drag) order or alphabetical by name. Serialised to
+    /// JSON; a JSON document written before this feature existed has no <c>SortMode</c> property at
+    /// all, and <c>System.Text.Json</c> deserializes a missing enum property to
+    /// <see langword="default"/>, i.e. <see cref="PanelSortMode.Manual"/> — so panels saved before
+    /// this feature keep showing their items in exactly the order they always did, with no migration
+    /// (see <see cref="PanelSortMode"/> for the full rationale).
+    /// </summary>
+    public PanelSortMode SortMode
+    {
+        get => _sortMode;
+        set => SetField(ref _sortMode, value);
     }
 
     /// <summary>

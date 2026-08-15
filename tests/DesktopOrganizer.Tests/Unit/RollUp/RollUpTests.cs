@@ -5,12 +5,27 @@ using DesktopOrganizer.UI.Models;
 namespace DesktopOrganizer.Tests.Unit.RollUp;
 
 /// <summary>
-/// Unit tests for the «Свернуть до заголовка» (roll-up) feature:
+/// Unit tests for the "collapse to title bar" (roll-up) feature:
 /// <see cref="BoolToGlyphConverter"/> and <see cref="ChildWindowModel.IsRolledUp"/> INPC.
 /// </summary>
 [Trait(UnitTests, "RollUp")]
 public class RollUpTests
 {
+    /// <summary>
+    /// Segoe MDL2 Assets glyph rendered while the panel IS rolled up — ChevronDown (U+E70D),
+    /// i.e. "click to roll back down". The panel header buttons all render in the
+    /// "Segoe MDL2 Assets" font (PanelHeaderButtonStyle), so the converter deliberately returns
+    /// private-use MDL2 code points rather than the plain Unicode geometric triangles an earlier
+    /// iteration used.
+    /// </summary>
+    private const string ChevronDownGlyph = "\uE70D";
+
+    /// <summary>
+    /// Segoe MDL2 Assets glyph rendered while the panel is expanded — ChevronUp (U+E70E),
+    /// i.e. "click to roll up".
+    /// </summary>
+    private const string ChevronUpGlyph = "\uE70E";
+
     private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
 
     private static BoolToGlyphConverter CreateConverter() => new();
@@ -20,33 +35,33 @@ public class RollUpTests
     // ------------------------------------------------------------------
 
     [Fact]
-    public void Convert_TrueWithNullParameter_ReturnsDownTriangle()
+    public void Convert_TrueWithNullParameter_ReturnsChevronDown()
     {
         var converter = CreateConverter();
 
         var result = converter.Convert(true, typeof(string), null!, Invariant);
 
-        Assert.Equal("▽", result);
+        Assert.Equal(ChevronDownGlyph, result);
     }
 
     [Fact]
-    public void Convert_FalseWithNullParameter_ReturnsUpTriangle()
+    public void Convert_FalseWithNullParameter_ReturnsChevronUp()
     {
         var converter = CreateConverter();
 
         var result = converter.Convert(false, typeof(string), null!, Invariant);
 
-        Assert.Equal("△", result);
+        Assert.Equal(ChevronUpGlyph, result);
     }
 
     [Fact]
-    public void Convert_TrueWithGlyphParameter_ReturnsDownTriangle()
+    public void Convert_TrueWithGlyphParameter_ReturnsChevronDown()
     {
         var converter = CreateConverter();
 
         var result = converter.Convert(true, typeof(string), "glyph", Invariant);
 
-        Assert.Equal("▽", result);
+        Assert.Equal(ChevronDownGlyph, result);
     }
 
     // ------------------------------------------------------------------
@@ -60,7 +75,7 @@ public class RollUpTests
 
         var result = converter.Convert(true, typeof(string), "tooltip", Invariant);
 
-        Assert.Equal("Развернуть", result);
+        Assert.Equal("Expand", result);
     }
 
     [Fact]
@@ -70,7 +85,7 @@ public class RollUpTests
 
         var result = converter.Convert(false, typeof(string), "tooltip", Invariant);
 
-        Assert.Equal("Свернуть", result);
+        Assert.Equal("Collapse", result);
     }
 
     // ------------------------------------------------------------------

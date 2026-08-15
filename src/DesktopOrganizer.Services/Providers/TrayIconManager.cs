@@ -15,6 +15,9 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
     public event EventHandler? OnShowMainWindowRequested;
 
     /// <inheritdoc />
+    public event EventHandler? OnToggleMainWindowVisibilityRequested;
+
+    /// <inheritdoc />
     public void Initialize()
     {
         notifyIconAdapter.SetIcon("Resources/app.ico");
@@ -32,13 +35,12 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
     {
         var contextMenu = new ContextMenuStrip();
 
-        contextMenu.Items.Add(
-            _isMainWindowVisible ? "Скрыть настройки" : "Настройки",
-            null,
-            (_, _) => ToggleMainWindowVisibility());
+        // Always "Settings" — clicking it is an explicit "open the window" action, never a hide.
+        // (Double-clicking the tray icon is the separate toggle gesture — see ToggleMainWindowVisibility.)
+        contextMenu.Items.Add("Settings", null, ShowMainWindowRequested);
 
         contextMenu.Items.Add(new ToolStripSeparator());
-        contextMenu.Items.Add("Выход", null, ExitRequested);
+        contextMenu.Items.Add("Exit", null, ExitRequested);
 
         notifyIconAdapter.SetContextMenu(contextMenu);
     }
@@ -46,8 +48,7 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
     private void ToggleMainWindowVisibility()
     {
         _isMainWindowVisible = !_isMainWindowVisible;
-        ShowMainWindowRequested(this, EventArgs.Empty);
-        UpdateContextMenu(_isMainWindowVisible);
+        OnToggleMainWindowVisibilityRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void ShowMainWindowRequested(object? sender, EventArgs e)

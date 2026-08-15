@@ -1,4 +1,5 @@
-﻿using DesktopOrganizer.UI.Models;
+﻿using System.Windows;
+using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Views;
 
 namespace DesktopOrganizer.UI.Services;
@@ -29,9 +30,18 @@ public interface IWindowManager
     event EventHandler<ChildWindowModel> OnChildWindowModified;
 
     /// <summary>
-    /// Shows or activates the main application window.
+    /// Toggles the main application window: shows/activates it if currently hidden, hides it if
+    /// currently visible. Used by the tray icon's double-click gesture.
     /// </summary>
     void StartMainWindow();
+
+    /// <summary>
+    /// Shows and activates the main application window unconditionally — never hides it. If the
+    /// window is already visible (e.g. minimized or behind other windows), it is restored to its
+    /// normal window state and brought to the foreground. Used by the tray icon context menu's
+    /// "Settings" item.
+    /// </summary>
+    void ShowMainWindow();
 
     /// <summary>
     /// Creates a new child window.
@@ -124,4 +134,28 @@ public interface IWindowManager
     /// to the actual <see cref="Views.ChildWindow"/> (shows or hides it).
     /// </summary>
     void ApplyPanelVisibility(Models.ChildWindowModel model);
+
+    /// <summary>
+    /// Fills <paramref name="buffer"/> with the current on-screen rectangles of every live, visible
+    /// child panel except <paramref name="excludingId"/> — the "obstacles" a drag gesture must not be
+    /// allowed to overlap (see <c>docs/PLANS/panel-anti-overlap.md</c> §3.3).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately reads live <see cref="Views.ChildWindow"/> geometry (<c>Window.Left</c>/<c>Top</c>/
+    /// <c>ActualWidth</c>/<c>ActualHeight</c>), never <see cref="Models.ChildWindowModel.Position"/>/
+    /// <see cref="Models.ChildWindowModel.Size"/>: the model's <c>Size</c> intentionally keeps a rolled-up
+    /// panel's <em>expanded</em> height (see <c>ChildWindow.OnRenderSizeChanged</c>), which would make a
+    /// collapsed panel block far more space than it visually occupies. A hidden panel (different page,
+    /// or otherwise not currently shown) contributes no obstacle — it blocks nothing the user can see.
+    /// <para>
+    /// The buffer is owned by the caller and reused across gestures; this method always starts by
+    /// calling <see cref="ICollection{T}.Clear"/> on it and never allocates a new list itself. Intended
+    /// to be called once per drag gesture (e.g. on mouse-down), not on every mouse-move.
+    /// </para>
+    /// </remarks>
+    /// <param name="excludingId">The <see cref="Models.ChildWindowModel.Id"/> of the panel currently
+    /// being dragged — excluded from its own obstacle set.</param>
+    /// <param name="buffer">The list to clear and repopulate with obstacle rectangles.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="buffer"/> is <see langword="null"/>.</exception>
+    void CollectOtherPanelBounds(Guid excludingId, IList<Rect> buffer);
 }

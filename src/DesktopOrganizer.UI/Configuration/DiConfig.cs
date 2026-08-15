@@ -29,6 +29,7 @@ public static class DiConfig
         services.AddSingleton<IAppSettings, AppSettings>();
         services.AddSingleton<IAutostartService, AutostartService>();
         services.AddSingleton<IWindowManager, WindowManager>();
+        services.AddSingleton<IPanelSelectionCoordinator, PanelSelectionCoordinator>();
         services.AddSingleton<IPageManager, PageManagerService>();
         services.AddSingleton<ILayoutSnapshotService, LayoutSnapshotService>();
         services.AddSingleton<MainWindow>();   // Singleton: hidden, not re-created
@@ -40,11 +41,13 @@ public static class DiConfig
                 sp.GetRequiredService<IAppSettings>(),
                 sp.GetRequiredService<IDesktopIntegrationService>(),
                 sp.GetRequiredService<IMonitorService>(),
+                sp.GetRequiredService<IVirtualDesktopService>(),
                 () => sp.GetRequiredService<SystemIconsPanelWindow>()));
         services.AddTransient<SystemIconsPanelViewModel>(sp =>
             new SystemIconsPanelViewModel(
                 sp.GetRequiredService<ISystemIconsPanelManager>().Model,
-                sp.GetRequiredService<ISystemShellService>()));
+                sp.GetRequiredService<ISystemShellService>(),
+                sp.GetRequiredService<IPanelSelectionCoordinator>()));
         services.AddTransient<SystemIconsPanelWindow>();
     }
 }

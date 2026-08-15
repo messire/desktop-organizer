@@ -1147,6 +1147,659 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    // ── B1: new {guid}\{originalName} storage layout (ADR-013 Decision 2) ───
+
+    [Fact]
+    public void MoveIn_ProducesPerItemGuidDirectory_FileNameIsOriginal()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "MyReport.docx");
+        File.WriteAllText(source, "x");
+
+        try
+        {
+            var result = service.MoveIn(source);
+
+            Assert.NotNull(result);
+            Assert.Equal("MyReport.docx", Path.GetFileName(result));
+
+            var itemDir = Path.GetDirectoryName(result)!;
+            var itemDirName = Path.GetFileName(itemDir);
+            Assert.True(Guid.TryParseExact(itemDirName, "N", out _), $"Expected parent directory '{itemDirName}' to be a bare GUID.");
+
+            var itemDirParent = Path.GetFullPath(Path.GetDirectoryName(itemDir)!).TrimEnd(Path.DirectorySeparatorChar);
+            var expectedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
+            Assert.Equal(expectedRoot, itemDirParent, ignoreCase: true);
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void MoveInDirectory_ProducesPerItemGuidDirectory_FolderNameIsOriginal()
+    {
+        var (service, root) = BuildService();
+        var sourceParent = Path.Combine(Path.GetTempPath(), $"DOrgOrigParent_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceParent);
+        var source = Path.Combine(sourceParent, "MyFolder");
+        Directory.CreateDirectory(source);
+        File.WriteAllText(Path.Combine(source, "f.txt"), "x");
+
+        try
+        {
+            var result = service.MoveInDirectory(source);
+
+            Assert.NotNull(result);
+            Assert.Equal("MyFolder", Path.GetFileName(result));
+
+            var itemDirName = Path.GetFileName(Path.GetDirectoryName(result));
+            Assert.True(Guid.TryParseExact(itemDirName, "N", out _), $"Expected parent directory '{itemDirName}' to be a bare GUID.");
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceParent);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void MoveIn_TwoFilesWithSameOriginalName_UseDistinctGuidDirectories_BothKeepOriginalName()
+    {
+        var (service, root) = BuildService();
+        var dirA = Path.Combine(Path.GetTempPath(), $"DOrgA_{Guid.NewGuid():N}");
+        var dirB = Path.Combine(Path.GetTempPath(), $"DOrgB_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dirA);
+        Directory.CreateDirectory(dirB);
+        var sourceA = Path.Combine(dirA, "Report.docx");
+        var sourceB = Path.Combine(dirB, "Report.docx");
+        File.WriteAllText(sourceA, "A");
+        File.WriteAllText(sourceB, "B");
+
+        try
+        {
+            var resultA = service.MoveIn(sourceA);
+            var resultB = service.MoveIn(sourceB);
+
+            Assert.NotNull(resultA);
+            Assert.NotNull(resultB);
+            Assert.Equal("Report.docx", Path.GetFileName(resultA));
+            Assert.Equal("Report.docx", Path.GetFileName(resultB));
+            Assert.NotEqual(Path.GetDirectoryName(resultA), Path.GetDirectoryName(resultB));
+            Assert.Equal("A", File.ReadAllText(resultA!));
+            Assert.Equal("B", File.ReadAllText(resultB!));
+        }
+        finally
+        {
+            SafeDeleteDirectory(dirA);
+            SafeDeleteDirectory(dirB);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    // ── B2: orphaned empty per-item GUID directory cleanup ───────────────────
+
+    [Fact]
+    public void Restore_CleansUpTheNowEmptyPerItemGuidDirectory()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "MyApp.lnk");
+        File.WriteAllText(source, "x");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+            var itemDir = Path.GetDirectoryName(managed)!;
+            Assert.True(Directory.Exists(itemDir));
+
+            var outcome = service.Restore(managed!);
+
+            Assert.Equal(RestoreOutcome.Restored, outcome);
+            Assert.False(Directory.Exists(itemDir), "The now-empty per-item GUID directory must be cleaned up.");
+            Assert.True(Directory.Exists(root), "The storage root itself must never be deleted.");
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void Release_CleansUpTheNowEmptyPerItemGuidDirectory()
+    {
+        var (service, root) = BuildService();
+        var source = Path.Combine(Path.GetTempPath(), $"DOrgSrc_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(source, "x");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+            var itemDir = Path.GetDirectoryName(managed)!;
+            Assert.True(Directory.Exists(itemDir));
+
+            service.Release(managed!);
+
+            Assert.False(Directory.Exists(itemDir), "The now-empty per-item GUID directory must be cleaned up.");
+            Assert.True(Directory.Exists(root), "The storage root itself must never be deleted.");
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void Restore_PerItemGuidDirectoryNotEmpty_IsNotDeleted()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "MyApp.lnk");
+        File.WriteAllText(source, "x");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+            var itemDir = Path.GetDirectoryName(managed)!;
+
+            // Something else (not tracked by the manifest) also lives in the per-item directory —
+            // simulates any stray file ending up alongside the managed item.
+            File.WriteAllText(Path.Combine(itemDir, "stray.txt"), "leave me alone");
+
+            var outcome = service.Restore(managed!);
+
+            Assert.Equal(RestoreOutcome.Restored, outcome);
+            Assert.True(Directory.Exists(itemDir), "A non-empty per-item directory must never be deleted.");
+            Assert.True(File.Exists(Path.Combine(itemDir, "stray.txt")));
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void Release_PerItemGuidDirectoryNotEmpty_IsNotDeleted()
+    {
+        var (service, root) = BuildService();
+        var source = Path.Combine(Path.GetTempPath(), $"DOrgSrc_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(source, "x");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+            var itemDir = Path.GetDirectoryName(managed)!;
+            File.WriteAllText(Path.Combine(itemDir, "stray.txt"), "leave me alone");
+
+            service.Release(managed!);
+
+            Assert.True(Directory.Exists(itemDir), "A non-empty per-item directory must never be deleted.");
+            Assert.True(File.Exists(Path.Combine(itemDir, "stray.txt")));
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Regression guard for the cleanup guard itself: a legacy flat-layout item (its "directory" IS
+    /// the storage root — see <see cref="PanelItemStorageService.RenameManaged"/> remarks on
+    /// <c>isLegacyFlat</c>) must never cause the storage root itself to be deleted, even once it
+    /// becomes the last item there.
+    /// </summary>
+    [Fact]
+    public void Restore_LegacyFlatItem_NeverDeletesStorageRoot()
+    {
+        var (service, root) = BuildService();
+        Directory.CreateDirectory(root);
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "Legacy.lnk");
+        File.WriteAllText(source, "legacy-content");
+
+        // Simulate a legacy flat-layout managed item: file lives directly in root, with a hand-written
+        // manifest entry (no per-item GUID directory — this predates ADR-013 Decision 2).
+        var legacyManaged = Path.Combine(root, $"Legacy_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(legacyManaged, "legacy-content");
+        var manifest = new Dictionary<string, string> { [legacyManaged] = source };
+        File.WriteAllText(Path.Combine(root, ".manifest.json"), JsonSerializer.Serialize(manifest));
+
+        try
+        {
+            var outcome = service.Restore(legacyManaged);
+
+            Assert.Equal(RestoreOutcome.Restored, outcome);
+            Assert.True(Directory.Exists(root), "The storage root itself must never be deleted.");
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    // ── B1: truncate-guard on destination path length (>240 chars) ──────────
+
+    [Fact]
+    public void MoveIn_LongFileName_TruncatesBaseNamePreservingExtension()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgLongOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var longBaseName = new string('a', 250);
+        var source = Path.Combine(sourceDir, longBaseName + ".txt");
+        File.WriteAllText(source, "long-name-content");
+
+        try
+        {
+            var result = service.MoveIn(source);
+
+            Assert.NotNull(result);
+            Assert.True(result!.Length <= 240, $"Destination path must respect the 240-char guard, was {result.Length} chars: '{result}'.");
+            Assert.EndsWith(".txt", result, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(result));
+            Assert.Equal("long-name-content", File.ReadAllText(result));
+
+            var truncatedBase = Path.GetFileNameWithoutExtension(result);
+            Assert.True(truncatedBase.Length < longBaseName.Length, "Base name must actually have been shortened.");
+            Assert.StartsWith(truncatedBase, longBaseName, StringComparison.Ordinal);
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    // ── C1/C2: RenameManaged (ADR-013 Decision 5) ────────────────────────────
+
+    [Fact]
+    public void RenameManaged_HappyPath_MovesFileAndUpdatesManifestOriginalName()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "Old.lnk");
+        File.WriteAllText(source, "content");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+            var itemDir = Path.GetDirectoryName(managed)!;
+
+            var renameResult = service.RenameManaged(managed!, "New.lnk");
+            var newPath = renameResult.NewPath;
+
+            Assert.Equal(RenameOutcome.Renamed, renameResult.Outcome);
+            Assert.NotNull(newPath);
+            Assert.Equal("New.lnk", Path.GetFileName(newPath));
+            Assert.Equal(itemDir, Path.GetDirectoryName(newPath), ignoreCase: true);
+            Assert.True(File.Exists(newPath));
+            Assert.False(File.Exists(managed!), "Old managed path must no longer exist after rename.");
+            Assert.Equal("content", File.ReadAllText(newPath!));
+
+            // Manifest key was re-keyed to the new managed path, and the recorded original path now
+            // carries the new name in the SAME original directory — proven by round-tripping via Restore.
+            var outcome = service.Restore(newPath!);
+            var expectedOriginal = Path.Combine(sourceDir, "New.lnk");
+
+            Assert.Equal(RestoreOutcome.Restored, outcome);
+            Assert.True(File.Exists(expectedOriginal), "Restore after rename must place the file back under its NEW name.");
+            Assert.Equal("content", File.ReadAllText(expectedOriginal));
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void RenameManaged_LegacyFlatItem_RelocatesIntoNewGuidDirectory()
+    {
+        var (service, root) = BuildService();
+        Directory.CreateDirectory(root);
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "Legacy.lnk");
+        File.WriteAllText(source, "legacy-content");
+
+        var legacyManaged = Path.Combine(root, $"Legacy_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(legacyManaged, "legacy-content");
+        var manifest = new Dictionary<string, string> { [legacyManaged] = source };
+        File.WriteAllText(Path.Combine(root, ".manifest.json"), JsonSerializer.Serialize(manifest));
+
+        try
+        {
+            var renameResult = service.RenameManaged(legacyManaged, "Cured.lnk");
+            var newPath = renameResult.NewPath;
+
+            Assert.Equal(RenameOutcome.Renamed, renameResult.Outcome);
+            Assert.NotNull(newPath);
+            Assert.Equal("Cured.lnk", Path.GetFileName(newPath));
+
+            var newItemDir = Path.GetDirectoryName(newPath)!;
+            Assert.False(
+                string.Equals(
+                    Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar),
+                    Path.GetFullPath(newItemDir).TrimEnd(Path.DirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase),
+                "Renaming a legacy flat item must relocate it into a NEW per-item directory, not leave it directly in the storage root.");
+            Assert.True(Guid.TryParseExact(Path.GetFileName(newItemDir), "N", out _));
+
+            Assert.True(File.Exists(newPath));
+            Assert.False(File.Exists(legacyManaged), "Legacy flat file must have moved out of the storage root.");
+
+            var outcome = service.Restore(newPath!);
+            var expectedOriginal = Path.Combine(sourceDir, "Cured.lnk");
+            Assert.Equal(RestoreOutcome.Restored, outcome);
+            Assert.True(File.Exists(expectedOriginal));
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="Manifest_TransientReadFailure_DoesNotPoisonCacheOrDestroyDiskManifest"/>:
+    /// a manifest cache that fails to load (the manifest file is exclusively locked by someone else)
+    /// must abort the rename entirely, before any file-system mutation — see ADR-013 Decision 5 /
+    /// <see cref="IPanelItemStorageService.RenameManaged"/> remarks.
+    /// </summary>
+    [Fact]
+    public void RenameManaged_ManifestCacheUntrusted_AbortsAndLeavesFileAndManifestUntouched()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"DOrgStorage_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var manifestPath = Path.Combine(root, ".manifest.json");
+
+        var source = Path.Combine(sourceDir, "Old.lnk");
+        File.WriteAllText(source, "must-not-move");
+
+        try
+        {
+            // Populate a real on-disk manifest entry via a fresh, unrelated service instance.
+            var writer = new PanelItemStorageService(root);
+            var managed = writer.MoveIn(source);
+            Assert.NotNull(managed);
+
+            var manifestJsonBefore = File.ReadAllText(manifestPath);
+
+            // A second, fresh instance whose very first manifest access hits a locked file.
+            var renamer = new PanelItemStorageService(root);
+            RenameResult result;
+            using (var lockHandle = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                result = renamer.RenameManaged(managed!, "New.lnk");
+                lockHandle.Close();
+            }
+
+            Assert.Equal(RenameOutcome.Failed, result.Outcome);
+            Assert.Null(result.NewPath);
+            Assert.True(File.Exists(managed!), "Managed file must be untouched when the manifest write aborts.");
+            Assert.Equal("must-not-move", File.ReadAllText(managed!));
+            Assert.Equal(manifestJsonBefore, File.ReadAllText(manifestPath));
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// M3 regression (found by code-quality-reviewer): a name collision must surface as the specific
+    /// <see cref="RenameOutcome.NameTaken"/>, not the generic <see cref="RenameOutcome.Failed"/> —
+    /// see <see cref="IPanelItemStorageService.RenameManaged"/> remarks and DoD §11.
+    /// </summary>
+    [Fact]
+    public void RenameManaged_DestinationNameAlreadyTaken_ReturnsNameTakenAndFileUntouched()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "A.lnk");
+        File.WriteAllText(source, "content-a");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+            var itemDir = Path.GetDirectoryName(managed)!;
+
+            // Something else already occupies the desired name inside the SAME per-item directory.
+            var takenPath = Path.Combine(itemDir, "Taken.lnk");
+            File.WriteAllText(takenPath, "already-here");
+
+            var result = service.RenameManaged(managed!, "Taken.lnk");
+
+            Assert.Equal(RenameOutcome.NameTaken, result.Outcome);
+            Assert.Null(result.NewPath);
+            Assert.True(File.Exists(managed!), "Source must be untouched on a collision.");
+            Assert.Equal("content-a", File.ReadAllText(managed!));
+            Assert.Equal("already-here", File.ReadAllText(takenPath));
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// M2 regression (found by code-quality-reviewer): if the physical move fails AFTER the
+    /// manifest has already been updated for the rename, the item must remain fully restorable
+    /// under its OLD managed path — no manual/rollback re-key that can itself fail and strand the
+    /// manifest is involved anymore (see <see cref="PanelItemStorageService"/> "TryRenameManifestEntry"
+    /// remarks). Before the fix, a failed rollback write here could leave the manifest keyed only to
+    /// the (never-created) new path, so <see cref="Restore"/> against the old (still physically
+    /// present, unchanged) managed path would return <see cref="RestoreOutcome.OriginalPathUnknown"/>
+    /// — which calling code treats as "remove from panel", i.e. permanent data loss.
+    /// </summary>
+    [Fact]
+    public void RenameManaged_MoveFailsAfterManifestUpdated_OldPathStillRestorable()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "Old.lnk");
+        const string content = "must-not-be-lost";
+        File.WriteAllText(source, content);
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+
+            RenameResult result;
+            using (var lockHandle = new FileStream(managed!, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                // File.Move needs exclusive access to the source — this lock makes the physical
+                // move fail AFTER TryRenameManifestEntry has already added the new manifest entry.
+                result = service.RenameManaged(managed!, "New.lnk");
+                lockHandle.Close();
+            }
+
+            Assert.Equal(RenameOutcome.Failed, result.Outcome);
+            Assert.Null(result.NewPath);
+            Assert.True(File.Exists(managed!), "Managed file must still be at its OLD path — the move never happened.");
+            Assert.Equal(content, File.ReadAllText(managed!));
+
+            // The critical assertion: the OLD manifest entry must still be valid — proving the item
+            // is still restorable, not silently orphaned.
+            var outcome = service.Restore(managed!);
+            Assert.Equal(RestoreOutcome.Restored, outcome);
+            Assert.True(File.Exists(source), "File must be restorable to its original location after a failed rename.");
+            Assert.Equal(content, File.ReadAllText(source));
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void RenameManaged_CaseOnlyRename_Succeeds()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "Report.lnk");
+        File.WriteAllText(source, "content");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+
+            var result = service.RenameManaged(managed!, "report.lnk");
+
+            Assert.Equal(RenameOutcome.Renamed, result.Outcome);
+            Assert.NotNull(result.NewPath);
+            Assert.Equal("report.lnk", Path.GetFileName(result.NewPath));
+            Assert.True(File.Exists(result.NewPath));
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// N4 regression (found by code-quality-reviewer): when the truncate-guard shortens the
+    /// requested name because the destination path would otherwise exceed the soft path-length cap,
+    /// the manifest must record the SAME (truncated) name that actually landed on disk — not the
+    /// raw, untruncated name the caller asked for. Otherwise a later <see cref="Restore"/> would put
+    /// the file back under a name that was never actually used for the managed copy.
+    /// </summary>
+    [Fact]
+    public void RenameManaged_LongNameTruncated_ManifestRecordsTruncatedNameMatchingDisk()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "Old.lnk");
+        const string content = "content";
+        File.WriteAllText(source, content);
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+
+            var longName = new string('b', 250) + ".lnk";
+            var result = service.RenameManaged(managed!, longName);
+
+            Assert.Equal(RenameOutcome.Renamed, result.Outcome);
+            Assert.NotNull(result.NewPath);
+            var actualOnDiskName = Path.GetFileName(result.NewPath);
+            Assert.True(actualOnDiskName.Length < longName.Length, "Name must actually have been truncated.");
+            Assert.True(File.Exists(result.NewPath));
+
+            // Restore must put the file back under the SAME truncated name that's on disk — proving
+            // the manifest's recorded original-name portion matches, not the raw untruncated input.
+            var outcome = service.Restore(result.NewPath!);
+            var expectedOriginal = Path.Combine(sourceDir, actualOnDiskName);
+
+            Assert.Equal(RestoreOutcome.Restored, outcome);
+            Assert.True(File.Exists(expectedOriginal), $"Expected restored file at '{expectedOriginal}' (matching the truncated on-disk name).");
+            Assert.Equal(content, File.ReadAllText(expectedOriginal));
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void RenameManaged_PathNotManaged_ReturnsFailed()
+    {
+        var (service, _) = BuildService();
+        var outside = Path.Combine(Path.GetTempPath(), $"DOrgOutside_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(outside, "not-managed");
+
+        try
+        {
+            var result = service.RenameManaged(outside, "New.lnk");
+
+            Assert.Equal(RenameOutcome.Failed, result.Outcome);
+            Assert.Null(result.NewPath);
+            Assert.True(File.Exists(outside));
+        }
+        finally
+        {
+            SafeDeleteFile(outside);
+        }
+    }
+
+    [Fact]
+    public void RenameManaged_NewNameContainsPathSeparator_ReturnsInvalidName()
+    {
+        var (service, root) = BuildService();
+        var source = Path.Combine(Path.GetTempPath(), $"DOrgSrc_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(source, "content");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+
+            var result = service.RenameManaged(managed!, @"..\evil.lnk");
+
+            Assert.Equal(RenameOutcome.InvalidName, result.Outcome);
+            Assert.Null(result.NewPath);
+            Assert.True(File.Exists(managed!), "A defense-in-depth reject must not touch the file.");
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void RenameManaged_StoredPathDoesNotExistOnDisk_ReturnsNotFound()
+    {
+        var (service, root) = BuildService();
+        Directory.CreateDirectory(root);
+        var ghostGuidDir = Path.Combine(root, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(ghostGuidDir);
+        var ghost = Path.Combine(ghostGuidDir, "ghost.lnk"); // never actually created
+
+        try
+        {
+            var result = service.RenameManaged(ghost, "New.lnk");
+            Assert.Equal(RenameOutcome.NotFound, result.Outcome);
+            Assert.Null(result.NewPath);
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
     private static void AssertManifestFileIsEmpty(string root)
     {
         var manifestPath = Path.Combine(root, ".manifest.json");

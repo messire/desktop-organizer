@@ -32,12 +32,35 @@ internal partial class NativeApi: INativeApi
         => NativeMethods.SetParentNative(child, newParent);
 
     /// <inheritdoc />
+    public IntPtr GetParent(IntPtr hwnd)
+        => hwnd == IntPtr.Zero ? IntPtr.Zero : NativeMethods.GetParentNative(hwnd);
+
+    /// <inheritdoc />
+    public string GetWindowClassName(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return string.Empty;
+
+        // 256 chars is the documented maximum length of a registered window class name.
+        var buffer = new System.Text.StringBuilder(256);
+        var length = NativeMethods.GetClassNameW(hwnd, buffer, buffer.Capacity);
+        return length > 0 ? buffer.ToString() : string.Empty;
+    }
+
+    /// <inheritdoc />
+    public IntPtr GetWindow(IntPtr hwnd, int command)
+        => hwnd == IntPtr.Zero ? IntPtr.Zero : NativeMethods.GetWindowNative(hwnd, command);
+
+    /// <inheritdoc />
     public IntPtr GetWindowLongPtr(IntPtr hwnd, int index)
         => NativeMethods.GetWindowLongPtrW(hwnd, index);
 
     /// <inheritdoc />
     public IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr newLong)
         => NativeMethods.SetWindowLongPtrW(hwnd, index, newLong);
+
+    /// <inheritdoc />
+    public bool SetWindowPos(IntPtr hwnd, IntPtr hwndInsertAfter, int x, int y, int cx, int cy, uint flags)
+        => hwnd != IntPtr.Zero && NativeMethods.SetWindowPos(hwnd, hwndInsertAfter, x, y, cx, cy, flags);
 
     /// <inheritdoc />
     public System.Drawing.Point GetCursorPos()
@@ -68,6 +91,10 @@ internal partial class NativeApi: INativeApi
     /// <inheritdoc />
     public bool IsWindowVisible(IntPtr hwnd)
         => NativeMethods.IsWindowVisible(hwnd);
+
+    /// <inheritdoc />
+    public IntPtr GetForegroundWindow()
+        => NativeMethods.GetForegroundWindow();
 
     /// <inheritdoc />
     public IntPtr GetKnownFolderPidl(Guid knownFolderId)
@@ -390,11 +417,26 @@ internal partial class NativeApi: INativeApi
         [LibraryImport("User32.dll", EntryPoint = "SetParent")]
         public static partial IntPtr SetParentNative(IntPtr hWndChild, IntPtr hWndNewParent);
 
+        [LibraryImport("User32.dll", EntryPoint = "GetParent")]
+        public static partial IntPtr GetParentNative(IntPtr hWnd);
+
+        // GetClassName writes into a caller-supplied buffer — StringBuilder marshalling is not
+        // supported by the LibraryImport source generator, so this one stays a classic DllImport.
+        [DllImport("User32.dll", EntryPoint = "GetClassNameW", CharSet = CharSet.Unicode)]
+        public static extern int GetClassNameW(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+        [LibraryImport("User32.dll", EntryPoint = "GetWindow")]
+        public static partial IntPtr GetWindowNative(IntPtr hWnd, int uCmd);
+
         [LibraryImport("User32.dll", EntryPoint = "GetWindowLongPtrW")]
         public static partial IntPtr GetWindowLongPtrW(IntPtr hWnd, int nIndex);
 
         [LibraryImport("User32.dll", EntryPoint = "SetWindowLongPtrW")]
         public static partial IntPtr SetWindowLongPtrW(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+        [LibraryImport("User32.dll", EntryPoint = "SetWindowPos", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
         [LibraryImport("User32.dll", EntryPoint = "GetCursorPos")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -407,6 +449,9 @@ internal partial class NativeApi: INativeApi
         [LibraryImport("User32.dll", EntryPoint = "IsWindowVisible")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static partial bool IsWindowVisible(IntPtr hWnd);
+
+        [LibraryImport("User32.dll", EntryPoint = "GetForegroundWindow")]
+        public static partial IntPtr GetForegroundWindow();
 
         // ShellExecuteEx carries a struct with string fields — DllImport (not source-gen LibraryImport)
         [DllImport("Shell32.dll", EntryPoint = "ShellExecuteExW", CharSet = CharSet.Unicode, SetLastError = true)]

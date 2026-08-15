@@ -18,6 +18,7 @@ internal class IconProvider : IIconProvider
 
     private const FileFlag IconFlags = FileFlag.Icon | ShellIconSize | UseFileAttributes;
     private const FileAttribute FileAttributes = Normal;
+    private const FileAttribute DirectoryAttributes = FileAttribute.Directory;
 
     // Only these carry an icon embedded in/derived from the file itself (rather than a shared
     // shell-type icon), so only they can actually go stale when the file's *content* changes.
@@ -89,7 +90,7 @@ internal class IconProvider : IIconProvider
             return cachedIcon;
         }
 
-        return TryRetrieveIcon(filePath, lastWriteTimeUtc) ?? PlaceholderIcon;
+        return TryRetrieveIcon(filePath, isFile, lastWriteTimeUtc) ?? PlaceholderIcon;
     }
 
     /// <summary>
@@ -131,14 +132,22 @@ internal class IconProvider : IIconProvider
     /// Attempts to retrieve the icon for the specified file path.
     /// </summary>
     /// <param name="filePath">File path.</param>
+    /// <param name="isFile">
+    /// Whether <paramref name="filePath"/> is a file (as opposed to a directory) — determines which
+    /// <c>SHGFI_USEFILEATTRIBUTES</c> attribute is passed to the shell. Since that flag makes the
+    /// shell resolve the icon purely from the given attribute and the path's extension (without
+    /// touching the file system), a directory passed as <see cref="FileAttribute.Normal"/> has no
+    /// extension to key off and falls back to the generic "unknown file" icon instead of a folder icon.
+    /// </param>
     /// <param name="lastWriteTimeUtc">Freshness timestamp to store alongside the cached icon.</param>
     /// <returns>A <see cref="BitmapSource"/> representing the icon, or <see langword="null"/> if retrieval fails.</returns>
-    private ImageSource? TryRetrieveIcon(string filePath, DateTime lastWriteTimeUtc)
+    private ImageSource? TryRetrieveIcon(string filePath, bool isFile, DateTime lastWriteTimeUtc)
     {
         try
         {
             var fileInfo = default(ShellFileInfo);
-            var iconHandle = _iconHandler.GetIconHandle(filePath, ref fileInfo, FileAttributes, IconFlags);
+            var fileAttributes = isFile ? FileAttributes : DirectoryAttributes;
+            var iconHandle = _iconHandler.GetIconHandle(filePath, ref fileInfo, fileAttributes, IconFlags);
             return iconHandle == IntPtr.Zero ? null : TryCreateBitmapSource(filePath, lastWriteTimeUtc, ref fileInfo);
         }
         catch (Exception ex)

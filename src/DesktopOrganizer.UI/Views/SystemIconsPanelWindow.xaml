@@ -12,7 +12,22 @@
         ShowInTaskbar="False"
         AllowsTransparency="True"
         Background="Transparent"
-        WindowStartupLocation="Manual">
+        WindowStartupLocation="Manual"
+        ShowActivated="False">
+    <!--
+        No Topmost here, by design (revises the ADR-019 trade-off). ADR-019 shipped Topmost="True"
+        because dropping the WorkerW parenting left the panel with no way back up the Z-order once
+        another window covered it (WS_EX_NOACTIVATE means a click never raises it). That restored
+        reachability at the cost of the panel floating over every application, which is not what a
+        desktop sidebar should do. The reachability problem is now solved from the other end instead:
+        SystemIconsPanelManager re-asserts, on a timer, the Z-order slot directly above the shell
+        desktop window (Progman), so the panel keeps sinking back behind ordinary windows — but not
+        behind the wallpaper — and is only ever visible over the desktop itself. Progman rather than
+        the HWND_BOTTOM pseudo-handle: HWND_BOTTOM only means "below everything else", which does not
+        exclude "below the window that paints the wallpaper" (ADR-001 rejected it for that reason).
+        ShowActivated="False" stays: the window must not steal focus when it is first shown, since
+        the desktop styles (WS_EX_NOACTIVATE) can only be applied after Show() — see ADR-019 §R0.5.
+    -->
     <d:Window.DataContext>
         <d:DesignInstance Type="vm:SystemIconsPanelViewModel" IsDesignTimeCreatable="False"/>
     </d:Window.DataContext>
@@ -27,20 +42,44 @@
             can be positioned absolutely over the items list during drag-reorder.
         -->
         <Grid x:Name="PanelGrid">
-            <ItemsControl x:Name="IconsItemsControl"
-                          ItemsSource="{Binding VisibleItems}"
-                          AllowDrop="True"
-                          PreviewMouseLeftButtonDown="IconsItemsControl_PreviewMouseLeftButtonDown"
-                          PreviewMouseMove="IconsItemsControl_PreviewMouseMove"
-                          DragOver="IconsItemsControl_DragOver"
-                          Drop="IconsItemsControl_Drop"
-                          DragLeave="IconsItemsControl_DragLeave">
-                <ItemsControl.ItemsPanel>
+            <!--
+                ItemsControl -> ListBox (ui-polishing-1 §5.3, D-F1): gives the sidebar the same
+                single-selection semantics and selection/hover chrome as the fence panels
+                (PanelItemContainerStyle, Templates.xaml — B-F1's fixed, non-clipped border), without
+                duplicating any of its hex tokens. Background/BorderThickness/Padding are all
+                explicitly zeroed out below to keep the default ListBox theme's own chrome (a
+                Padding="1" and a themed border, same trap documented next to ListViewTemplate in
+                Templates.xaml) from adding unaccounted pixels to the window's SizeToContent="Width"
+                measurement. ScrollViewer.HorizontalScrollBarVisibility="Disabled" for the same reason
+                — the vertical StackPanel content only ever grows downward.
+            -->
+            <ListBox x:Name="IconsListBox"
+                     ItemsSource="{Binding VisibleItems}"
+                     SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                     SelectionMode="Single"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     Padding="0"
+                     ItemContainerStyle="{StaticResource PanelItemContainerStyle}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     AllowDrop="True"
+                     PreviewMouseLeftButtonDown="IconsListBox_PreviewMouseLeftButtonDown"
+                     PreviewMouseMove="IconsListBox_PreviewMouseMove"
+                     DragOver="IconsListBox_DragOver"
+                     Drop="IconsListBox_Drop"
+                     DragLeave="IconsListBox_DragLeave">
+                <ListBox.ItemsPanel>
                     <ItemsPanelTemplate>
+                        <!--
+                            Left vertical (matches the pre-migration ItemsControl layout). The
+                            drag-reorder code-behind locates this panel by type
+                            (FindVisualChild<StackPanel> in SystemIconsPanelWindow.xaml.cs) rather than
+                            by name, so it survives the ItemsControl -> ListBox swap unchanged.
+                        -->
                         <StackPanel Orientation="Vertical"/>
                     </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
                     <DataTemplate>
                         <!--
                             Each item uses a Border + MouseBinding instead of Button so that
@@ -57,13 +96,13 @@
                                 Drop="IconButton_Drop">
                             <Border.InputBindings>
                                 <MouseBinding Gesture="LeftDoubleClick"
-                                              Command="{Binding DataContext.OpenItemCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                              Command="{Binding DataContext.OpenItemCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                               CommandParameter="{Binding Kind}"/>
                             </Border.InputBindings>
                             <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
                                 <Image Source="{Binding Icon}"
-                                       Width="{Binding DataContext.IconSizePx, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                       Height="{Binding DataContext.IconSizePx, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                       Width="{Binding DataContext.IconSizePx, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                       Height="{Binding DataContext.IconSizePx, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                        RenderOptions.BitmapScalingMode="HighQuality"
                                        Stretch="Uniform"/>
                                 <TextBlock Text="{Binding Label}"
@@ -76,8 +115,8 @@
                             </StackPanel>
                         </Border>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                </ListBox.ItemTemplate>
+            </ListBox>
 
             <!--
                 Insertion indicator: a 2 px horizontal line shown during drag-reorder.

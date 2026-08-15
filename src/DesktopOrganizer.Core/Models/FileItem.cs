@@ -17,6 +17,7 @@ namespace DesktopOrganizer.Core.Models;
 /// </remarks>
 public sealed class FileItem : INotifyPropertyChanged
 {
+    private string? _displayName;
     private bool _exists;
     private bool _isDirectory;
 
@@ -26,10 +27,17 @@ public sealed class FileItem : INotifyPropertyChanged
     /// </summary>
     /// <param name="path">The file path.</param>
     /// <param name="icon">The file icon.</param>
-    public FileItem(string path, ImageSource? icon)
+    /// <param name="displayName">
+    /// Optional cosmetic override for <see cref="DisplayName"/>, never persisted. Used only to strip
+    /// a legacy managed-storage GUID suffix from an item's on-disk name for display purposes (see
+    /// <see cref="ManagedItemName.StripLegacyGuidSuffix"/> and ADR-013 Decision 3) — the on-disk
+    /// <see cref="Path"/>/<see cref="Name"/> themselves are unaffected.
+    /// </param>
+    public FileItem(string path, ImageSource? icon, string? displayName = null)
     {
         Path = path;
         Icon = icon;
+        _displayName = displayName;
         _exists = ComputeExists(path);
         _isDirectory = System.IO.Directory.Exists(path);
     }
@@ -40,17 +48,35 @@ public sealed class FileItem : INotifyPropertyChanged
     /// <summary>
     /// The file path.
     /// </summary>
-    public string Path { get; }
+    public string Path { get; private set; }
 
     /// <summary>
     /// The file icon.
     /// </summary>
-    public ImageSource? Icon { get; }
+    public ImageSource? Icon { get; private set; }
 
     /// <summary>
     /// The file name extracted from the file path.
     /// </summary>
     public string Name => System.IO.Path.GetFileName(Path);
+
+    /// <summary>
+    /// The name to show in the UI: <see cref="Name"/>, unless a cosmetic <c>displayName</c> override
+    /// was supplied at construction (see the constructor's <c>displayName</c> parameter). Never
+    /// persisted — purely a rendering concern, recomputed fresh from <see cref="Path"/> whenever no
+    /// override is set. For a shortcut (<see cref="IsShortcut"/>) the trailing <c>.lnk</c> is also
+    /// stripped, matching Windows Explorer's default "hide extensions" behavior — <see cref="Name"/>/
+    /// <see cref="Path"/>/<see cref="Type"/> themselves are unaffected and still reflect the real
+    /// on-disk name with its extension.
+    /// </summary>
+    public string DisplayName
+    {
+        get
+        {
+            var name = _displayName ?? Name;
+            return IsShortcut ? StripShortcutExtension(name) : name;
+        }
+    }
 
     /// <summary>
     /// The file extension extracted from the file path.
@@ -108,12 +134,55 @@ public sealed class FileItem : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Updates this item in place after a physical rename/move (see
+    /// <c>IFileItemRenameService.Rename</c> and <c>BaseViewModel.TryRenameItem</c>), instead of
+    /// discarding and recreating the <see cref="FileItem"/> — the same instance stays bound to
+    /// whatever UI container (and selection) already references it. Raises <see cref="PropertyChanged"/>
+    /// for every value that changed as a result: <see cref="Path"/>, <see cref="Icon"/>,
+    /// <see cref="Name"/>, <see cref="DisplayName"/>, <see cref="Type"/> and <see cref="IsShortcut"/>
+    /// all derive from <see cref="Path"/>, so they all change together. Also re-evaluates
+    /// <see cref="Exists"/>/<see cref="IsDirectory"/> against the new path and clears any cosmetic
+    /// <c>displayName</c> override passed at construction — after a rename the on-disk name <i>is</i>
+    /// the name the user chose, so <see cref="DisplayName"/> should reflect it directly rather than
+    /// keep showing a stale legacy-suffix-stripped value computed from the old path.
+    /// </summary>
+    /// <param name="newPath">The item's new full path, as returned by the rename service.</param>
+    /// <param name="icon">A freshly resolved icon for <paramref name="newPath"/>.</param>
+    public void Relocate(string newPath, ImageSource? icon)
+    {
+        Path = newPath;
+        Icon = icon;
+        _displayName = null;
+
+        Exists = ComputeExists(newPath);
+        IsDirectory = System.IO.Directory.Exists(newPath);
+
+        OnPropertyChanged(nameof(Path));
+        OnPropertyChanged(nameof(Icon));
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(Type));
+        OnPropertyChanged(nameof(IsShortcut));
+    }
+
+    /// <summary>
     /// The file name as a string representation of the object.
     /// </summary>
     public override string ToString() => Name;
 
     private static bool ComputeExists(string path) =>
         System.IO.File.Exists(path) || System.IO.Directory.Exists(path);
+
+    /// <summary>
+    /// Strips a trailing <c>.lnk</c> extension (case-insensitive) from <paramref name="name"/>, used
+    /// by <see cref="DisplayName"/> for shortcuts. Only ever called with <see cref="IsShortcut"/>
+    /// already <see langword="true"/>, but re-checks the suffix itself rather than trusting the caller
+    /// blindly, so a cosmetic <c>displayName</c> override that doesn't happen to end in <c>.lnk</c>
+    /// (shouldn't normally occur, but isn't guaranteed by the constructor's contract) is left untouched
+    /// instead of truncated.
+    /// </summary>
+    private static string StripShortcutExtension(string name) =>
+        name.EndsWith(".lnk", System.StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
 
     private void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

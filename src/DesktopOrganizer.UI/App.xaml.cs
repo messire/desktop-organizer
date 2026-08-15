@@ -11,7 +11,17 @@ namespace DesktopOrganizer.UI;
 /// </summary>
 public partial class App : Application
 {
-    private const int MinPanelSize = 120;
+    // Cast from GridMetrics.MinPanelSize (the single source of truth for this value — finalization
+    // MAJOR M-1/m-2 — also backs ChildWindow.xaml's hard MinWidth="120" and ChildWindow.xaml.cs's own
+    // MinPanelSize) rather than an independent literal: System.Drawing.Size's width/height are int,
+    // while GridMetrics.MinPanelSize is a double shared with the (fractional-IconSize-aware) WPF-side
+    // panel geometry math, so a narrowing cast is required here at the int/double boundary.
+    private const int MinPanelSize = (int)GridMetrics.MinPanelSize;
+
+    // Held open for the whole process lifetime purely so the installer (see AppMutex in
+    // installer\DesktopOrganizer.iss) can detect a running instance and prompt to close it before
+    // overwriting locked files — not used for single-instance enforcement.
+    private readonly Mutex _installerDetectionMutex = new(initiallyOwned: false, "DesktopOrganizerSingleInstanceMutex");
 
     private readonly ServiceProvider _serviceProvider;
     private ITrayIconManager? _trayIconManager;
@@ -64,6 +74,7 @@ public partial class App : Application
         // scheduled, debounced) would be silently lost.
         WindowManager.SaveWindowsStateNow();
         _serviceProvider.Dispose();
+        _installerDetectionMutex.Dispose();
         base.OnExit(e);
     }
 
@@ -114,12 +125,16 @@ public partial class App : Application
     }
 
     private void ShowSettingsWindow(object? sender, EventArgs e)
+        => Current.Dispatcher.Invoke(() => WindowManager.ShowMainWindow());
+
+    private void ToggleSettingsWindow(object? sender, EventArgs e)
         => Current.Dispatcher.Invoke(() => WindowManager.StartMainWindow());
 
     private void InitTrayIcon()
     {
         TrayIconManager.Initialize();
         TrayIconManager.OnShowMainWindowRequested += ShowSettingsWindow;
+        TrayIconManager.OnToggleMainWindowVisibilityRequested += ToggleSettingsWindow;
         TrayIconManager.OnExitRequested += (_, _) => Shutdown();
     }
 
@@ -129,7 +144,7 @@ public partial class App : Application
     private void CreateLassoPanel(DesktopLassoEventArgs args)
     {
         var model = NewPanelWithDefaults();
-        model.Title = "Новая панель";
+        model.Title = "New Panel";
         model.Position = new System.Drawing.Point(args.X, args.Y);
         model.Size = new System.Drawing.Size(Math.Max(MinPanelSize, args.Width), Math.Max(MinPanelSize, args.Height));
 

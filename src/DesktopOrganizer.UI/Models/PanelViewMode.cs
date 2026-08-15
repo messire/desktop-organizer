@@ -9,5 +9,5 @@ public enum PanelViewMode
     List,
 
     /// <summary>Wrapping grid with large icons.</summary>
-    Wrap,
+    Grid,
 }

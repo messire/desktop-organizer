@@ -41,13 +41,16 @@ internal sealed class FolderWatcher : IFolderWatcher
         {
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.Attributes,
             IncludeSubdirectories = false,
-            EnableRaisingEvents = true,
         };
 
+        // Subscribe before enabling raising events: otherwise an FS event landing in the gap
+        // between construction and subscription is silently dropped.
         _watcher.Created += OnCreated;
         _watcher.Deleted += OnDeleted;
         _watcher.Renamed += OnRenamed;
         _watcher.Error += OnError;
+
+        _watcher.EnableRaisingEvents = true;
     }
 
     /// <inheritdoc/>

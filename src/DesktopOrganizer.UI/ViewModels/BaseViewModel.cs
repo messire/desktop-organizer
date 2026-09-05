@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Models;
 
 namespace DesktopOrganizer.UI.ViewModels;

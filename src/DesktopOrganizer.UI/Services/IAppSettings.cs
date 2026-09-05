@@ -1,3 +1,5 @@
+using DesktopOrganizer.Core;
+
 namespace DesktopOrganizer.UI.Services;
 
 /// <summary>
@@ -69,7 +71,7 @@ public interface IAppSettings
     string CurrentPage { get; set; }
 
     /// <summary>
-    /// JSON-serialised list of <see cref="DesktopOrganizer.Core.Models.LayoutSnapshot"/>. Defaults to <c>"[]"</c>.
+    /// JSON-serialised list of <see cref="LayoutSnapshot"/>. Defaults to <c>"[]"</c>.
     /// </summary>
     string LayoutSnapshots { get; set; }
 

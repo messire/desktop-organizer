@@ -1,4 +1,4 @@
-namespace DesktopOrganizer.Core.Models;
+namespace DesktopOrganizer.Core;
 
 /// <summary>
 /// Represents a named point-in-time snapshot of the entire desktop layout.

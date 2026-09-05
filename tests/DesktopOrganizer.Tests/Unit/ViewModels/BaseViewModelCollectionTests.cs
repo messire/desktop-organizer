@@ -1,7 +1,7 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.ViewModels;
 using Moq;
@@ -54,7 +54,7 @@ public class BaseViewModelCollectionTests
     private static Mock<IIconProvider> BuildIconProviderMock()
     {
         var iconMock = new Mock<IIconProvider>();
-        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((System.Windows.Media.ImageSource?)null);
+        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((System.Windows.Media.ImageSource)null!);
         return iconMock;
     }
 

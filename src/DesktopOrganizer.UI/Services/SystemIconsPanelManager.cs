@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Views;

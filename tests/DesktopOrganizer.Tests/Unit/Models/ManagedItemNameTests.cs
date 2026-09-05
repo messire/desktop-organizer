@@ -1,4 +1,4 @@
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 
 namespace DesktopOrganizer.Tests.Unit.Models;
 

@@ -3,8 +3,9 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 
@@ -68,8 +69,15 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
 
         RebuildVisibleItems();
 
-        OpenItemCommand = new RelayCommand<SystemIconKind>(kind =>
-            _shellService.OpenSystemItem(kind, IntPtr.Zero));
+        // RelayCommand<T>.Cast returns default(T) (i.e. Some(default), not null) when the command
+        // parameter doesn't bind to T for a non-nullable value type — so RelayCommand<SystemIconKind>
+        // here would make a failed CommandParameter binding silently open SystemIconKind.ThisPc
+        // instead of no-op'ing. SystemIconKind? makes "no value" and "ThisPc" distinguishable again.
+        OpenItemCommand = new RelayCommand<SystemIconKind?>(kind =>
+        {
+            if (kind is { } value)
+                _shellService.OpenSystemItem(value, IntPtr.Zero);
+        });
     }
 
     // -------------------------------------------------------------------------
@@ -359,21 +367,4 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
 
     private void OnPropertyChanged([CallerMemberName] string? name = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-
-    // -------------------------------------------------------------------------
-    // Minimal relay command implementation (internal to this ViewModel)
-    // -------------------------------------------------------------------------
-
-    private sealed class RelayCommand<T>(Action<T> execute) : ICommand
-    {
-        public event EventHandler? CanExecuteChanged;
-
-        public bool CanExecute(object? parameter) => true;
-
-        public void Execute(object? parameter)
-        {
-            if (parameter is T value)
-                execute(value);
-        }
-    }
 }

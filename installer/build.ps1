@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Публикует DesktopOrganizer.UI как self-contained сборку (win-x64) и сразу
     собирает инсталлятор через Inno Setup — одной командой, чтобы install.exe

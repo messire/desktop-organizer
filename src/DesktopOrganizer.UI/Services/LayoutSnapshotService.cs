@@ -1,5 +1,5 @@
 using System.Text.Json;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Models;
 
 namespace DesktopOrganizer.UI.Services;

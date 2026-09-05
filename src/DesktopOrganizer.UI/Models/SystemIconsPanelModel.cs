@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 
 namespace DesktopOrganizer.UI.Models;
 

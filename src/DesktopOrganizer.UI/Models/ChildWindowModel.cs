@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text.Json.Serialization;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using Point = System.Drawing.Point;
 using Size = System.Drawing.Size;
 using WindowState = System.Windows.WindowState;

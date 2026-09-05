@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 
 namespace DesktopOrganizer.UI.Models;
 

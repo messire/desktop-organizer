@@ -25,11 +25,6 @@ public interface IWindowManager
     event EventHandler<ChildWindowModel> OnChildWindowRemoved;
 
     /// <summary>
-    /// Triggered when a child window is modified.
-    /// </summary>
-    event EventHandler<ChildWindowModel> OnChildWindowModified;
-
-    /// <summary>
     /// Toggles the main application window: shows/activates it if currently hidden, hides it if
     /// currently visible. Used by the tray icon's double-click gesture.
     /// </summary>

@@ -1,4 +1,4 @@
-namespace DesktopOrganizer.Core.Models;
+namespace DesktopOrganizer.Core;
 
 /// <summary>
 /// Maps a <see cref="SystemIconKind"/> to its known-folder identifier and default caption.

@@ -1,6 +1,6 @@
 ﻿using System.IO;
 using System.Windows.Media.Imaging;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 
 namespace DesktopOrganizer.Tests.Unit.Models;
 

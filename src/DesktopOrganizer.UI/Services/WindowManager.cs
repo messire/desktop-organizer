@@ -70,9 +70,6 @@ public class WindowManager : IWindowManager
     public event EventHandler<ChildWindowModel>? OnChildWindowRemoved;
 
     /// <inheritdoc />
-    public event EventHandler<ChildWindowModel>? OnChildWindowModified;
-
-    /// <inheritdoc />
     public void StartMainWindow()
     {
         var mainWindow = GetOrCreateMainWindow();

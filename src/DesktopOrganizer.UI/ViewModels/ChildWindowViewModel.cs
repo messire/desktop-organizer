@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using System.IO;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;

@@ -1,5 +1,5 @@
 using System.Windows.Media;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Interfaces;
 using Moq;

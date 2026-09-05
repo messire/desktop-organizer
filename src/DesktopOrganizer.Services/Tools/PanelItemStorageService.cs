@@ -735,7 +735,9 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     /// <summary>
     /// Copies a single file and verifies the destination matches before the caller is allowed to
     /// delete the source. Returns <see langword="false"/> (leaving the source untouched) on any
-    /// failure or verification mismatch.
+    /// failure or verification mismatch. Verification compares actual content, not just file length
+    /// — a length-only check would let a silently truncated-then-padded or bit-flipped copy through,
+    /// after which the (only) source copy would be deleted.
     /// </summary>
     private static bool TryCopyFileVerified(string sourcePath, string destPath)
     {
@@ -748,14 +750,43 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
 
             if (!File.Exists(destPath)) return false;
 
-            var sourceLength = new FileInfo(sourcePath).Length;
-            var destLength = new FileInfo(destPath).Length;
-            return sourceLength == destLength;
+            // Cheap fast-fail before paying for a full-content comparison of both files.
+            if (new FileInfo(sourcePath).Length != new FileInfo(destPath).Length) return false;
+
+            return FilesHaveIdenticalContent(sourcePath, destPath);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"PanelItemStorageService: verified copy failed '{sourcePath}' -> '{destPath}': {ex.Message}");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Byte-for-byte comparison, not a hash: bails on the first differing byte instead of always
+    /// reading both files to completion. This is a corruption check on a same-machine copy, not an
+    /// adversarial integrity check, so a cryptographic hash buys nothing here.
+    /// </summary>
+    private static bool FilesHaveIdenticalContent(string sourcePath, string destPath)
+    {
+        const int BufferSize = 81920; // matches Stream.CopyTo's own default buffer size
+
+        using var sourceStream = File.OpenRead(sourcePath);
+        using var destStream = File.OpenRead(destPath);
+
+        var sourceBuffer = new byte[BufferSize];
+        var destBuffer = new byte[BufferSize];
+
+        while (true)
+        {
+            var sourceRead = sourceStream.Read(sourceBuffer, 0, BufferSize);
+            var destRead = destStream.Read(destBuffer, 0, BufferSize);
+
+            if (sourceRead != destRead) return false;
+            if (sourceRead == 0) return true; // both streams exhausted at the same length
+
+            if (!sourceBuffer.AsSpan(0, sourceRead).SequenceEqual(destBuffer.AsSpan(0, destRead)))
+                return false;
         }
     }
 

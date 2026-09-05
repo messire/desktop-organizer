@@ -21,7 +21,7 @@ namespace DesktopOrganizer.UI.Controls;
 /// (<c>PanelItemSortComparer</c>, drag-reorder) is untouched.</item>
 /// <item>Every child is arranged at the uniform cell size (the max of all children's
 /// <see cref="UIElement.DesiredSize"/>), never stretched to fill the row's leftover space — the leftover
-/// space always goes into gap width instead. <c>ChildWindow.ComputeInsertionGap</c> compares the
+/// space always goes into gap width instead. <c>ListReorderGeometry.ComputeInsertionGap</c> compares the
 /// cursor against <c>container.ActualWidth / 2</c>; a stretched container would shift that midpoint and
 /// desync the drag-reorder "insert before/after" decision.</item>
 /// <item>Positioning is done purely via the coordinates passed to <see cref="UIElement.Arrange"/> — no
@@ -57,9 +57,17 @@ public sealed class AdaptiveIconGridPanel : Panel
         IsNonNegativeDouble);
 
     /// <summary>
-    /// Edge-padding ratio (<c>m = x * ratio</c>, <c>m_v = x_v * ratio</c>). Default is
-    /// <see cref="AdaptiveGridLayout.DefaultEdgePaddingRatio"/>. See <see cref="MinGapProperty"/>'s doc
-    /// comment for why this is left unset in XAML.
+    /// HORIZONTAL edge-padding ratio (<c>m = x * ratio</c>). Default is
+    /// <see cref="AdaptiveGridLayout.DefaultEdgePaddingRatio"/> (0.5 — half a cell of left/right padding,
+    /// serving a real Fences-parity visual-centering purpose for rows narrower than the viewport). See
+    /// <see cref="MinGapProperty"/>'s doc comment for why this is left unset in XAML.
+    /// <para>
+    /// Vertical (top/bottom) edge padding is a SEPARATE property, <see cref="VerticalEdgePaddingRatio"/>
+    /// — the two axes used to share this one ratio, but that made a single row of icons report a content
+    /// height of <c>2 * rowHeight</c> (half a row of blank space above AND below the one visible row),
+    /// which was large enough to trigger a spurious vertical scrollbar even though the row plainly fit.
+    /// See <see cref="AdaptiveGridLayout.DefaultVerticalEdgePaddingRatio"/> for the fix.
+    /// </para>
     /// </summary>
     public static readonly DependencyProperty EdgePaddingRatioProperty = DependencyProperty.Register(
         nameof(EdgePaddingRatio),
@@ -71,10 +79,28 @@ public sealed class AdaptiveIconGridPanel : Panel
         IsNonNegativeDouble);
 
     /// <summary>
-    /// Shared <see cref="ValidateValueCallback"/> for <see cref="MinGapProperty"/> and
-    /// <see cref="EdgePaddingRatioProperty"/>: rejects negative or <c>NaN</c> values so the "cells never
-    /// overlap" invariant documented in this class's remarks (<c>MinGap &gt;= 0</c>) is actually enforced
-    /// rather than merely asserted in a comment.
+    /// VERTICAL edge-padding ratio (<c>m_v = x_v * ratio</c>), independent of
+    /// <see cref="EdgePaddingRatio"/>. Default is <see cref="AdaptiveGridLayout.DefaultVerticalEdgePaddingRatio"/>
+    /// (<c>0</c> — no top/bottom padding). See <see cref="EdgePaddingRatioProperty"/>'s doc comment for
+    /// why this is a separate DP from the horizontal ratio, and <see cref="MinGapProperty"/>'s doc
+    /// comment for why this is left unset in XAML (the default lives solely in
+    /// <see cref="AdaptiveGridLayout"/> so <see cref="Behaviors.PanelResizeController"/>'s height-snap
+    /// stays in agreement with this panel's actual rendered height).
+    /// </summary>
+    public static readonly DependencyProperty VerticalEdgePaddingRatioProperty = DependencyProperty.Register(
+        nameof(VerticalEdgePaddingRatio),
+        typeof(double),
+        typeof(AdaptiveIconGridPanel),
+        new FrameworkPropertyMetadata(
+            AdaptiveGridLayout.DefaultVerticalEdgePaddingRatio,
+            FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsArrange),
+        IsNonNegativeDouble);
+
+    /// <summary>
+    /// Shared <see cref="ValidateValueCallback"/> for <see cref="MinGapProperty"/>,
+    /// <see cref="EdgePaddingRatioProperty"/>, and <see cref="VerticalEdgePaddingRatioProperty"/>: rejects
+    /// negative or <c>NaN</c> values so the "cells never overlap" invariant documented in this class's
+    /// remarks (<c>MinGap &gt;= 0</c>) is actually enforced rather than merely asserted in a comment.
     /// </summary>
     private static bool IsNonNegativeDouble(object value) => (double)value >= 0d && !double.IsNaN((double)value);
 
@@ -85,11 +111,18 @@ public sealed class AdaptiveIconGridPanel : Panel
         set => SetValue(MinGapProperty, value);
     }
 
-    /// <summary>Gets or sets the edge-padding ratio (<c>m = x * ratio</c>).</summary>
+    /// <summary>Gets or sets the HORIZONTAL edge-padding ratio (<c>m = x * ratio</c>).</summary>
     public double EdgePaddingRatio
     {
         get => (double)GetValue(EdgePaddingRatioProperty);
         set => SetValue(EdgePaddingRatioProperty, value);
+    }
+
+    /// <summary>Gets or sets the VERTICAL edge-padding ratio (<c>m_v = x_v * ratio</c>).</summary>
+    public double VerticalEdgePaddingRatio
+    {
+        get => (double)GetValue(VerticalEdgePaddingRatioProperty);
+        set => SetValue(VerticalEdgePaddingRatioProperty, value);
     }
 
     /// <summary>
@@ -130,9 +163,8 @@ public sealed class AdaptiveIconGridPanel : Panel
         }
 
         var minGap = MinGap;
-        var ratio = EdgePaddingRatio;
-        var m = AdaptiveGridLayout.EdgePadding(cell, ratio);
-        var mv = AdaptiveGridLayout.EdgePadding(rowHeight, ratio);
+        var m = AdaptiveGridLayout.EdgePadding(cell, EdgePaddingRatio);
+        var mv = AdaptiveGridLayout.EdgePadding(rowHeight, VerticalEdgePaddingRatio);
 
         double width;
         int rowCapacity;
@@ -185,9 +217,8 @@ public sealed class AdaptiveIconGridPanel : Panel
         }
 
         var minGap = MinGap;
-        var ratio = EdgePaddingRatio;
-        var m = AdaptiveGridLayout.EdgePadding(cell, ratio);
-        var mv = AdaptiveGridLayout.EdgePadding(rowHeight, ratio);
+        var m = AdaptiveGridLayout.EdgePadding(cell, EdgePaddingRatio);
+        var mv = AdaptiveGridLayout.EdgePadding(rowHeight, VerticalEdgePaddingRatio);
 
         var rowCapacity = AdaptiveGridLayout.RowCapacity(finalSize.Width, cell, minGap, m);
         var rowCount = AdaptiveGridLayout.RowCount(children.Count, rowCapacity);

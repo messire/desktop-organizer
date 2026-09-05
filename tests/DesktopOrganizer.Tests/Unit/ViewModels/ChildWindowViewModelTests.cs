@@ -1,5 +1,5 @@
 using System.IO;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
@@ -42,7 +42,7 @@ public class ChildWindowViewModelTests
     public ChildWindowViewModelTests()
     {
         EnsureWpfApplication();
-        _iconProviderMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((System.Windows.Media.ImageSource?)null);
+        _iconProviderMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((System.Windows.Media.ImageSource)null!);
 
         // Default: the one-time Move-semantics hint hasn't been shown yet. Individual tests that
         // care about the already-shown case override this via SetupProperty again.

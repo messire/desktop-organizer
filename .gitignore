@@ -10,11 +10,8 @@
 *.userosscache
 *.sln.docstates
 
-
-CLAUDE.md
-.claude/
-adr/
-docs/
+# Claude Code: personal local permission overrides, not shared team config
+.claude/settings.local.json
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

@@ -1,5 +1,5 @@
 using System.Windows.Media;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Interfaces;
 
@@ -150,7 +150,14 @@ internal sealed class SystemShellService : ISystemShellService, IDisposable
         }
 
         _disposed = true;
-        _recycleBinTimer.Dispose();
+
+        // Dispose(WaitHandle) blocks until any in-flight PollRecycleBin callback has finished,
+        // so it can't run concurrently with (or after) _iconCache.Clear() below. Bounded: a poll
+        // in the middle of a slow SHQueryRecycleBin call must not hang app shutdown indefinitely.
+        using var waitHandle = new ManualResetEvent(false);
+        if (_recycleBinTimer.Dispose(waitHandle))
+            waitHandle.WaitOne(TimeSpan.FromSeconds(2));
+
         _iconCache.Clear();
     }
 
@@ -160,6 +167,8 @@ internal sealed class SystemShellService : ISystemShellService, IDisposable
     /// </summary>
     private void PollRecycleBin(object? state)
     {
+        if (_disposed) return;
+
         try
         {
             var current = GetRecycleBinState();

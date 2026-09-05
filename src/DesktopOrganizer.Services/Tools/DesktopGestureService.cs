@@ -1,4 +1,3 @@
-using System.Text;
 using DesktopOrganizer.Services.Abstractions;
 
 namespace DesktopOrganizer.Services.Tools;
@@ -8,11 +7,19 @@ namespace DesktopOrganizer.Services.Tools;
 /// See ADR-003. The hook only observes input; it suppresses a single right-button-up
 /// when a lasso drag completes, so the desktop context menu does not appear.
 /// </summary>
+/// <remarks>
+/// All P/Invoke is delegated to <see cref="INativeApi"/> per the project invariant — this class owns
+/// the hook lifetime and the gesture wiring only.
+/// </remarks>
 internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGestureEnvironment
 {
     private const int WhMouseLl = 14;
 
-    private readonly NativeMethods.LowLevelMouseProc _proc;
+    private readonly INativeApi _nativeApi;
+
+    // Keeps the hook procedure rooted for the lifetime of the hook: the native side holds only an
+    // unmanaged thunk, so a collected delegate would crash the whole input pipeline.
+    private readonly LowLevelMouseCallback _proc;
     private readonly DesktopGestureStateMachine _state;
     private IntPtr _hookHandle;
 
@@ -25,8 +32,10 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
     /// <summary>
     /// Initializes a new instance of the <see cref="DesktopGestureService"/> class.
     /// </summary>
-    public DesktopGestureService()
+    /// <param name="nativeApi">Native API façade (all P/Invoke lives behind it).</param>
+    public DesktopGestureService(INativeApi nativeApi)
     {
+        _nativeApi = nativeApi;
         _proc = HookCallback;
         _state = new DesktopGestureStateMachine(this);
     }
@@ -35,20 +44,28 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
     int IDesktopGestureEnvironment.TickCount => Environment.TickCount;
 
     /// <inheritdoc />
-    uint IDesktopGestureEnvironment.DoubleClickTime => NativeMethods.GetDoubleClickTime();
+    uint IDesktopGestureEnvironment.DoubleClickTime => _nativeApi.GetDoubleClickTime();
 
     /// <inheritdoc />
     public void Start()
     {
         if (_hookHandle != IntPtr.Zero) return;
-        _hookHandle = NativeMethods.SetWindowsHookExW(WhMouseLl, _proc, NativeMethods.GetModuleHandle(null), 0);
+
+        _hookHandle = _nativeApi.SetWindowsHookEx(WhMouseLl, _proc, _nativeApi.GetModuleHandle(null), 0);
+        if (_hookHandle == IntPtr.Zero)
+        {
+            // Do not fail the app: desktop gestures degrade to "unavailable", but the reason must be
+            // visible instead of silently no-oping.
+            Console.Error.WriteLine(
+                $"Desktop gesture hook could not be installed (Win32 error {Marshal.GetLastWin32Error()}).");
+        }
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
         if (_hookHandle == IntPtr.Zero) return;
-        NativeMethods.UnhookWindowsHookEx(_hookHandle);
+        _nativeApi.UnhookWindowsHookEx(_hookHandle);
         _hookHandle = IntPtr.Zero;
     }
 
@@ -61,7 +78,7 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
         if (nCode < 0)
-            return NativeMethods.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+            return _nativeApi.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
 
         var swallow = false;
 
@@ -77,7 +94,7 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
             swallow = false;
         }
 
-        var next = NativeMethods.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+        var next = _nativeApi.CallNextHookEx(_hookHandle, nCode, wParam, lParam);
         return swallow ? (IntPtr)1 : next;
     }
 
@@ -87,11 +104,11 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
     /// <returns>Whether the message must be suppressed.</returns>
     private bool ProcessMessage(IntPtr wParam, IntPtr lParam)
     {
-        var data = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
+        var pt = _nativeApi.ReadMouseHookPoint(lParam);
 
         // The state machine has already reset its own state by the time it returns a decision,
         // so a throwing subscriber below cannot leave the gesture latched.
-        var decision = _state.Process((int)wParam, data.pt.X, data.pt.Y);
+        var decision = _state.Process((int)wParam, pt.X, pt.Y);
         if (decision.RaisesEvent) RaiseSubscribers(decision);
 
         return decision.Swallow;
@@ -115,22 +132,17 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
     }
 
     /// <inheritdoc />
+    /// <remarks>Over the desktop means the background or the icon view — not an app or a panel.</remarks>
     bool IDesktopGestureEnvironment.IsDesktopPoint(int x, int y)
-        => IsDesktopPoint(new NativeMethods.POINT { X = x, Y = y });
+        => _nativeApi.GetWindowClassName(_nativeApi.WindowFromPoint(x, y))
+            is "SysListView32" or "SHELLDLL_DefView" or "WorkerW" or "Progman";
 
     /// <inheritdoc />
+    /// <remarks>Empty means over the desktop but not on an icon.</remarks>
     bool IDesktopGestureEnvironment.IsEmptyDesktopPoint(int x, int y)
-        => IsEmptyDesktopPoint(new NativeMethods.POINT { X = x, Y = y });
-
-    /// <summary>Whether the point is over the desktop (background or icon view), not over an app/panel.</summary>
-    private static bool IsDesktopPoint(NativeMethods.POINT pt)
-        => GetClass(NativeMethods.WindowFromPoint(pt)) is "SysListView32" or "SHELLDLL_DefView" or "WorkerW" or "Progman";
-
-    /// <summary>Whether the point is over an empty part of the desktop (not on an icon).</summary>
-    private static bool IsEmptyDesktopPoint(NativeMethods.POINT pt)
     {
-        var hwnd = NativeMethods.WindowFromPoint(pt);
-        var cls = GetClass(hwnd);
+        var hwnd = _nativeApi.WindowFromPoint(x, y);
+        var cls = _nativeApi.GetWindowClassName(hwnd);
 
         // Pure background layers are always "empty".
         if (cls is "WorkerW" or "Progman") return true;
@@ -138,161 +150,8 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
 
         var listView = cls == "SysListView32"
             ? hwnd
-            : NativeMethods.FindWindowEx(hwnd, IntPtr.Zero, "SysListView32", null);
+            : _nativeApi.FindWindowEx(hwnd, IntPtr.Zero, "SysListView32", null);
 
-        return listView != IntPtr.Zero && NativeMethods.ListViewPointIsEmpty(listView, pt);
-    }
-
-    private static string GetClass(IntPtr hwnd)
-    {
-        if (hwnd == IntPtr.Zero) return string.Empty;
-        var sb = new StringBuilder(256);
-        var len = NativeMethods.GetClassName(hwnd, sb, sb.Capacity);
-        return len > 0 ? sb.ToString() : string.Empty;
-    }
-
-    private static class NativeMethods
-    {
-        public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-        private const int LvmHitTest = 0x1000 + 18;
-        private const uint ProcessVmOperation = 0x0008;
-        private const uint ProcessVmRead = 0x0010;
-        private const uint ProcessVmWrite = 0x0020;
-        private const uint MemCommit = 0x1000;
-        private const uint MemRelease = 0x8000;
-        private const uint PageReadWrite = 0x04;
-
-        [StructLayout(LayoutKind.Sequential)]
-        public struct POINT
-        {
-            public int X;
-            public int Y;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        public struct MSLLHOOKSTRUCT
-        {
-            public POINT pt;
-            public uint mouseData;
-            public uint flags;
-            public uint time;
-            public UIntPtr dwExtraInfo;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct LVHITTESTINFO
-        {
-            public POINT pt;
-            public uint flags;
-            public int iItem;
-            public int iSubItem;
-            public int iGroup;
-        }
-
-        [DllImport("User32.dll", SetLastError = true)]
-        public static extern IntPtr SetWindowsHookExW(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
-
-        [DllImport("User32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
-        [DllImport("User32.dll")]
-        public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("Kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        public static extern IntPtr GetModuleHandle(string? lpModuleName);
-
-        [DllImport("User32.dll")]
-        public static extern IntPtr WindowFromPoint(POINT point);
-
-        [DllImport("User32.dll", EntryPoint = "FindWindowExW", CharSet = CharSet.Unicode)]
-        public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string? className, string? windowName);
-
-        [DllImport("User32.dll", EntryPoint = "GetClassNameW", CharSet = CharSet.Unicode)]
-        public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
-
-        [DllImport("User32.dll")]
-        public static extern uint GetDoubleClickTime();
-
-        [DllImport("User32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
-
-        [DllImport("User32.dll", SetLastError = true)]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-
-        [DllImport("User32.dll", SetLastError = true)]
-        private static extern IntPtr SendMessageW(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("Kernel32.dll", SetLastError = true)]
-        private static extern IntPtr OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint pid);
-
-        [DllImport("Kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool CloseHandle(IntPtr handle);
-
-        [DllImport("Kernel32.dll", SetLastError = true)]
-        private static extern IntPtr VirtualAllocEx(IntPtr proc, IntPtr addr, UIntPtr size, uint type, uint protect);
-
-        [DllImport("Kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool VirtualFreeEx(IntPtr proc, IntPtr addr, UIntPtr size, uint freeType);
-
-        [DllImport("Kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool WriteProcessMemory(IntPtr proc, IntPtr baseAddr, IntPtr buffer, UIntPtr size, out UIntPtr written);
-
-        [DllImport("Kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool ReadProcessMemory(IntPtr proc, IntPtr baseAddr, IntPtr buffer, UIntPtr size, out UIntPtr read);
-
-        /// <summary>
-        /// Cross-process LVM_HITTEST: returns true when <paramref name="screenPt"/> hits no list item.
-        /// Defensive — any failure returns false (treated as "not empty"), per ADR-003 fallback.
-        /// </summary>
-        public static bool ListViewPointIsEmpty(IntPtr listView, POINT screenPt)
-        {
-            var clientPt = screenPt;
-            if (!ScreenToClient(listView, ref clientPt)) return false;
-
-            GetWindowThreadProcessId(listView, out var pid);
-            if (pid == 0) return false;
-
-            var proc = OpenProcess(ProcessVmOperation | ProcessVmRead | ProcessVmWrite, false, pid);
-            if (proc == IntPtr.Zero) return false;
-
-            var size = Marshal.SizeOf<LVHITTESTINFO>();
-            var remote = IntPtr.Zero;
-            var local = IntPtr.Zero;
-
-            try
-            {
-                remote = VirtualAllocEx(proc, IntPtr.Zero, (UIntPtr)size, MemCommit, PageReadWrite);
-                if (remote == IntPtr.Zero) return false;
-
-                var info = new LVHITTESTINFO { pt = clientPt, iItem = -1 };
-                local = Marshal.AllocHGlobal(size);
-                Marshal.StructureToPtr(info, local, false);
-
-                if (!WriteProcessMemory(proc, remote, local, (UIntPtr)size, out _)) return false;
-                SendMessageW(listView, LvmHitTest, IntPtr.Zero, remote);
-                if (!ReadProcessMemory(proc, remote, local, (UIntPtr)size, out _)) return false;
-
-                info = Marshal.PtrToStructure<LVHITTESTINFO>(local);
-                return info.iItem < 0;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"ListView hit-test failed: {ex.Message}");
-                return false;
-            }
-            finally
-            {
-                if (local != IntPtr.Zero) Marshal.FreeHGlobal(local);
-                if (remote != IntPtr.Zero) VirtualFreeEx(proc, remote, UIntPtr.Zero, MemRelease);
-                CloseHandle(proc);
-            }
-        }
+        return listView != IntPtr.Zero && _nativeApi.IsListViewPointEmpty(listView, x, y);
     }
 }

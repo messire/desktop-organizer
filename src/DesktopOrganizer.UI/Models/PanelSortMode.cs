@@ -1,3 +1,5 @@
+using DesktopOrganizer.Core;
+
 namespace DesktopOrganizer.UI.Models;
 
 /// <summary>
@@ -29,7 +31,7 @@ public enum PanelSortMode
     Manual = 0,
 
     /// <summary>
-    /// Items are sorted alphabetically by <see cref="DesktopOrganizer.Core.Models.FileItem.DisplayName"/>,
+    /// Items are sorted alphabetically by <see cref="FileItem.DisplayName"/>,
     /// folders before files (<see cref="DesktopOrganizer.Core.Models.PanelItemSortComparer.ByName"/>). A non-mutating
     /// projection: switching back to <see cref="Manual"/> restores the prior manual order exactly.
     /// </summary>

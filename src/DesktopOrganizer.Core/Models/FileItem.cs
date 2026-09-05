@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Windows.Media;
 
-namespace DesktopOrganizer.Core.Models;
+namespace DesktopOrganizer.Core;
 
 /// <summary>
 /// File data content.
@@ -119,8 +119,7 @@ public sealed class FileItem : INotifyPropertyChanged
     /// Purely string-based (no file-system access), so unlike <see cref="Exists"/>/<see cref="IsDirectory"/>
     /// it needs no refresh.
     /// </summary>
-    public bool IsShortcut =>
-        string.Equals(System.IO.Path.GetExtension(Path), ".lnk", System.StringComparison.OrdinalIgnoreCase);
+    public bool IsShortcut => string.Equals(System.IO.Path.GetExtension(Path), ".lnk", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Re-evaluates <see cref="Exists"/> and <see cref="IsDirectory"/> against the current file-system
@@ -170,8 +169,7 @@ public sealed class FileItem : INotifyPropertyChanged
     /// </summary>
     public override string ToString() => Name;
 
-    private static bool ComputeExists(string path) =>
-        System.IO.File.Exists(path) || System.IO.Directory.Exists(path);
+    private static bool ComputeExists(string path) => System.IO.File.Exists(path) || System.IO.Directory.Exists(path);
 
     /// <summary>
     /// Strips a trailing <c>.lnk</c> extension (case-insensitive) from <paramref name="name"/>, used
@@ -181,9 +179,7 @@ public sealed class FileItem : INotifyPropertyChanged
     /// (shouldn't normally occur, but isn't guaranteed by the constructor's contract) is left untouched
     /// instead of truncated.
     /// </summary>
-    private static string StripShortcutExtension(string name) =>
-        name.EndsWith(".lnk", System.StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
+    private static string StripShortcutExtension(string name) => name.EndsWith(".lnk", System.StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
 
-    private void OnPropertyChanged(string propertyName) =>
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    private void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

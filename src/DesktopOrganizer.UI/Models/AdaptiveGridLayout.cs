@@ -17,8 +17,12 @@ namespace DesktopOrganizer.UI.Models;
 /// <c>ListBoxItem</c>'s <see cref="System.Windows.UIElement.DesiredSize"/>; the analytical twin is
 /// <see cref="GridMetrics.CellSize"/>/<see cref="GridMetrics.RowHeight"/>), <c>pmin</c>/<c>pmin_v</c> is
 /// the minimum gap between cells (<see cref="Controls.AdaptiveIconGridPanel.MinGap"/>), and
-/// <c>m</c>/<c>m_v</c> is the edge padding (<c>cell * ratio</c>,
-/// <see cref="Controls.AdaptiveIconGridPanel.EdgePaddingRatio"/>). The same two formulas
+/// <c>m</c>/<c>m_v</c> is the edge padding (<c>cell * ratio</c>) — <c>m</c> from
+/// <see cref="Controls.AdaptiveIconGridPanel.EdgePaddingRatio"/> (horizontal,
+/// <see cref="DefaultEdgePaddingRatio"/> = 0.5) and <c>m_v</c> from the separate
+/// <see cref="Controls.AdaptiveIconGridPanel.VerticalEdgePaddingRatio"/> (vertical,
+/// <see cref="DefaultVerticalEdgePaddingRatio"/> = 0 — see that constant's doc comment for why the two
+/// axes no longer share one ratio). The same two formulas
 /// (<see cref="Extent"/>/<see cref="Offset"/>) are axis-agnostic: callers pass the horizontal cell/gap/
 /// padding to get <c>W(k)</c> and the vertical ones to get <c>H(R)</c> — there is exactly one source of
 /// truth for both axes.
@@ -43,7 +47,8 @@ public static class AdaptiveGridLayout
     public const double DefaultMinGap = 4d;
 
     /// <summary>
-    /// Default edge-padding ratio (<c>m = x * ratio</c>). <c>0.5</c> is the spec's <c>m = x/2</c> rule.
+    /// Default edge-padding ratio for the HORIZONTAL axis (<c>m = x * ratio</c>). <c>0.5</c> is the
+    /// spec's <c>m = x/2</c> rule.
     /// <para>
     /// Historical note: while <see cref="DefaultMinGap"/> was <c>0</c>, this ratio kept every valid
     /// <see cref="Extent"/> a multiple of the cell size (<c>W(k) = x*(k+1)</c>) for ALL column/row
@@ -57,8 +62,33 @@ public static class AdaptiveGridLayout
     /// this change — this is an expected, intentional side effect of increasing <c>pmin</c>, not a
     /// compatibility bug.
     /// </para>
+    /// <para>
+    /// VERTICAL axis note: prior to the "убрать нижний и верхний отступы" fix (bug report: a
+    /// single-row Grid-mode panel showed a spurious vertical scrollbar because
+    /// <see cref="Extent"/>(1, rowHeight, gap, rowHeight*0.5) == 2*rowHeight — a full extra row's worth
+    /// of blank space above/below one visible row), this same ratio also drove the vertical axis
+    /// (<c>m_v = x_v * ratio</c>). It no longer does: the vertical axis now uses the separate, smaller
+    /// <see cref="DefaultVerticalEdgePaddingRatio"/> (<see cref="Controls.AdaptiveIconGridPanel"/>'s
+    /// <c>VerticalEdgePaddingRatio</c> DP). This constant is HORIZONTAL-only from that point on.
+    /// </para>
     /// </summary>
     public const double DefaultEdgePaddingRatio = 0.5d;
+
+    /// <summary>
+    /// Default edge-padding ratio for the VERTICAL axis (<c>m_v = x_v * ratio</c>). <c>0</c> — no
+    /// top/bottom padding at all.
+    /// <para>
+    /// Introduced to fix a reported bug: with the vertical axis sharing <see cref="DefaultEdgePaddingRatio"/>
+    /// (<c>0.5</c>), a single row of icons (<c>count = 1</c>, so the gap term in <see cref="Extent"/>
+    /// drops out) reported a content height of <c>2 * rowHeight</c> — half a row of blank padding above
+    /// AND below the one visible row — which was large enough to trip the panel's
+    /// <c>ScrollViewer.VerticalScrollBarVisibility="Auto"</c> into showing a scrollbar even though the
+    /// single row plainly fit in the viewport. Horizontal edge padding is intentionally left untouched
+    /// (unlike the vertical case, it serves a real Fences-parity visual-centering purpose for a row that
+    /// isn't full-width) — see <see cref="DefaultEdgePaddingRatio"/>'s "VERTICAL axis note".
+    /// </para>
+    /// </summary>
+    public const double DefaultVerticalEdgePaddingRatio = 0d;
 
     /// <summary>
     /// Tolerance (in pixels) subtracted from the shortfall before flooring in <see cref="RowCapacity"/>.

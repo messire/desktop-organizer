@@ -5,9 +5,6 @@ namespace DesktopOrganizer.Services.Providers;
 /// <inheritdoc />
 public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconManager
 {
-    // Settings window starts hidden (app lives in the tray) — see ADR-002.
-    private bool _isMainWindowVisible;
-
     /// <inheritdoc />
     public event EventHandler? OnExitRequested;
 
@@ -22,7 +19,8 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
     {
         notifyIconAdapter.SetIcon("Resources/app.ico");
 
-        UpdateContextMenu(_isMainWindowVisible);
+        // Settings window starts hidden (app lives in the tray) — see ADR-002.
+        UpdateContextMenu(isMainWindowVisible: false);
         notifyIconAdapter.DoubleClick += (_, _) => ToggleMainWindowVisibility();
     }
 
@@ -46,10 +44,7 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
     }
 
     private void ToggleMainWindowVisibility()
-    {
-        _isMainWindowVisible = !_isMainWindowVisible;
-        OnToggleMainWindowVisibilityRequested?.Invoke(this, EventArgs.Empty);
-    }
+        => OnToggleMainWindowVisibilityRequested?.Invoke(this, EventArgs.Empty);
 
     private void ShowMainWindowRequested(object? sender, EventArgs e)
         => OnShowMainWindowRequested?.Invoke(sender, e);

@@ -1,7 +1,7 @@
 <Project>
 
     <PropertyGroup>
-        <Version>0.2.1</Version>
+        <Version>0.3.0</Version>
         <!-- DesktopOrganizer.UI's user settings (ChildWindowsState, panel layout, etc. — see
              Properties\Settings.settings) are System.Configuration "User"-scoped, which .NET keys by
              AssemblyVersion: %LocalAppData%\...\<AssemblyVersion>\user.config. If AssemblyVersion moved
@@ -19,11 +19,15 @@
         <Nullable>enable</Nullable>
         <UseWPF>true</UseWPF>
         <ImplicitUsings>enable</ImplicitUsings>
-        <CodeAnalysisRuleSet>$(SolutionDir)linters\linter.ruleset</CodeAnalysisRuleSet>
+        <CodeAnalysisRuleSet>$(MSBuildThisFileDirectory)linters\linter.ruleset</CodeAnalysisRuleSet>
     </PropertyGroup>
 
     <ItemGroup>
         <InternalsVisibleTo Include="DesktopOrganizer.Tests"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="StyleCop.Analyzers" PrivateAssets="all"/>
     </ItemGroup>
 
 </Project>

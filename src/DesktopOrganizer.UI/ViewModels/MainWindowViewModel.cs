@@ -10,16 +10,21 @@ using DesktopOrganizer.UI.Services;
 namespace DesktopOrganizer.UI.ViewModels;
 
 /// <summary>
-/// ViewModel for the Settings/Config window. Manages the list of panels, per-panel
-/// appearance, global defaults and autostart.
+/// ViewModel for the Settings/Config window. Owns the panel/page collection and CRUD, autostart, and
+/// desktop-icons-visibility; delegates per-concern settings to sub-ViewModels extracted per
+/// REFACTORING_PLAN.md §5.3: <see cref="SelectedPanelSettings"/> (selected panel's editable
+/// appearance/sort settings), <see cref="GlobalDefaults"/> (grid/snap/default-appearance settings), and
+/// <see cref="SystemIconsSettings"/> (the System Icons Panel feature). All three are constructed
+/// internally (not DI-injected) and their identically-named properties are forwarded 1:1 by this class,
+/// with their <see cref="INotifyPropertyChanged.PropertyChanged"/> notifications re-raised verbatim —
+/// so <c>MainWindow.xaml</c>'s existing flat bindings against the root ViewModel, and this class's own
+/// public surface/constructor signature, are unchanged by the extraction.
 /// </summary>
 public class MainWindowViewModel : INotifyPropertyChanged
 {
     private readonly IWindowManager _windowManager;
-    private readonly IAppSettings _appSettings;
     private readonly IAutostartService _autostart;
     private readonly IPageManager _pageManager;
-    private readonly ISystemIconsPanelManager _systemIconsPanelManager;
     private readonly IConfirmationService _confirmation;
     private readonly IPanelItemStorageService _itemStorage;
     private readonly IDesktopIconsService _desktopIcons;
@@ -29,6 +34,21 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// ViewModel for the "Layout snapshots" section.
     /// </summary>
     public LayoutSnapshotsViewModel LayoutSnapshots { get; }
+
+    /// <summary>
+    /// Property proxy for the selected panel's editable settings (REFACTORING_PLAN.md §5.3).
+    /// </summary>
+    public SelectedPanelSettingsViewModel SelectedPanelSettings { get; }
+
+    /// <summary>
+    /// Global default settings for new panels and grid/snap behavior (REFACTORING_PLAN.md §5.3).
+    /// </summary>
+    public GlobalDefaultsViewModel GlobalDefaults { get; }
+
+    /// <summary>
+    /// ViewModel for the "System Icons Panel" section (REFACTORING_PLAN.md §5.3).
+    /// </summary>
+    public SystemIconsSettingsViewModel SystemIconsSettings { get; }
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -67,60 +87,60 @@ public class MainWindowViewModel : INotifyPropertyChanged
             if (_selectedPanel == value) return;
             _selectedPanel = value;
             OnPropertyChanged(nameof(SelectedPanel));
-            RaiseSelectedPanelProperties();
+            SelectedPanelSettings.SetPanel(value);
         }
     }
 
     /// <summary>Whether a panel is selected (drives enabled state of the editor section).</summary>
-    public bool HasSelectedPanel => _selectedPanel is not null;
+    public bool HasSelectedPanel => SelectedPanelSettings.HasSelectedPanel;
 
     /// <summary>Title of the selected panel.</summary>
     public string SelectedPanelTitle
     {
-        get => _selectedPanel?.Title ?? string.Empty;
-        set => SetSelectedPanel(p => p.Title = value);
+        get => SelectedPanelSettings.SelectedPanelTitle;
+        set => SelectedPanelSettings.SelectedPanelTitle = value;
     }
 
     /// <summary>Background colour (hex) of the selected panel.</summary>
     public string SelectedPanelBackgroundColor
     {
-        get => _selectedPanel?.BackgroundColor ?? string.Empty;
-        set => SetSelectedPanel(p => p.BackgroundColor = value);
+        get => SelectedPanelSettings.SelectedPanelBackgroundColor;
+        set => SelectedPanelSettings.SelectedPanelBackgroundColor = value;
     }
 
     /// <summary>Text colour (hex) of the selected panel.</summary>
     public string SelectedPanelTextColor
     {
-        get => _selectedPanel?.TextColor ?? string.Empty;
-        set => SetSelectedPanel(p => p.TextColor = value);
+        get => SelectedPanelSettings.SelectedPanelTextColor;
+        set => SelectedPanelSettings.SelectedPanelTextColor = value;
     }
 
     /// <summary>Background opacity (0–1) of the selected panel.</summary>
     public double SelectedPanelOpacity
     {
-        get => _selectedPanel?.BackgroundOpacity ?? 1.0;
-        set => SetSelectedPanel(p => p.BackgroundOpacity = value);
+        get => SelectedPanelSettings.SelectedPanelOpacity;
+        set => SelectedPanelSettings.SelectedPanelOpacity = value;
     }
 
     /// <summary>Icon size (px) of the selected panel.</summary>
     public double SelectedPanelIconSize
     {
-        get => _selectedPanel?.IconSize ?? 48;
-        set => SetSelectedPanel(p => p.IconSize = value);
+        get => SelectedPanelSettings.SelectedPanelIconSize;
+        set => SelectedPanelSettings.SelectedPanelIconSize = value;
     }
 
     /// <summary>View mode of the selected panel.</summary>
     public PanelViewMode SelectedPanelViewMode
     {
-        get => _selectedPanel?.ViewMode ?? PanelViewMode.List;
-        set => SetSelectedPanel(p => p.ViewMode = value);
+        get => SelectedPanelSettings.SelectedPanelViewMode;
+        set => SelectedPanelSettings.SelectedPanelViewMode = value;
     }
 
     /// <summary>Sort order of the selected panel.</summary>
     public PanelSortMode SelectedPanelSortMode
     {
-        get => _selectedPanel?.SortMode ?? PanelSortMode.Manual;
-        set => SetSelectedPanel(p => p.SortMode = value);
+        get => SelectedPanelSettings.SelectedPanelSortMode;
+        set => SelectedPanelSettings.SelectedPanelSortMode = value;
     }
 
     /// <summary>
@@ -128,22 +148,15 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// always sort by name (ADR-014 Decision 7) — there's nowhere to persist a manual order for them —
     /// so the sort-order selector is disabled while a folder source is assigned.
     /// </summary>
-    public bool SelectedPanelSupportsManualOrder =>
-        _selectedPanel is not null && string.IsNullOrWhiteSpace(_selectedPanel.SourceFolderPath);
+    public bool SelectedPanelSupportsManualOrder => SelectedPanelSettings.SelectedPanelSupportsManualOrder;
 
     /// <summary>
     /// Snap-to-grid cell size in pixels. 1 = no snapping, 4–128 = snap.
     /// </summary>
     public int GridSize
     {
-        get => _appSettings.GridSize;
-        set
-        {
-            if (_appSettings.GridSize == value) return;
-            _appSettings.GridSize = value;
-            _appSettings.Save();
-            OnPropertyChanged(nameof(GridSize));
-        }
+        get => GlobalDefaults.GridSize;
+        set => GlobalDefaults.GridSize = value;
     }
 
     /// <summary>
@@ -151,14 +164,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// </summary>
     public bool SnapResizeToIconGrid
     {
-        get => _appSettings.SnapResizeToIconGrid;
-        set
-        {
-            if (_appSettings.SnapResizeToIconGrid == value) return;
-            _appSettings.SnapResizeToIconGrid = value;
-            _appSettings.Save();
-            OnPropertyChanged(nameof(SnapResizeToIconGrid));
-        }
+        get => GlobalDefaults.SnapResizeToIconGrid;
+        set => GlobalDefaults.SnapResizeToIconGrid = value;
     }
 
     /// <summary>
@@ -167,42 +174,36 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// </summary>
     public int GridSnapDistance
     {
-        get => _appSettings.GridSnapDistance;
-        set
-        {
-            if (_appSettings.GridSnapDistance == value) return;
-            _appSettings.GridSnapDistance = value;
-            _appSettings.Save();
-            OnPropertyChanged(nameof(GridSnapDistance));
-        }
+        get => GlobalDefaults.GridSnapDistance;
+        set => GlobalDefaults.GridSnapDistance = value;
     }
 
     /// <summary>Default background colour (hex) for new panels.</summary>
     public string DefaultBackgroundColor
     {
-        get => _appSettings.DefaultBackgroundColor;
-        set => SetGlobal(v => _appSettings.DefaultBackgroundColor = v, value, _appSettings.DefaultBackgroundColor, nameof(DefaultBackgroundColor));
+        get => GlobalDefaults.DefaultBackgroundColor;
+        set => GlobalDefaults.DefaultBackgroundColor = value;
     }
 
     /// <summary>Default text colour (hex) for new panels.</summary>
     public string DefaultTextColor
     {
-        get => _appSettings.DefaultTextColor;
-        set => SetGlobal(v => _appSettings.DefaultTextColor = v, value, _appSettings.DefaultTextColor, nameof(DefaultTextColor));
+        get => GlobalDefaults.DefaultTextColor;
+        set => GlobalDefaults.DefaultTextColor = value;
     }
 
     /// <summary>Default opacity (0–1) for new panels.</summary>
     public double DefaultOpacity
     {
-        get => _appSettings.DefaultOpacity;
-        set => SetGlobal(v => _appSettings.DefaultOpacity = v, value, _appSettings.DefaultOpacity, nameof(DefaultOpacity));
+        get => GlobalDefaults.DefaultOpacity;
+        set => GlobalDefaults.DefaultOpacity = value;
     }
 
     /// <summary>Default icon size (px) for new panels.</summary>
     public double DefaultIconSize
     {
-        get => _appSettings.DefaultIconSize;
-        set => SetGlobal(v => _appSettings.DefaultIconSize = v, value, _appSettings.DefaultIconSize, nameof(DefaultIconSize));
+        get => GlobalDefaults.DefaultIconSize;
+        set => GlobalDefaults.DefaultIconSize = value;
     }
 
     /// <summary>Whether the app starts with Windows.</summary>
@@ -260,15 +261,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Whether the system icons panel is shown on the desktop.</summary>
     public bool SystemIconsPanelEnabled
     {
-        get => _systemIconsPanelManager.Model.IsEnabled;
-        set
-        {
-            if (_systemIconsPanelManager.Model.IsEnabled == value) return;
-            _systemIconsPanelManager.Model.IsEnabled = value;
-            _systemIconsPanelManager.Apply();
-            _systemIconsPanelManager.Save();
-            OnPropertyChanged(nameof(SystemIconsPanelEnabled));
-        }
+        get => SystemIconsSettings.SystemIconsPanelEnabled;
+        set => SystemIconsSettings.SystemIconsPanelEnabled = value;
     }
 
     /// <summary>
@@ -278,57 +272,29 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// </summary>
     public bool SystemIconsPanelOnAllVirtualDesktops
     {
-        get => _systemIconsPanelManager.Model.ShowOnAllVirtualDesktops;
-        set
-        {
-            if (_systemIconsPanelManager.Model.ShowOnAllVirtualDesktops == value) return;
-            _systemIconsPanelManager.Model.ShowOnAllVirtualDesktops = value;
-
-            // Deliberately NOT Apply(): this toggle only starts/stops the poll timer / anchor
-            // placement, and Apply() would tear down and recreate the panel window (visible flicker
-            // for a setting that never touches the window itself — see ApplyVirtualDesktopSetting).
-            _systemIconsPanelManager.ApplyVirtualDesktopSetting();
-            _systemIconsPanelManager.Save();
-            OnPropertyChanged(nameof(SystemIconsPanelOnAllVirtualDesktops));
-        }
+        get => SystemIconsSettings.SystemIconsPanelOnAllVirtualDesktops;
+        set => SystemIconsSettings.SystemIconsPanelOnAllVirtualDesktops = value;
     }
 
     /// <summary>The ordered list of system icon items (for per-item visibility checkboxes).</summary>
-    public ObservableCollection<SystemIconItemModel> SystemIconsItems
-        => _systemIconsPanelManager.Model.Items;
+    public ObservableCollection<SystemIconItemModel> SystemIconsItems => SystemIconsSettings.SystemIconsItems;
 
     /// <summary>Size (Small / Medium / Large) for system icon items.</summary>
     public SystemIconSize SystemIconsSize
     {
-        get => _systemIconsPanelManager.Model.IconSize;
-        set
-        {
-            if (_systemIconsPanelManager.Model.IconSize == value) return;
-            _systemIconsPanelManager.Model.IconSize = value;
-            _systemIconsPanelManager.Apply();
-            _systemIconsPanelManager.Save();
-            OnPropertyChanged(nameof(SystemIconsSize));
-        }
+        get => SystemIconsSettings.SystemIconsSize;
+        set => SystemIconsSettings.SystemIconsSize = value;
     }
 
     /// <summary>Available icon size options for the ComboBox.</summary>
-    public IReadOnlyList<SystemIconSize> SystemIconSizeOptions { get; } = Enum.GetValues<SystemIconSize>();
+    public IReadOnlyList<SystemIconSize> SystemIconSizeOptions => SystemIconsSettings.SystemIconSizeOptions;
 
     /// <summary>
     /// Whether the "Show on all virtual desktops" feature has been silently disabled by the
-    /// circuit breaker in <c>SystemIconsPanelManager.PollVirtualDesktopOnce</c> (three consecutive
-    /// no-effect move attempts — see <see cref="SystemIconsPanelModel.VirtualDesktopFeatureIneffective"/>
-    /// and ADR-016) — i.e. whether <see cref="SystemIconsPanelOnAllVirtualDesktops"/>'s checkbox is
-    /// checked but no longer actually doing anything on this system. Drives a warning hint next to that
-    /// checkbox in <c>MainWindow.xaml</c> (finalization MAJOR M-3) — without it, this state was
-    /// previously invisible: the checkbox stayed checked while the manager had already given up
-    /// polling. Unlike the other System Icons Panel properties above, this one is never set by the user
-    /// — it only ever changes from the manager's own background poll — so there is no setter, only a
-    /// <see cref="SystemIconsPanelModel.PropertyChanged"/> subscription (see the constructor) forwarding
-    /// the model's own change notification.
+    /// circuit breaker in <c>SystemIconsPanelManager.PollVirtualDesktopOnce</c> — see
+    /// <see cref="SystemIconsSettingsViewModel.SystemIconsVirtualDesktopFeatureIneffective"/>.
     /// </summary>
-    public bool SystemIconsVirtualDesktopFeatureIneffective
-        => _systemIconsPanelManager.Model.VirtualDesktopFeatureIneffective;
+    public bool SystemIconsVirtualDesktopFeatureIneffective => SystemIconsSettings.SystemIconsVirtualDesktopFeatureIneffective;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="MainWindowViewModel"/> class.
@@ -345,14 +311,24 @@ public class MainWindowViewModel : INotifyPropertyChanged
         IDesktopIconsService desktopIcons)
     {
         _windowManager              = windowManager;
-        _appSettings                = appSettings;
         _autostart                  = autostart;
         _pageManager                = pageManager;
-        _systemIconsPanelManager    = systemIconsPanelManager;
         _confirmation               = confirmation;
         _itemStorage                = itemStorage;
         _desktopIcons               = desktopIcons;
         LayoutSnapshots             = layoutSnapshots;
+
+        SelectedPanelSettings = new SelectedPanelSettingsViewModel(windowManager);
+        GlobalDefaults        = new GlobalDefaultsViewModel(appSettings);
+        SystemIconsSettings   = new SystemIconsSettingsViewModel(systemIconsPanelManager);
+
+        // Re-raise every sub-ViewModel's own PropertyChanged verbatim on this ViewModel — the property
+        // names match exactly (see the forwarding properties above), so no name translation is needed.
+        // Never unsubscribed: all three sub-ViewModels are owned for the lifetime of this (DI-singleton)
+        // ViewModel.
+        SelectedPanelSettings.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName!);
+        GlobalDefaults.PropertyChanged        += (_, e) => OnPropertyChanged(e.PropertyName!);
+        SystemIconsSettings.PropertyChanged   += (_, e) => OnPropertyChanged(e.PropertyName!);
 
         AddPanelCommand    = new RelayCommand(AddPanel);
         RemovePanelCommand = new RelayCommand(RemovePanel, CanRemovePanel);
@@ -364,21 +340,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
         _windowManager.OnChildWindowRemoved += OnPanelRemoved;
         _pageManager.PageChanged            += OnPageChanged;
 
-        // Forwards the manager's own background-poll changes to VirtualDesktopFeatureIneffective (the
-        // circuit breaker tripping/resetting) into a PropertyChanged for the read-only proxy above —
-        // nothing else on this ViewModel ever sets that field, so without this subscription the UI
-        // would never learn it changed (finalization MAJOR M-3). Never unsubscribed: both this
-        // ViewModel and the manager (and its Model) are process-wide DI singletons (DiConfig), so there
-        // is no shorter-lived side to leak against.
-        _systemIconsPanelManager.Model.PropertyChanged += OnSystemIconsPanelModelPropertyChanged;
-
         SyncPages();
-    }
-
-    private void OnSystemIconsPanelModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(SystemIconsPanelModel.VirtualDesktopFeatureIneffective))
-            OnPropertyChanged(nameof(SystemIconsVirtualDesktopFeatureIneffective));
     }
 
     /// <summary>
@@ -407,10 +369,10 @@ public class MainWindowViewModel : INotifyPropertyChanged
         var model = new ChildWindowModel
         {
             Title = "New Panel",
-            BackgroundColor = _appSettings.DefaultBackgroundColor,
-            TextColor = _appSettings.DefaultTextColor,
-            BackgroundOpacity = _appSettings.DefaultOpacity,
-            IconSize = _appSettings.DefaultIconSize,
+            BackgroundColor = GlobalDefaults.DefaultBackgroundColor,
+            TextColor = GlobalDefaults.DefaultTextColor,
+            BackgroundOpacity = GlobalDefaults.DefaultOpacity,
+            IconSize = GlobalDefaults.DefaultIconSize,
             PageId = _pageManager.CurrentPage,
         };
 
@@ -486,40 +448,6 @@ public class MainWindowViewModel : INotifyPropertyChanged
 
         if (_selectedPanel?.Id == model.Id)
             SelectedPanel = null;
-    }
-
-    /// <summary>
-    /// Applies a change to the selected panel and persists it. The model's own property
-    /// setter guards equality, so re-applying an unchanged value is harmless.
-    /// </summary>
-    private void SetSelectedPanel(Action<ChildWindowModel> apply, [System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null)
-    {
-        if (_selectedPanel is null) return;
-
-        apply(_selectedPanel);
-        _windowManager.SaveWindowsState();
-        OnPropertyChanged(propertyName!);
-    }
-
-    private void SetGlobal<T>(Action<T> apply, T newValue, T current, string propertyName)
-    {
-        if (EqualityComparer<T>.Default.Equals(current, newValue)) return;
-        apply(newValue);
-        _appSettings.Save();
-        OnPropertyChanged(propertyName);
-    }
-
-    private void RaiseSelectedPanelProperties()
-    {
-        OnPropertyChanged(nameof(HasSelectedPanel));
-        OnPropertyChanged(nameof(SelectedPanelTitle));
-        OnPropertyChanged(nameof(SelectedPanelBackgroundColor));
-        OnPropertyChanged(nameof(SelectedPanelTextColor));
-        OnPropertyChanged(nameof(SelectedPanelOpacity));
-        OnPropertyChanged(nameof(SelectedPanelIconSize));
-        OnPropertyChanged(nameof(SelectedPanelViewMode));
-        OnPropertyChanged(nameof(SelectedPanelSortMode));
-        OnPropertyChanged(nameof(SelectedPanelSupportsManualOrder));
     }
 
     /// <summary>

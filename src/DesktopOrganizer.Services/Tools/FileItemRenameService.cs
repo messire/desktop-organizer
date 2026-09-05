@@ -1,5 +1,5 @@
 using System.IO;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 
 namespace DesktopOrganizer.Services.Tools;

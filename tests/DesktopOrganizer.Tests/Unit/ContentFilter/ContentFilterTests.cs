@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using System.IO;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.ViewModels;
@@ -210,7 +210,7 @@ public class PanelFilterViewModelTests
     {
         Directory.CreateDirectory(TempDir);
         var iconMock = new Mock<IIconProvider>();
-        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource?)null);
+        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
 
         var model = new ChildWindowModel { ContentFilter = filter };
         var vm = new FilterViewModel(iconMock.Object);
@@ -299,7 +299,7 @@ public class PanelFilterViewModelTests
     public void ShowAll_AfterHideShortcuts_RestoredItemsVisible()
     {
         var iconMock = new Mock<IIconProvider>();
-        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource?)null);
+        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
 
         var model = new ChildWindowModel { ContentFilter = PanelContentFilter.ShowAll };
         var vm = new FilterViewModel(iconMock.Object);
@@ -326,7 +326,7 @@ public class PanelFilterViewModelTests
     public void ModelContentFilterChange_TriggersFileItemsUpdate()
     {
         var iconMock = new Mock<IIconProvider>();
-        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource?)null);
+        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
 
         var model = new ChildWindowModel { ContentFilter = PanelContentFilter.ShowAll };
         var vm = new FilterViewModel(iconMock.Object);
@@ -367,7 +367,7 @@ public class SyncToModelPersistenceRegressionTests
     {
         Directory.CreateDirectory(TempDir);
         var iconMock = new Mock<IIconProvider>();
-        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource?)null);
+        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
 
         var model = new ChildWindowModel { ContentFilter = filter };
         var vm = new FilterViewModel(iconMock.Object);
@@ -379,7 +379,7 @@ public class SyncToModelPersistenceRegressionTests
     {
         Directory.CreateDirectory(TempDir);
         var iconMock = new Mock<IIconProvider>();
-        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource?)null);
+        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
 
         var model = new ChildWindowModel { ContentFilter = filter };
         var fvm = new FilterViewModel(iconMock.Object);

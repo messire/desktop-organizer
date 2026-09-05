@@ -1,3 +1,4 @@
+using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.ViewModels;
 
 namespace DesktopOrganizer.UI.Views;
@@ -21,11 +22,11 @@ public partial class MainWindow : Window
 
         // Ctrl+PgDown / Ctrl+PgUp — navigate between pages
         InputBindings.Add(new KeyBinding(
-            new RelayPageCommand(_viewModel, next: true),
+            new RelayCommand(() => SwitchPage(next: true)),
             new KeyGesture(Key.Next, ModifierKeys.Control)));
 
         InputBindings.Add(new KeyBinding(
-            new RelayPageCommand(_viewModel, next: false),
+            new RelayCommand(() => SwitchPage(next: false)),
             new KeyGesture(Key.Prior, ModifierKeys.Control)));
     }
 
@@ -37,28 +38,19 @@ public partial class MainWindow : Window
         Hide();
     }
 
-    // ------------------------------------------------------------------
-    // Small private command that delegates Ctrl+PgUp/Down to the VM
-    // ------------------------------------------------------------------
-    private sealed class RelayPageCommand(MainWindowViewModel vm, bool next) : ICommand
+    /// <summary>
+    /// Delegates Ctrl+PgUp/Down to the VM: moves to the next/previous page, wrapping around.
+    /// </summary>
+    private void SwitchPage(bool next)
     {
-        public event EventHandler? CanExecuteChanged;
+        var pages = _viewModel.Pages;
+        if (pages.Count == 0) return;
 
-        public bool CanExecute(object? parameter) => true;
+        var currentIndex = pages.IndexOf(_viewModel.CurrentPage);
+        var targetIndex = next
+            ? (currentIndex + 1) % pages.Count
+            : (currentIndex - 1 + pages.Count) % pages.Count;
 
-        public void Execute(object? parameter)
-        {
-            var pages = vm.Pages;
-            if (pages.Count == 0) return;
-
-            var currentIndex = pages.IndexOf(vm.CurrentPage);
-            int targetIndex;
-            if (next)
-                targetIndex = (currentIndex + 1) % pages.Count;
-            else
-                targetIndex = (currentIndex - 1 + pages.Count) % pages.Count;
-
-            vm.SwitchPageCommand.Execute(pages[targetIndex]);
-        }
+        _viewModel.SwitchPageCommand.Execute(pages[targetIndex]);
     }
 }

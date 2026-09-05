@@ -1,9 +1,11 @@
 using System.Windows.Controls;
 using System.Windows.Interop;
-using System.Windows.Media;
-using DesktopOrganizer.Core.Models;
+using DesktopOrganizer.Core;
+using DesktopOrganizer.UI.Behaviors;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.ViewModels;
+
+using static DesktopOrganizer.UI.Views.VisualTreeWalker;
 
 namespace DesktopOrganizer.UI.Views;
 
@@ -24,11 +26,12 @@ public partial class SystemIconsPanelWindow : Window
 {
     private readonly SystemIconsPanelViewModel _viewModel;
 
-    // Drag-reorder state
-    private Point _dragStartPoint;
-    private SystemIconItemModel? _dragItem;
-    private bool _isDragging;
-
+    // Drag-reorder gesture detection (press/threshold/DoDragDrop) is shared with ChildWindow via
+    // ListReorderGestureController (REFACTORING_PLAN.md §5.2/§6.5 dedup) — this window's own DragOver/
+    // Drop/insertion-indicator hit-testing stays local (a plain vertical StackPanel walk, meaningfully
+    // different from ChildWindow's view-mode-aware ListBoxItem-generator hit-test), so only Down/Move
+    // are wired through the shared controller.
+    private readonly ListReorderGestureController<SystemIconItemModel> _reorderController;
 
     /// <summary>
     /// Initializes a new instance of <see cref="SystemIconsPanelWindow"/>.
@@ -38,6 +41,13 @@ public partial class SystemIconsPanelWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         InitializeComponent();
+
+        _reorderController = new ListReorderGestureController<SystemIconItemModel>(
+            dragSource: IconsListBox,
+            dataFormat: "SystemIconKind",
+            resolveDragCandidate: ResolveReorderDragCandidate,
+            createPayload: item => item.Kind,
+            onGestureEnded: () => { });
     }
 
     /// <inheritdoc />
@@ -97,50 +107,30 @@ public partial class SystemIconsPanelWindow : Window
     /// bubbling phase right after this <c>Preview</c> handler.
     /// </summary>
     private void IconsListBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        => _reorderController.OnPreviewMouseLeftButtonDown(sender, e);
+
+    private void IconsListBox_PreviewMouseMove(object sender, MouseEventArgs e)
+        => _reorderController.OnPreviewMouseMove(sender, e);
+
+    /// <summary>
+    /// Resolves the press-time drag-to-reorder candidate for <see cref="_reorderController"/>. Walks up
+    /// to the ListBoxItem container, not a specific content element type — before the ItemsControl ->
+    /// ListBox migration (§5.3) this looked for an ancestor Button, but the item template stopped
+    /// containing one when it moved to a Border + MouseBinding (FIX 5, see IconBorder below), which
+    /// silently made the drag candidate always null and drag-reorder dead code (ui-polishing-1 §5.2 —
+    /// the bug this fixes). ListBoxItem is the right ancestor type post-migration, matching the same
+    /// pattern already used in ChildWindow.xaml.cs.
+    /// </summary>
+    private SystemIconItemModel? ResolveReorderDragCandidate(DependencyObject source)
     {
-        _dragStartPoint = e.GetPosition(null);
-        _dragItem = null;
-        _isDragging = false;
-
-        if (e.OriginalSource is not DependencyObject source) return;
-
-        // Walk up to the ListBoxItem container, not a specific content element type — before the
-        // ItemsControl -> ListBox migration (§5.3) this looked for an ancestor Button, but the item
-        // template stopped containing one when it moved to a Border + MouseBinding (FIX 5, see
-        // IconBorder below), which silently made _dragItem always null and drag-reorder dead code
-        // (ui-polishing-1 §5.2 — the bug this fixes). ListBoxItem is the right ancestor type
-        // post-migration, matching the same pattern already used in ChildWindow.xaml.cs.
         var container = FindAncestorOrSelf<ListBoxItem>(source);
         if (container is null)
         {
             _viewModel.SelectedItem = null;
-            return;
+            return null;
         }
 
-        if (container.DataContext is SystemIconItemModel item)
-            _dragItem = item;
-    }
-
-    private void IconsListBox_PreviewMouseMove(object sender, MouseEventArgs e)
-    {
-        if (e.LeftButton != MouseButtonState.Pressed || _dragItem is null || _isDragging)
-            return;
-
-        var pos = e.GetPosition(null);
-        var delta = pos - _dragStartPoint;
-
-        // Only start drag after the system drag threshold is exceeded.
-        if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance)
-            return;
-
-        _isDragging = true;
-
-        var data = new DataObject("SystemIconKind", _dragItem.Kind);
-        DragDrop.DoDragDrop(IconsListBox, data, DragDropEffects.Move);
-
-        _isDragging = false;
-        _dragItem = null;
+        return container.DataContext as SystemIconItemModel;
     }
 
     private void IconsListBox_DragOver(object sender, DragEventArgs e)
@@ -281,31 +271,5 @@ public partial class SystemIconsPanelWindow : Window
         }
 
         return lastBottom;
-    }
-
-    private static T? FindAncestorOrSelf<T>(DependencyObject obj)
-        where T : DependencyObject
-    {
-        while (obj is not null)
-        {
-            if (obj is T t) return t;
-            obj = VisualTreeHelper.GetParent(obj);
-        }
-
-        return null;
-    }
-
-    private static T? FindVisualChild<T>(DependencyObject parent)
-        where T : DependencyObject
-    {
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T t) return t;
-            var result = FindVisualChild<T>(child);
-            if (result is not null) return result;
-        }
-
-        return null;
     }
 }

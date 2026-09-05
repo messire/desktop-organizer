@@ -209,7 +209,7 @@
                                 DragOver="FileListHost_DragOver"
                                 DragLeave="FileListHost_DragLeave"
                                 Drop="FileListHost_Drop"
-                                Margin="0,0,0,4"/>
+                                Margin="0,0,0,0"/>
             </Grid>
 
             <!-- Resize overlay: transparent thumbs on edges/corners; centre cell is empty so

@@ -6,6 +6,24 @@
 internal delegate bool EnumWindowsCallback(IntPtr hwnd, IntPtr lParam);
 
 /// <summary>
+/// Callback delegate for the low-level mouse hook installed by
+/// <see cref="INativeApi.SetWindowsHookEx"/> (<c>WH_MOUSE_LL</c>, <c>HOOKPROC</c>).
+/// </summary>
+/// <remarks>
+/// The instance passed to <see cref="INativeApi.SetWindowsHookEx"/> must be kept alive (rooted in a
+/// field) by the caller for the whole lifetime of the hook — the native side holds only an unmanaged
+/// thunk, which the GC does not track.
+/// </remarks>
+internal delegate IntPtr LowLevelMouseCallback(int nCode, IntPtr wParam, IntPtr lParam);
+
+/// <summary>
+/// Window procedure callback for the hidden window created by
+/// <see cref="INativeApi.CreateMessageWindow"/> (<c>WNDPROC</c>).
+/// </summary>
+/// <remarks>Must be kept alive by the caller for the whole lifetime of the window.</remarks>
+internal delegate IntPtr NativeWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+
+/// <summary>
 /// Utilities provided access to native functions via P/Invoke.
 /// </summary>
 internal interface INativeApi
@@ -166,9 +184,136 @@ internal interface INativeApi
     /// Moves the given paths to the Recycle Bin (FO_DELETE | FOF_ALLOWUNDO).
     /// </summary>
     bool SendToRecycleBin(string[] paths, IntPtr ownerHwnd);
+
+    // ── Low-level mouse hook (WH_MOUSE_LL), see ADR-003 / ADR-012 ────────────────────────────────
+
+    /// <summary>
+    /// Returns the module handle of <paramref name="moduleName"/>, or of the current process when
+    /// <see langword="null"/> is passed.
+    /// </summary>
+    IntPtr GetModuleHandle(string? moduleName);
+
+    /// <summary>
+    /// Installs a global hook procedure. The caller owns the returned handle and must release it
+    /// through <see cref="UnhookWindowsHookEx"/>.
+    /// </summary>
+    /// <param name="hookId">One of the <c>WH_*</c> constants (this overload targets <c>WH_MOUSE_LL</c> = 14).</param>
+    /// <param name="callback">Hook procedure; must stay rooted by the caller until unhooked.</param>
+    /// <param name="moduleHandle">Module owning the procedure; for <c>WH_MOUSE_LL</c> the current module.</param>
+    /// <param name="threadId">Thread to hook, or 0 for all threads on the desktop.</param>
+    /// <returns>The hook handle, or <see cref="IntPtr.Zero"/> on failure.</returns>
+    IntPtr SetWindowsHookEx(int hookId, LowLevelMouseCallback callback, IntPtr moduleHandle, uint threadId);
+
+    /// <summary>
+    /// Removes a hook previously installed with <see cref="SetWindowsHookEx"/>.
+    /// </summary>
+    bool UnhookWindowsHookEx(IntPtr hookHandle);
+
+    /// <summary>
+    /// Passes the hook information to the next hook procedure in the chain.
+    /// </summary>
+    IntPtr CallNextHookEx(IntPtr hookHandle, int nCode, IntPtr wParam, IntPtr lParam);
+
+    /// <summary>
+    /// Reads the cursor position out of an <c>MSLLHOOKSTRUCT</c> pointed to by the hook's
+    /// <c>lParam</c>. Screen coordinates, physical pixels.
+    /// </summary>
+    System.Drawing.Point ReadMouseHookPoint(IntPtr lParam);
+
+    /// <summary>
+    /// Returns the window at the given screen point, or <see cref="IntPtr.Zero"/>.
+    /// </summary>
+    IntPtr WindowFromPoint(int screenX, int screenY);
+
+    /// <summary>
+    /// Returns the system double-click interval, in milliseconds.
+    /// </summary>
+    uint GetDoubleClickTime();
+
+    /// <summary>
+    /// Cross-process <c>LVM_HITTEST</c> against Explorer's desktop <c>SysListView32</c>: reports
+    /// whether the given screen point hits no list item (i.e. bare desktop between the icons).
+    /// </summary>
+    /// <remarks>
+    /// Fully defensive: any failure — insufficient rights, bitness mismatch, or a hung
+    /// <c>explorer.exe</c> — returns <see langword="false"/> ("not empty"), never throws. The message
+    /// is sent with a short timeout and <c>SMTO_ABORTIFHUNG</c>, because this runs inside the global
+    /// mouse hook where a blocking call would stall input for the whole OS.
+    /// </remarks>
+    bool IsListViewPointEmpty(IntPtr listView, int screenX, int screenY);
+
+    // ── Monitors & hidden broadcast window ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Enumerates the attached display monitors. Rectangles are physical pixels.
+    /// Returns an empty list on failure.
+    /// </summary>
+    IReadOnlyList<NativeMonitorInfo> GetMonitorInfos();
+
+    /// <summary>
+    /// System (primary monitor) DPI scale — 1.0 at 96 DPI. Returns 1.0 on failure.
+    /// </summary>
+    double GetSystemDpiScale();
+
+    /// <summary>
+    /// Primary screen size in physical pixels (<c>SM_CXSCREEN</c>/<c>SM_CYSCREEN</c>).
+    /// </summary>
+    System.Drawing.Size GetPrimaryScreenSizePx();
+
+    /// <summary>
+    /// Registers a window class and creates a hidden top-level window used only to receive broadcast
+    /// messages (<c>WM_DISPLAYCHANGE</c>/<c>WM_SETTINGCHANGE</c>).
+    /// </summary>
+    /// <param name="className">Unique class name to register.</param>
+    /// <param name="windowProc">Window procedure; must stay rooted by the caller until destroyed.</param>
+    /// <returns>
+    /// The created window. On failure <see cref="NativeMessageWindow.IsValid"/> is
+    /// <see langword="false"/> and <see cref="NativeMessageWindow.LastError"/> carries the Win32 error.
+    /// </returns>
+    NativeMessageWindow CreateMessageWindow(string className, NativeWindowProc windowProc);
+
+    /// <summary>
+    /// Destroys a window created by <see cref="CreateMessageWindow"/> and unregisters its class.
+    /// Safe to call with a default/invalid value.
+    /// </summary>
+    void DestroyMessageWindow(NativeMessageWindow window);
+
+    /// <summary>
+    /// Default window procedure (<c>DefWindowProc</c>) for messages the caller does not handle.
+    /// </summary>
+    IntPtr DefaultWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
 }
 
 /// <summary>
 /// Native Recycle Bin query result.
 /// </summary>
 internal readonly record struct RecycleBinNativeState(long ItemCount, long TotalSize);
+
+/// <summary>
+/// A display monitor as reported by <c>GetMonitorInfo</c>. Rectangles are physical pixels;
+/// conversion to WPF device-independent units is the caller's job.
+/// </summary>
+internal readonly record struct NativeMonitorInfo(
+    string DeviceName,
+    System.Drawing.Rectangle Bounds,
+    System.Drawing.Rectangle WorkArea,
+    bool IsPrimary);
+
+/// <summary>
+/// Handle pair of a hidden broadcast window plus the class atom that has to be unregistered with it.
+/// </summary>
+/// <param name="Handle">Window handle, or <see cref="IntPtr.Zero"/> when creation failed.</param>
+/// <param name="ClassAtom">Registered class atom, or 0 when registration failed.</param>
+/// <param name="LastError">Win32 error of the failing step, or 0 on success.</param>
+internal readonly record struct NativeMessageWindow(IntPtr Handle, ushort ClassAtom, int LastError)
+{
+    /// <summary>
+    /// Gets a value indicating whether the window was created successfully.
+    /// </summary>
+    public bool IsValid => Handle != IntPtr.Zero;
+
+    /// <summary>
+    /// Gets a value indicating whether anything at all needs to be released.
+    /// </summary>
+    public bool HasResources => Handle != IntPtr.Zero || ClassAtom != 0;
+}

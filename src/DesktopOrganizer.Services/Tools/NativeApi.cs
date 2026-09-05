@@ -363,6 +363,208 @@ internal partial class NativeApi: INativeApi
         }
     }
 
+    // ── Low-level mouse hook (WH_MOUSE_LL), see ADR-003 / ADR-012 ───────────────────────────────
+
+    /// <inheritdoc />
+    public IntPtr GetModuleHandle(string? moduleName)
+        => NativeMethods.GetModuleHandleW(moduleName);
+
+    /// <inheritdoc />
+    public IntPtr SetWindowsHookEx(int hookId, LowLevelMouseCallback callback, IntPtr moduleHandle, uint threadId)
+        => NativeMethods.SetWindowsHookExW(hookId, callback, moduleHandle, threadId);
+
+    /// <inheritdoc />
+    public bool UnhookWindowsHookEx(IntPtr hookHandle)
+        => hookHandle != IntPtr.Zero && NativeMethods.UnhookWindowsHookEx(hookHandle);
+
+    /// <inheritdoc />
+    public IntPtr CallNextHookEx(IntPtr hookHandle, int nCode, IntPtr wParam, IntPtr lParam)
+        => NativeMethods.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+
+    /// <inheritdoc />
+    public System.Drawing.Point ReadMouseHookPoint(IntPtr lParam)
+    {
+        // Deliberately not guarded: a garbage lParam must surface to the hook's own try/catch
+        // (ADR-012) rather than be silently reported as the (0,0) screen corner.
+        var data = Marshal.PtrToStructure<NativeMethods.MSLLHOOKSTRUCT>(lParam);
+        return new System.Drawing.Point(data.pt.X, data.pt.Y);
+    }
+
+    /// <inheritdoc />
+    public IntPtr WindowFromPoint(int screenX, int screenY)
+        => NativeMethods.WindowFromPoint(new NativeMethods.POINT { X = screenX, Y = screenY });
+
+    /// <inheritdoc />
+    public uint GetDoubleClickTime()
+        => NativeMethods.GetDoubleClickTime();
+
+    /// <inheritdoc />
+    public bool IsListViewPointEmpty(IntPtr listView, int screenX, int screenY)
+    {
+        if (listView == IntPtr.Zero) return false;
+
+        var clientPt = new NativeMethods.POINT { X = screenX, Y = screenY };
+        if (!NativeMethods.ScreenToClient(listView, ref clientPt)) return false;
+
+        NativeMethods.GetWindowThreadProcessId(listView, out var pid);
+        if (pid == 0) return false;
+
+        var proc = NativeMethods.OpenProcess(
+            NativeMethods.ProcessVmOperation | NativeMethods.ProcessVmRead | NativeMethods.ProcessVmWrite,
+            false,
+            pid);
+        if (proc == IntPtr.Zero) return false;
+
+        var size = Marshal.SizeOf<NativeMethods.LVHITTESTINFO>();
+        var remote = IntPtr.Zero;
+        var local = IntPtr.Zero;
+
+        try
+        {
+            remote = NativeMethods.VirtualAllocEx(proc, IntPtr.Zero, (UIntPtr)size, NativeMethods.MemCommit, NativeMethods.PageReadWrite);
+            if (remote == IntPtr.Zero) return false;
+
+            var info = new NativeMethods.LVHITTESTINFO { pt = clientPt, iItem = -1 };
+            local = Marshal.AllocHGlobal(size);
+            Marshal.StructureToPtr(info, local, false);
+
+            if (!NativeMethods.WriteProcessMemory(proc, remote, local, (UIntPtr)size, out _)) return false;
+
+            // CRITICAL: this runs inside the WH_MOUSE_LL callback. A plain SendMessage would block
+            // the hook thread — and therefore mouse input for the entire OS — while explorer.exe is
+            // hung. SMTO_ABORTIFHUNG + a short timeout make the worst case a wrong "not empty".
+            // SMTO_BLOCK stops this thread (the hook/UI thread) from reentrantly pumping other
+            // threads' incoming sent-messages while it waits, which is not safe mid-hook-callback.
+            var sent = NativeMethods.SendMessageTimeoutW(
+                listView,
+                NativeMethods.LvmHitTest,
+                IntPtr.Zero,
+                remote,
+                NativeMethods.SmtoAbortIfHung | NativeMethods.SmtoBlock,
+                NativeMethods.HitTestTimeoutMs,
+                out _);
+            if (sent == IntPtr.Zero) return false;
+
+            if (!NativeMethods.ReadProcessMemory(proc, remote, local, (UIntPtr)size, out _)) return false;
+
+            info = Marshal.PtrToStructure<NativeMethods.LVHITTESTINFO>(local);
+            return info.iItem < 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"ListView hit-test failed: {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            if (local != IntPtr.Zero) Marshal.FreeHGlobal(local);
+            if (remote != IntPtr.Zero) NativeMethods.VirtualFreeEx(proc, remote, UIntPtr.Zero, NativeMethods.MemRelease);
+            NativeMethods.CloseHandle(proc);
+        }
+    }
+
+    // ── Monitors & hidden broadcast window ──────────────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public IReadOnlyList<NativeMonitorInfo> GetMonitorInfos()
+    {
+        var monitors = new List<NativeMonitorInfo>();
+
+        bool Collect(IntPtr hMonitor, IntPtr hdc, IntPtr lprcMonitor, IntPtr data)
+        {
+            var mi = NativeMethods.MONITORINFOEX.Create();
+            if (NativeMethods.GetMonitorInfo(hMonitor, ref mi))
+            {
+                monitors.Add(new NativeMonitorInfo(
+                    mi.DeviceName,
+                    ToRectangle(mi.rcMonitor),
+                    ToRectangle(mi.rcWork),
+                    (mi.dwFlags & NativeMethods.MonitorinfofPrimary) != 0));
+            }
+
+            return true; // continue enumeration
+        }
+
+        try
+        {
+            NativeMethods.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, Collect, IntPtr.Zero);
+        }
+        catch (Exception ex)
+        {
+            // Defensive: never let a native failure bubble into the caller (often the UI thread).
+            Console.Error.WriteLine($"EnumDisplayMonitors failed: {ex.Message}");
+        }
+
+        return monitors;
+    }
+
+    /// <inheritdoc />
+    public double GetSystemDpiScale()
+    {
+        var hdc = NativeMethods.GetDC(IntPtr.Zero);
+        if (hdc == IntPtr.Zero) return 1.0;
+
+        try
+        {
+            var dpi = NativeMethods.GetDeviceCaps(hdc, NativeMethods.LogPixelsX);
+            return dpi > 0 ? dpi / 96.0 : 1.0;
+        }
+        finally
+        {
+            NativeMethods.ReleaseDC(IntPtr.Zero, hdc);
+        }
+    }
+
+    /// <inheritdoc />
+    public System.Drawing.Size GetPrimaryScreenSizePx()
+        => new(NativeMethods.GetSystemMetrics(NativeMethods.SmCxScreen), NativeMethods.GetSystemMetrics(NativeMethods.SmCyScreen));
+
+    /// <inheritdoc />
+    public NativeMessageWindow CreateMessageWindow(string className, NativeWindowProc windowProc)
+    {
+        var hInstance = NativeMethods.GetModuleHandleW(null);
+
+        var wc = new NativeMethods.WNDCLASS
+        {
+            lpfnWndProc = windowProc,
+            hInstance = hInstance,
+            lpszClassName = className,
+        };
+
+        var atom = NativeMethods.RegisterClass(ref wc);
+        if (atom == 0) return new NativeMessageWindow(IntPtr.Zero, 0, Marshal.GetLastWin32Error());
+
+        // IMPORTANT: a message-only window (HWND_MESSAGE parent) does NOT receive broadcast messages
+        // such as WM_DISPLAYCHANGE / WM_SETTINGCHANGE — Windows excludes message-only windows from
+        // broadcasts by design. We therefore create an ordinary hidden top-level window (no parent,
+        // WS_POPUP, never WS_VISIBLE). Top-level windows DO receive broadcasts, while WS_POPUP
+        // without WS_VISIBLE keeps it off-screen and invisible to the user.
+        var hwnd = NativeMethods.CreateWindowEx(
+            0, className, className, NativeMethods.WsPopup, 0, 0, 0, 0,
+            IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
+
+        if (hwnd != IntPtr.Zero) return new NativeMessageWindow(hwnd, atom, 0);
+
+        // Roll the class registration back so a retry can reuse the name.
+        var error = Marshal.GetLastWin32Error();
+        NativeMethods.UnregisterClass((IntPtr)atom, hInstance);
+        return new NativeMessageWindow(IntPtr.Zero, 0, error);
+    }
+
+    /// <inheritdoc />
+    public void DestroyMessageWindow(NativeMessageWindow window)
+    {
+        if (window.Handle != IntPtr.Zero) NativeMethods.DestroyWindow(window.Handle);
+        if (window.ClassAtom != 0) NativeMethods.UnregisterClass((IntPtr)window.ClassAtom, NativeMethods.GetModuleHandleW(null));
+    }
+
+    /// <inheritdoc />
+    public IntPtr DefaultWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam)
+        => NativeMethods.DefWindowProcW(hwnd, msg, wParam, lParam);
+
+    private static System.Drawing.Rectangle ToRectangle(NativeMethods.RECT r)
+        => System.Drawing.Rectangle.FromLTRB(r.left, r.top, r.right, r.bottom);
+
     private static partial class NativeMethods
     {
         // Shell "Properties" dialog
@@ -387,6 +589,33 @@ internal partial class NativeApi: INativeApi
         public const uint CmfNormal = 0x00000000;
         public const uint TpmReturnCmd = 0x0100;
         public const uint TpmRightButton = 0x0002;
+
+        // Low-level mouse hook + cross-process LVM_HITTEST
+        public const int LvmHitTest = 0x1000 + 18;
+        public const uint SmtoBlock = 0x0001;
+        public const uint SmtoAbortIfHung = 0x0002;
+
+        // Windows abandons (and, on repeat, silently uninstalls) a WH_MOUSE_LL hook that doesn't
+        // return within HKCU\Control Panel\Desktop\LowLevelHooksTimeout (default 300ms) — this
+        // whole IsListViewPointEmpty call happens inside that window, so the SendMessageTimeoutW
+        // budget below must leave headroom for the OpenProcess/VirtualAllocEx/WriteProcessMemory/
+        // ReadProcessMemory calls around it, not consume the full 300ms itself.
+        public const uint HitTestTimeoutMs = 50;
+        public const uint ProcessVmOperation = 0x0008;
+        public const uint ProcessVmRead = 0x0010;
+        public const uint ProcessVmWrite = 0x0020;
+        public const uint MemCommit = 0x1000;
+        public const uint MemRelease = 0x8000;
+        public const uint PageReadWrite = 0x04;
+
+        // Monitors / hidden broadcast window
+        public const int MonitorinfofPrimary = 0x00000001;
+        public const int LogPixelsX = 88;
+        public const int SmCxScreen = 0;
+        public const int SmCyScreen = 1;
+
+        // Hidden top-level window style: a popup that is never shown (no WS_VISIBLE).
+        public const int WsPopup = unchecked((int)0x80000000);
 
         public static Guid IidIShellFolder = new("000214E6-0000-0000-C000-000000000046");
         public static Guid IidIContextMenu = new("000214E4-0000-0000-C000-000000000046");
@@ -467,8 +696,8 @@ internal partial class NativeApi: INativeApi
             public int cbSize;
             public uint fMask;
             public IntPtr hwnd;
-            [MarshalAs(UnmanagedType.LPWStr)] public string lpVerb;
-            [MarshalAs(UnmanagedType.LPWStr)] public string lpFile;
+            [MarshalAs(UnmanagedType.LPWStr)] public string? lpVerb;
+            [MarshalAs(UnmanagedType.LPWStr)] public string? lpFile;
             [MarshalAs(UnmanagedType.LPWStr)] public string? lpParameters;
             [MarshalAs(UnmanagedType.LPWStr)] public string? lpDirectory;
             public int nShow;
@@ -599,5 +828,169 @@ internal partial class NativeApi: INativeApi
             [PreserveSig]
             int GetCommandString(IntPtr idCmd, uint uType, IntPtr pReserved, IntPtr pszName, uint cchMax);
         }
+
+        // ── Low-level mouse hook, monitors, hidden broadcast window ─────────────────────────────
+        // (constants for this block live with the other constants at the top of the class)
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MSLLHOOKSTRUCT
+        {
+            public POINT pt;
+            public uint mouseData;
+            public uint flags;
+            public uint time;
+            public UIntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct LVHITTESTINFO
+        {
+            public POINT pt;
+            public uint flags;
+            public int iItem;
+            public int iSubItem;
+            public int iGroup;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT
+        {
+            public int left;
+            public int top;
+            public int right;
+            public int bottom;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct MONITORINFOEX
+        {
+            public int cbSize;
+            public RECT rcMonitor;
+            public RECT rcWork;
+            public int dwFlags;
+
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string szDevice;
+
+            public readonly string DeviceName => szDevice;
+
+            public static MONITORINFOEX Create() => new() { cbSize = Marshal.SizeOf<MONITORINFOEX>() };
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct WNDCLASS
+        {
+            public uint style;
+            public NativeWindowProc lpfnWndProc;
+            public int cbClsExtra;
+            public int cbWndExtra;
+            public IntPtr hInstance;
+            public IntPtr hIcon;
+            public IntPtr hCursor;
+            public IntPtr hbrBackground;
+            public string? lpszMenuName;
+            public string lpszClassName;
+        }
+
+        [LibraryImport("Kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+        public static partial IntPtr GetModuleHandleW(string? lpModuleName);
+
+        // SetWindowsHookEx takes a managed delegate callback — DllImport required.
+        [DllImport("User32.dll", EntryPoint = "SetWindowsHookExW", SetLastError = true)]
+        public static extern IntPtr SetWindowsHookExW(int idHook, LowLevelMouseCallback lpfn, IntPtr hMod, uint dwThreadId);
+
+        [LibraryImport("User32.dll", EntryPoint = "UnhookWindowsHookEx", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [LibraryImport("User32.dll", EntryPoint = "CallNextHookEx")]
+        public static partial IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+        [LibraryImport("User32.dll", EntryPoint = "WindowFromPoint")]
+        public static partial IntPtr WindowFromPoint(POINT point);
+
+        [LibraryImport("User32.dll", EntryPoint = "GetDoubleClickTime")]
+        public static partial uint GetDoubleClickTime();
+
+        [LibraryImport("User32.dll", EntryPoint = "ScreenToClient")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+        [LibraryImport("User32.dll", EntryPoint = "GetWindowThreadProcessId", SetLastError = true)]
+        public static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [LibraryImport("User32.dll", EntryPoint = "SendMessageTimeoutW", SetLastError = true)]
+        public static partial IntPtr SendMessageTimeoutW(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
+
+        [LibraryImport("Kernel32.dll", EntryPoint = "OpenProcess", SetLastError = true)]
+        public static partial IntPtr OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint pid);
+
+        [LibraryImport("Kernel32.dll", EntryPoint = "CloseHandle", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool CloseHandle(IntPtr handle);
+
+        [LibraryImport("Kernel32.dll", EntryPoint = "VirtualAllocEx", SetLastError = true)]
+        public static partial IntPtr VirtualAllocEx(IntPtr proc, IntPtr addr, UIntPtr size, uint type, uint protect);
+
+        [LibraryImport("Kernel32.dll", EntryPoint = "VirtualFreeEx", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool VirtualFreeEx(IntPtr proc, IntPtr addr, UIntPtr size, uint freeType);
+
+        [LibraryImport("Kernel32.dll", EntryPoint = "WriteProcessMemory", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool WriteProcessMemory(IntPtr proc, IntPtr baseAddr, IntPtr buffer, UIntPtr size, out UIntPtr written);
+
+        [LibraryImport("Kernel32.dll", EntryPoint = "ReadProcessMemory", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool ReadProcessMemory(IntPtr proc, IntPtr baseAddr, IntPtr buffer, UIntPtr size, out UIntPtr read);
+
+        // EnumDisplayMonitors takes a managed delegate callback — DllImport required.
+        [DllImport("User32.dll", EntryPoint = "EnumDisplayMonitors")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
+
+        // MONITORINFOEX carries a ByValTStr field — not blittable, so DllImport (not LibraryImport).
+        [DllImport("User32.dll", EntryPoint = "GetMonitorInfoW", CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
+
+        [LibraryImport("User32.dll", EntryPoint = "GetSystemMetrics")]
+        public static partial int GetSystemMetrics(int nIndex);
+
+        [LibraryImport("User32.dll", EntryPoint = "GetDC")]
+        public static partial IntPtr GetDC(IntPtr hWnd);
+
+        [LibraryImport("User32.dll", EntryPoint = "ReleaseDC")]
+        public static partial int ReleaseDC(IntPtr hWnd, IntPtr hDc);
+
+        [LibraryImport("Gdi32.dll", EntryPoint = "GetDeviceCaps")]
+        public static partial int GetDeviceCaps(IntPtr hdc, int nIndex);
+
+        // WNDCLASS carries a delegate + string fields — DllImport (not source-gen LibraryImport).
+        [DllImport("User32.dll", EntryPoint = "RegisterClassW", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern ushort RegisterClass(ref WNDCLASS lpWndClass);
+
+        [LibraryImport("User32.dll", EntryPoint = "UnregisterClassW", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool UnregisterClass(IntPtr lpClassName, IntPtr hInstance);
+
+        [DllImport("User32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr CreateWindowEx(
+            int dwExStyle, string lpClassName, string lpWindowName, int dwStyle,
+            int x, int y, int nWidth, int nHeight,
+            IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+
+        [LibraryImport("User32.dll", EntryPoint = "DestroyWindow", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool DestroyWindow(IntPtr hWnd);
+
+        [LibraryImport("User32.dll", EntryPoint = "DefWindowProcW")]
+        public static partial IntPtr DefWindowProcW(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        /// <summary>
+        /// <c>MONITORENUMPROC</c>. <paramref name="lprcMonitor"/> is kept as a raw pointer (the
+        /// caller reads the rectangles through <c>GetMonitorInfo</c> instead), which keeps the
+        /// delegate blittable.
+        /// </summary>
+        public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, IntPtr lprcMonitor, IntPtr dwData);
     }
 }

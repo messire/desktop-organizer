@@ -1,10 +1,10 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:models="clr-namespace:DesktopOrganizer.Core.Models;assembly=DesktopOrganizer.Core"
                     xmlns:uimodels="clr-namespace:DesktopOrganizer.UI.Models"
                     xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
                     xmlns:behaviors="clr-namespace:DesktopOrganizer.UI.Behaviors"
-                    xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls">
+                    xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
+                    xmlns:models="clr-namespace:DesktopOrganizer.Core;assembly=DesktopOrganizer.Core">
 
     <conv:HexBrushConverter x:Key="HexBrush"/>
     <conv:ColorOpacityBrushConverter x:Key="ColorOpacityBrush"/>

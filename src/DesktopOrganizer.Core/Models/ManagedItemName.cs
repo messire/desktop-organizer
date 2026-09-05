@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.RegularExpressions;
 
-namespace DesktopOrganizer.Core.Models;
+namespace DesktopOrganizer.Core;
 
 /// <summary>
 /// Pure, file-system-free string helpers for panel item names. No I/O — every method here operates
@@ -15,9 +15,7 @@ public static class ManagedItemName
     // Anchored to the end of the (extension-stripped) name so it only ever strips a suffix that sits
     // immediately before the extension for a file, or at the very end of the string for an
     // extensionless folder name.
-    private static readonly Regex LegacyGuidSuffixPattern = new(
-        "_[0-9a-fA-F]{32}$",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex LegacyGuidSuffixPattern = new("_[0-9a-fA-F]{32}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Strips a legacy flat-layout managed-storage GUID suffix from a bare file or folder name, e.g.

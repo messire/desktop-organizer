@@ -1,0 +1,18 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Example tokens. Tune from real screenshots on target wallpapers. -->
+    <Color x:Key="Color.Surface.Base">#E61A1D23</Color>
+    <Color x:Key="Color.Surface.Hover">#F01D2128</Color>
+    <Color x:Key="Color.Border.Subtle">#26FFFFFF</Color>
+    <Color x:Key="Color.Border.Hover">#45FFFFFF</Color>
+    <Color x:Key="Color.Text.Primary">#F2FFFFFF</Color>
+    <Color x:Key="Color.Text.Secondary">#A8FFFFFF</Color>
+    <Color x:Key="Color.Text.Disabled">#66FFFFFF</Color>
+
+    <Color x:Key="Color.Accent.Blue">#3B82F6</Color>
+    <Color x:Key="Color.Accent.Violet">#A855F7</Color>
+    <Color x:Key="Color.Accent.Amber">#F59E0B</Color>
+    <Color x:Key="Color.Accent.Green">#22C55E</Color>
+    <Color x:Key="Color.Accent.Cyan">#06B6D4</Color>
+    <Color x:Key="Color.Accent.Coral">#F06464</Color>
+</ResourceDictionary>

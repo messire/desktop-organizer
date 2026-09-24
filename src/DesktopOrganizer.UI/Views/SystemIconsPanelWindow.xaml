@@ -35,8 +35,13 @@
     <!--
         Outer border provides a semi-transparent dark background strip for the panel.
         Width is auto (SizeToContent=Width on the Window drives this).
+        Background: Brush.Sidebar.Background (Resources/Styles/Brushes.xaml, C5, D-2/§2.2) — the exact
+        same translucent-black value the inline literal here used to have, just named; not
+        Brush.Surface.Base (that token is fully opaque by design) or the
+        PanelSurfaceBrushConverter/PanelTheme machinery ChildWindow's PanelChrome uses, since this
+        sidebar is not a themed panel with its own AccentColor (D-7).
     -->
-    <Border Background="#55000000" Padding="4,8">
+    <Border Background="{StaticResource Brush.Sidebar.Background}" Padding="4,8">
         <!--
             Grid wraps ItemsControl + insertion indicator so the indicator
             can be positioned absolutely over the items list during drag-reorder.
@@ -45,8 +50,11 @@
             <!--
                 ItemsControl -> ListBox (ui-polishing-1 §5.3, D-F1): gives the sidebar the same
                 single-selection semantics and selection/hover chrome as the fence panels
-                (PanelItemContainerStyle, Templates.xaml — B-F1's fixed, non-clipped border), without
-                duplicating any of its hex tokens. Background/BorderThickness/Padding are all
+                (PanelItemContainerStyle, Resources/Styles/Panels.xaml as of C5 — B-F1's fixed,
+                non-clipped border; C5 additionally gives its selected state the panel's own
+                PanelTheme.Accent, which for this window is always the neutral default since it never
+                sets PanelTheme.Accent — D-7), without duplicating any of its hex tokens.
+                Background/BorderThickness/Padding are all
                 explicitly zeroed out below to keep the default ListBox theme's own chrome (a
                 Padding="1" and a themed border, same trap documented next to ListViewTemplate in
                 Templates.xaml) from adding unaccounted pixels to the window's SizeToContent="Width"
@@ -106,7 +114,7 @@
                                        RenderOptions.BitmapScalingMode="HighQuality"
                                        Stretch="Uniform"/>
                                 <TextBlock Text="{Binding Label}"
-                                           Foreground="White"
+                                           Foreground="{StaticResource Brush.Text.Primary}"
                                            FontSize="10"
                                            TextAlignment="Center"
                                            HorizontalAlignment="Center"
@@ -121,9 +129,13 @@
             <!--
                 Insertion indicator: a 2 px horizontal line shown during drag-reorder.
                 Hidden by default; shown/positioned in DragOver, hidden in Drop/DragLeave.
+                Brush.Border.Focus (Resources/Styles/Brushes.xaml) — the same Ambient Accent token
+                ChildWindow.xaml's own ReorderInsertionIndicator uses for the identical purpose (C4);
+                that file's own comment documents it as approximating the old hardcoded blue literal
+                this element used to have.
             -->
             <Border x:Name="InsertionIndicator"
-                    Background="#FF4080FF"
+                    Background="{StaticResource Brush.Border.Focus}"
                     Height="2"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Top"

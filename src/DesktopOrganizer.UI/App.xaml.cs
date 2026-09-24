@@ -1,6 +1,10 @@
-using DesktopOrganizer.UI.Configuration;
+using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.UI.Diagnostics;
+using DesktopOrganizer.UI.Lifecycle;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
+using DesktopOrganizer.UI.State;
+using DesktopOrganizer.UI.Theming;
 using DesktopOrganizer.UI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,12 +22,16 @@ public partial class App : Application
     // panel geometry math, so a narrowing cast is required here at the int/double boundary.
     private const int MinPanelSize = (int)GridMetrics.MinPanelSize;
 
-    // Held open for the whole process lifetime purely so the installer (see AppMutex in
-    // installer\DesktopOrganizer.iss) can detect a running instance and prompt to close it before
-    // overwriting locked files — not used for single-instance enforcement.
-    private readonly Mutex _installerDetectionMutex = new(initiallyOwned: false, "DesktopOrganizerSingleInstanceMutex");
-
     private readonly ServiceProvider _serviceProvider;
+    private readonly ISingleInstanceCoordinator _coordinator;
+
+    // Defense-in-depth (ADR-023 D-3): Program.Main only ever constructs App after a RunAsPrimary
+    // decision (ADR-023 D-2), so this is always SingleInstanceRole.Primary on every reachable path
+    // today. It exists so that if a future refactor of the entry point ever did construct App for a
+    // non-Primary process, OnExit's early-return below still stops it from reaching
+    // SaveWindowsStateNow()/SystemIconsPanel.Save() and stomping the real Primary's state with an
+    // empty/unloaded model (ADR-023 R-1, phase-3 plan §0.1).
+    private readonly SingleInstanceRole _role;
     private ITrayIconManager? _trayIconManager;
     private IWindowManager? _windowManager;
     private IDesktopIconsService? _desktopIcons;
@@ -31,6 +39,9 @@ public partial class App : Application
     private IMonitorService? _monitorService;
     private IAppSettings? _appSettings;
     private ISystemIconsPanelManager? _systemIconsPanel;
+    private IGestureDiagnostics? _gestureDiagnostics;
+    private IDiagnosticsLog? _diagnosticsLog;
+    private IApplicationStateService? _applicationState;
 
     private ITrayIconManager TrayIconManager
         => (_trayIconManager ??= _serviceProvider.GetService<ITrayIconManager>())!;
@@ -53,28 +64,107 @@ public partial class App : Application
     private ISystemIconsPanelManager SystemIconsPanel
         => (_systemIconsPanel ??= _serviceProvider.GetService<ISystemIconsPanelManager>())!;
 
+    private IApplicationStateService ApplicationState
+        => (_applicationState ??= _serviceProvider.GetService<IApplicationStateService>())!;
+
+    private IGestureDiagnostics GestureDiagnostics
+        => (_gestureDiagnostics ??= _serviceProvider.GetService<IGestureDiagnostics>())!;
+
+    private IDiagnosticsLog DiagnosticsLog
+        => (_diagnosticsLog ??= _serviceProvider.GetService<IDiagnosticsLog>())!;
+
+    private static string GetAppVersion()
+        => System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+
     /// <summary>
-    /// Initializes a new instance of the <see cref="App"/> class.
+    /// Approximates the primary monitor's DPI scale (1.0 at 96 DPI) for diagnostics only — deliberately
+    /// not the more precise per-monitor <c>INativeApi.GetSystemDpiScale()</c> used internally by
+    /// <see cref="DesktopOrganizer.Services.Abstractions.IMonitorService"/>, which isn't reachable from
+    /// this project (<c>INativeApi</c> is internal to DesktopOrganizer.Services).
     /// </summary>
-    public App()
+    private static double GetPrimaryDpiScale()
     {
-        ServiceCollection services = new ServiceCollection();
-        services.ConfigureServices();
-        _serviceProvider = services.BuildServiceProvider();
+        using var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero);
+        return g.DpiX / 96.0;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="App"/> class. Only ever called from
+    /// <see cref="Program.Main"/>, after the single-instance handshake has already resolved to
+    /// <see cref="SingleInstanceStartupAction.RunAsPrimary"/> (ADR-023 D-2) — there is no parameterless
+    /// constructor, so nothing can accidentally construct an <see cref="App"/> without first going
+    /// through that handshake.
+    /// </summary>
+    /// <param name="serviceProvider">
+    /// The DI container built by <see cref="Program.Main"/> — the same instance
+    /// <see cref="ISingleInstanceCoordinator"/> was itself resolved from, so it must not be rebuilt
+    /// here (that would construct a second coordinator instance holding its own, separate handles).
+    /// </param>
+    /// <param name="coordinator">
+    /// The already-started coordinator (ADR-023). Used here only for <see cref="ISingleInstanceCoordinator.EnterShutdown"/>
+    /// (<see cref="OnExit"/>) and to subscribe <see cref="SingleInstanceActivationHandler"/> to
+    /// <see cref="ISingleInstanceCoordinator.ActivationRequested"/> (<see cref="StartApp"/>) — disposing
+    /// it (stopping the activation server, releasing both mutexes) happens implicitly when
+    /// <paramref name="serviceProvider"/> is disposed, since it is itself a registered singleton there.
+    /// </param>
+    /// <param name="role">See the remarks on <see cref="_role"/>.</param>
+    internal App(ServiceProvider serviceProvider, ISingleInstanceCoordinator coordinator, SingleInstanceRole role)
+    {
+        _serviceProvider = serviceProvider;
+        _coordinator = coordinator;
+        _role = role;
     }
 
     /// <inheritdoc />
     protected override void OnExit(ExitEventArgs e)
     {
+        // Defense-in-depth (ADR-023 D-3) — see the remarks on _role: on every reachable path today this
+        // process is always Primary, but if it somehow weren't, this must be the very first thing
+        // OnExit does, before any teardown below ever runs (ADR-023 R-1, phase-3 plan §0.1).
+        if (_role != SingleInstanceRole.Primary)
+        {
+            base.OnExit(e);
+            return;
+        }
+
+        // First real action of shutdown (ADR-023 D-9): flip the activation server to answering
+        // SHUTTING_DOWN before any teardown below runs, so a Secondary racing to activate us right now
+        // gets a deterministic "retry" signal (ADR-023 D-5/D-6/R-6) instead of a connection that just
+        // times out mid-shutdown.
+        _coordinator.EnterShutdown();
+
         RestoreDesktopIcons();
-        SystemIconsPanel.Save();
 
         // Structural (app exit): must write synchronously, before disposing the DI container, or the
         // last action the user took right before closing (which SaveWindowsState may have only just
-        // scheduled, debounced) would be silently lost.
-        WindowManager.SaveWindowsStateNow();
+        // scheduled, debounced) would be silently lost. A single ApplicationStateService.SaveNow() call
+        // now covers the whole document (panels, pages, layout snapshots AND the system icons panel —
+        // ADR-024 D-11/D-12: it pulls every section's current live state itself), replacing the two
+        // separate SystemIconsPanel.Save() + WindowManager.SaveWindowsStateNow() calls this used to be.
+        ApplicationState.SaveNow();
+
+        // Record the session end before the DI container (and the IDiagnosticsLog it owns) is disposed
+        // — otherwise the very last events recorded during shutdown could be lost.
+        GestureDiagnostics.SessionExiting();
+
+        // Stops the activation server and releases the guard mutex (ADR-023 D-9), then — since this
+        // process was Primary — writes the SingleInstanceShutdownSequence diagnostics event. Must run
+        // here, explicitly, before _serviceProvider.Dispose() below: IDiagnosticsLog is resolved from
+        // the still-live container, which is exactly what makes this safe. Calling it from inside
+        // ISingleInstanceCoordinator's own Dispose() (invoked automatically as part of the container's
+        // disposal chain, by which point the container is already marked disposed) would throw
+        // ObjectDisposedException on every ordinary exit (C-2) — Dispose() is a no-op with respect to
+        // diagnostics precisely because this call already did the work.
+        _coordinator.CompleteShutdown();
+
+        // Flush any buffered diagnostics events — including the shutdown-sequence event just written
+        // above — before the DI container is disposed.
+        DiagnosticsLog.Flush();
+
+        // Disposes every registered IDisposable singleton, including ISingleInstanceCoordinator, whose
+        // own Dispose() at this point only needs to release its two OS mutex handles (CompleteShutdown
+        // above already did the rest).
         _serviceProvider.Dispose();
-        _installerDetectionMutex.Dispose();
         base.OnExit(e);
     }
 
@@ -96,17 +186,169 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// Builds the Ambient Accent Visual System's <see cref="Application.Resources"/> merge chain in
+    /// code (ADR-025 D-1/D-12, docs/PLANS/phase-5-ambient-accent-ui.md §1/§3.2) — see App.xaml's own
+    /// remarks for WHY this can't be a static <c>&lt;ResourceDictionary.MergedDictionaries&gt;</c> list
+    /// declared in XAML any more. Precisely: <c>Brushes.xaml</c>'s entries are plain
+    /// <c>&lt;SolidColorBrush ... po:Freeze="True"/&gt;</c> objects, not deferred content the way
+    /// <c>Style</c>/<c>ControlTemplate</c>/<c>DataTemplate</c> resources are (WPF only defers THOSE
+    /// types' parsing until first lookup) — so each brush, and the <c>{StaticResource Color.*}</c>
+    /// reference inside it, is constructed and resolved as soon as <c>Brushes.xaml</c> itself is parsed/
+    /// merged, not lazily on first consumer access. Once <c>po:Freeze="True"</c> then locks that
+    /// resolved value in as an immutable <see cref="System.Windows.Media.Brush"/>, no later dictionary
+    /// merge can ever change it. So <c>Colors.HighContrast.xaml</c> — when Windows High Contrast is
+    /// active — has to be merged in BEFORE <c>Brushes.xaml</c> parses, not appended afterwards (a later
+    /// merge only overwrites the <c>Color.*</c> dictionary keys; it can never reach brushes already
+    /// frozen from the old values).
+    ///
+    /// <see cref="SystemParameters.HighContrast"/> is read exactly once here, synchronously, before any
+    /// <see cref="Window"/> is constructed (see the one call site, <see cref="StartApp"/>) — "minimum at
+    /// startup" per D-12; live re-theming while the app is running is explicitly out of scope for this
+    /// fix and would require re-running this whole method plus re-freezing/re-fetching every consumer
+    /// that already resolved a Brush from the old dictionary state.
+    ///
+    /// Order is otherwise EXACTLY what App.xaml used to declare statically — only the conditional
+    /// Colors.HighContrast.xaml insertion between Colors.xaml and Spacing.xaml is new:
+    ///
+    ///     Colors -> [Colors.HighContrast, only if SystemParameters.HighContrast] -> Spacing -> Brushes
+    ///     -> Typography -> Icons -> Controls -> Panels -> Templates
+    /// </summary>
+    private void LoadResourceDictionaries()
+    {
+        var highContrast = SystemParameters.HighContrast;
+        HighContrastState.IsActive = highContrast;
+
+        // docs/PLANS/workspace-grid-07-visual.md "reduced motion": same "read once at startup" contract
+        // as HighContrastState.IsActive directly above — see MotionState's own remarks. Read here (not
+        // e.g. lazily from RollUpBehavior itself) purely to keep every SystemParameters snapshot this app
+        // takes at launch in one place, next to the flag it already reads this way.
+        MotionState.AnimationsEnabled = SystemParameters.ClientAreaAnimation;
+
+        var merged = Resources.MergedDictionaries;
+        merged.Add(LoadResourceDictionary("/Resources/Styles/Colors.xaml"));
+
+        if (highContrast)
+            merged.Add(LoadResourceDictionary("/Resources/Styles/Colors.HighContrast.xaml"));
+
+        merged.Add(LoadResourceDictionary("/Resources/Styles/Spacing.xaml"));
+        merged.Add(LoadResourceDictionary("/Resources/Styles/Brushes.xaml"));
+        merged.Add(LoadResourceDictionary("/Resources/Styles/Typography.xaml"));
+        merged.Add(LoadResourceDictionary("/Resources/Styles/Icons.xaml"));
+        merged.Add(LoadResourceDictionary("/Resources/Styles/Controls.xaml"));
+        merged.Add(LoadResourceDictionary("/Resources/Styles/Panels.xaml"));
+        merged.Add(LoadResourceDictionary("/Resources/Templates.xaml"));
+    }
+
+    // Instance method (not static) purely to satisfy StyleCop's static-members-before-instance-members
+    // ordering rule (SA1204) without relocating this helper away from its only caller, immediately
+    // above — LoadComponent itself is Application's own instance API either way.
+    //
+    // Names the assembly explicitly ("/DesktopOrganizer.UI;component/...") rather than passing
+    // relativePackUri straight through with no assembly segment at all: Application.LoadComponent(Uri)
+    // REQUIRES a relative URI — it throws ArgumentException ("AbsoluteUriNotAllowed") on an absolute
+    // "pack://application:,,,/..." form, so UriKind.Relative can't be dropped here — but a relative pack
+    // URI with no leading "/AssemblyName;component" segment resolves against whatever assembly
+    // PresentationFramework treats as the application's entry/resource assembly, not necessarily THIS
+    // (DesktopOrganizer.UI) assembly specifically. They are the same assembly on every reachable path
+    // today (Program.Main lives in DesktopOrganizer.UI), so the unqualified form happened to resolve
+    // correctly, but only incidentally — adding the explicit assembly segment removes that ambiguity
+    // without changing the (still-required) relative URI kind.
+    private ResourceDictionary LoadResourceDictionary(string relativePackUri)
+        => (ResourceDictionary)LoadComponent(new Uri($"/DesktopOrganizer.UI;component{relativePackUri}", UriKind.Relative));
+
     private void StartApp(object? sender, StartupEventArgs e)
     {
+        // Must run before anything else in StartApp: InitTrayIcon()/LoadPanels() below are the first
+        // things that can construct a Window (ChildWindow/MainWindow/SystemIconsPanelWindow), and every
+        // one of those XAML files resolves StaticResource keys this builds.
+        LoadResourceDictionaries();
+
+        // D-12 (docs/PLANS/phase-6-edit-layout-ux.md §1): published as an application resource, not a
+        // ChildWindowViewModel property (DO-002 §0 — zero changed lines there), so a panel's
+        // HeaderContextMenu — which lives in its own visual tree and does not inherit attached DPs — can
+        // still bind to it via {StaticResource LayoutEditMode}. Must be set before InitTrayIcon()/
+        // LoadPanels() below construct any Window whose XAML might reference it.
+        Resources["LayoutEditMode"] = _serviceProvider.GetRequiredService<ILayoutEditModeService>();
+
         InitTrayIcon();
         MonitorService.Start(); // begin listening for display changes before panels load
         LoadPanels();
+
+        // Recorded here — after LoadPanels() — so panelCount reflects the panels actually restored
+        // this session, not zero.
+        //
+        // Guarded by DiagnosticsLog.IsEnabled here (not just inside GestureDiagnostics.SessionStarted)
+        // so the arguments themselves are never eagerly computed when diagnostics is off — the default
+        // for Release builds without --diag/DESKTOPORGANIZER_DIAG=1 (finalization MINOR-4).
+        // GetPrimaryDpiScale() in particular calls System.Drawing.Graphics.FromHwnd(IntPtr.Zero)
+        // unconditionally, with no try/catch of its own; skipping it entirely when diagnostics is
+        // disabled means a failure there can never interrupt StartApp before InitDesktopGestures().
+        if (DiagnosticsLog.IsEnabled)
+        {
+            GestureDiagnostics.SessionStarted(
+                GetAppVersion(),
+                Environment.OSVersion.VersionString,
+                GetPrimaryDpiScale(),
+                MonitorService.GetMonitors().Count,
+                WindowManager.GetAllChildWindows().Count());
+        }
+
         InitDesktopGestures();
 
         SystemIconsPanel.Load();
         SystemIconsPanel.Apply();
+
+        // Second half of the write barrier (ADR-024 D-11 / finalization MAJOR M-1): every one of the
+        // four state-owning consumers has now had the chance to read its own slice of the document
+        // ApplicationState.Load() returned in Program.Main — WindowManager via LoadPanels() above,
+        // PageManager and LayoutSnapshotService transitively via LoadPanels()'s MainWindowViewModel
+        // resolution (whose constructor requires a LayoutSnapshotsViewModel, whose own constructor
+        // calls ILayoutSnapshotService.Load()), and SystemIconsPanelManager via the Load() immediately
+        // above — the last of the four to run. Any RequestSave()/SaveNow() before this line is now a
+        // guaranteed no-op (ApplicationStateService.PersistNow) instead of risking a write that pulls
+        // an empty/default section from a consumer that hasn't loaded yet and persists it over real
+        // on-disk data.
+        ApplicationState.MarkConsumersReady();
+
+        // Wired last, deliberately after every other startup step above: subscribing is the "attach
+        // sink" moment that immediately replays anything ActivationRequestRelay buffered since
+        // Program.Main started the activation server, well before this App/StartApp existed (ADR-023
+        // §2.2). Handle() itself only ever calls IWindowManager.ShowMainWindow() (ADR-023 D-8) — it
+        // never touches panels, pages, or SystemIconsPanel, so it is safe to wire regardless of what
+        // else StartApp did or didn't finish.
+        // UiDispatch.TryBeginInvoke (fire-and-forget), not a bare Current.Dispatcher.Invoke/
+        // UiDispatch.TryInvoke: ActivationRequested is raised on NamedPipeActivationServer's own
+        // background accept thread, so an activation arriving while the dispatcher is already shutting
+        // down would otherwise rethrow TaskCanceledException on that thread — an unhandled exception off
+        // the UI thread, i.e. a hard process kill during an otherwise clean exit. Dropping a "show the
+        // settings window" request from a process that is closing is the correct degrade. See
+        // UiDispatch's remarks.
+        //
+        // MAJOR M-3 fix (P08 fix cycle 2): a BLOCKING Invoke here used to run afoul of
+        // ISingleInstanceCoordinator.CompleteShutdown's bounded NamedPipeActivationServer.Stop().Join(2s)
+        // (ADR-023 D-9) — a plain Thread.Join that does NOT pump the dispatcher. An activation arriving
+        // on the accept thread while App.OnExit is inside that join blocked the accept thread until the
+        // join gave up, needlessly delaying application exit by up to its full 2-second budget (and, at
+        // startup, held ActivationRequestRelay's internal lock for that same span — see UiDispatch.
+        // TryBeginInvoke's remarks). ShowMainWindow() has no result the accept thread needs back — the
+        // DO/1 response is already written and drained before ActivationRequestRelay ever hands the
+        // request off (ADR-023 D-8, NamedPipeActivationServer.HandleConnection: "answer first, hand off
+        // after") — so fire-and-forget changes nothing about the wire protocol, only removes the
+        // accept-thread block.
+        var activationHandler = new SingleInstanceActivationHandler(WindowManager, action => UiDispatch.TryBeginInvoke(Current.Dispatcher, action));
+        _coordinator.ActivationRequested += (_, request) => activationHandler.Handle(request);
     }
 
+    // NIT (P08 fix cycle 2 UiDispatch review): the raw Current.Dispatcher.BeginInvoke/Invoke calls below
+    // are deliberately NOT migrated to UiDispatch. UiDispatch exists to guard a marshal FROM a background
+    // thread onto the UI thread; none of these three call sites cross threads at all. WH_MOUSE_LL hook
+    // callbacks (DesktopGestures.DesktopDoubleClicked/LassoCompleted) run on whichever thread called
+    // SetWindowsHookEx — the UI thread, per DesktopGestureService — and TrayIconManager's requested
+    // events likewise fire from the tray's own hidden-window message loop, pumped on the UI thread. A
+    // same-thread Dispatcher.Invoke/BeginInvoke uses WPF's own re-entrant fast path
+    // (Dispatcher.CheckAccess() == true) regardless of shutdown state, so there is no dead-dispatcher
+    // hazard here for UiDispatch to guard against.
     private void InitDesktopGestures()
     {
         // Heavy work is deferred off the hook callback via the dispatcher.
@@ -136,6 +378,37 @@ public partial class App : Application
         TrayIconManager.OnShowMainWindowRequested += ShowSettingsWindow;
         TrayIconManager.OnToggleMainWindowVisibilityRequested += ToggleSettingsWindow;
         TrayIconManager.OnExitRequested += (_, _) => Shutdown();
+
+        // D-9 #1 — the tray is the one toggle point for the global layout edit mode that never depends
+        // on WS_EX_NOACTIVATE. ITrayIconManager (DesktopOrganizer.Services) has no visibility into
+        // ILayoutEditModeService (DesktopOrganizer.UI sits above it in the layering — see that
+        // interface's remarks), so this is the translation point: tray clicks in, service calls out.
+        var layoutEditMode = _serviceProvider.GetRequiredService<ILayoutEditModeService>();
+
+        TrayIconManager.OnEditLayoutToggleRequested += (_, _) => layoutEditMode.Toggle(LayoutModeChangeSource.Tray);
+        TrayIconManager.OnLockLayoutToggleRequested += (_, _) => layoutEditMode.IsLayoutLocked = !layoutEditMode.IsLayoutLocked;
+
+        // UpdateContextMenu takes a caller-supplied snapshot, not live state (see its remarks) — refresh
+        // it every time anything it depends on changes, not just once at startup, so the tray checkmarks
+        // never go stale relative to a change made from another entry point (panel menu, settings
+        // window, Escape).
+        void RefreshTrayLayoutMenu() => TrayIconManager.UpdateContextMenu(
+            // DO-006: isMainWindowVisible is a known dead flag, not wired to real main-window visibility — see docs/Refactoring/BACKLOG.md
+            isMainWindowVisible: false,
+            isEditLayoutChecked: layoutEditMode.IsEditing,
+            canEnterEditLayout: layoutEditMode.CanEnterEditLayout,
+            isLockLayoutChecked: layoutEditMode.IsLayoutLocked);
+
+        layoutEditMode.ModeChanged += (_, _) => RefreshTrayLayoutMenu();
+        layoutEditMode.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(ILayoutEditModeService.IsLayoutLocked) or nameof(ILayoutEditModeService.CanEnterEditLayout))
+                RefreshTrayLayoutMenu();
+        };
+
+        // Initialize() above built the menu from hardcoded defaults, before IAppSettings.IsLayoutLocked
+        // (persisted, D-8) had a chance to be reflected — replace it now with the real snapshot.
+        RefreshTrayLayoutMenu();
     }
 
     /// <summary>
@@ -145,8 +418,28 @@ public partial class App : Application
     {
         var model = NewPanelWithDefaults();
         model.Title = "New Panel";
-        model.Position = new System.Drawing.Point(args.X, args.Y);
-        model.Size = new System.Drawing.Size(Math.Max(MinPanelSize, args.Width), Math.Max(MinPanelSize, args.Height));
+
+        // F-7 (P03-L1, ADR-028 «Lasso-создание панели: px vs DIP»): DesktopLassoEventArgs is in PHYSICAL
+        // SCREEN PIXELS by contract, while ChildWindowModel.Position/Size are DIP — writing one into the
+        // other made every lassoed panel oversized and displaced at any scale other than 100%. The
+        // conversion uses IMonitorService's own system-DPI coefficient (the same one GetMonitors()
+        // divides by), so no fourth DPI source is introduced; the minimum panel size is applied after it.
+        var dipBounds = LassoPanelGeometry.ToDip(
+            args.X, args.Y, args.Width, args.Height, MonitorService.GetSystemDpiScale(), MinPanelSize);
+
+        var monitors = new List<(string DeviceName, System.Windows.Rect Bounds, System.Windows.Rect WorkArea)>();
+        foreach (var monitor in MonitorService.GetMonitors())
+            monitors.Add((monitor.DeviceName, monitor.Bounds, monitor.WorkArea));
+
+        // Writes Position/Size, aligning the position to the workspace grid of the monitor the lasso was
+        // drawn on when the new panel is GridAligned (closes the TODO(P03) in
+        // PanelDefaults.ReconcileGridAlignedSpans, which cannot resolve a monitor origin itself).
+        LassoPanelGeometry.ApplyTo(model, dipBounds, monitors);
+
+        // MAJOR-1(b) fix-cycle 1 (docs/PLANS/workspace-grid-migration.md §10.5): must run after
+        // Position/Size above, not inside NewPanelWithDefaults — see PanelDefaults.ReconcileGridAlignedSpans's
+        // remarks for why.
+        PanelDefaults.ReconcileGridAlignedSpans(model);
 
         WindowManager.CreateChildWindow(model);
 
@@ -154,11 +447,10 @@ public partial class App : Application
         WindowManager.SaveWindowsStateNow();
     }
 
-    private ChildWindowModel NewPanelWithDefaults() => new()
+    private ChildWindowModel NewPanelWithDefaults()
     {
-        BackgroundColor = AppSettings.DefaultBackgroundColor,
-        TextColor = AppSettings.DefaultTextColor,
-        BackgroundOpacity = AppSettings.DefaultOpacity,
-        IconSize = AppSettings.DefaultIconSize,
-    };
+        var model = new ChildWindowModel();
+        PanelDefaults.Apply(model, AppSettings);
+        return model;
+    }
 }

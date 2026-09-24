@@ -75,7 +75,9 @@ public class RollUpTests
 
         var result = converter.Convert(true, typeof(string), "tooltip", Invariant);
 
-        Assert.Equal("Expand", result);
+        // Pin updated (docs/PLANS/workspace-grid-07-visual.md fix-cycle 1, NIT): "Expand" -> "Expand
+        // panel" for screen-reader clarity out of context — see BoolToGlyphConverter's own remarks.
+        Assert.Equal("Expand panel", result);
     }
 
     [Fact]
@@ -85,7 +87,7 @@ public class RollUpTests
 
         var result = converter.Convert(false, typeof(string), "tooltip", Invariant);
 
-        Assert.Equal("Collapse", result);
+        Assert.Equal("Collapse panel", result);
     }
 
     // ------------------------------------------------------------------

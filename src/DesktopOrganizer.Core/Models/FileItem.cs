@@ -165,6 +165,29 @@ public sealed class FileItem : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Re-resolves <see cref="Icon"/> in place, without touching <see cref="Path"/>/<see cref="Name"/>/
+    /// <see cref="DisplayName"/>/<see cref="Type"/>/<see cref="IsShortcut"/> the way <see cref="Relocate"/>
+    /// does. Used by <c>BaseViewModel.RefreshItemsLiveness</c> when a previously-missing item's file
+    /// reappears (P00 baseline finding H3): <c>IIconProvider</c> deliberately never caches its
+    /// placeholder result for a missing path, so re-resolving here is enough to replace it with the
+    /// file's real icon instead of leaving the item permanently stuck on the placeholder even after
+    /// <see cref="Refresh"/> flips <see cref="Exists"/> back to <see langword="true"/>.
+    /// </summary>
+    /// <param name="icon">The freshly resolved icon, or <see langword="null"/> if none could be resolved.</param>
+    /// <returns>
+    /// <see langword="true"/> if <see cref="Icon"/> actually changed (and <see cref="PropertyChanged"/>
+    /// was raised for it); <see langword="false"/> for a no-op re-resolution to the same instance.
+    /// </returns>
+    public bool UpdateIcon(ImageSource? icon)
+    {
+        if (ReferenceEquals(Icon, icon)) return false;
+
+        Icon = icon;
+        OnPropertyChanged(nameof(Icon));
+        return true;
+    }
+
+    /// <summary>
     /// The file name as a string representation of the object.
     /// </summary>
     public override string ToString() => Name;

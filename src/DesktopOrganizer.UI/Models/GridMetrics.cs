@@ -49,18 +49,91 @@ public static class GridMetrics
     public const double ItemMargin = 6d;
 
     /// <summary>
-    /// Total horizontal chrome of FileListHost outside the icon grid itself.
-    /// As of ui-polishing-1 §3.5 this is <c>0</c> (<c>FileListHost.Margin="0,0,0,4"</c> — no extra
-    /// left/right margin): the item's own per-side chrome (<see cref="ItemMargin"/> = 6px, see its
-    /// doc comment) already reproduces exactly half of the 12px inter-column seam at the left/right
-    /// edges of the list, which is the "uniform grid with half-gutter edges" rule that keeps the edge
-    /// from looking twice as thick as the seam between two columns. Any extra host-level margin here
-    /// would stack on top of that and reintroduce the asymmetry. Still added back to the quantised
-    /// content width (see <c>Resize_DragDelta</c>/<c>SnapWidthToGrid</c> in ChildWindow.xaml.cs) so the
-    /// formula stays correct if this ever needs to become non-zero again (e.g. a themed border around
-    /// FileListHost).
+    /// Total horizontal chrome, as a WINDOW-width value, that sits between
+    /// <see cref="System.Windows.Window.Width"/> and the icon grid's own content width — i.e. what every
+    /// caller of this constant (<see cref="MinPanelWidth"/>,
+    /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
+    /// <c>ResizeConstraintsFactory.BuildConstraints</c>'s <c>HorizontalChrome</c>) adds back after
+    /// quantising CONTENT width, or subtracts before quantising it, to convert between the two.
+    /// <para>
+    /// <b>FileListHost's OWN chrome is still <c>0</c></b> (ui-polishing-1 §3.5,
+    /// <c>FileListHost.Margin="0,0,0,4"</c> — no extra left/right margin): the item's own per-side
+    /// chrome (<see cref="ItemMargin"/> = 6px, see its doc comment) already reproduces exactly half of
+    /// the 12px inter-column seam at the left/right edges of the list, the "uniform grid with
+    /// half-gutter edges" rule from ADR-015. That part of this constant's original justification is
+    /// unchanged.
+    /// </para>
+    /// <para>
+    /// As of ADR-029 (F-3 fix, docs/PLANS/workspace-grid-00-baseline.md finding F-3, "Решение 2") this
+    /// constant is NO LONGER the independent <c>0d</c> literal ADR-015 gave it — it is
+    /// <see cref="PanelMetrics.ContentLeftInset"/> (8 DIP), accounting for a DIFFERENT, OUTER layer of
+    /// chrome ADR-015 never knew about: <c>PanelChrome</c>'s fixed 8-DIP accent-indicator column
+    /// (<c>Resources/Styles/Panels.xaml</c>, <c>PART_AccentIndicator</c>'s <c>ColumnDefinition</c>,
+    /// ADR-025 MAJOR-1), which sits between <see cref="System.Windows.Window.Width"/> and the
+    /// <c>*</c>-column <c>PART_ContentHost</c> that actually hosts <c>FileListHost</c> /
+    /// <c>AdaptiveIconGridPanel</c>. Before this fix, every ANALYTICAL snap-time computation of "how
+    /// many columns fit" assumed the FULL window width was available to the icon grid, while
+    /// <c>AdaptiveIconGridPanel</c> itself — driven by real WPF layout, not this constant — only ever
+    /// saw <c>Window.Width - 8</c>; the two systematically disagreed by exactly one column at every
+    /// snap point. Applies identically to BOTH <see cref="AdaptiveGridLayout"/>-facing
+    /// <see cref="IconLayoutPolicy"/> values (ADR-029 Open Question Q2 = A: this is a chrome-accounting
+    /// fix, orthogonal to the stretch-vs-fixed-gap contract, so it is not gated by
+    /// <see cref="IconLayoutPolicy"/> at all).
+    /// </para>
     /// </summary>
-    public const double FileListHPadding = 0d;
+    public const double FileListHPadding = PanelMetrics.ContentLeftInset;
+
+    /// <summary>
+    /// M-2 (adr/ADR-018-adaptive-icon-grid-layout.md's MAJOR-finding, variant (a) — accepted by the P05
+    /// fix-cycle for <see cref="IconLayoutPolicy.FixedGap"/> only, see adr/ADR-029-icon-layout-policy.md
+    /// Решение 4 amendment): the extra width, ON TOP of <see cref="FileListHPadding"/>, reserved for a
+    /// vertical scrollbar that MIGHT appear — <paramref name="verticalScrollBarWidth"/> for
+    /// <see cref="IconLayoutPolicy.FixedGap"/>, <c>0</c> for <see cref="IconLayoutPolicy.LegacyStretch"/>
+    /// (unchanged behavior).
+    /// <para>
+    /// <b>Why this exists.</b> <c>ScrollViewer.VerticalScrollBarVisibility="Auto"</c>
+    /// (<c>GridViewTemplate</c>) means the vertical scrollbar's own appearance/disappearance changes the
+    /// viewport width <see cref="Controls.AdaptiveIconGridPanel"/> measures against, which can flip
+    /// <see cref="AdaptiveGridLayout.RowCapacity"/> by exactly one column right at the threshold where a
+    /// panel's content stops/starts fitting vertically. Under <see cref="IconLayoutPolicy.LegacyStretch"/>
+    /// this is absorbed by the stretch term (the same columns just redistribute their gap slightly) —
+    /// ADR-018 accepted it as-is (variant (c)). Under <see cref="IconLayoutPolicy.FixedGap"/> there is no
+    /// stretch to absorb it: the column flip instead surfaces as a sudden jump in the right-edge surplus
+    /// space (ADR-029's Решение 4 UX-compromise section), which reads as more jarring — so <c>FixedGap</c>
+    /// reserves the scrollbar's width UNCONDITIONALLY (independent of whether a scrollbar is actually
+    /// visible right now), trading a small amount of always-unused width for a column count that never
+    /// changes as items are added/removed.
+    /// </para>
+    /// <para>
+    /// <paramref name="verticalScrollBarWidth"/> is a parameter, not a direct
+    /// <see cref="System.Windows.SystemParameters.VerticalScrollBarWidth"/> read inside this method, so
+    /// this class (and <see cref="AdaptiveGridLayout"/>) stay free of any WPF runtime dependency and
+    /// fully unit-testable with an arbitrary injected value — callers (<see cref="Controls.AdaptiveIconGridPanel"/>,
+    /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
+    /// <c>ResizeConstraintsFactory.BuildConstraints</c>) are the ones that read the real system metric.
+    /// </para>
+    /// </summary>
+    public static double ReservedVerticalScrollBarWidth(IconLayoutPolicy policy, double verticalScrollBarWidth)
+        => policy == IconLayoutPolicy.FixedGap ? verticalScrollBarWidth : 0d;
+
+    /// <summary>
+    /// Total horizontal chrome, as a WINDOW-width value, between <see cref="System.Windows.Window.Width"/>
+    /// and the CONTENT width actually available to lay out icon-grid columns in — i.e. the
+    /// policy-aware generalisation of <see cref="FileListHPadding"/> that also accounts for M-2's
+    /// <see cref="ReservedVerticalScrollBarWidth"/> reservation
+    /// (<c>= FileListHPadding + ReservedVerticalScrollBarWidth(policy, verticalScrollBarWidth)</c>).
+    /// This is the single function every window-width&lt;-&gt;content-width conversion in the snap-code
+    /// path (<c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
+    /// <see cref="MinPanelWidth(double, IconLayoutPolicy, double)"/>,
+    /// <c>ResizeConstraintsFactory.BuildConstraints</c>'s <c>HorizontalChrome</c>) must use once
+    /// <see cref="IconLayoutPolicy"/> is in scope — using bare <see cref="FileListHPadding"/> in any of
+    /// those call sites would silently re-introduce the exact class of drift F-3 already fixed once (a
+    /// snap-time formula assuming a narrower/wider content area than what
+    /// <see cref="Controls.AdaptiveIconGridPanel"/> actually reserves), this time specific to
+    /// <see cref="IconLayoutPolicy.FixedGap"/> panels.
+    /// </summary>
+    public static double ContentHorizontalChrome(IconLayoutPolicy policy, double verticalScrollBarWidth)
+        => FileListHPadding + ReservedVerticalScrollBarWidth(policy, verticalScrollBarWidth);
 
     /// <summary>
     /// Width of the item StackPanel (icon box) in GridViewTemplate.
@@ -126,10 +199,12 @@ public static class GridMetrics
     /// <para>
     /// <c>+ FileListHPadding</c> promotes the content-only Extent to a WINDOW-width value, matching
     /// the contract every caller of this method compares it against (e.g.
-    /// <c>ChildWindow.Resize_DragDelta</c>/<c>SnapWidthToGrid</c> compare it directly against
-    /// <c>SnapExtent(...) + FileListHPadding</c>, itself a window-width value) — currently a no-op
-    /// numerically since <see cref="FileListHPadding"/> is <c>0</c>, but keeps the contract correct if
-    /// that ever changes (finalization m-3).
+    /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c> compare
+    /// it directly against <c>SnapExtent(...) + FileListHPadding</c>, itself a window-width value). As
+    /// of ADR-029's F-3 fix this is NO LONGER a numeric no-op — <see cref="FileListHPadding"/> is now
+    /// <see cref="PanelMetrics.ContentLeftInset"/> (8), not <c>0</c> — this term is exactly what keeps
+    /// this method a genuine window-width value now that <see cref="FileListHPadding"/> stopped being
+    /// zero (finalization m-3's own prediction, realized by ADR-029).
     /// </para>
     /// <para>
     /// Clamped up to <see cref="MinPanelSize"/> because the unclamped icon-grid minimum (72/84/96/108px
@@ -142,11 +217,35 @@ public static class GridMetrics
     /// </para>
     /// </summary>
     public static double MinPanelWidth(double iconSize)
+        => MinPanelWidth(iconSize, IconLayoutPolicy.LegacyStretch, verticalScrollBarWidth: 0d);
+
+    /// <summary>
+    /// Policy-aware overload (M-2, adr/ADR-029-icon-layout-policy.md Решение 4 amendment): identical to
+    /// <see cref="MinPanelWidth(double)"/> except it converts the one-column content extent to a
+    /// window-width value via <see cref="ContentHorizontalChrome"/> instead of the bare
+    /// <see cref="FileListHPadding"/>, so a <see cref="IconLayoutPolicy.FixedGap"/> panel's minimum
+    /// window width also reserves M-2's scrollbar width — keeping this floor consistent with what
+    /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c> and
+    /// <c>ResizeConstraintsFactory.BuildConstraints</c> now compute for the same policy.
+    /// <see cref="IconLayoutPolicy.LegacyStretch"/> passed here is numerically identical to the
+    /// three-argument overload above (<see cref="ContentHorizontalChrome"/> reduces to
+    /// <see cref="FileListHPadding"/> for that policy, regardless of <paramref name="verticalScrollBarWidth"/>).
+    /// </summary>
+    /// <param name="iconSize">The panel's current icon size.</param>
+    /// <param name="policy">The panel's <see cref="IconLayoutPolicy"/> (Grid mode only — callers must
+    /// resolve List-mode panels to <see cref="IconLayoutPolicy.LegacyStretch"/> themselves, mirroring
+    /// ADR-029 Решение 5: the policy is meaningless outside Grid mode).</param>
+    /// <param name="verticalScrollBarWidth">
+    /// The real <see cref="System.Windows.SystemParameters.VerticalScrollBarWidth"/>, read by the
+    /// caller — see <see cref="ReservedVerticalScrollBarWidth"/>'s remarks for why this class never
+    /// reads it directly.
+    /// </param>
+    public static double MinPanelWidth(double iconSize, IconLayoutPolicy policy, double verticalScrollBarWidth)
     {
         var cell = CellSize(iconSize);
         var edgePadding = AdaptiveGridLayout.EdgePadding(cell, AdaptiveGridLayout.DefaultEdgePaddingRatio);
         var oneColumnExtent = AdaptiveGridLayout.Extent(1, cell, AdaptiveGridLayout.DefaultMinGap, edgePadding);
 
-        return Math.Max(MinPanelSize, oneColumnExtent + FileListHPadding);
+        return Math.Max(MinPanelSize, oneColumnExtent + ContentHorizontalChrome(policy, verticalScrollBarWidth));
     }
 }

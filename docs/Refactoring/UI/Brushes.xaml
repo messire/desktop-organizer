@@ -1,0 +1,9 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="Brush.Surface.Base" Color="{StaticResource Color.Surface.Base}"/>
+    <SolidColorBrush x:Key="Brush.Surface.Hover" Color="{StaticResource Color.Surface.Hover}"/>
+    <SolidColorBrush x:Key="Brush.Border.Subtle" Color="{StaticResource Color.Border.Subtle}"/>
+    <SolidColorBrush x:Key="Brush.Border.Hover" Color="{StaticResource Color.Border.Hover}"/>
+    <SolidColorBrush x:Key="Brush.Text.Primary" Color="{StaticResource Color.Text.Primary}"/>
+    <SolidColorBrush x:Key="Brush.Text.Secondary" Color="{StaticResource Color.Text.Secondary}"/>
+</ResourceDictionary>

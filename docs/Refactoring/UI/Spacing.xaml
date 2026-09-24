@@ -1,0 +1,9 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <sys:Double x:Key="Space.4" xmlns:sys="clr-namespace:System;assembly=mscorlib">4</sys:Double>
+    <sys:Double x:Key="Space.8" xmlns:sys="clr-namespace:System;assembly=mscorlib">8</sys:Double>
+    <sys:Double x:Key="Space.12" xmlns:sys="clr-namespace:System;assembly=mscorlib">12</sys:Double>
+    <sys:Double x:Key="Space.16" xmlns:sys="clr-namespace:System;assembly=mscorlib">16</sys:Double>
+    <CornerRadius x:Key="Radius.Panel">8</CornerRadius>
+    <CornerRadius x:Key="Radius.Control">6</CornerRadius>
+</ResourceDictionary>

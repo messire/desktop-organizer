@@ -120,18 +120,31 @@ public class GridMetricsTests
         Assert.Equal(expected, GridMetrics.CellSize(iconSize));
     }
 
-    // ----- FileListHPadding (ui-polishing-1 §3.5) -----
+    // ----- FileListHPadding (ui-polishing-1 §3.5; ADR-029 F-3 fix, 2026-09-22) -----
 
     /// <summary>
-    /// FileListHPadding is 0 (FileListHost carries no extra left/right margin): the item's own
-    /// per-side chrome (ItemMargin) already reproduces half the inter-column seam at the list edges,
-    /// so no additional host-level padding is needed to keep the edge visually symmetric with the
-    /// seam between two columns (ui-polishing-1 §3.5/§3.7).
+    /// As of ADR-029's F-3 fix, FileListHPadding is no longer an independent 0 literal — it now equals
+    /// PanelMetrics.ContentLeftInset (8), the fixed PanelChrome accent-indicator column width that sits
+    /// between Window.Width and the icon grid's actual content width
+    /// (docs/PLANS/workspace-grid-00-baseline.md finding F-3). This regression-pins the "single source
+    /// of truth" invariant itself, not a specific number: if PanelMetrics.ContentLeftInset ever changes,
+    /// this must track it automatically without a second edit here.
     /// </summary>
     [Fact]
-    public void FileListHPadding_IsZero()
+    public void FileListHPadding_EqualsPanelMetricsContentLeftInset()
     {
-        Assert.Equal(0d, GridMetrics.FileListHPadding);
+        Assert.Equal(PanelMetrics.ContentLeftInset, GridMetrics.FileListHPadding);
+    }
+
+    /// <summary>
+    /// Pins the actual current value (8) as a literal, in addition to the symbolic invariant above — a
+    /// silent, unintentional change to PanelMetrics.ContentLeftInset would still be visible here as a
+    /// concrete regression, not just a tautological "equals itself" check.
+    /// </summary>
+    [Fact]
+    public void FileListHPadding_Is8()
+    {
+        Assert.Equal(8d, GridMetrics.FileListHPadding);
     }
 
     // ----- FileListVPadding (adaptive-icon-grid) -----
@@ -205,10 +218,13 @@ public class GridMetricsTests
     }
 
     /// <summary>
-    /// Above the IconSize threshold where the icon-grid formula (2 * CellSize(iconSize)) already exceeds
-    /// MinPanelSize on its own, MinPanelWidth must return that unclamped icon-grid value verbatim — the
-    /// Math.Max clamp added for the M-1 fix must never silently widen a panel's minimum beyond what the
-    /// grid geometry actually requires once it is safely above the hard floor.
+    /// Above the IconSize threshold where the icon-grid formula (2 * CellSize(iconSize) + FileListHPadding)
+    /// already exceeds MinPanelSize on its own, MinPanelWidth must return that unclamped icon-grid value
+    /// verbatim — the Math.Max clamp added for the M-1 fix must never silently widen a panel's minimum
+    /// beyond what the grid geometry actually requires once it is safely above the hard floor. As of
+    /// ADR-029's F-3 fix, "the icon-grid formula" includes `+ FileListHPadding` (now 8, not 0) — updated
+    /// from the pre-F-3 expectation of a bare `2 * cell`, which pinned FileListHPadding as a numeric
+    /// no-op that is no longer true (see GridMetrics.MinPanelWidth's remarks).
     /// </summary>
     [Theory]
     [InlineData(64d)]
@@ -216,6 +232,112 @@ public class GridMetricsTests
     public void MinPanelWidth_AboveFloor_ReturnsUnclampedIconGridValue(double iconSize)
     {
         var cell = GridMetrics.CellSize(iconSize);
-        Assert.Equal(2d * cell, GridMetrics.MinPanelWidth(iconSize), 1e-9);
+        Assert.Equal((2d * cell) + GridMetrics.FileListHPadding, GridMetrics.MinPanelWidth(iconSize), 1e-9);
+    }
+
+    // ----- ReservedVerticalScrollBarWidth / ContentHorizontalChrome (M-2 fix-cycle amendment,
+    // adr/ADR-029-icon-layout-policy.md Решение 4) -----
+
+    /// <summary>
+    /// LegacyStretch never reserves scrollbar width, for any injected width — M-2's fix is scoped to
+    /// FixedGap only; LegacyStretch keeps ADR-018's original (accepted, documented) trade-off.
+    /// </summary>
+    [Theory]
+    [InlineData(0d)]
+    [InlineData(17d)]
+    [InlineData(23.5d)]
+    public void ReservedVerticalScrollBarWidth_LegacyStretch_IsAlwaysZero(double scrollBarWidth)
+    {
+        Assert.Equal(0d, GridMetrics.ReservedVerticalScrollBarWidth(IconLayoutPolicy.LegacyStretch, scrollBarWidth));
+    }
+
+    /// <summary>
+    /// FixedGap reserves exactly the injected scrollbar width, unconditionally — the function never
+    /// reads a real system metric itself (kept WPF-free/pure/unit-testable), it only decides WHETHER the
+    /// caller-supplied value applies to this policy.
+    /// </summary>
+    [Theory]
+    [InlineData(0d)]
+    [InlineData(17d)]
+    [InlineData(23.5d)]
+    public void ReservedVerticalScrollBarWidth_FixedGap_EqualsInjectedWidth(double scrollBarWidth)
+    {
+        Assert.Equal(scrollBarWidth, GridMetrics.ReservedVerticalScrollBarWidth(IconLayoutPolicy.FixedGap, scrollBarWidth));
+    }
+
+    /// <summary>
+    /// ContentHorizontalChrome(LegacyStretch, x) must equal FileListHPadding for ANY injected scrollbar
+    /// width — LegacyStretch's snap-code behavior must be completely unaffected by M-2 (decision: "для
+    /// LegacyStretch поведение без изменений").
+    /// </summary>
+    [Theory]
+    [InlineData(0d)]
+    [InlineData(17d)]
+    public void ContentHorizontalChrome_LegacyStretch_EqualsFileListHPadding(double scrollBarWidth)
+    {
+        Assert.Equal(GridMetrics.FileListHPadding, GridMetrics.ContentHorizontalChrome(IconLayoutPolicy.LegacyStretch, scrollBarWidth));
+    }
+
+    /// <summary>
+    /// ContentHorizontalChrome(FixedGap, x) == FileListHPadding + x — the composition Решение 4
+    /// specifies, exercised with a realistic SystemParameters.VerticalScrollBarWidth-shaped value (17
+    /// DIP, the common Windows default at 100% scale) as well as a boundary 0.
+    /// </summary>
+    [Theory]
+    [InlineData(0d)]
+    [InlineData(17d)]
+    public void ContentHorizontalChrome_FixedGap_EqualsFileListHPaddingPlusScrollBarWidth(double scrollBarWidth)
+    {
+        Assert.Equal(
+            GridMetrics.FileListHPadding + scrollBarWidth,
+            GridMetrics.ContentHorizontalChrome(IconLayoutPolicy.FixedGap, scrollBarWidth));
+    }
+
+    // ----- MinPanelWidth(iconSize, policy, verticalScrollBarWidth) overload (M-2) -----
+
+    /// <summary>
+    /// The 1-argument overload must be exactly equivalent to calling the 3-argument overload with
+    /// LegacyStretch and 0 — the existing MinPanelWidth(double) call sites (and every test above this
+    /// section) must keep observing byte-for-byte the same values after this overload was added.
+    /// </summary>
+    [Theory]
+    [InlineData(16d)]
+    [InlineData(48d)]
+    [InlineData(96d)]
+    public void MinPanelWidth_OneArgOverload_EqualsThreeArgOverload_LegacyStretchZeroScrollBar(double iconSize)
+    {
+        Assert.Equal(
+            GridMetrics.MinPanelWidth(iconSize),
+            GridMetrics.MinPanelWidth(iconSize, IconLayoutPolicy.LegacyStretch, verticalScrollBarWidth: 0d));
+    }
+
+    /// <summary>
+    /// LegacyStretch's 3-argument result must stay identical regardless of the injected scrollbar width —
+    /// mirrors ContentHorizontalChrome_LegacyStretch_EqualsFileListHPadding at the MinPanelWidth level.
+    /// </summary>
+    [Fact]
+    public void MinPanelWidth_LegacyStretch_UnaffectedByScrollBarWidth()
+    {
+        var withZero = GridMetrics.MinPanelWidth(48d, IconLayoutPolicy.LegacyStretch, 0d);
+        var withSeventeen = GridMetrics.MinPanelWidth(48d, IconLayoutPolicy.LegacyStretch, 17d);
+
+        Assert.Equal(withZero, withSeventeen);
+    }
+
+    /// <summary>
+    /// FixedGap's MinPanelWidth must be exactly ContentHorizontalChrome(FixedGap, x) - FileListHPadding
+    /// wider than the LegacyStretch value at the same IconSize, once the icon-grid term is already above
+    /// MinPanelSize (so the Math.Max clamp doesn't absorb the difference) — i.e. it genuinely reserves
+    /// the scrollbar width in the floor too, consistent with SnapWidthToGrid/ResizeConstraintsFactory.
+    /// </summary>
+    [Theory]
+    [InlineData(64d, 17d)]
+    [InlineData(96d, 23.5d)]
+    public void MinPanelWidth_FixedGap_AboveFloor_IsWiderThanLegacyStretchByReservedScrollBarWidth(double iconSize, double scrollBarWidth)
+    {
+        var legacyStretch = GridMetrics.MinPanelWidth(iconSize, IconLayoutPolicy.LegacyStretch, scrollBarWidth);
+        var fixedGap = GridMetrics.MinPanelWidth(iconSize, IconLayoutPolicy.FixedGap, scrollBarWidth);
+
+        Assert.Equal(legacyStretch + scrollBarWidth, fixedGap, 1e-9);
     }
 }

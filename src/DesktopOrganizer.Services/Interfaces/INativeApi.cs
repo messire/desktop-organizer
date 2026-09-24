@@ -1,4 +1,6 @@
-﻿namespace DesktopOrganizer.Services.Interfaces;
+﻿using DesktopOrganizer.Services.Abstractions;
+
+namespace DesktopOrganizer.Services.Interfaces;
 
 /// <summary>
 /// Callback delegate for <see cref="INativeApi.EnumWindows"/>.
@@ -149,6 +151,26 @@ internal interface INativeApi
     IntPtr GetForegroundWindow();
 
     /// <summary>
+    /// Hands this process's right to set the foreground window over to another process
+    /// (<c>AllowSetForegroundWindow</c>).
+    /// </summary>
+    /// <param name="processId">
+    /// Target process id, or <c>ASFW_ANY</c> (<c>-1</c>) to allow any process to take the foreground
+    /// until the next call that changes it. <c>ASFW_ANY</c> is what the single-instance activation
+    /// client uses (ADR-023 D-8/R-13): a secondary process knows the primary only by pipe name, never
+    /// by pid, and the grant is consumed within milliseconds by the primary's own
+    /// <c>Window.Activate()</c>.
+    /// </param>
+    /// <returns>
+    /// <see langword="true"/> when the call succeeded. <see langword="false"/> means this process did
+    /// not hold the right to give away in the first place (it is not in the foreground, the foreground
+    /// is locked, or the target process no longer exists) — the caller's worst case is then the
+    /// pre-existing behavior: the activated window flashes in the taskbar instead of coming forward.
+    /// Never throws.
+    /// </returns>
+    bool AllowSetForegroundWindow(int processId);
+
+    /// <summary>
     /// Returns the absolute PIDL for the given known-folder / CLSID GUID, or <see cref="IntPtr.Zero"/> on failure.
     /// Caller must release it via <see cref="FreePidl"/>.
     /// </summary>
@@ -282,6 +304,44 @@ internal interface INativeApi
     /// Default window procedure (<c>DefWindowProc</c>) for messages the caller does not handle.
     /// </summary>
     IntPtr DefaultWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    // ── Native panel sizing primitives (ADR-022 / Phase 2) ──────────────────────────────────────
+
+    /// <summary>
+    /// Window bounding rectangle (<c>GetWindowRect</c>). The result is ALWAYS in screen coordinates,
+    /// regardless of whether the window is top-level or re-parented into <c>WorkerW</c> — which is why
+    /// it is the calibration reference for the (undocumented for re-parented popups) coordinate space
+    /// of <c>WM_SIZING</c> (Phase 2 plan R-3).
+    /// </summary>
+    /// <param name="hwnd">Window to measure.</param>
+    /// <param name="rect">Receives the screen rectangle in physical pixels, or default on failure.</param>
+    /// <returns><see langword="true"/> when the call succeeded.</returns>
+    bool GetWindowRect(IntPtr hwnd, out NativeRectPx rect);
+
+    /// <summary>
+    /// Reads the <c>RECT</c> pointed to by the <c>lParam</c> of <c>WM_SIZING</c>/<c>WM_DPICHANGED</c>.
+    /// Direct analogue of <see cref="ReadMouseHookPoint"/> — same technique, same level of abstraction.
+    /// </summary>
+    /// <param name="lParam">Message <c>lParam</c>; a pointer to a native <c>RECT</c>.</param>
+    /// <returns>The rectangle, in the message's own coordinate space (physical pixels).</returns>
+    NativeRectPx ReadRect(IntPtr lParam);
+
+    /// <summary>
+    /// Writes a <c>RECT</c> back into the memory pointed to by <paramref name="lParam"/>.
+    /// <c>WM_SIZING</c> is answered by modifying the proposed rectangle in place.
+    /// </summary>
+    /// <param name="lParam">Message <c>lParam</c>; a pointer to a native <c>RECT</c>.</param>
+    /// <param name="rect">Rectangle to store, in the message's coordinate space (physical pixels).</param>
+    void WriteRect(IntPtr lParam, NativeRectPx rect);
+
+    /// <summary>
+    /// Per-window DPI scale (<c>GetDpiForWindow</c> / 96.0), falling back to
+    /// <see cref="GetSystemDpiScale"/> when the window DPI is unavailable (invalid handle, or a
+    /// pre-1607 Windows where the export does not exist).
+    /// </summary>
+    /// <param name="hwnd">Window whose DPI is requested.</param>
+    /// <returns>Scale factor, 1.0 at 96 DPI. Never returns 0 and never throws.</returns>
+    double GetDpiScaleForWindow(IntPtr hwnd);
 }
 
 /// <summary>

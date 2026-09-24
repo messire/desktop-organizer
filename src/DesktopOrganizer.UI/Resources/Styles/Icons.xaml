@@ -1,0 +1,26 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+    <!--
+        Ambient Accent Visual System — Segoe MDL2 Assets glyph tokens (D-1). Every codepoint below is
+        copied verbatim from an existing consumer — reused, not invented — so migrating that consumer
+        onto the token later is a pure rename with zero visual change:
+          - Icon.Glyph.Sort        <- ChildWindow.xaml, SortModeToggleButton Content="&#xE8CB;"
+          - Icon.Glyph.ViewGrid    <- Converters/ViewModeGlyphConverter.cs GridTargetGlyph (U+E8A9)
+          - Icon.Glyph.ViewList    <- Converters/ViewModeGlyphConverter.cs ListTargetGlyph (U+E8FD)
+          - Icon.Glyph.ChevronDown <- Converters/BoolToGlyphConverter.cs (U+E70D)
+          - Icon.Glyph.ChevronUp   <- Converters/BoolToGlyphConverter.cs (U+E70E)
+          - Icon.Glyph.Overflow    <- new in C6 (U+E712, the standard Segoe MDL2 "More"/overflow glyph;
+                                      no prior consumer to copy from — the header overflow button below
+                                      is its first).
+
+        The FontFamily string itself ("Segoe MDL2 Assets") stays a literal Setter in Controls.xaml /
+        Templates.xaml, not here — this dictionary is <sys:String> codepoints only, per D-1.
+    -->
+    <sys:String x:Key="Icon.Glyph.Sort">&#xE8CB;</sys:String>
+    <sys:String x:Key="Icon.Glyph.ViewGrid">&#xE8A9;</sys:String>
+    <sys:String x:Key="Icon.Glyph.ViewList">&#xE8FD;</sys:String>
+    <sys:String x:Key="Icon.Glyph.ChevronDown">&#xE70D;</sys:String>
+    <sys:String x:Key="Icon.Glyph.ChevronUp">&#xE70E;</sys:String>
+    <sys:String x:Key="Icon.Glyph.Overflow">&#xE712;</sys:String>
+</ResourceDictionary>

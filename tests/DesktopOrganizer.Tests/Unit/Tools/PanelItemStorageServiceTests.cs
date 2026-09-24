@@ -1800,6 +1800,281 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    // ── TryFindManagedPath (ADR-009 Amendment 2026-09-22, P08 stale-path resolution) ────────────
+
+    [Fact]
+    public void TryFindManagedPath_OriginalHasLiveManagedCopy_ReturnsTrueAndManagedPath()
+    {
+        var (service, root) = BuildService();
+        var source = Path.Combine(Path.GetTempPath(), $"DOrgStalePath_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(source, "shortcut-content");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+
+            var found = service.TryFindManagedPath(source, out var managedPath);
+
+            Assert.True(found);
+            Assert.Equal(managed, managedPath, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void TryFindManagedPath_IsCaseInsensitive()
+    {
+        var (service, root) = BuildService();
+        var source = Path.Combine(Path.GetTempPath(), $"DOrgStalePathCase_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(source, "content");
+
+        try
+        {
+            service.MoveIn(source);
+
+            var found = service.TryFindManagedPath(source.ToUpperInvariant(), out var managedPath);
+
+            Assert.True(found);
+            Assert.NotNull(managedPath);
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void TryFindManagedPath_NoManifestEntry_ReturnsFalse()
+    {
+        var (service, root) = BuildService();
+
+        try
+        {
+            var found = service.TryFindManagedPath(@"C:\never\dropped.lnk", out var managedPath);
+
+            Assert.False(found);
+            Assert.Null(managedPath);
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void TryFindManagedPath_ManagedCopyMissingFromDisk_ReturnsFalse()
+    {
+        // A manifest entry can outlive its managed file if it was deleted by hand outside this
+        // service (or by a bug elsewhere) — TryFindManagedPath must not hand back a path that would
+        // just trade one broken icon/launch target for another.
+        var (service, root) = BuildService();
+        var source = Path.Combine(Path.GetTempPath(), $"DOrgStalePathGhost_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(source, "content");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+
+            File.Delete(managed!); // simulate the managed copy vanishing without going through Release
+
+            var found = service.TryFindManagedPath(source, out var managedPath);
+
+            Assert.False(found);
+            Assert.Null(managedPath);
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void TryFindManagedPath_IsReadOnly_DoesNotMutateManifestFile()
+    {
+        var (service, root) = BuildService();
+        var source = Path.Combine(Path.GetTempPath(), $"DOrgStalePathReadOnly_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(source, "content");
+
+        try
+        {
+            service.MoveIn(source);
+
+            var manifestPath = Path.Combine(root, ".manifest.json");
+            var before = File.ReadAllText(manifestPath);
+
+            service.TryFindManagedPath(source, out _);
+            service.TryFindManagedPath("some/other/nonexistent/path.lnk", out _);
+
+            var after = File.ReadAllText(manifestPath);
+            Assert.Equal(before, after);
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void TryFindManagedPath_EmptyOrWhitespacePath_ReturnsFalse()
+    {
+        var (service, root) = BuildService();
+
+        try
+        {
+            Assert.False(service.TryFindManagedPath(string.Empty, out var managedPath1));
+            Assert.Null(managedPath1);
+
+            Assert.False(service.TryFindManagedPath("   ", out var managedPath2));
+            Assert.Null(managedPath2);
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    // ── FindManagedCandidates / TryFindManagedPath ambiguity (M1 fix, P08 fix cycle 1, 2026-09-22) ──
+
+    /// <summary>
+    /// Directly seeds a manifest recording <paramref name="originalPath"/> against two DIFFERENT,
+    /// both-live managed paths — a scenario <see cref="PanelItemStorageService"/>'s own public API
+    /// can never produce on its own (each <c>MoveIn</c> call consumes its unique source), but one the
+    /// manifest's plain <c>Dictionary&lt;managedPath, originalPath&gt;</c> shape does not prevent, and
+    /// which a manually-edited/legacy-imported manifest could contain.
+    /// </summary>
+    private static (string ManagedA, string ManagedB) SeedAmbiguousManifest(string root, string originalPath)
+    {
+        Directory.CreateDirectory(root);
+        var managedA = Path.Combine(root, "candidate-a.lnk");
+        var managedB = Path.Combine(root, "candidate-b.lnk");
+        File.WriteAllText(managedA, "a");
+        File.WriteAllText(managedB, "b");
+
+        var manifest = new Dictionary<string, string> { [managedA] = originalPath, [managedB] = originalPath };
+        File.WriteAllText(Path.Combine(root, ".manifest.json"), JsonSerializer.Serialize(manifest));
+
+        return (managedA, managedB);
+    }
+
+    [Fact]
+    public void FindManagedCandidates_SingleLiveCandidate_ReturnsExactlyThatOne()
+    {
+        var (service, root) = BuildService();
+        var source = Path.Combine(Path.GetTempPath(), $"DOrgCandidateSingle_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(source, "content");
+
+        try
+        {
+            var managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+
+            var candidates = service.FindManagedCandidates(source);
+
+            Assert.Equal([managed], candidates, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void FindManagedCandidates_NoManifestEntry_ReturnsEmpty()
+    {
+        var (service, root) = BuildService();
+
+        try
+        {
+            Assert.Empty(service.FindManagedCandidates(@"C:\never\dropped.lnk"));
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void FindManagedCandidates_AmbiguousManifest_ReturnsBothLiveCandidates()
+    {
+        var (service, root) = BuildService();
+        const string originalPath = @"C:\fake\ambiguous-original.lnk";
+
+        try
+        {
+            var (managedA, managedB) = SeedAmbiguousManifest(root, originalPath);
+
+            var candidates = service.FindManagedCandidates(originalPath);
+
+            Assert.Equal(2, candidates.Count);
+            Assert.Contains(managedA, candidates, StringComparer.OrdinalIgnoreCase);
+            Assert.Contains(managedB, candidates, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void TryFindManagedPath_AmbiguousManifest_TwoLiveCandidatesForSameOriginal_ReturnsFalse()
+    {
+        // CRITICAL/MAJOR M1: picking the first live candidate by dictionary enumeration order (the
+        // pre-fix behavior) risked silently resolving to a managed copy actually owned by a different
+        // panel. An ambiguous manifest must resolve to nothing, exactly like
+        // TryFindManagedPath_NoManifestEntry_ReturnsFalse — explicit refusal over a guess.
+        var (service, root) = BuildService();
+        const string originalPath = @"C:\fake\ambiguous-original.lnk";
+
+        try
+        {
+            SeedAmbiguousManifest(root, originalPath);
+
+            var found = service.TryFindManagedPath(originalPath, out var managedPath);
+
+            Assert.False(found);
+            Assert.Null(managedPath);
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void FindManagedCandidates_OneOfTwoManifestEntriesGhosted_ReturnsOnlyTheLiveOne()
+    {
+        // Not ambiguous in practice once the dead entry is filtered out — same "verify it still
+        // resolves on disk" discipline as TryFindManagedPath_ManagedCopyMissingFromDisk_ReturnsFalse.
+        var (service, root) = BuildService();
+        const string originalPath = @"C:\fake\one-ghosted-original.lnk";
+
+        try
+        {
+            var (managedA, managedB) = SeedAmbiguousManifest(root, originalPath);
+            File.Delete(managedB); // simulate managedB vanishing without going through Release
+
+            var candidates = service.FindManagedCandidates(originalPath);
+
+            Assert.Equal([managedA], candidates, StringComparer.OrdinalIgnoreCase);
+            Assert.True(service.TryFindManagedPath(originalPath, out var managedPath));
+            Assert.Equal(managedA, managedPath, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
     private static void AssertManifestFileIsEmpty(string root)
     {
         var manifestPath = Path.Combine(root, ".manifest.json");

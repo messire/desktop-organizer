@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Models;
 
@@ -21,6 +22,17 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     private readonly HashSet<string> _allItemPaths = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ObservableRangeCollection<FileItem> _fileItems = [];
+
+    /// <summary>
+    /// Bounded retry bookkeeping for <see cref="RefreshItemsLiveness"/>'s placeholder-retry (M3, P08
+    /// fix cycle 1, 2026-09-22) — see that method's remarks. Keyed by <see cref="FileItem"/> reference
+    /// via <see cref="ConditionalWeakTable{TKey,TValue}"/> rather than a plain dictionary explicitly
+    /// cleaned up on <see cref="RemoveFile"/>/<see cref="RemoveFileByPath"/>/<see cref="ReplaceAll"/>:
+    /// an item dropped from <see cref="_allItems"/> naturally becomes unreachable from here too once
+    /// nothing else references it, with no extra bookkeeping needed at every removal call site.
+    /// </summary>
+    private readonly ConditionalWeakTable<FileItem, PlaceholderRetryState> _placeholderRetries = new();
+
     private FileItem? _selectedFile;
 
     /// <inheritdoc />
@@ -337,6 +349,108 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
         _allItemPaths.Add(newPath);
 
         item.Relocate(newPath, _iconProvider.GetIcon(newPath));
+    }
+
+    /// <summary>
+    /// Re-validates <see cref="FileItem.Exists"/>/<see cref="FileItem.IsDirectory"/> for every tracked
+    /// item against the current file-system state (<see cref="FileItem.Refresh"/>), and re-resolves the
+    /// icon for any item that just transitioned from missing to present. <see cref="IIconProvider"/>
+    /// deliberately never caches its placeholder result for a missing path (see
+    /// <c>IconProvider.GetIcon</c>), so a single fresh call here is enough to replace a stuck
+    /// placeholder with the file's real icon once the underlying file/folder actually reappears (e.g.
+    /// a removable drive is remounted, or a stale path was resolved to its managed copy on the next
+    /// <c>ChildWindowViewModel.LoadFromModel</c>) — P00 baseline finding H3.
+    /// </summary>
+    /// <remarks>
+    /// A content-change re-fetch for items that stay present throughout (e.g. an <c>.exe</c>'s
+    /// embedded icon changing after an in-place update) is intentionally NOT performed here:
+    /// <see cref="IIconProvider.GetIcon"/> already does that freshness check (comparing
+    /// <c>LastWriteTimeUtc</c>) once actually called, but calling it for every tracked item on every
+    /// liveness tick would reintroduce the exact synchronous UI-thread cost this panel's icon pipeline
+    /// already measured as expensive for large panels (~2.8ms/item — see
+    /// docs/DIAGNOSTICS/icon-loading-findings.md). The missing → present transition this method reacts
+    /// to is comparatively rare and bounded by how many items were actually broken, not by the panel's
+    /// full size.
+    /// <para>
+    /// <b>M3 addition (P08 fix cycle 1, 2026-09-22):</b> the missing→present transition above only
+    /// ever fires once per disappearance. A file that is <see cref="FileItem.Exists"/> throughout but
+    /// whose <em>icon retrieval itself</em> failed transiently — e.g. <c>SHGetFileInfoW</c> called
+    /// before the shell has finished initializing during autostart — used to leave the item stuck on
+    /// <see cref="IIconProvider"/>'s placeholder for the rest of the session, since nothing ever called
+    /// <see cref="IIconProvider.GetIcon"/> again for an item that was never "missing" to begin with.
+    /// Every existing, still-placeholder item is now retried too, bounded to
+    /// <see cref="MaxPlaceholderRetryAttempts"/> attempts with a growing per-tick backoff (see
+    /// <see cref="RetryPlaceholderIcon"/>) — NOT unconditionally on every tick, which would reintroduce
+    /// the exact synchronous UI-thread cost documented above for the common "still missing"/"still
+    /// present with a real icon" cases (this only ever does extra work for the rare stuck-placeholder
+    /// case, bounded to 3 tries total per item).
+    /// </para>
+    /// </remarks>
+    internal void RefreshItemsLiveness()
+    {
+        foreach (var item in _allItems)
+        {
+            var wasMissing = !item.Exists;
+            item.Refresh();
+
+            if (wasMissing && item.Exists)
+            {
+                item.UpdateIcon(_iconProvider.GetIcon(item.Path));
+                _placeholderRetries.Remove(item); // fresh reappearance supersedes any prior retry state
+            }
+            else if (item.Exists && _iconProvider.IsPlaceholder(item.Icon))
+            {
+                RetryPlaceholderIcon(item);
+            }
+            else
+            {
+                // Either still missing, or present with a real (non-placeholder) icon — either way,
+                // any previous retry bookkeeping for this item is no longer relevant.
+                _placeholderRetries.Remove(item);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Retries <see cref="IIconProvider.GetIcon"/> for <paramref name="item"/> — an item that exists on
+    /// disk but is still showing the icon pipeline's own placeholder (see
+    /// <see cref="RefreshItemsLiveness"/>) — bounded to <see cref="MaxPlaceholderRetryAttempts"/> total
+    /// attempts, with a growing per-liveness-tick backoff between attempts (1 tick before the 2nd try,
+    /// 2 before the 3rd) so a persistently-broken item doesn't pay for a full shell round-trip on every
+    /// single 3-second tick forever. <see cref="IIconProvider"/> never caches a placeholder result
+    /// against a valid path (only a successful retrieval is ever cached — see <c>IconProvider.StoreInCache</c>),
+    /// so each attempt here genuinely re-invokes the shell rather than serving a stale cached failure.
+    /// </summary>
+    /// <param name="item">An existing item whose current <see cref="FileItem.Icon"/> is the placeholder.</param>
+    private void RetryPlaceholderIcon(FileItem item)
+    {
+        var state = _placeholderRetries.GetValue(item, static _ => new PlaceholderRetryState());
+        if (state.AttemptsRemaining <= 0) return;
+
+        if (state.TicksUntilNextAttempt > 0)
+        {
+            state.TicksUntilNextAttempt--;
+            return;
+        }
+
+        state.AttemptsRemaining--;
+        state.TicksUntilNextAttempt = MaxPlaceholderRetryAttempts - state.AttemptsRemaining; // 1, then 2, ...
+
+        var icon = _iconProvider.GetIcon(item.Path);
+        if (_iconProvider.IsPlaceholder(icon)) return; // still stuck — leave the counted-down state as-is
+
+        item.UpdateIcon(icon);
+        _placeholderRetries.Remove(item); // resolved — no further bookkeeping needed
+    }
+
+    /// <summary>Maximum number of placeholder-retry attempts per item (see <see cref="RetryPlaceholderIcon"/>).</summary>
+    private const int MaxPlaceholderRetryAttempts = 3;
+
+    /// <summary>Per-item mutable retry counters for <see cref="RetryPlaceholderIcon"/>.</summary>
+    private sealed class PlaceholderRetryState
+    {
+        public int AttemptsRemaining = MaxPlaceholderRetryAttempts;
+        public int TicksUntilNextAttempt;
     }
 
     /// <summary>

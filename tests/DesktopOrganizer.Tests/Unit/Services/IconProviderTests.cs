@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Enums;
 using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.Services.Models;
@@ -26,12 +27,25 @@ public class IconProviderTests
     private readonly IconProvider _iconProvider;
     private readonly Mock<IIconHandler> _iconHandlerMock;
     private readonly Mock<IIconFactory> _iconFactoryMock;
+    private readonly Mock<IDiagnosticsLog> _diagnosticsLogMock;
+    private readonly List<(string Category, string Name, string? Scope, KeyValuePair<string, object?>[] Payload)> _diagnosticsWrites = [];
 
     public IconProviderTests()
     {
         _iconHandlerMock = new Mock<IIconHandler>();
         _iconFactoryMock = new Mock<IIconFactory>();
-        _iconProvider = new IconProvider(_iconHandlerMock.Object, _iconFactoryMock.Object);
+        _diagnosticsLogMock = new Mock<IDiagnosticsLog>();
+        _diagnosticsLogMock.SetupGet(l => l.IsEnabled).Returns(true);
+        _diagnosticsLogMock
+            .Setup(l => l.Write(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<KeyValuePair<string, object?>[]>()))
+            .Callback<string, string, string?, KeyValuePair<string, object?>[]>(
+                (category, name, scope, payload) => _diagnosticsWrites.Add((category, name, scope, payload)));
+
+        _iconProvider = new IconProvider(_iconHandlerMock.Object, _iconFactoryMock.Object, _diagnosticsLogMock.Object);
     }
 
     public static IEnumerable<object[]> GetIconTestData => new List<object[]>
@@ -89,7 +103,7 @@ public class IconProviderTests
     {
         // Arrange
         const int capacity = 2;
-        var provider = new IconProvider(_iconHandlerMock.Object, _iconFactoryMock.Object, capacity);
+        var provider = new IconProvider(_iconHandlerMock.Object, _iconFactoryMock.Object, _diagnosticsLogMock.Object, capacity);
         var paths = Enumerable.Range(0, 3).Select(index => CreateTempFile($"cache-evict-{index}")).ToArray();
 
         try
@@ -136,7 +150,7 @@ public class IconProviderTests
     {
         // Arrange
         const int capacity = 2;
-        var provider = new IconProvider(_iconHandlerMock.Object, _iconFactoryMock.Object, capacity);
+        var provider = new IconProvider(_iconHandlerMock.Object, _iconFactoryMock.Object, _diagnosticsLogMock.Object, capacity);
         var pathA = CreateTempFile("lru-a");
         var pathB = CreateTempFile("lru-b");
         var pathC = CreateTempFile("lru-c");
@@ -309,34 +323,234 @@ public class IconProviderTests
         _iconFactoryMock.Verify(factory => factory.CreateBitmap(), Times.Once);
     }
 
+    /// <summary>
+    /// Regression for the P00 baseline audit (docs/DIAGNOSTICS/icon-loading-findings.md, F-10): a
+    /// failed icon retrieval used to go only to <c>Console.Error</c>, which a <c>WinExe</c> process
+    /// never surfaces anywhere and which the ADR-027 JSONL log never captured. It must now reach the
+    /// diagnostics log, and the payload must respect the privacy invariant — extension and exception
+    /// type name only, never the path or <see cref="Exception.Message"/> (which frequently embeds it).
+    /// </summary>
     [Fact]
-    public void GetIcon_ThrowsException_WhenIconHandlerFails()
+    public void GetIcon_WritesDiagnosticsEvent_WhenIconHandlerThrows()
     {
         // Arrange
-        var exceptionMessage = "Test exception";
+        var exceptionMessage = $"Test exception mentioning the path {ValidFilePath}";
         _iconHandlerMock
             .Setup(h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags))
             .Throws(new InvalidOperationException(exceptionMessage));
 
-        using var consoleOutput = new StringWriter();
-        var originalOutput = Console.Error;
-        Console.SetError(consoleOutput);
+        // Act
+        var result = _iconProvider.GetIcon(ValidFilePath);
+
+        // Assert
+        _iconHandlerMock.Verify(api => api.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags), Times.Once);
+
+        var write = Assert.Single(_diagnosticsWrites, w => w.Name == "IconRetrievalFailed");
+        Assert.Equal("icon", write.Category);
+        Assert.Null(write.Scope);
+        Assert.Equal(".txt", GetPayloadValue<string>(write.Payload, "extension"));
+        Assert.Equal(nameof(InvalidOperationException), GetPayloadValue<string>(write.Payload, "errorType"));
+
+        // Privacy invariant: no payload value may contain the path or the raw exception message.
+        Assert.DoesNotContain(write.Payload, kv => kv.Value is string s && s.Contains(ValidFilePath, StringComparison.Ordinal));
+        Assert.DoesNotContain(write.Payload, kv => kv.Value is string s && s.Contains(exceptionMessage, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// When diagnostics logging is disabled, a failure must still degrade to the placeholder without
+    /// paying for payload construction (the zero-cost <see cref="IDiagnosticsLog.IsEnabled"/> seam).
+    /// </summary>
+    [Fact]
+    public void GetIcon_DoesNotWriteDiagnosticsEvent_WhenDiagnosticsDisabled()
+    {
+        // Arrange
+        _diagnosticsLogMock.SetupGet(l => l.IsEnabled).Returns(false);
+        _iconHandlerMock
+            .Setup(h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags))
+            .Throws(new InvalidOperationException("boom"));
+
+        // Act
+        _iconProvider.GetIcon(ValidFilePath);
+
+        // Assert
+        _diagnosticsLogMock.Verify(
+            l => l.Write(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Never);
+    }
+
+    // ── UX P1 (P08 fix cycle 1, 2026-09-22): generic-by-extension fallback for a missing path ───────
+
+    [Fact]
+    public void GetIcon_MissingPathWithExtension_AttemptsShellLookupAsFile_ReturnsRealIconWhenAvailable()
+    {
+        // Arrange — SHGFI_USEFILEATTRIBUTES is already part of IconFlags; a missing path with a
+        // recognized extension must now reach the shell instead of short-circuiting straight to the
+        // placeholder, matching Explorer's own behavior for a vanished item.
+        const string missingPath = @"C:\fake\does-not-exist.txt";
+        var expectedIcon = new DrawingImage();
+        var shellFileInfo = default(ShellFileInfo);
+
+        _iconHandlerMock
+            .Setup(h => h.GetIconHandle(missingPath, ref shellFileInfo, FileAttributes, IconFlags))
+            .Returns(ValidIconHandle);
+        // It.IsAny<IntPtr>() (not ValidIconHandle): the mocked GetIconHandle above only configures its
+        // own RETURN value, not the ref ShellFileInfo.IconHandle field TryCreateBitmapSource actually
+        // reads (CreateBitmap(fileInfo.IconHandle)) — that field is never populated by this simple
+        // setup and stays IntPtr.Zero, same as every other test in this file that goes through the
+        // success path (see SetupMocks below).
+        _iconFactoryMock.Setup(f => f.CreateBitmap(It.IsAny<IntPtr>())).Returns(expectedIcon);
+
+        // Act
+        var result = _iconProvider.GetIcon(missingPath);
+
+        // Assert
+        Assert.Same(expectedIcon, result);
+        _iconHandlerMock.Verify(h => h.GetIconHandle(missingPath, ref shellFileInfo, FileAttributes, IconFlags), Times.Once);
+    }
+
+    [Fact]
+    public void GetIcon_MissingPathWithoutExtension_AttemptsShellLookupAsDirectory()
+    {
+        const string missingPath = @"C:\fake\does-not-exist-folder";
+        var expectedIcon = new DrawingImage();
+        var shellFileInfo = default(ShellFileInfo);
+
+        _iconHandlerMock
+            .Setup(h => h.GetIconHandle(missingPath, ref shellFileInfo, DirectoryAttributes, IconFlags))
+            .Returns(ValidIconHandle);
+        _iconFactoryMock.Setup(f => f.CreateBitmap(It.IsAny<IntPtr>())).Returns(expectedIcon);
+
+        var result = _iconProvider.GetIcon(missingPath);
+
+        Assert.Same(expectedIcon, result);
+        _iconHandlerMock.Verify(h => h.GetIconHandle(missingPath, ref shellFileInfo, DirectoryAttributes, IconFlags), Times.Once);
+    }
+
+    [Fact]
+    public void GetIcon_MissingPath_ShellLookupAlsoFails_FallsBackToOwnPlaceholder()
+    {
+        const string missingPath = @"C:\fake\does-not-exist.qqqzz";
+        var placeholder = new DrawingImage();
+        _iconFactoryMock.Setup(f => f.CreateBitmap()).Returns(placeholder);
+        // No handler setup at all -> loose mock returns IntPtr.Zero, same as a genuinely failed lookup.
+
+        var result = _iconProvider.GetIcon(missingPath);
+
+        Assert.Same(placeholder, result);
+        Assert.True(_iconProvider.IsPlaceholder(result));
+    }
+
+    // ── MINOR-1 (P08 fix cycle 2, 2026-09-22): missing-path fallback must never poison the cache ──────
+
+    [Fact]
+    public void GetIcon_MissingPathFallbackThenFileAppears_ServesTheRealIconNotTheStaleFallback()
+    {
+        // Regression: fix cycle 1's UX P1 missing-path shell fallback used to be StoreInCache'd under
+        // lastWriteTimeUtc = default -- the SAME freshness key a non-freshness-sensitive extension (the
+        // vast majority: .txt, .docx, .jpg, directories, ...) keeps computing for its ENTIRE session,
+        // including once the file is genuinely present, since NeedsFreshnessCheck is skipped whenever
+        // the path didn't exist AND is false for these extensions regardless of existence. Without this
+        // fix, RefreshItemsLiveness's missing->present re-fetch (BaseViewModel) would still be served
+        // this now-wrong cached fallback instead of the file's real icon. A path that did not exist at
+        // retrieval time must never be cached.
+        var path = Path.Combine(Path.GetTempPath(), $"IconProviderTests-appears-{Guid.NewGuid():N}.txt");
+        Assert.False(File.Exists(path));
+
+        SetupIconHandlerForPath(path, ValidIconHandle);
+        _iconFactoryMock
+            .Setup(factory => factory.CreateBitmap(It.IsAny<IntPtr>()))
+            .Returns(() => new DrawingImage());
 
         try
         {
-            // Act
-            var result = _iconProvider.GetIcon(ValidFilePath);
+            // Act: first call while genuinely missing -> UX P1 shell fallback, must NOT be cached.
+            var missingResult = _iconProvider.GetIcon(path);
 
-            // Assert
-            _iconHandlerMock.Verify(api => api.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags), Times.Once);
-            var output = consoleOutput.ToString();
-            Assert.Contains($"Error retrieving icon for '{ValidFilePath}': {exceptionMessage}", output);
+            // The file now appears on disk (e.g. the user re-creates it, or a Restore brings it back).
+            File.WriteAllText(path, "now exists");
+            var presentResult = _iconProvider.GetIcon(path);
+
+            // Assert — a brand-new bitmap instance (factory.CreateBitmap returns a fresh DrawingImage
+            // each call), proving the second call actually re-resolved the icon instead of hitting a
+            // stale cache entry from the first, missing-path call.
+            Assert.NotSame(missingResult, presentResult);
+            _iconHandlerMock.Verify(
+                h => h.GetIconHandle(path, ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags),
+                Times.Exactly(2));
         }
         finally
         {
-            Console.SetError(originalOutput);
+            File.Delete(path);
         }
     }
+
+    [Fact]
+    public void GetIcon_MissingPathCalledTwice_StillNotCached_ReResolvesEachTime()
+    {
+        // Companion regression: confirms the "never cache a missing-path result" fix applies even when
+        // the path never appears at all — repeated calls for a still-missing path must keep asking the
+        // shell (cheap, no-disk-I/O SHGFI_USEFILEATTRIBUTES) rather than serving a cached instance, since
+        // GetIcon_CachesIcons_ForSameFilePath already covers the existing-file caching contract
+        // separately and this must NOT regress into caching missing paths too.
+        const string missingPath = @"C:\fake\still-missing.txt";
+        SetupIconHandlerForPath(missingPath, ValidIconHandle);
+        _iconFactoryMock
+            .Setup(factory => factory.CreateBitmap(It.IsAny<IntPtr>()))
+            .Returns(() => new DrawingImage());
+
+        var first = _iconProvider.GetIcon(missingPath);
+        var second = _iconProvider.GetIcon(missingPath);
+
+        Assert.NotSame(first, second);
+        _iconHandlerMock.Verify(
+            h => h.GetIconHandle(missingPath, ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags),
+            Times.Exactly(2));
+    }
+
+    // ── M3 (P08 fix cycle 1, 2026-09-22): IIconProvider.IsPlaceholder ────────────────────────────────
+
+    [Fact]
+    public void IsPlaceholder_PlaceholderInstance_ReturnsTrue()
+    {
+        var placeholder = new DrawingImage();
+        _iconFactoryMock.Setup(f => f.CreateBitmap()).Returns(placeholder);
+
+        var icon = _iconProvider.GetIcon(@"C:\fake\missing.qqqzz");
+
+        Assert.True(_iconProvider.IsPlaceholder(icon));
+    }
+
+    [Fact]
+    public void IsPlaceholder_RealResolvedIcon_ReturnsFalse()
+    {
+        SetupMocks(ValidFilePath, ValidIconHandle, new DrawingImage());
+        var icon = _iconProvider.GetIcon(ValidFilePath);
+
+        Assert.False(_iconProvider.IsPlaceholder(icon));
+    }
+
+    [Fact]
+    public void IsPlaceholder_NullIcon_ReturnsFalse()
+    {
+        Assert.False(_iconProvider.IsPlaceholder(null));
+    }
+
+    [Fact]
+    public void IsPlaceholder_RealResolvedIcon_DoesNotAllocateAPlaceholderBitmap()
+    {
+        // NIT fix (P08 fix cycle 2, 2026-09-22): checking a REAL icon must never force-allocate the
+        // lazily-created placeholder bitmap just to answer the reference-equality question — a session
+        // where no path has ever actually needed a placeholder should never pay for one.
+        SetupMocks(ValidFilePath, ValidIconHandle, new DrawingImage());
+        var icon = _iconProvider.GetIcon(ValidFilePath);
+
+        _iconProvider.IsPlaceholder(icon);
+
+        _iconFactoryMock.Verify(f => f.CreateBitmap(), Times.Never);
+    }
+
+    private static T GetPayloadValue<T>(KeyValuePair<string, object?>[] payload, string key)
+        => (T)payload.Single(kv => kv.Key == key).Value!;
 
     /// <summary>
     /// Creates a real, uniquely-named temp file so <c>File.Exists</c>/<c>GetLastWriteTimeUtc</c>

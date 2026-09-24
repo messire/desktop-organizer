@@ -241,6 +241,66 @@ public class MonitorServiceNativeApiTests
         Assert.NotNull(result);
     }
 
+    // ── GetSystemDpiScale / GetWindowRectDip: Stage S additive members ───────────────────────────
+    // (docs/PLANS/workspace-grid-03-04-integration.md §1.2)
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    public void GetSystemDpiScale_DelegatesDirectlyToNativeApi(double scale)
+    {
+        // Arrange
+        _nativeApiMock.Setup(api => api.GetSystemDpiScale()).Returns(scale);
+
+        // Act
+        var result = _service.GetSystemDpiScale();
+
+        // Assert
+        Assert.Equal(scale, result);
+    }
+
+    [Fact]
+    public void GetWindowRectDip_ValidHandle_ScalesPhysicalPixelsToDip_UsingSameCoefficientAsGetMonitors()
+    {
+        // Arrange
+        _nativeApiMock.Setup(api => api.GetSystemDpiScale()).Returns(2.0);
+        _nativeApiMock
+            .Setup(api => api.GetWindowRect(new IntPtr(42), out It.Ref<NativeRectPx>.IsAny))
+            .Returns((IntPtr _, out NativeRectPx rect) =>
+            {
+                rect = new NativeRectPx(100, 200, 500, 600);
+                return true;
+            });
+
+        // Act
+        var result = _service.GetWindowRectDip(new IntPtr(42));
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(new Rect(50, 100, 200, 200), result!.Value);
+    }
+
+    [Fact]
+    public void GetWindowRectDip_NativeApiReportsFailure_ReturnsNull()
+    {
+        // Arrange
+        _nativeApiMock
+            .Setup(api => api.GetWindowRect(It.IsAny<IntPtr>(), out It.Ref<NativeRectPx>.IsAny))
+            .Returns((IntPtr _, out NativeRectPx rect) =>
+            {
+                rect = default;
+                return false;
+            });
+
+        // Act
+        var result = _service.GetWindowRectDip(new IntPtr(42));
+
+        // Assert
+        Assert.Null(result);
+        _nativeApiMock.Verify(api => api.GetSystemDpiScale(), Times.Never);
+    }
+
     // ── Start/Dispose: hidden broadcast-window lifecycle ─────────────────────────
 
     [Fact]

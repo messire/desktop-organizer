@@ -175,12 +175,16 @@ try/catch в хуке, `Freeze()` кистей/иконок) в основном
   `EnableRaisingEvents = true` выставлен ДО подписки на `Created`/`Deleted`/`Renamed`/`Error` → событие
   ОС в этом окне тихо теряется. Fix применён как описано: все 4 обработчика подписаны до
   `EnableRaisingEvents = true`.
-- [MAJOR] **Открыто.** Single-instance guard подтверждён отсутствующим: `App.xaml.cs:24` создаёт
-  `Mutex("DesktopOrganizerSingleInstanceMutex", initiallyOwned:false)` только для того, чтобы
-  инсталлятор видел запущенный процесс — `WaitOne`/владение никогда не проверяется. В сочетании с
-  in-memory write-through кешем манифеста `PanelItemStorageService` два одновременных процесса тихо
-  затирают правки друг друга. Либо сделать этим же мьютексом реальный guard, либо переименовать его,
-  чтобы имя не вводило в заблуждение. Не тронуто в этом заходе — см. ROADMAP «Сквозные задачи».
+- [MAJOR] **Закрыто Фазой 3 refactoring-пакета, см. ADR-023.** Single-instance guard отсутствовал:
+  `App.xaml.cs:24` создавал `Mutex("DesktopOrganizerSingleInstanceMutex", initiallyOwned:false)` только
+  для того, чтобы инсталлятор видел запущенный процесс — `WaitOne`/владение никогда не проверялось. В
+  сочетании с in-memory write-through кешем манифеста `PanelItemStorageService` два одновременных
+  процесса тихо затирали правки друг друга (DO-001). Ветка `feat/single-instance-ipc`: реальный guard
+  mutex (per-session) + машинно-глобальный Named Pipe тай-брейкер поверх него (ADR-023 D-1/D-4), guard
+  выполняется в собственном `Program.Main` до создания `Application`, так что второй процесс никогда не
+  доходит до `App.OnExit` (ADR-023 D-2, ключевая находка R-1). Остаточный риск — одновременная запись в
+  storage при Fast User Switching до появления файлового лока storage-root — задокументирован как R-15
+  и явно передан в Фазу 4 (ADR-024).
 - **[MINOR] Закрыто 2026-09-05:** `Providers/TrayIconManager.cs` — мёртвое поле
   `_isMainWindowVisible` удалено. **Новая находка, вскрытая этим фиксом:**
   `UpdateContextMenu(bool isMainWindowVisible)` фактически мёртвый API — ни один вызывающий не
@@ -232,8 +236,11 @@ try/catch в хуке, `Freeze()` кистей/иконок) в основном
   Побочный эффект — `SystemIconsPanelWindow` заодно получила `try/finally` вокруг `DoDragDrop`,
   которого у неё раньше не было (в отличие от `ChildWindow`) — задокументировано как найденный, а не
   внесённый баг.
-- [MINOR] **Открыто, не в объёме сессии.** `Views/MainWindow.xaml:63-97` — инлайновые стили с
-  захардкоженными цветами вместо ресурсов.
+- [MINOR] **Закрыто (Phase 5 пакета `docs/Refactoring/`, ADR-025 Accepted, ветка
+  `ui/ambient-accent-design-tokens`, см. `docs/Refactoring/BACKLOG.md` DO-003).** Было:
+  `Views/MainWindow.xaml:63-97` — инлайновые стили с захардкоженными цветами вместо ресурсов. Фикс:
+  вынесены в токены `Color.Settings.*` (`Resources/Styles/Colors.xaml`) и стили
+  `Settings.PageTabButtonStyle`/`Settings.PageTabCloseButtonStyle` (`Controls.xaml`).
 - [MINOR] **Открыто, не в объёме сессии.** `RelayCommand`/`RelayCommand<T>` — `CanExecuteChanged`
   только через `CommandManager.RequerySuggested`, нет ручного `RaiseCanExecuteChanged()`.
 - Позитив: подписка `Model.PropertyChanged` в `ChildWindowViewModel` корректно отписывается в
@@ -309,7 +316,9 @@ reorder / cross-panel selection — уже сейчас в одном класс
 - Двойной клик/лассо при зависшем/занятом Explorer (CRITICAL находка §5.2).
 - `dotnet build`/`dotnet test` до и после фикса пути ruleset — реальные числа падающих тестов и
   покрытия (сейчас недоступны в этой среде).
-- Поведение при двух одновременно запущенных экземплярах (single-instance).
+- Поведение при двух одновременно запущенных экземплярах (single-instance) — код+автотесты закрыты
+  Фазой 3 (ADR-023 Accepted), живая проверка матрицы M-1..M-13
+  (`docs/Refactoring/Testing/single-instance-manual-matrix.md`) остаётся manual verify.
 - Z-order/встраивание WorkerW на Windows 10 vs 11.
 - Ресайз/snap-математика после декомпозиции `ChildWindow.xaml.cs` при масштабировании 125%/150%.
 - Долгая сессия — утечки GDI/handle при перезапусках Explorer.

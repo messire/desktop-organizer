@@ -1,6 +1,10 @@
 using System.IO;
+using System.Threading;
+using System.Windows;
+using System.Windows.Threading;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.UI.Diagnostics;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -31,6 +35,8 @@ namespace DesktopOrganizer.Tests.Unit.ViewModels;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class ChildWindowViewModelTests
 {
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+
     private readonly Mock<IIconProvider> _iconProviderMock = new();
     private readonly Mock<IFileLauncher> _fileLauncherMock = new();
     private readonly Mock<IFolderWatcherFactory> _watcherFactoryMock = new();
@@ -38,6 +44,7 @@ public class ChildWindowViewModelTests
     private readonly Mock<IFileItemRenameService> _renameServiceMock = new();
     private readonly Mock<IAppSettings> _appSettingsMock = new();
     private readonly Mock<IPanelSelectionCoordinator> _selectionCoordinatorMock = new();
+    private readonly Mock<IGestureDiagnostics> _diagnosticsMock = new();
 
     public ChildWindowViewModelTests()
     {
@@ -53,18 +60,67 @@ public class ChildWindowViewModelTests
     /// The VM constructor resolves <c>ListViewTemplate</c>/<c>GridViewTemplate</c> via
     /// <see cref="System.Windows.Application.Current"/>. There's no WPF host in the test process by
     /// default (no <c>UseWPF</c> app bootstrap), so a minimal <see cref="System.Windows.Application"/>
-    /// with the real Templates.xaml resource dictionary merged in is created once per test run,
-    /// mirroring what <c>App.xaml</c> does in production.
+    /// is created once per test run, mirroring what <c>App.xaml</c> does in production.
     /// </summary>
-    private static void EnsureWpfApplication()
-    {
-        if (System.Windows.Application.Current is not null) return;
+    /// <remarks>
+    /// M-2 fix (P08 fix cycle 2, sta-test-conventions.md "live but non-pumping owner"): delegates to
+    /// <see cref="WpfApplicationHost.EnsureApplication"/> — the one place the real merge chain
+    /// <c>App.xaml.cs</c>'s own <c>LoadResourceDictionaries()</c> builds is defined — instead of hand-
+    /// rolling a throwaway <see cref="System.Windows.Application"/> with only <c>Templates.xaml</c>
+    /// merged in. Whichever call across the whole <c>dotnet test</c> process gets here first still owns
+    /// <see cref="System.Windows.Application.Current"/> for the rest of the run (see that class's own
+    /// remarks); this method no longer duplicates that decision with its own "was it null before" check.
+    /// </remarks>
+    private static void EnsureWpfApplication() => WpfApplicationHost.EnsureApplication();
 
-        var app = new System.Windows.Application();
-        app.Resources.MergedDictionaries.Add(new System.Windows.ResourceDictionary
+    /// <summary>
+    /// Ensures every operation already queued on <paramref name="dispatcher"/> at Normal priority or
+    /// above — in particular, whatever <c>ChildWindowViewModel.OnFolderChanged</c> just queued via the
+    /// fire-and-forget <see cref="UiDispatch.TryBeginInvoke"/> (CRITICAL C-1 fix, P08 fix cycle 2) — has
+    /// run, before returning.
+    /// </summary>
+    /// <remarks>
+    /// Takes <paramref name="dispatcher"/> explicitly (always <c>Application.Current!.Dispatcher</c> at
+    /// the call site) rather than assuming <see cref="Dispatcher.CurrentDispatcher"/> — i.e. THIS xUnit
+    /// thread's own — because WHICH thread ends up owning <see cref="Application.Current"/> for the whole
+    /// `dotnet test` process depends on whichever WPF-touching fixture across the ENTIRE assembly happens
+    /// to run first (see <see cref="WpfApplicationHost"/>'s own remarks): it might be this very
+    /// constructor's own <see cref="EnsureWpfApplication"/> call, or it might be a dedicated
+    /// <c>StaTestRunner</c>-owned worker thread from a completely different test class that got there
+    /// first. Two different drain mechanisms follow from that:
+    /// <list type="bullet">
+    /// <item><description>
+    /// Same thread (<see cref="Dispatcher.CheckAccess"/> true — this xUnit thread owns
+    /// <see cref="Application.Current"/> itself): it is NOT otherwise pumping at all, so a blocking wait
+    /// here would deadlock; push a nested <see cref="DispatcherFrame"/> instead, which re-enters the
+    /// dispatcher's own queue processing synchronously, in place.
+    /// </description></item>
+    /// <item><description>
+    /// A different thread (some other fixture's <c>StaTestRunner</c>-owned worker): that thread is, by
+    /// `StaTestRunner`'s own contract, ALREADY pumping forever, so a plain blocking wait for a
+    /// low-priority marker to run is both safe (this thread isn't the one that needs to pump) and
+    /// correct.
+    /// </description></item>
+    /// </list>
+    /// </remarks>
+    private static void FlushDispatcherQueue(Dispatcher dispatcher)
+    {
+        if (dispatcher.CheckAccess())
         {
-            Source = new Uri("/DesktopOrganizer.UI;component/Resources/Templates.xaml", UriKind.Relative),
-        });
+            var frame = new DispatcherFrame();
+            dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
+            return;
+        }
+
+        using var completed = new ManualResetEventSlim(initialState: false);
+        dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => completed.Set()));
+
+        if (!completed.Wait(Timeout))
+        {
+            throw new TimeoutException(
+                $"{nameof(ChildWindowViewModelTests)}.{nameof(FlushDispatcherQueue)}: dispatcher did not drain within {Timeout}.");
+        }
     }
 
     private ChildWindowViewModel BuildSut(IPanelSelectionCoordinator? selectionCoordinator = null) => new(
@@ -74,7 +130,8 @@ public class ChildWindowViewModelTests
         _storageMock.Object,
         _renameServiceMock.Object,
         _appSettingsMock.Object,
-        selectionCoordinator ?? _selectionCoordinatorMock.Object);
+        selectionCoordinator ?? _selectionCoordinatorMock.Object,
+        _diagnosticsMock.Object);
 
     private static string NewTempFilePath() => Path.Combine(Path.GetTempPath(), $"DOrgVmTest_{Guid.NewGuid():N}.txt");
 
@@ -462,6 +519,301 @@ public class ChildWindowViewModelTests
 
         var item = Assert.Single(sut.AllItems);
         Assert.Equal(@"C:\fake\second.txt", item.Path);
+    }
+
+    // ── ADR-009 Amendment 2026-09-22 (P08): stale-path self-heal on LoadFromModel ───────────────
+
+    [Fact]
+    public void LoadFromModel_StalePathWithLiveManagedCopy_ResolvesToManagedPath()
+    {
+        // Regression for P00 baseline finding F-9/H2: 20 of 26 real-world panel items pointed at a
+        // pre-Move original desktop path instead of their managed copy. When the storage service's
+        // manifest still knows the managed copy, LoadFromModel must resolve to it instead of building
+        // a permanently-broken FileItem.
+        var stalePath = @"C:\fake\moved-away.lnk";
+        var managedPath = NewTempFilePath();
+        File.WriteAllText(managedPath, "managed content");
+
+        var outManagedPath = managedPath;
+        _storageMock.Setup(s => s.TryFindManagedPath(stalePath, out outManagedPath)).Returns(true);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            sut.LoadFromModel(new ChildWindowModel { FilePaths = [stalePath] });
+
+            var item = Assert.Single(sut.AllItems);
+            Assert.Equal(managedPath, item.Path);
+            Assert.True(item.Exists);
+        }
+        finally
+        {
+            File.Delete(managedPath);
+        }
+    }
+
+    [Fact]
+    public void LoadFromModel_StalePathWithNoManagedCopy_KeepsOriginalPath()
+    {
+        // No manifest entry (or manifest entry with no live managed copy) — the item must stay
+        // exactly as it was (still shown, still greyed out via Exists == false), never dropped or
+        // silently replaced with something invented.
+        var stalePath = @"C:\fake\never-moved.lnk";
+        var outManagedPath = (string?)null;
+        _storageMock.Setup(s => s.TryFindManagedPath(stalePath, out outManagedPath)).Returns(false);
+
+        using var sut = BuildSut();
+        sut.LoadFromModel(new ChildWindowModel { FilePaths = [stalePath] });
+
+        var item = Assert.Single(sut.AllItems);
+        Assert.Equal(stalePath, item.Path);
+        Assert.False(item.Exists);
+    }
+
+    [Fact]
+    public void LoadFromModel_StalePathWithLiveManagedCopy_WritesRemapBackToModelFilePathsImmediately()
+    {
+        // CRITICAL C1 fix, part (b) (P08 fix cycle 1, 2026-09-22): the remap must be visible on
+        // Model.FilePaths right away, in memory — not only after some unrelated future SyncToModel()
+        // call — or code that reads Model.FilePaths directly in between (e.g.
+        // MainWindowViewModel.RemovePanel's "does this panel have anything to lose" check) still sees
+        // the stale, pre-remap path.
+        var stalePath = @"C:\fake\moved-away.lnk";
+        var managedPath = NewTempFilePath();
+        File.WriteAllText(managedPath, "managed content");
+
+        var outManagedPath = managedPath;
+        _storageMock.Setup(s => s.TryFindManagedPath(stalePath, out outManagedPath)).Returns(true);
+
+        var model = new ChildWindowModel { FilePaths = [stalePath] };
+        using var sut = BuildSut();
+
+        var filesChangedCount = 0;
+        sut.FilesChanged += (_, _) => filesChangedCount++;
+
+        try
+        {
+            sut.LoadFromModel(model);
+
+            // Assert — already fixed up on the model by the time LoadFromModel returns, and a
+            // (debounced) save was requested via FilesChanged so it survives a crash before any
+            // unrelated future save trigger fires.
+            Assert.Equal(managedPath, Assert.Single(model.FilePaths));
+            Assert.Equal(1, filesChangedCount);
+        }
+        finally
+        {
+            File.Delete(managedPath);
+        }
+    }
+
+    [Fact]
+    public void LoadFromModel_StalePathWithNoManagedCopy_DoesNotMutateModelFilePathsOrRaiseFilesChanged()
+    {
+        // No remap happened (no live managed copy) — Model.FilePaths must be left exactly as it was,
+        // and no save should be requested for a no-op.
+        var stalePath = @"C:\fake\never-moved.lnk";
+        var outManagedPath = (string?)null;
+        _storageMock.Setup(s => s.TryFindManagedPath(stalePath, out outManagedPath)).Returns(false);
+
+        var model = new ChildWindowModel { FilePaths = [stalePath] };
+        using var sut = BuildSut();
+
+        var filesChangedRaised = false;
+        sut.LoadFromModel(model);
+        sut.FilesChanged += (_, _) => filesChangedRaised = true;
+
+        Assert.Equal(stalePath, Assert.Single(model.FilePaths));
+        Assert.False(filesChangedRaised);
+    }
+
+    [Fact]
+    public void LoadFromModel_PathAlreadyExists_NeverConsultsStorageForResolution()
+    {
+        // The read-time remap only ever looks at paths that are already missing — an existing item
+        // must never pay the manifest-scan cost, and must never be "resolved" away from its own path.
+        var existingPath = NewTempFilePath();
+        File.WriteAllText(existingPath, "content");
+
+        using var sut = BuildSut();
+
+        try
+        {
+            sut.LoadFromModel(new ChildWindowModel { FilePaths = [existingPath] });
+
+            var item = Assert.Single(sut.AllItems);
+            Assert.Equal(existingPath, item.Path);
+            _storageMock.Verify(
+                s => s.TryFindManagedPath(It.IsAny<string>(), out It.Ref<string?>.IsAny),
+                Times.Never);
+        }
+        finally
+        {
+            File.Delete(existingPath);
+        }
+    }
+
+    // ── P08: RefreshItemsLiveness re-resolves the icon when a missing file reappears ────────────
+
+    [Fact]
+    public void RefreshItemsLiveness_ItemReappears_ReResolvesIconViaProvider()
+    {
+        // Regression for P00 baseline finding H3: IconProvider never caches its placeholder for a
+        // missing path, but nothing previously called GetIcon again once the file came back — the
+        // item stayed permanently stuck on the placeholder even after Exists flipped back to true.
+        var path = NewTempFilePath(); // does not exist yet
+
+        using var sut = BuildSut();
+        sut.LoadFromModel(new ChildWindowModel { FilePaths = [path] });
+
+        var item = Assert.Single(sut.AllItems);
+        Assert.False(item.Exists);
+
+        try
+        {
+            File.WriteAllText(path, "now exists");
+
+            var freshIcon = new System.Windows.Media.DrawingImage();
+            _iconProviderMock.Setup(p => p.GetIcon(path)).Returns(freshIcon);
+
+            sut.RefreshItemsLiveness();
+
+            Assert.True(item.Exists);
+            Assert.Same(freshIcon, item.Icon);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RefreshItemsLiveness_ItemStaysMissing_NeverCallsIconProviderAgain()
+    {
+        // No transition (still missing) — no reason to re-hit the icon provider at all.
+        var path = @"C:\fake\still-missing.lnk";
+
+        using var sut = BuildSut();
+        sut.LoadFromModel(new ChildWindowModel { FilePaths = [path] });
+        _iconProviderMock.Invocations.Clear();
+
+        sut.RefreshItemsLiveness();
+
+        var item = Assert.Single(sut.AllItems);
+        Assert.False(item.Exists);
+        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public void RefreshItemsLiveness_ItemStaysPresent_NeverCallsIconProviderAgain()
+    {
+        // An item that was already present and stays present must not pay a repeated GetIcon call on
+        // every liveness tick — see BaseViewModel.RefreshItemsLiveness remarks on the responsiveness
+        // trade-off (P00 baseline: ~2.8ms/item synchronous on the UI thread).
+        var path = NewTempFilePath();
+        File.WriteAllText(path, "content");
+
+        using var sut = BuildSut();
+
+        try
+        {
+            sut.LoadFromModel(new ChildWindowModel { FilePaths = [path] });
+            _iconProviderMock.Invocations.Clear();
+
+            sut.RefreshItemsLiveness();
+
+            var item = Assert.Single(sut.AllItems);
+            Assert.True(item.Exists);
+            _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    // ── M3 (P08 fix cycle 1, 2026-09-22): bounded placeholder retry for an item that Exists but is
+    // still showing the icon pipeline's own placeholder (a transient SHGetFileInfo failure, e.g.
+    // during autostart before the shell has finished initializing) ─────────────────────────────────
+
+    [Fact]
+    public void RefreshItemsLiveness_ItemExistsButIconIsPlaceholder_RetriesWithBackoff_ThenResolvesRealIcon()
+    {
+        var path = NewTempFilePath();
+        File.WriteAllText(path, "content");
+        var placeholder = new System.Windows.Media.DrawingImage();
+        var realIcon = new System.Windows.Media.DrawingImage();
+
+        _iconProviderMock.Setup(p => p.IsPlaceholder(placeholder)).Returns(true);
+        _iconProviderMock.Setup(p => p.IsPlaceholder(realIcon)).Returns(false);
+        _iconProviderMock.Setup(p => p.GetIcon(path)).Returns(placeholder);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            sut.LoadFromModel(new ChildWindowModel { FilePaths = [path] });
+            var item = Assert.Single(sut.AllItems);
+            Assert.Same(placeholder, item.Icon);
+            _iconProviderMock.Invocations.Clear();
+
+            // Tick 1: first retry attempt — provider still returns the placeholder.
+            sut.RefreshItemsLiveness();
+            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Once);
+            Assert.Same(placeholder, item.Icon);
+
+            // Tick 2: backoff — must NOT re-hit the provider on every single tick.
+            sut.RefreshItemsLiveness();
+            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Once);
+
+            // Tick 3: backoff elapsed — second attempt; the provider now succeeds.
+            _iconProviderMock.Setup(p => p.GetIcon(path)).Returns(realIcon);
+            sut.RefreshItemsLiveness();
+
+            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Exactly(2));
+            Assert.Same(realIcon, item.Icon);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RefreshItemsLiveness_PlaceholderPersistsForever_StopsRetryingAfterThreeAttempts()
+    {
+        var path = NewTempFilePath();
+        File.WriteAllText(path, "content");
+        var placeholder = new System.Windows.Media.DrawingImage();
+
+        _iconProviderMock.Setup(p => p.IsPlaceholder(placeholder)).Returns(true);
+        _iconProviderMock.Setup(p => p.GetIcon(path)).Returns(placeholder);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            sut.LoadFromModel(new ChildWindowModel { FilePaths = [path] });
+            _iconProviderMock.Invocations.Clear();
+
+            // 1-then-2-tick backoff schedule: attempts land on ticks 1, 3, and 6.
+            for (var tick = 0; tick < 6; tick++)
+            {
+                sut.RefreshItemsLiveness();
+            }
+
+            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Exactly(3));
+
+            // Bounded, not merely "slow": further ticks never attempt again.
+            sut.RefreshItemsLiveness();
+            sut.RefreshItemsLiveness();
+            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Exactly(3));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     // ── A6: SelectedFile survives a ReplaceFileItems rebuild (ADR-012 Reset side effect) ───────────
@@ -1325,6 +1677,45 @@ public class ChildWindowViewModelTests
         Assert.Equal(PanelSortMode.Name, sut.Model.SortMode);
     }
 
+    // ── P06 (docs/fix-prompts/06-fit-content.md): SetIconLayoutPolicyCommand ────────────────────────
+
+    [Fact]
+    public void SetIconLayoutPolicyCommand_Execute_WritesModelIconLayoutPolicy()
+    {
+        using var sut = BuildSut();
+        sut.LoadFromModel(new ChildWindowModel { IconLayoutPolicy = IconLayoutPolicy.LegacyStretch });
+
+        sut.SetIconLayoutPolicyCommand.Execute(IconLayoutPolicy.FixedGap);
+
+        Assert.Equal(IconLayoutPolicy.FixedGap, sut.Model.IconLayoutPolicy);
+    }
+
+    [Fact]
+    public void SetIconLayoutPolicyCommand_CanExecute_AlwaysTrue_EvenForAPortal()
+    {
+        var portalDir = NewTempDirPath();
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            sut.LoadFromModel(new ChildWindowModel { SourceFolderPath = portalDir });
+            Assert.True(sut.IsPortal);
+
+            // Unlike SetSortModeCommand, IconLayoutPolicy has nothing to do with manual item ordering —
+            // it stays available for a Folder Portal panel (ADR-029 Решение 5 does not gate it on
+            // portal-ness at all, only on Grid vs List mode, which this command doesn't check either —
+            // see ChildWindow.xaml's own "Icon layout" MenuItem, gated only by CanEnterEditLayout).
+            Assert.True(sut.SetIconLayoutPolicyCommand.CanExecute(IconLayoutPolicy.FixedGap));
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+        }
+    }
+
     // ── ADR-014 Decision 7 (fixes §1.2): Folder Portal watcher tick preserves alphabetical order ───
 
     [Fact]
@@ -1350,7 +1741,12 @@ public class ChildWindowViewModelTests
             File.WriteAllText(newFilePath, "a");
 
             // Simulate the FileSystemWatcher's "created" callback the way OnFolderChanged consumes it.
+            // CRITICAL C-1 fix (P08 fix cycle 2): OnFolderChanged now marshals fire-and-forget via
+            // UiDispatch.TryBeginInvoke rather than blocking, so the dispatched mutation is only QUEUED
+            // by the time Raise returns — FlushDispatcherQueue() ensures the queued action actually runs
+            // before the assertion below reads sut.FileItems.
             watcherMock.Raise(w => w.Changed += null, watcherMock.Object, new FolderChangeEventArgs(FolderChangeKind.Created, newFilePath));
+            FlushDispatcherQueue(Application.Current!.Dispatcher);
 
             Assert.Equal(
                 [newFilePath, Path.Combine(portalDir, "B.txt"), Path.Combine(portalDir, "C.txt")],
@@ -1360,6 +1756,166 @@ public class ChildWindowViewModelTests
         {
             Directory.Delete(portalDir, recursive: true);
         }
+    }
+
+    // ── CRITICAL C-1 (P08 fix cycle 2): OnFolderChanged must never block its FolderWatcher caller ──
+
+    /// <summary>
+    /// Pins the actual defect behind CRITICAL C-1: <c>OnFolderChanged</c> used to marshal onto the UI
+    /// thread via the BLOCKING <see cref="UiDispatch.TryInvoke"/> from inside <c>FolderWatcher</c>'s own
+    /// debounce callback thread. If that callback thread is holding <c>FolderWatcher</c>'s debounce lock
+    /// while the blocking <c>Invoke</c> waits for the UI thread, and the UI thread's very next action is
+    /// closing this panel (<c>DetachWatcher</c> → <c>IFolderWatcher.Dispose</c>/<c>Stop</c> → the SAME
+    /// lock), the two threads deadlock the whole application.
+    /// </summary>
+    /// <remarks>
+    /// Reproducing the exact lock is <c>FolderWatcher</c>'s own concern (out of scope for this ViewModel-
+    /// level fixture — see its own tests), but the property this test CAN and must pin at this layer is
+    /// the one the fix actually guarantees: raising <c>Changed</c> on a genuine background thread returns
+    /// promptly, regardless of whether <see cref="Application.Current"/>'s dispatcher is currently pumping
+    /// — which is exactly the state most fixtures in this file leave it in (see
+    /// <c>docs/Refactoring/Testing/sta-test-conventions.md</c>'s "live but non-pumping owner" hazard).
+    /// Against the pre-fix (blocking <see cref="UiDispatch.TryInvoke"/>) code, this callback thread would
+    /// hang until <see cref="Timeout"/> elapses, because nothing on this non-pumping dispatcher ever
+    /// services the queued Invoke — i.e. this test would fail (time out) against that code.
+    /// </remarks>
+    [Fact]
+    public void OnFolderChanged_RaisedOnABackgroundThread_ReturnsBeforeTheUiThreadServicesIt()
+    {
+        var portalDir = NewTempDirPath();
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            sut.LoadFromModel(new ChildWindowModel { SourceFolderPath = portalDir });
+
+            using var raised = new ManualResetEventSlim(initialState: false);
+            var worker = new Thread(() =>
+            {
+                watcherMock.Raise(
+                    w => w.Changed += null,
+                    watcherMock.Object,
+                    new FolderChangeEventArgs(FolderChangeKind.ResyncRequired, portalDir));
+                raised.Set();
+            })
+            {
+                IsBackground = true,
+            };
+            worker.Start();
+
+            var completedPromptly = raised.Wait(Timeout);
+            worker.Join(Timeout);
+
+            Assert.True(
+                completedPromptly,
+                "OnFolderChanged must not block the FolderWatcher callback thread waiting for the UI thread.");
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// UiDispatch fix-cycle verification (MAJOR): a folder-change that was already queued (fire-and-forget)
+    /// when the panel was closed must be a no-op once it finally runs — otherwise a ResyncRequired would
+    /// re-enumerate the folder and rebuild the item list on a DISPOSED view-model, mid-close.
+    /// </summary>
+    [Fact]
+    public void OnFolderChanged_QueuedBeforeDispose_DoesNothingAfterDispose()
+    {
+        var portalDir = NewTempDirPath();
+        File.WriteAllText(Path.Combine(portalDir, "late.txt"), "x");
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+
+        var sut = BuildSut();
+        try
+        {
+            sut.LoadFromModel(new ChildWindowModel { SourceFolderPath = portalDir });
+            FlushDispatcherQueue(Application.Current!.Dispatcher);
+            var countBeforeDispose = sut.FileItems.Count;
+
+            // Capture the handler BEFORE Dispose detaches it — this models a debounce tick that fired on
+            // the watcher thread a moment before the UI thread closed the panel.
+            EventHandler<FolderChangeEventArgs>? captured = null;
+            watcherMock.SetupAdd(w => w.Changed += It.IsAny<EventHandler<FolderChangeEventArgs>>())
+                .Callback<EventHandler<FolderChangeEventArgs>>(h => captured = h);
+            sut.LoadFromModel(new ChildWindowModel { SourceFolderPath = portalDir });
+            FlushDispatcherQueue(Application.Current.Dispatcher);
+            Assert.NotNull(captured);
+
+            sut.FileItems.Clear();
+            sut.Dispose();
+
+            captured!(watcherMock.Object, new FolderChangeEventArgs(FolderChangeKind.ResyncRequired, portalDir));
+            FlushDispatcherQueue(Application.Current.Dispatcher);
+
+            Assert.Empty(sut.FileItems);
+            Assert.True(countBeforeDispose >= 1); // the folder really had content to resync
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+        }
+    }
+
+    // ── MAJOR M-1 (P08 fix cycle 2): RefreshExistence single-flight guard ───────────────────────────
+
+    [Fact]
+    public void RefreshExistence_WhenNoRefreshIsPending_QueuesOneAndMarksItPending()
+    {
+        using var sut = BuildSut();
+        sut.LoadFromModel(new ChildWindowModel());
+
+        sut.RefreshExistence(null);
+
+        Assert.True(sut.IsExistenceRefreshPending, "the first tick must mark a refresh as pending.");
+    }
+
+    /// <summary>
+    /// Pins the actual MAJOR M-1 fix: <c>RefreshExistence</c> used to queue a brand-new blocking
+    /// <see cref="UiDispatch.TryInvoke"/> operation on EVERY 3-second tick regardless of whether an
+    /// earlier one had been serviced yet — against a busy/blocked UI thread, that accumulates one occupied
+    /// thread-pool thread per tick and can starve the pool (see
+    /// <c>docs/Refactoring/Testing/sta-test-conventions.md</c>'s "second, unrelated flake"). Ten ticks
+    /// fired back-to-back — none of them from a pumped dispatcher, so the first one's dispatched action
+    /// never actually runs during this synchronous test method — must still leave the single-flight flag
+    /// in exactly its pending state, never queuing a second (or third, …) operation on top of the first.
+    /// </summary>
+    [Fact]
+    public void RefreshExistence_WhileARefreshIsAlreadyPending_NeverAccumulatesMoreThanOnePendingRefresh()
+    {
+        using var sut = BuildSut();
+        sut.LoadFromModel(new ChildWindowModel());
+
+        sut.RefreshExistence(null);
+        Assert.True(sut.IsExistenceRefreshPending);
+
+        for (var i = 0; i < 9; i++)
+            sut.RefreshExistence(null);
+
+        Assert.True(
+            sut.IsExistenceRefreshPending,
+            "still exactly one refresh pending after 10 ticks — never reset/corrupted by the later, skipped ticks.");
+    }
+
+    [Fact]
+    public void RefreshExistence_AfterDispose_NeverTouchesThePendingFlag()
+    {
+        using var sut = BuildSut();
+        sut.LoadFromModel(new ChildWindowModel());
+        sut.Dispose();
+
+        var exception = Record.Exception(() => sut.RefreshExistence(null));
+
+        Assert.Null(exception);
+        Assert.False(
+            sut.IsExistenceRefreshPending,
+            "a tick arriving after Dispose() must early-return before claiming the single-flight slot.");
     }
 
     // ── ui-polishing-1 §2.4 Block A2: IPanelSelectionCoordinator integration ─────────────────────

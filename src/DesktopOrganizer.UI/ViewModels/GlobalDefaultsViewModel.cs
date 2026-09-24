@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 
 namespace DesktopOrganizer.UI.ViewModels;
@@ -14,6 +15,7 @@ namespace DesktopOrganizer.UI.ViewModels;
 public class GlobalDefaultsViewModel : INotifyPropertyChanged
 {
     private readonly IAppSettings _appSettings;
+    private readonly IWindowManager _windowManager;
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -21,14 +23,28 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
     /// <summary>
     /// Initializes a new instance of the <see cref="GlobalDefaultsViewModel"/> class.
     /// </summary>
-    public GlobalDefaultsViewModel(IAppSettings appSettings)
+    /// <param name="appSettings">Backing store for every global default/grid setting.</param>
+    /// <param name="windowManager">
+    /// ADR-011 Amendment (2026-09-24): re-aligns every open panel onto the new
+    /// <see cref="IAppSettings.GridSize"/> lattice right after it changes — see the
+    /// <see cref="GridSize"/> setter.
+    /// </param>
+    public GlobalDefaultsViewModel(IAppSettings appSettings, IWindowManager windowManager)
     {
         _appSettings = appSettings;
+        _windowManager = windowManager;
     }
 
     /// <summary>
     /// Snap-to-grid cell size in pixels. 1 = no snapping, 4–128 = snap.
     /// </summary>
+    /// <remarks>
+    /// ADR-011 Amendment (2026-09-24): changing this setting re-aligns every currently open panel onto the
+    /// NEW grid via <see cref="IWindowManager.NormalizePanelsToGrid"/> — otherwise a panel positioned under
+    /// the previous <see cref="GridSize"/> would keep "living on a different grid" than panels created (or
+    /// dragged) after the change, since a subsequent drag only ever nudges an EXISTING off-grid position by
+    /// whole NEW-grid steps rather than re-quantising it.
+    /// </remarks>
     public int GridSize
     {
         get => _appSettings.GridSize;
@@ -37,6 +53,7 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
             if (_appSettings.GridSize == value) return;
             _appSettings.GridSize = value;
             _appSettings.Save();
+            _windowManager.NormalizePanelsToGrid();
             OnPropertyChanged(nameof(GridSize));
         }
     }
@@ -53,6 +70,23 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
             _appSettings.SnapResizeToIconGrid = value;
             _appSettings.Save();
             OnPropertyChanged(nameof(SnapResizeToIconGrid));
+        }
+    }
+
+    /// <summary>
+    /// When <see langword="true"/>, panels resize via the native <c>WM_SIZING</c> loop instead of the
+    /// legacy WPF <c>Thumb</c> path (docs/PLANS/phase-2-native-panel-sizing.md). Experimental — takes
+    /// effect only for panels created after the app restarts.
+    /// </summary>
+    public bool NativePanelSizing
+    {
+        get => _appSettings.NativePanelSizing;
+        set
+        {
+            if (_appSettings.NativePanelSizing == value) return;
+            _appSettings.NativePanelSizing = value;
+            _appSettings.Save();
+            OnPropertyChanged(nameof(NativePanelSizing));
         }
     }
 
@@ -99,6 +133,81 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
         get => _appSettings.DefaultIconSize;
         set => SetGlobal(v => _appSettings.DefaultIconSize = v, value, _appSettings.DefaultIconSize, nameof(DefaultIconSize));
     }
+
+    /// <summary>
+    /// Default <see cref="PanelSurfaceStyle"/> for new panels, as the persisted enum-name string
+    /// (<see cref="IAppSettings.DefaultSurfaceStyle"/>). No settings-window control binds to this yet
+    /// (ADR-025 D-10 leaves the global-defaults UI untouched); it exists so panel-creation call sites
+    /// (<see cref="MainWindowViewModel.AddPanel"/>, <c>App.xaml.cs</c>'s <c>NewPanelWithDefaults</c>) can
+    /// seed <see cref="Models.ChildWindowModel.SurfaceStyle"/> — parse with
+    /// <see cref="PanelSurfaceStyleParser.ParseOrAmbient"/>.
+    /// </summary>
+    public string DefaultSurfaceStyle
+    {
+        get => _appSettings.DefaultSurfaceStyle;
+        set => SetGlobal(v => _appSettings.DefaultSurfaceStyle = v, value, _appSettings.DefaultSurfaceStyle, nameof(DefaultSurfaceStyle));
+    }
+
+    /// <summary>
+    /// Which panel move/resize gestures remain available while <see cref="ILayoutEditModeService.Mode"/>
+    /// is <see cref="LayoutInteractionMode.Normal"/> (docs/PLANS/phase-6-edit-layout-ux.md §1 D-2).
+    /// Persisted as the enum member name via <see cref="IAppSettings.NormalModeLayoutGestures"/> — parsed
+    /// with <see cref="NormalModeLayoutGesturesParser.ParseOrMoveOnly"/>, which never throws (same shape
+    /// as <see cref="DefaultSurfaceStyle"/> above).
+    /// </summary>
+    public NormalModeLayoutGestures NormalModeLayoutGestures
+    {
+        get => NormalModeLayoutGesturesParser.ParseOrMoveOnly(_appSettings.NormalModeLayoutGestures);
+        set => SetGlobal(
+            v => _appSettings.NormalModeLayoutGestures = v.ToString(),
+            value,
+            NormalModeLayoutGestures,
+            nameof(NormalModeLayoutGestures));
+    }
+
+    /// <summary>Available options for the Normal-mode gesture-policy selector (settings window).</summary>
+    public IReadOnlyList<NormalModeLayoutGestures> NormalModeLayoutGesturesOptions { get; } = Enum.GetValues<NormalModeLayoutGestures>();
+
+    /// <summary>
+    /// Default <see cref="PanelGeometryMode"/> for new panels (ADR-028; docs/PLANS/workspace-grid-migration.md),
+    /// persisted as the enum member name via <see cref="IAppSettings.DefaultPanelGeometryMode"/> — parsed
+    /// with <see cref="PanelGeometryModeParser.ParseOrLegacyFreeform"/>, which never throws (same shape as
+    /// <see cref="NormalModeLayoutGestures"/> above). Consumed by panel-creation call sites
+    /// (<see cref="MainWindowViewModel.AddPanel"/>, <c>App.xaml.cs</c>'s <c>NewPanelWithDefaults</c>) to seed
+    /// <see cref="Models.ChildWindowModel.GeometryMode"/> — never affects panels that already exist.
+    /// </summary>
+    public PanelGeometryMode DefaultPanelGeometryMode
+    {
+        get => PanelGeometryModeParser.ParseOrLegacyFreeform(_appSettings.DefaultPanelGeometryMode);
+        set => SetGlobal(
+            v => _appSettings.DefaultPanelGeometryMode = v.ToString(),
+            value,
+            DefaultPanelGeometryMode,
+            nameof(DefaultPanelGeometryMode));
+    }
+
+    /// <summary>Available options for the default-panel-geometry-mode selector (settings window).</summary>
+    public IReadOnlyList<PanelGeometryMode> PanelGeometryModeOptions { get; } = Enum.GetValues<PanelGeometryMode>();
+
+    /// <summary>
+    /// Default <see cref="IconLayoutPolicy"/> for new panels (ADR-029 Decision 6), persisted as the enum
+    /// member name via <see cref="IAppSettings.DefaultIconLayoutPolicy"/> — parsed with
+    /// <see cref="IconLayoutPolicyParser.ParseOrLegacyStretch"/>, which never throws. Consumed by the same
+    /// panel-creation call sites as <see cref="DefaultPanelGeometryMode"/> to seed
+    /// <see cref="Models.ChildWindowModel.IconLayoutPolicy"/> — never affects panels that already exist.
+    /// </summary>
+    public IconLayoutPolicy DefaultIconLayoutPolicy
+    {
+        get => IconLayoutPolicyParser.ParseOrLegacyStretch(_appSettings.DefaultIconLayoutPolicy);
+        set => SetGlobal(
+            v => _appSettings.DefaultIconLayoutPolicy = v.ToString(),
+            value,
+            DefaultIconLayoutPolicy,
+            nameof(DefaultIconLayoutPolicy));
+    }
+
+    /// <summary>Available options for the default-icon-layout-policy selector (settings window).</summary>
+    public IReadOnlyList<IconLayoutPolicy> IconLayoutPolicyOptions { get; } = Enum.GetValues<IconLayoutPolicy>();
 
     private void SetGlobal<T>(Action<T> apply, T newValue, T current, string propertyName)
     {

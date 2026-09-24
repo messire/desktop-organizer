@@ -732,6 +732,276 @@ A–E (§10 плана), `dotnet build`/`dotnet test` зелёные без ро
 
 ---
 
+## Ambient Accent Visual System (Фаза 5 пакета `docs/Refactoring/`, вне формальных Фаз этого ROADMAP)
+
+Источник — отдельный refactoring-пакет `docs/Refactoring/` (собственная нумерация Phase 0–9, не
+совпадает с Фазами этого документа), мастер-план [docs/PLANS/phase-5-ambient-accent-ui.md](PLANS/phase-5-ambient-accent-ui.md),
+трекер — [docs/Refactoring/ROADMAP.md](Refactoring/ROADMAP.md) (Phase 5) и
+[docs/Refactoring/PHASES/PHASE-5-ambient-accent-ui.md](Refactoring/PHASES/PHASE-5-ambient-accent-ui.md).
+Ветка `ui/ambient-accent-design-tokens` (от `rc/0.4.0`). Архитектурное решение —
+[ADR-025](../adr/ADR-025-ambient-accent-visual-language.md) (Accepted).
+
+- [x] **Новый визуальный язык панелей: нейтральная поверхность + локальный семантический акцент**
+      вместо сплошной заливки категорией (сознательное расхождение с буквальным дефолтом Fences, см.
+      ADR-025 «Альтернативы»). Токенизированные словари (`Resources/Styles/*.xaml`), lookless
+      `PanelChrome`, attached DP `PanelTheme` (единый appearance для Grid/List/Folder Portal/
+      `SystemIconsPanel`), визуализация interaction-состояний Idle/Hover/Editing/Dragging/Resizing
+      (`InteractionVisualState`, ADR-021's `PanelInteractionTracker` не изменён), миграция схемы
+      persistence v3→v4 (`V3ToV4Migration`, `AccentColor`/`SurfaceStyle`/`SurfaceOpacity` заменяют
+      `BackgroundColor`/`BackgroundOpacity`), обесцвечивание `MainWindow.xaml` (закрывает
+      `docs/Refactoring/BACKLOG.md` DO-003). Реализация (`wpf-ui-builder`) прошла три полных раунда
+      `code-quality-reviewer` ∥ `fences-ux-parity-reviewer` с фиксами между ними + финальный узкий
+      фикс-цикл (MAJOR-1/MAJOR-2, MAJOR-A/MAJOR-B, MAJOR-5 — все исправлены, в т.ч. Dragging/Resizing
+      различимость по ширине акцент-индикатора и border opacity). DoD-чеклист сверен и закрыт —
+      [docs/Refactoring/PHASES/PHASE-5-ambient-accent-ui.md](Refactoring/PHASES/PHASE-5-ambient-accent-ui.md).
+      Принятые trade-off'ы и известные проблемы, сознательно оставленные вне скоупа (не баги) —
+      см. ADR-025: лоссивная миграция `#1E1E1E → Accent.Neutral` для дефолтных панелей (D-5),
+      `Glass` = пониженная непрозрачность/усиленный border, не настоящий acrylic/DWM-blur (R-8),
+      `TextColor`-долг (DO-013), `Color.Overlay.Hover` в High Contrast, активная вкладка настроек в HC
+      без доп. индикатора, мёртвая ветка `"accent"` в `VisualStateToDoubleConverter`, High Contrast
+      подхватывается только при старте приложения (DO-015).
+
+- [x] **P00 — Baseline-аудит фактической геометрии** (`docs/fix-prompts/00-audit.md`,
+      [docs/PLANS/workspace-grid-00-baseline.md](PLANS/workspace-grid-00-baseline.md)): только чтение
+      (`src/` не менялся, добавлен один characterization-тест) — 21 writer геометрии панели,
+      12 находок F-1…F-12 (origin сетки не привязан к монитору, IconSize меняет panel bounds, хром
+      `PanelChrome` не учтён в снап-формулах, `MonitorDeviceId` не обновляется при межмониторном drag,
+      лассо пишет px как DIP, дробный persisted `IconSize`, конфликт с ADR-018 stretch-gap), плюс
+      измеренный на реальной Windows 11 icon-loading дефект (прозрачный placeholder, 20/26 сохранённых
+      путей — устаревшие pre-Move). Передано в P01 как входные вопросы для ADR-028/ADR-029.
+- [x] **P01 — Архитектура: ADR-028 (Workspace Grid) + ADR-029 (Icon Layout Policy)**
+      (`docs/fix-prompts/01-architecture.md`): architecture-only проход, без изменений `src/`. Три
+      независимые системы координат (physical monitor px / workspace panel grid DIP / internal icon
+      layout DIP) впервые формально разделены и поимённо специфицированы — закрывает F-3-класс багов
+      структурно. [ADR-028](../adr/ADR-028-workspace-grid.md): origin = work area монитора (закрывает
+      F-1), модуль `U=8 DIP`/gap `G`, `PanelGeometryMode {LegacyFreeform, GridAligned}`, spans вместо
+      сырых DIP (устойчивость к сдвигу origin при hotplug/DPI/taskbar), presets S/M/L/XL, `Alt`
+      подавляет квантование на время жеста. [ADR-029](../adr/ADR-029-icon-layout-policy.md):
+      `IconLayoutPolicy {LegacyStretch, FixedGap}` (amendment к ADR-018), `PanelMetrics.ContentLeftInset`
+      как единая константа контракта на хром (F-3), `PanelSizingMode {Manual, AutoContent}` (владение
+      F-4). Оба ADR остались `Proposed` до реализации/manual verify — см. «P09 (gate)» ниже.
+- [x] **P02 — Чистая геометрия `WorkspaceGridMetrics`/`WorkspaceLayoutPolicy`** (`docs/fix-prompts/02-metrics.md`,
+      [docs/PLANS/workspace-grid-02-metrics.md](PLANS/workspace-grid-02-metrics.md)): pure-math слой,
+      без подключения к рантайму. `SnapPosition`/`BoundsToSpans`/`SpansToBounds`/`SafeClamp`/
+      `PreferredSize`/`ClampAgainstObstacles` (gap-aware) в `src/DesktopOrganizer.UI/Models/`. **Fix-цикл
+      1** — 7 MAJOR-находок: `Math.Ceiling` без допуска давал «ratchet» на round-trip DIP↔px (допуск
+      0.5 DIP), `SafeClamp` мог дать позицию вне сетки, resize-перегрузка `SnapBounds` была структурно
+      неверна (anchor не квантовался), план подключения для этапа 04 (system C не участвует в системе
+      B), API slot↔position/gap-aware clamp/anti-overlap по целым слотам, решения оркестратора:
+      интерактивный resize — `Round` (не `Ceiling`), округление `.5` — `Math.Floor(t+0.5)` (не
+      banker's). **Fix-цикл 2** — R1-амнистия и gap-арифметика разделены (инфляция препятствия не имеет
+      права амнистировать реальное пересечение), `SafeClamp`-перегрузки переименованы по владению
+      режима. **Fix-цикл 3** (carry-over из верификаций P03/P04) — публичные члены
+      `ClampResizeToWorkArea`/`RoundBoundsToSpans`/`ClampToMinimum` повышены до `public`,
+      `PanelDragPipeline.CommittedSize` закрывает MAJOR верификации P04 (WPF `ActualWidth` отстаёт на
+      layout-pass → Alt-resize клампился неверно).
+- [x] **P02b — Persistence-фундамент: схема v4→v5** (`docs/PLANS/workspace-grid-migration.md`): единая
+      версия схемы для обоих ADR (workspace grid + icon layout policy) — аддитивные `geometryMode`,
+      `widthSpanUnits`/`heightSpanUnits`, `iconLayoutPolicy`, `sizingMode`; дефолты сохраняют сегодняшнее
+      поведение (`legacyFreeform`/`legacyStretch`/`manual`), явно проставляются миграцией, а не
+      наследуются молча. Откат старой сборки на v5-файл безопасен по конструкции (существующий rung 7
+      ADR-024, «никогда не мигрирует вниз, никогда не перезаписывает» — подтверждено чтением кода, не
+      гипотеза). **Fix-цикл 1** — MAJOR (`GridAligned` без валидных spans), 4 MINOR (`Enum.TryParse`,
+      неверный JSON-тип ронял `Load()`, `LegacyFreeform` получал лишние spans в DTO, дефолты новой
+      панели из двух рассинхронизированных копий → единый `PanelDefaults`), нет постоянной копии
+      документа до миграции. **Fix-цикл 2 (последний)** — MAJOR N-2 (`WritePreMigrationBackupIfMissing`
+      игнорировал advisory lock, писал неатомарно), MAJOR N-3 (`null` вместо коллекции в payload ронял
+      `Load()`), MINOR-находки (типизированные enum-поля DTO, `ReconcileGridAlignedSpans` без клампа к
+      минимуму, `AddPanel`/`GridAligned` давал 248×232 вместо прежних 260×300). **Финальная
+      верификация** — MAJOR-1 (null-элементы коллекций).
+- [x] **P03 — Единый drag/snap/collision и координаты мониторов** (`docs/fix-prompts/03-positioning.md`,
+      [docs/PLANS/workspace-grid-03-04-integration.md](PLANS/workspace-grid-03-04-integration.md) §2/§2.8,
+      ADR-028 «Реализация P03»): `WorkspaceLayoutPolicy` подключён к реальному пути перемещения панели.
+      Конвейер `GridAligned` — `SnapPosition` от origin work area **конкретного** монитора (не от
+      глобального `(0,0)`) → snap-guides ADR-026 (только Edit Layout) → gap-aware anti-overlap ADR-017
+      («твёрдая стена», всегда последняя и не пробивается); `Alt` временно подавляет только квантование,
+      на отпускании позиция квантуется всегда. `LegacyFreeform` — байт-в-байт прежний путь.
+      `MonitorDeviceId` обновляется по центру панели на drop в обоих режимах (F-6) — панель больше не
+      возвращается на DISPLAY1 после любого `WM_SETTINGCHANGE`. Restore и `MonitorsChanged` пересчитывают
+      `GridAligned`-панель из её spans против текущего origin её же монитора (идемпотентно, без «jump on
+      first launch»); `LegacyFreeform` идёт через нетронутый `ClampIntoMonitor`. Добавлены: явная команда
+      «Align to workspace grid» (per-panel, `IsCheckable` — снятие галки возвращает `LegacyFreeform` без
+      сдвига панели) и «Align all to grid» в окне настроек (с подтверждением, детерминированный порядок);
+      лассо конвертирует px→DIP через `IMonitorService.GetSystemDpiScale()` (F-7); «Add panel» занимает
+      первый свободный слот вместо `(0,0)` (M8). Попутно закрыт carry-over из финальной верификации P02
+      fix-cycle 2: gap-aware clamp расширял препятствие по обеим осям и ломал «скольжение вдоль стены»
+      (`PanelCollision.InflateX`/`InflateY`, `docs/PLANS/workspace-grid-02-metrics.md` §8.5).
+      Открытый вопрос **OQ-6** (позиция как абсолютная точка vs индекс слота) — см. план §8.
+
+- [x] **P03 fix-cycle 1** (code-review, `docs/PLANS/workspace-grid-03-04-integration.md` §2.8/§7/§8,
+      ADR-028 «Реализация P03 — fix-цикл 1»): CRITICAL **C-1** — `SnapToGrid` резолвило `_gridState` один
+      раз в начале drag и клампило drop обратно в work area СТАРТОВОГО монитора, поэтому меж-мониторный
+      drop телепортировал панель назад и `MonitorDeviceId` (F-6) никогда не обновлялся; исправлено
+      `PanelDragPipeline.RetargetToDropMonitor` — резолвит монитор по СЫРОМУ (до clamp) центру панели из
+      уже снятого снимка `_dragMonitors`, без новой энумерации, и подставляет его origin/work area ДО
+      `ResolveGridDrop`. MAJOR **M-1** — guide-шаг (`SnapGuideCalculator.Snap`) использовал замороженный
+      `state.WorkArea` стартового монитора; теперь `ResolveGridFrame` резолвит work area ПО КАДРУ из того
+      же снимка мониторов (как уже делал `LegacyFreeform`-путь). MAJOR **M-2** — «Align all» проходило по
+      панелям ВСЕХ страниц, а `CollectOtherPanelBounds` пропускает `!IsVisible`, из-за чего панели скрытых
+      страниц выравнивались без препятствий и схлопывались в один слот; область сужена до ТЕКУЩЕЙ
+      страницы, текст кнопки/диалога унифицирован («Align all panels to grid», диалог явно называет
+      число панелей текущей страницы). MAJOR **M-3** — `OnMonitorsChanged` писало `Width/Height` и
+      запрашивало сохранение на каждый `WM_SETTINGCHANGE` (тема/локаль) без проверки, изменилось ли
+      что-то; добавлен допуск 0.5 DIP (`WindowManager.GridAlignedBoundsUnchanged`) и общий флаг
+      `anyChanged`, гейтящий `SaveWindowsState()`. MINOR — три писателя геометрии унифицированы на
+      `Math.Round` вместо усекающего `(int)` (согласовано с `LassoPanelGeometry`); `ResolveGridDrop`
+      получил перегрузку, клампящую по РАЗВЁРНУТОМУ размеру свёрнутой панели, а не по её collapsed-высоте;
+      второй уровень отката в `ClampHardWall` (per-axis, сегодня no-op) оставлен как есть — снятие риска
+      регрессии «стена пробита» дороже цены одного лишнего O(N)-прохода; отказ «Align to workspace grid»
+      теперь пишет диагностическую строку вместо тихого no-op; `CollectOtherPanelBounds` принимает
+      `Guid?` вместо сентинела `Guid.Empty`. UX — подсказка про `Alt` на пункте меню «Align to workspace
+      grid». **OQ-6 закрыт (решение A)**: позиция `GridAligned`-панели остаётся абсолютной точкой,
+      ре-квантуемой к новому origin (см. ADR-028) — полноценный «логический слот» требует новой schema-
+      миграции вне объёма этого пакета. `dotnet build`/`dotnet test` — 2766 passed (базис worktree'а
+      этого fix-цикла — 2747, +19).
+
+- [x] **P04 — Spans, native resizing, roll-up, presets** (`docs/fix-prompts/04-resize.md`,
+      [docs/PLANS/workspace-grid-03-04-integration.md](PLANS/workspace-grid-03-04-integration.md) §3):
+      `GridAligned` resize квантует ОБЕ протяжённости через `WorkspaceLayoutPolicy` (не
+      `GridMetrics.CellSize` — система C не участвует), две точки входа в конвейер
+      (`ResizeConstraintsFactory` — какими правилами, `ResizeGestureSession.TryUpdate` — само
+      квантование), новый `IPanelSizingGridHost` (даёт контроллерам монитор/препятствия/writer без
+      правки `ChildWindow.xaml.cs`), anti-overlap при resize по целым слотам (закрывает открытый
+      backlog-пункт ADR-017 для `GridAligned`), `RollUpBehavior` работает span'ами
+      (`CollapsedHeaderSpan=5`, OQ-4=A), presets S/M/L/XL доступны в обоих режимах геометрии и НЕ меняют
+      `PanelGeometryMode` (единственная явная точка входа/выхода — checkable «Align to workspace grid»).
+      **Fix-цикл 1** — MAJOR-1 (clamp «на кадре», а не трансляция на mouse-up — тянуть правый край мог
+      сдвинуть ЛЕВЫЙ на mouse-up), MAJOR-2 (commit писал неточный extent из-за px-round-trip погрешности
+      — `RoundBoundsToSpans` вместо сырых bounds), MAJOR-3 (ленивая миграция spans без
+      `ClampToMinimum` — высота могла навсегда застрять ниже минимума), `Alt` при resize (вариант B,
+      симметрично drag), preset выключает `AutoContent` (UX P0), MV-21 закрыт (подменю «Size»
+      дизейблится на свёрнутой панели).
+- [x] **P05 — `IconLayoutPolicy` + F-3 chrome fix** (`docs/fix-prompts/05-icon-layout.md`,
+      ADR-029 Решения 1–3): `IconLayoutPolicy {LegacyStretch, FixedGap}` — `FixedGap` = ветка
+      «неполного ряда» ADR-018, применённая безусловно ко всем рядам (шаг между иконками не зависит от
+      ширины панели); `PanelMetrics.ContentLeftInset=8`/`GridMetrics.FileListHPadding` (ссылка, не
+      независимая константа) фиксирует F-3 (снап-код терял колонку хрома) для ОБЕИХ политик (Q2=A).
+      **Fix-цикл, итерация 1** — MAJOR-1 (`ChildWindow.Initialize` безусловно вызывал
+      `SnapWidthToGrid()` — до F-3 numeric no-op, после F-3 силовой одноразовый скачок ширины для
+      практически любой персистентной Grid-панели при первой загрузке после апгрейда; решение —
+      переснап при загрузке удалён ДЛЯ ВСЕХ режимов, включая `LegacyFreeform`), M-2 (`FixedGap`
+      резервирует ширину скроллбара безусловно). **Fix-цикл, итерация 2 (последняя)** — CRITICAL-1
+      (`AdaptiveIconGridPanel.CapacityWidth`: M-2's «безусловное резервирование» на деле двойным вычетом
+      воспроизводило тот же скачок колонок, который был призван устранить — новый DP, привязанный к
+      стабильной `ScrollViewer.ActualWidth`, резерв вычитается один раз), MAJOR-2 (`IconLayoutPolicy`
+      теперь тоже триггерит переснап при смене на живой панели), MINOR (drag-reorder hit-test в левом
+      гуттере ряда резолвился в последний элемент вместо первого; golden-эквивалентность расширена на
+      `FixedGap`).
+- [x] **P06 — `PanelSizingMode`/«Fit panel to content»/«Icon layout» UI** (`docs/fix-prompts/06-fit-content.md`,
+      [docs/PLANS/workspace-grid-06-fit-content.md](PLANS/workspace-grid-06-fit-content.md), ADR-029
+      Решение 7): явное действие «Fit panel to content» + персистентный `PanelSizingMode.AutoContent` —
+      одна чистая формула (`PanelContentSizer.FitHeight`, переиспользует `GridMetrics`/
+      `AdaptiveGridLayout` без дублирования), ограничено Grid-режимом (Q3=B), однонаправленно (ширина →
+      высота, никогда обратно). Новые пункты контекстного меню («Icon layout», «Panel sizing» —
+      «Fit panel to content»/«Auto-size to content»/«Apply to all panels…»), новые настройки
+      («Defaults for new panels» — Panel geometry/Icon layout, поля уже существовали с P02b, но не были
+      выведены в UI). Никаких изменений формата persisted JSON. **Fix-цикл 1** — MAJOR-1
+      (`IsLayoutLocked`/`IsEnabled`-гейтинг отсутствовал у «Apply … to all panels…»), MAJOR-2
+      (`ApplyFitHeight`'s `GridAligned`-ветка игнорировала fail-safe возврат резолвера — схлопывала
+      панель до минимального span на fail-safe пути), MAJOR-3 (debounce-тик мог сработать посреди
+      активного resize/drag-жеста — гонка геометрии), MAJOR-4 (завершённый ВЕРТИКАЛЬНЫЙ resize не
+      демотировал `AutoContent → Manual` — Fences-подобное поведение добавлено), UX-P1 (сырые имена enum
+      в двух `ComboBox` настроек → `EnumDisplayNameConverter`), UX-P2 (подменю «Panel sizing»
+      симметрично «Icon layout»). Статус ADR-029 сознательно возвращён `Accepted → Proposed` по итогам
+      этого fix-цикла (до релизной сверки P09).
+- [x] **P07-visual fix-cycle 1** (`docs/fix-prompts/07-visual.md`, `docs/PLANS/workspace-grid-07-visual.md`,
+      ADR-025 Amendment 2026-09-22): border radius 6→8 DIP resize-grip hit-test fix (widened
+      `ResizeOverlay`/`NativePanelResizeController.BorderDip` to a shared `PanelMetrics.ResizeGripThickness`,
+      corrected an overclaim about `Clip`/hit-testing in `RoundedRectClipConverter`/ADR-025 re: the real
+      OS-level per-pixel-alpha click-through risk on `AllowsTransparency="True"`); header icon-button hover
+      wash now direction-aware by surface luminance (`Theming/HoverOverlayPolicy.cs`,
+      `Converters/HoverOverlayBrushConverter.cs`) — closes the hover-contrast regression found by the P07
+      audit (idle 3.59:1 → hover was 2.72:1, now improves on idle); List-mode item label now truncates
+      with an ellipsis (StackPanel → Grid item root, `Resources/Templates.xaml`); a11y wording/coverage
+      fixes (`AutomationProperties.Name` on the panel window itself, "Expand/Collapse panel" wording); a
+      Glass-on-light-wallpaper usability hint added next to the Surface style picker
+      (`Views/MainWindow.xaml`). New debt from this pass: `SurfaceComposer.MinSurfaceOpacity` (0.35) stays
+      far below WCAG contrast on a light wallpaper for every style — **DO-021**, deliberately not
+      auto-raised (would silently re-render already-saved panels below the new floor).
+
+> ⚠️ **Manual verify (Win10/Win11) — не выполнено, среда разработки ограничена `dotnet build`/`dotnet
+- [x] **P07-visual fix-cycle 2 (последний)** (`docs/PLANS/workspace-grid-07-visual.md` §13): повторное
+      ревью нашло, что fix-cycle 1's MAJOR-1 (единая толщина 8 DIP грипа) само создало НОВЫЙ регресс
+      (header-кнопки/scrollbar перекрыты шире, чем нужно), а UX-P2's structural fix (Grid вместо
+      StackPanel) был структурно верным, но не подключён к реальному `ListBox`'s `ScrollViewer`. MAJOR-A
+      — `PanelMetrics.ResizeGripThickness` разделён на `ResizeCornerThickness`(8)/`ResizeEdgeThickness`(6),
+      `NativeHitTestMapper.Map` теперь принимает пару порогов; остаточный оверлап численно уменьшен
+      (21%→14% высоты кнопки, ~47%→~35% ширины scrollbar), но НЕ обнулён — задокументированный
+      структурный предел, не молча принятый (см. `docs/REVIEWS/workspace-grid-debt.md` WGD-03/WGD-01 —
+      корректность самой реализации углового грипа под вопросом, требует приоритетной живой проверки).
+      MAJOR-B — `ListViewTemplate`'s `ListBox` получил `ScrollViewer.HorizontalScrollBarVisibility=
+      "Disabled"` (fix-cycle 1's regression-тест измерял только `DataTemplate` в обход реального
+      `ListBox`/`ScrollViewer` и не поймал этот дефект — новый честный тест на реальном `ListBox`
+      добавлен). Побочно найден и исправлен инцидент теста: первая версия нового geometry-теста могла
+      навсегда оставить `Application.Current.Resources` пустым для всего процесса `dotnet test`, если
+      оказывалась первым владельцем `Application` (сломало 72 несвязанных теста) — см.
+      `docs/REVIEWS/workspace-grid-debt.md` WGD-02 (тот же класс риска остаётся открытым для будущих
+      тестовых файлов). Это последний разрешённый fix-cycle для P07 (лимит 2 итерации).
+- [x] **P08 — Icon loading pipeline: диагностика + фикс** (`docs/fix-prompts/08-icons.md`,
+      [docs/DIAGNOSTICS/icon-loading-findings.md](DIAGNOSTICS/icon-loading-findings.md)): симптом
+      «часть ярлыков в панели без иконки, подпись есть» — подтверждён измерением на реальной Windows 11
+      (P00), два независимых фактора: (1) 20/26 сохранённых путей указывают на устаревшие pre-Move
+      исходники (переиспользован manifest ADR-009 для reverse lookup, `TryFindManagedPath`), (2)
+      placeholder для несуществующего пути был полностью прозрачным (`RenderTargetBitmap.Render()` до
+      закрытия `DrawingContext`) — оба фикса нужны одновременно (ни один не объясняет весь симптом сам
+      по себе). Плюс: 4 новых diagnostics-события категории `icon` (были — немой `Console.Error` в
+      `WinExe`-процессе), file-based invalidation (`FileItem.UpdateIcon` на переходе missing→present,
+      переиспользован уже существующий 3с liveness-poll). **Fix-цикл 1** — CRITICAL C1 (confirm-диалог
+      на удаление панели/страницы считал `hasManagedFiles` по устаревшему, ещё не ремапленному
+      `Model.FilePaths` — мог показать нейтральный текст перед тем, как `Release()` тихо удалит теперь
+      managed-файл мимо Корзины), 4 MAJOR (ambiguous remap между панелями, privacy-утечка в
+      `SafeExtension` для путей вида `ivan.petrov`, transient `SHGetFileInfoW`-сбой навсегда «прилипал»
+      к placeholder, интеграционные тесты не доказывали «не placeholder»), UX-фикс (missing-путь
+      пытается shell-lookup по расширению/атрибутам ПЕРЕД fallback на placeholder). **Fix-цикл 2
+      (последний)** — CRITICAL-1 (`RemovePage` игнорировал `false` от confirm-гейта, страница исчезала
+      из UI даже при отмене), MAJOR-1 (`LayoutSnapshotService.Restore` не прогонял cross-panel-aware
+      remap для восстановленных панелей), MINOR (missing-путь кешировался с `lastWriteTimeUtc=default`
+      навсегда для большинства расширений; contested-candidate remap отдавался «первому по порядку»
+      вместо явного отказа для ОБОИХ претендентов — переписано на two-pass discovery/apply). Оставлено
+      задокументированным долгом (не устранено): async icon loading для 200+ элементов (≈0.56с
+      блокировки, требует отдельного ADR — см. `docs/REVIEWS/workspace-grid-debt.md` WGD-21), 1/20
+      путей без manifest-записи (WGD-22).
+
+**P09 (gate) — pending.** Финальная релизная сверка (`docs/fix-prompts/09-acceptance.md`) не запущена в
+этом цикле — входные артефакты подготовлены: единый бэклог долга
+[docs/REVIEWS/workspace-grid-debt.md](REVIEWS/workspace-grid-debt.md) и сводная матрица
+[docs/REVIEWS/workspace-grid-manual-verify.md](REVIEWS/workspace-grid-manual-verify.md) (объединяет
+MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§11, P08, P02b rollback — без
+дублей). До выполнения P09 оба ADR (028, 029) остаются `Proposed` — см. их шапки
+(«Implemented 2026-09-22, Accepted pending manual verify — см. P09»).
+
+> ⚠️ **Manual verify (Win10/Win11) — не выполнено, среда разработки ограничена `dotnet build`/`dotnet
+> test`.** Полный список (18 пунктов, V-1..V-18) — `docs/PLANS/phase-5-ambient-accent-ui.md` §7.2 и
+> [docs/Refactoring/Testing/ambient-accent-visual-matrix.md](Refactoring/Testing/ambient-accent-visual-matrix.md).
+> Наивысший приоритет:
+> - новая нейтральная поверхность видима, заливки сплошным цветом категории нет (V-2);
+> - все 4 состояния High Contrast читаемы, включая известные ограничения (`Color.Overlay.Hover`,
+>   активная вкладка настроек) из ADR-025 (V-14);
+> - Dragging vs Resizing отличимы по курсору в реальном жесте, а не только по расчётным opacity/
+>   толщине индикатора (V-11/V-12);
+> - selected+hover читаемы на разных `SurfaceOpacity`/`SurfaceStyle` для Grid/List/Folder Portal/
+>   `SystemIconsPanel` (V-5..V-8);
+> - ARGB-акцент из существующего v3-бэкапа (`user.config`/JSON-стейта до апгрейда) корректно
+>   переезжает в `AccentColor` при миграции v3→v4, дефолтные панели получили нейтральный акцент
+>   (V-18);
+> - DPI 125%/150%: индикатор акцента не размывается, border 1px не исчезает (V-15);
+> - отсутствие layout-shift акцент-полосы при смене interaction-состояния (толщина индикатора меняется
+>   визуально, но не должна сдвигать соседний контент/геометрию панели).
+>
+> **Добавлено P07-visual fix-cycle 1** (см. выше): 8-DIP скругление угла с расширенным resize-grip —
+> диагональный ресайз ловится в прежней зоне на 100/125/150% DPI; header-кнопка при наведении читаема на
+> светлых И тёмных обоях (не только на тёмных, как раньше); длинное имя файла в List-режиме обрезается
+> многоточием, не вылезает за границу панели; `AutomationProperties.Name` панели/кнопок — через
+> Narrator/Accessibility Insights.
+>
+> **Добавлено P02–P08 (пакет workspace-grid, см. пункты выше в этом же разделе).** Полная сводная
+> manual-verify матрица для ЭТОЙ части работы (не дублируется здесь построчно) —
+> [docs/REVIEWS/workspace-grid-manual-verify.md](REVIEWS/workspace-grid-manual-verify.md) (WG-MV/IL-MV/
+> VIS-MV/ICO-MV/MIG-MV, объединяет план P03/P04 §7, ADR-029 manual verify, P07-visual §9/§11, P08
+> findings, P02b rollback); известный/задокументированный долг — [docs/REVIEWS/workspace-grid-debt.md](REVIEWS/workspace-grid-debt.md).
+
+---
+
 ## Сквозные задачи
 
 - [~] Тесты на новые сервисы: `FolderWatcherTests`, `PageManagerServiceTests`, `MonitorServiceTests` реализованы

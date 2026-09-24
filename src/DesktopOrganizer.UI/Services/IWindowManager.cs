@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Views;
 
@@ -149,8 +149,67 @@ public interface IWindowManager
     /// </para>
     /// </remarks>
     /// <param name="excludingId">The <see cref="Models.ChildWindowModel.Id"/> of the panel currently
-    /// being dragged — excluded from its own obstacle set.</param>
+    /// being dragged — excluded from its own obstacle set — or <see langword="null"/> to exclude nothing
+    /// (n-1 fix-cycle 1, docs/PLANS/workspace-grid-03-04-integration.md §2, code-review: replaces the
+    /// previous <c>Guid.Empty</c>-as-sentinel convention used when placing a NOT-YET-created panel, which
+    /// has no id of its own to pass).</param>
     /// <param name="buffer">The list to clear and repopulate with obstacle rectangles.</param>
     /// <exception cref="ArgumentNullException"><paramref name="buffer"/> is <see langword="null"/>.</exception>
-    void CollectOtherPanelBounds(Guid excludingId, IList<Rect> buffer);
+    void CollectOtherPanelBounds(Guid? excludingId, IList<Rect> buffer);
+
+    /// <summary>
+    /// Runs the explicit "Align to workspace grid" command (ADR-028 «Явная команда», P03-W4) over a
+    /// single panel when <paramref name="panelId"/> is supplied, or over every panel on the CURRENT page
+    /// when it is <see langword="null"/>: each panel switches to <see cref="Models.PanelGeometryMode.GridAligned"/>,
+    /// its position quantises to its monitor's work-area origin and its size rounds UP to the nearest
+    /// whole span, with the same anti-overlap wall every drag frame uses applied last — so a panel may
+    /// stop short of its ideal slot rather than displace a neighbour.
+    /// </summary>
+    /// <remarks>
+    /// Panels are processed top-to-bottom, then left-to-right, and each already-processed panel becomes
+    /// an obstacle for the next, so the outcome is deterministic for a given layout. Persists once at the
+    /// end (not per panel). There is deliberately no bulk inverse: un-aligning is per-panel, through the
+    /// panel's own context menu (OQ-3 = B).
+    /// <para>
+    /// <b>M-2 fix-cycle 1 (docs/PLANS/workspace-grid-03-04-integration.md §2.5).</b> The <see langword="null"/>
+    /// ("align all") form only ever targets the CURRENT page. Every OTHER page's panels are always hidden
+    /// (<c>CollectOtherPanelBounds</c> skips non-<c>IsVisible</c> panels), so a batch spanning several
+    /// inactive pages saw no obstacles at all between panels on the SAME inactive page and let them
+    /// collide into a single slot — scoping to the current page is what keeps "who is an obstacle for
+    /// whom" honest.
+    /// </para>
+    /// </remarks>
+    /// <param name="panelId">The single panel to align, or <see langword="null"/> for every panel on the current page.</param>
+    void AlignPanelsToWorkspaceGrid(Guid? panelId);
+
+    /// <summary>
+    /// Assigns a brand-new <see cref="Models.PanelGeometryMode.GridAligned"/> panel the first free slot
+    /// on its target monitor's workspace grid — left-to-right, then top-to-bottom, keeping the standard
+    /// gap from every existing panel (P03-L3, baseline M8: new panels used to be created at <c>(0,0)</c>
+    /// and stack exactly on top of each other). Call BEFORE <see cref="CreateChildWindow"/>.
+    /// </summary>
+    /// <remarks>
+    /// A no-op for <see cref="Models.PanelGeometryMode.LegacyFreeform"/> panels (their creation behavior
+    /// is unchanged by ADR-028) and when the work area has no free slot left — in which case the caller's
+    /// own position stands and the usual placement/clamping applies.
+    /// </remarks>
+    /// <param name="model">The not-yet-created panel, with its size already assigned.</param>
+    void PlaceNewPanelOnFreeSlot(Models.ChildWindowModel model);
+
+    /// <summary>
+    /// ADR-011 Amendment (2026-09-24): re-aligns every open panel's <c>Position</c>/<c>Size</c> onto the
+    /// CURRENT <c>IAppSettings.GridSize</c> lattice, in place, right after the setting itself changes —
+    /// so a panel positioned/sized under a PREVIOUS <c>GridSize</c> (e.g. placed at <c>32</c>, then the
+    /// setting changed to <c>48</c>) does not keep "living on a different grid" than panels created
+    /// after the change and than every subsequent drag (which snaps in the NEW <c>GridSize</c>'s steps).
+    /// A no-op when <c>GridSize &lt;= 1</c> (no grid) or there are no open panels. Persists once at the
+    /// end (not per panel), only if at least one panel actually changed.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="Models.PanelGeometryMode.GridAligned"/> panel is only touched when the current
+    /// <c>GridSize</c> happens to be a whole multiple of <c>WorkspaceGridMetrics.UnitSize</c> — see
+    /// <c>WindowManager.NormalizeGridAlignedToGridSize</c>'s remarks for why an incommensurate
+    /// <c>GridSize</c> is deliberately left alone for that mode.
+    /// </remarks>
+    void NormalizePanelsToGrid();
 }

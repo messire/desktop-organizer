@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
         mc:Ignorable="d"
         Title="DesktopOrganizer — Settings"
         Icon="/Resources/app.ico"
@@ -11,11 +12,15 @@
         ResizeMode="CanMinimize">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        <!-- P06 fix-cycle UX-P1 (adr/ADR-029-icon-layout-policy.md "Fix-цикл P06"): human-readable labels
+             for the "Defaults for new panels" enum ComboBoxes below, synced with the wording
+             ChildWindow.xaml's "Icon layout" context-menu already uses. -->
+        <conv:EnumDisplayNameConverter x:Key="EnumDisplayName"/>
     </Window.Resources>
     <DockPanel>
 
         <!-- Page tab strip -->
-        <Border DockPanel.Dock="Top" Background="#F0F0F0" BorderBrush="#CCCCCC" BorderThickness="0,0,0,1">
+        <Border DockPanel.Dock="Top" Background="{StaticResource Brush.Settings.ChromeBackground}" BorderBrush="{StaticResource Brush.Settings.ChromeBorder}" BorderThickness="0,0,0,1">
             <DockPanel>
                 <Button DockPanel.Dock="Right"
                         Content="+"
@@ -38,7 +43,8 @@
                                             Command="{Binding DataContext.SwitchPageCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                             Padding="12,6"
                                             BorderThickness="0"
-                                            Cursor="Hand">
+                                            Cursor="Hand"
+                                            Style="{StaticResource Settings.PageTabButtonStyle}">
                                         <Button.Content>
                                             <TextBlock Text="{Binding}">
                                                 <TextBlock.Style>
@@ -59,23 +65,6 @@
                                                 </TextBlock.Style>
                                             </TextBlock>
                                         </Button.Content>
-                                        <Button.Style>
-                                            <Style TargetType="Button">
-                                                <Setter Property="Background" Value="Transparent"/>
-                                                <Setter Property="BorderThickness" Value="0"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Value="True">
-                                                        <DataTrigger.Binding>
-                                                            <MultiBinding Converter="{StaticResource EqualityToBool}">
-                                                                <Binding/>
-                                                                <Binding Path="DataContext.CurrentPage" RelativeSource="{RelativeSource AncestorType=Window}"/>
-                                                            </MultiBinding>
-                                                        </DataTrigger.Binding>
-                                                        <Setter Property="Background" Value="White"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Button.Style>
                                     </Button>
                                     <!-- Remove button — hidden for the "default" page -->
                                     <Button Content="×"
@@ -85,19 +74,8 @@
                                             BorderThickness="0"
                                             FontSize="11"
                                             ToolTip="Remove page"
-                                            Cursor="Hand">
-                                        <Button.Style>
-                                            <Style TargetType="Button">
-                                                <Setter Property="Background" Value="Transparent"/>
-                                                <Setter Property="Foreground" Value="#888888"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding}" Value="default">
-                                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Button.Style>
-                                    </Button>
+                                            Cursor="Hand"
+                                            Style="{StaticResource Settings.PageTabCloseButtonStyle}"/>
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -127,7 +105,7 @@
                         desktop grid size" request; GridSize itself is intentionally kept (see §3.4).
                     -->
                     <TextBlock Text="Panel position grid"
-                               Foreground="#666666" FontSize="11" Margin="0,10,0,4"/>
+                               Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11" Margin="0,10,0,4"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -138,7 +116,7 @@
                                 ToolTip="Snap step for panel window position, in pixels. 1 disables snapping. Does not affect icon spacing inside a panel."/>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="{Binding GridSize}" FontWeight="SemiBold" MinWidth="28" TextAlignment="Right"/>
-                            <TextBlock Text=" px" Foreground="#666666"/>
+                            <TextBlock Text=" px" Foreground="{StaticResource Brush.Settings.TextMuted}"/>
                         </StackPanel>
                     </Grid>
 
@@ -146,8 +124,13 @@
                               IsChecked="{Binding SnapResizeToIconGrid, Mode=TwoWay}"
                               Content="Snap panel size to icon grid"/>
 
+                    <CheckBox Margin="0,10,0,0"
+                              IsChecked="{Binding NativePanelSizing, Mode=TwoWay}"
+                              Content="Native resize (experimental, applies after restart)"
+                              ToolTip="Resizes panels via the OS native sizing loop instead of the built-in resize handles. Experimental — takes effect only for panels created after the app is restarted."/>
+
                     <TextBlock Text="Snap distance while dragging"
-                               Foreground="#666666" FontSize="11" Margin="0,10,0,4"/>
+                               Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11" Margin="0,10,0,4"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -158,9 +141,35 @@
                                 ToolTip="Distance at which a dragged panel snaps to the grid. 0 disables the live magnet; snapping still applies on drop."/>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="{Binding GridSnapDistance}" FontWeight="SemiBold" MinWidth="28" TextAlignment="Right"/>
-                            <TextBlock Text=" px" Foreground="#666666"/>
+                            <TextBlock Text=" px" Foreground="{StaticResource Brush.Settings.TextMuted}"/>
                         </StackPanel>
                     </Grid>
+                </StackPanel>
+            </Expander>
+
+            <!-- Layout editing (docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #3). IsEditingLayout/
+                 IsLayoutLocked/NormalModeLayoutGestures forward straight to the ILayoutEditModeService/
+                 IAppSettings singletons (MainWindowViewModel) — kept in sync with the tray icon and a
+                 panel's own "Edit layout"/"Lock layout" context-menu items (D-9 #1/#2) via the service's
+                 own INotifyPropertyChanged, so this checkbox never goes stale if the mode changes
+                 elsewhere while this window is open. -->
+            <Expander Header="Layout editing" IsExpanded="True" Margin="0,0,0,12">
+                <StackPanel Margin="0,10,0,0">
+                    <CheckBox Content="Edit layout mode (Ctrl+E)"
+                              IsChecked="{Binding IsEditingLayout, Mode=TwoWay}"
+                              IsEnabled="{Binding CanEnterEditLayout}"
+                              ToolTip="Shows move/resize handles on every panel. Also toggled from the tray icon, a panel's right-click menu, or Ctrl+E."/>
+
+                    <CheckBox Content="Lock layout"
+                              IsChecked="{Binding IsLayoutLocked, Mode=TwoWay}"
+                              Margin="0,10,0,0"
+                              ToolTip="Prevents panels from being moved or resized (in either mode) until unlocked. Roll up/down, renaming, and file operations are unaffected."/>
+
+                    <TextBlock Text="Move/resize outside Edit layout mode"
+                               Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11" Margin="0,10,0,4"/>
+                    <ComboBox ItemsSource="{Binding NormalModeLayoutGesturesOptions}"
+                              SelectedItem="{Binding NormalModeLayoutGestures, Mode=TwoWay}"
+                              ToolTip="Which panel move/resize gestures stay available while Edit layout mode is off."/>
                 </StackPanel>
             </Expander>
 
@@ -186,9 +195,9 @@
                                 Visibility="{Binding SystemIconsVirtualDesktopFeatureIneffective,
                                                       Converter={StaticResource BooleanToVisibilityConverter}}"
                                 ToolTip="This feature isn't working on this system and has been disabled.">
-                        <TextBlock Text="⚠" Foreground="#B8860B" FontWeight="Bold" Margin="0,0,4,0"/>
+                        <TextBlock Text="⚠" Foreground="{StaticResource Brush.Settings.Warning}" FontWeight="Bold" Margin="0,0,4,0"/>
                         <TextBlock Text="This feature isn't working on this system and has been disabled."
-                                   Foreground="#B8860B" FontSize="11" TextWrapping="Wrap"/>
+                                   Foreground="{StaticResource Brush.Settings.Warning}" FontSize="11" TextWrapping="Wrap"/>
                     </StackPanel>
 
                     <GroupBox Header="Visible icons" Padding="8" Margin="0,0,0,10"
@@ -220,7 +229,7 @@
             <!-- Panels -->
             <Expander Header="Desktop panels" IsExpanded="True" Margin="0,0,0,12">
                 <StackPanel Margin="0,10,0,0">
-                    <Border BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="4" Height="150">
+                    <Border BorderBrush="{StaticResource Brush.Settings.ChromeBorder}" BorderThickness="1" CornerRadius="4" Height="150">
                         <ListBox ItemsSource="{Binding Panels}"
                                  SelectedItem="{Binding SelectedPanel}"
                                  BorderThickness="0">
@@ -233,6 +242,12 @@
                     </Border>
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                        <!-- ADR-028 «Явная команда» (P03 §2.5): the all-panels form of the per-panel
+                             "Align to workspace grid" context-menu item, scoped to the CURRENT page only
+                             (M-2 fix-cycle 1). Confirmed in the ViewModel (no bulk inverse exists) and
+                             disabled while the layout is locked. Text unified with the confirmation
+                             dialog's own title ("Align all panels to grid" everywhere). -->
+                        <Button Content="Align all panels to grid" Command="{Binding AlignAllPanelsCommand}" Padding="12,6" Margin="0,0,8,0"/>
                         <Button Content="Add panel" Command="{Binding AddPanelCommand}" Padding="12,6" Margin="0,0,8,0"/>
                         <Button Content="Remove" Command="{Binding RemovePanelCommand}" Padding="12,6"/>
                     </StackPanel>
@@ -255,45 +270,80 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Title" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
                                Text="{Binding SelectedPanelTitle, UpdateSourceTrigger=PropertyChanged}"/>
 
-                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Background color (hex)" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Accent color (hex)" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="1" Grid.Column="1" Margin="0,4"
-                               Text="{Binding SelectedPanelBackgroundColor, UpdateSourceTrigger=LostFocus}"/>
+                               Text="{Binding SelectedPanelAccentColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border    Grid.Row="1" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
-                               BorderBrush="#888" BorderThickness="1"
-                               Background="{Binding SelectedPanelBackgroundColor, Converter={StaticResource HexBrush}}"/>
+                               BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
+                               Background="{Binding SelectedPanelAccentColor, Converter={StaticResource HexBrush}}"/>
 
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Text color (hex)" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="2" Grid.Column="1" Margin="0,4"
                                Text="{Binding SelectedPanelTextColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border    Grid.Row="2" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
-                               BorderBrush="#888" BorderThickness="1"
+                               BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
                                Background="{Binding SelectedPanelTextColor, Converter={StaticResource HexBrush}}"/>
 
-                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Opacity" VerticalAlignment="Center" Margin="0,4"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Surface opacity" VerticalAlignment="Center" Margin="0,4"/>
                     <Slider    Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" Margin="0,4"
-                               Minimum="0" Maximum="1" TickFrequency="1" Value="{Binding SelectedPanelOpacity, Mode=TwoWay}"/>
+                               Minimum="0" Maximum="1" TickFrequency="1" Value="{Binding SelectedPanelSurfaceOpacity, Mode=TwoWay}"/>
                     <TextBlock Grid.Row="3" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center"
-                               Text="{Binding SelectedPanelOpacity, StringFormat={}{0:P0}}"/>
+                               Text="{Binding SelectedPanelSurfaceOpacity, StringFormat={}{0:P0}}"/>
 
-                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Icon size" VerticalAlignment="Center" Margin="0,4"/>
-                    <Slider    Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" Margin="0,4"
+                    <!--
+                        Usability hint (docs/PLANS/workspace-grid-07-visual.md §4-1, oracle decision C —
+                        fix-cycle 1): Glass structurally cannot reach the 4.5:1 text-contrast target on a
+                        light wallpaper at ANY opacity (AmbientAccentContrastAuditTests'
+                        KnownGap_Glass_AtMaximumOpacity_OnLightWallpaper_FailsTextContrast, all 7 accent
+                        presets) — a direct consequence of GlassOpacityFactor (ADR-025 R-8, "Glass is
+                        deliberately more see-through than acrylic"), not something this settings hint can
+                        fix. Nested in a StackPanel inside the SAME Grid cell (rather than a new
+                        Grid.RowDefinitions row) to avoid renumbering every Grid.Row index below it in
+                        this Grid. Brush.Settings.TextMuted/FontSize 11 match this window's own existing
+                        "small note under a control" convention (see "Panel position grid"/"Snap distance
+                        while dragging" above).
+                    -->
+                    <TextBlock x:Name="SurfaceStyleLabel" Grid.Row="4" Grid.Column="0" Text="Surface style" VerticalAlignment="Top" Margin="0,4"/>
+                    <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4">
+                        <!--
+                            MINOR fix (docs/PLANS/workspace-grid-07-visual.md fix-cycle 2): AutomationProperties.
+                            LabeledBy/HelpText so UI Automation clients (Narrator, Accessibility Insights)
+                            announce both the field's own label AND the usability hint below it — previously
+                            neither was exposed, so a screen-reader user would hear only "combo box" with no
+                            indication a Glass-specific caveat exists. HelpText binds to the SAME TextBlock the
+                            hint is rendered in (never a duplicated string literal) so the two can never drift
+                            out of sync.
+                        -->
+                        <ComboBox ItemsSource="{Binding SurfaceStyles}"
+                                  SelectedItem="{Binding SelectedPanelSurfaceStyle, Mode=TwoWay}"
+                                  AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                  AutomationProperties.HelpText="{Binding ElementName=SurfaceStyleGlassHint, Path=Text}"/>
+                        <TextBlock x:Name="SurfaceStyleGlassHint"
+                                   Text="Glass reads best on dark wallpapers; for light wallpapers, Solid or Ambient stay more readable."
+                                   Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11"
+                                   TextWrapping="Wrap" Margin="0,4,0,0"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Icon size" VerticalAlignment="Center" Margin="0,4"/>
+                    <Slider    Grid.Row="5" Grid.Column="1" VerticalAlignment="Center" Margin="0,4"
                                Minimum="16" Maximum="96" TickFrequency="4" IsSnapToTickEnabled="True" Value="{Binding SelectedPanelIconSize, Mode=TwoWay}"/>
-                    <TextBlock Grid.Row="4" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center"
+                    <TextBlock Grid.Row="5" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center"
                                Text="{Binding SelectedPanelIconSize, StringFormat={}{0:F0} px}"/>
 
-                    <TextBlock Grid.Row="5" Grid.Column="0" Text="View" VerticalAlignment="Center" Margin="0,4"/>
-                    <ComboBox  Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="View" VerticalAlignment="Center" Margin="0,4"/>
+                    <ComboBox  Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
                                ItemsSource="{Binding ViewModes}"
                                SelectedItem="{Binding SelectedPanelViewMode, Mode=TwoWay}"/>
 
-                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Sort order" VerticalAlignment="Center" Margin="0,4"/>
-                    <ComboBox  Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Sort order" VerticalAlignment="Center" Margin="0,4"/>
+                    <ComboBox  Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
                                ItemsSource="{Binding SortModes}"
                                SelectedItem="{Binding SelectedPanelSortMode, Mode=TwoWay}"
                                IsEnabled="{Binding SelectedPanelSupportsManualOrder}"
@@ -314,20 +364,25 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Background color (hex)" VerticalAlignment="Center" Margin="0,4"/>
+                    <!-- DefaultBackgroundColor is the persisted user.config key name (unchanged, ADR-025
+                         D-10 / DO-014); it now seeds a new panel's AccentColor, hence the "Accent color"
+                         label here diverging from the binding path's name. -->
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Accent color (hex)" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="0" Grid.Column="1" Margin="0,4"
                                Text="{Binding DefaultBackgroundColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border    Grid.Row="0" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
-                               BorderBrush="#888" BorderThickness="1"
+                               BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
                                Background="{Binding DefaultBackgroundColor, Converter={StaticResource HexBrush}}"/>
 
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Text color (hex)" VerticalAlignment="Center" Margin="0,4"/>
                     <TextBox   Grid.Row="1" Grid.Column="1" Margin="0,4"
                                Text="{Binding DefaultTextColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border    Grid.Row="1" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
-                               BorderBrush="#888" BorderThickness="1"
+                               BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
                                Background="{Binding DefaultTextColor, Converter={StaticResource HexBrush}}"/>
 
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Opacity" VerticalAlignment="Center" Margin="0,4"/>
@@ -341,13 +396,44 @@
                                Minimum="16" Maximum="96" TickFrequency="4" IsSnapToTickEnabled="True" Value="{Binding DefaultIconSize, Mode=TwoWay}"/>
                     <TextBlock Grid.Row="3" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center"
                                Text="{Binding DefaultIconSize, StringFormat={}{0:F0} px}"/>
+
+                    <!--
+                        P06 (docs/fix-prompts/06-fit-content.md): surfaces IAppSettings.DefaultPanelGeometryMode/
+                        DefaultIconLayoutPolicy (ADR-028/ADR-029 Decision 6) — both already existed on
+                        GlobalDefaultsViewModel/IAppSettings (docs/PLANS/workspace-grid-migration.md §10)
+                        but had no settings-window control until now. Only affects NEW panels (lasso, "Add
+                        panel"); existing panels are migrated explicitly and never read these defaults.
+                    -->
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Panel geometry" VerticalAlignment="Center" Margin="0,4"/>
+                    <ComboBox  Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
+                               ItemsSource="{Binding PanelGeometryModeOptions}"
+                               SelectedItem="{Binding DefaultPanelGeometryMode, Mode=TwoWay}"
+                               ToolTip="Whether new panels snap to the workspace grid (Grid Aligned) or resize/move freely (Legacy Freeform).">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Converter={StaticResource EnumDisplayName}}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Icon layout" VerticalAlignment="Center" Margin="0,4"/>
+                    <ComboBox  Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4"
+                               ItemsSource="{Binding IconLayoutPolicyOptions}"
+                               SelectedItem="{Binding DefaultIconLayoutPolicy, Mode=TwoWay}"
+                               ToolTip="Whether new panels use a fixed gap between icons (Fixed Gap) or stretch a full row to fill the panel's width (Legacy Stretch).">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Converter={StaticResource EnumDisplayName}}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
                 </Grid>
             </Expander>
 
             <!-- Layout snapshots -->
             <Expander Header="Layout snapshots" IsExpanded="True" Margin="0,0,0,12">
                 <StackPanel Margin="0,10,0,0">
-                    <Border BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="4" Height="160">
+                    <Border BorderBrush="{StaticResource Brush.Settings.ChromeBorder}" BorderThickness="1" CornerRadius="4" Height="160">
                         <ListView ItemsSource="{Binding LayoutSnapshots.Snapshots}"
                                   BorderThickness="0"
                                   SelectionMode="Single">
@@ -364,7 +450,7 @@
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding CreatedAt, StringFormat={}{0:dd.MM.yyyy HH:mm}}"
-                                                           VerticalAlignment="Center" Foreground="#666666"/>
+                                                           VerticalAlignment="Center" Foreground="{StaticResource Brush.Settings.TextMuted}"/>
                                             </DataTemplate>
                                         </GridViewColumn.CellTemplate>
                                     </GridViewColumn>

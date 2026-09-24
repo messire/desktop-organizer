@@ -34,14 +34,18 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     internal int ManifestDiskReadCount { get; private set; }
 
     /// <summary>
+    /// Gets the folder moved-in files are stored under. Internal test instrumentation — lets
+    /// <c>AppStorageRootTests</c> pin the default constructor to <see cref="Storage.AppStorageRoot"/>.
+    /// </summary>
+    internal string StorageRoot => _storageRoot;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="PanelItemStorageService"/> class, using the
-    /// real per-user app-data folder as storage root.
+    /// real per-user app-data folder as storage root (<see cref="Storage.AppStorageRoot.Default"/> —
+    /// Debug and Release builds resolve to different folders, see <see cref="Storage.AppStorageRoot"/>).
     /// </summary>
     public PanelItemStorageService()
-        : this(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DesktopOrganizer",
-            "PanelItems"))
+        : this(Path.Combine(Storage.AppStorageRoot.Default, "PanelItems"))
     {
     }
 
@@ -594,6 +598,62 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             Console.Error.WriteLine($"PanelItemStorageService.RenameManaged failed for '{storedPath}': {ex.Message}");
             return new RenameResult(RenameOutcome.Failed, null);
         }
+    }
+
+    /// <inheritdoc />
+    public bool TryFindManagedPath(string originalPath, out string? managedPath)
+    {
+        // M1 fix (P08 fix cycle 1, 2026-09-22): only ever report a candidate when it's the SINGLE live
+        // one — see the interface doc remarks for why an ambiguous manifest must not arbitrarily pick
+        // the first match by dictionary enumeration order.
+        var candidates = FindManagedCandidates(originalPath);
+        if (candidates.Count == 1)
+        {
+            managedPath = candidates[0];
+            return true;
+        }
+
+        managedPath = null;
+        return false;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> FindManagedCandidates(string originalPath)
+    {
+        if (string.IsNullOrWhiteSpace(originalPath)) return [];
+
+        string fullOriginal;
+        try
+        {
+            fullOriginal = Path.GetFullPath(originalPath);
+        }
+        catch (Exception)
+        {
+            // Malformed path — definitely nothing to resolve.
+            return [];
+        }
+
+        List<string>? candidates = null;
+
+        lock (_manifestLock)
+        {
+            var (manifest, trusted) = EnsureManifestCacheUnlocked();
+            if (!trusted) return [];
+
+            foreach (var (candidateManagedPath, candidateOriginalPath) in manifest)
+            {
+                if (!string.Equals(candidateOriginalPath, fullOriginal, StringComparison.OrdinalIgnoreCase)) continue;
+
+                // The manifest entry may be stale itself (e.g. the managed copy was since deleted by
+                // hand, outside this service) — only report a path that actually still resolves to
+                // something on disk, so callers never trade one broken path for another.
+                if (!File.Exists(candidateManagedPath) && !Directory.Exists(candidateManagedPath)) continue;
+
+                (candidates ??= []).Add(candidateManagedPath);
+            }
+        }
+
+        return candidates ?? (IReadOnlyList<string>)[];
     }
 
     // ── Destination naming ──────────────────────────────────────────────────

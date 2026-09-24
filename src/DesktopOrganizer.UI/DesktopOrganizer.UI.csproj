@@ -3,10 +3,24 @@
     <PropertyGroup>
         <OutputType>WinExe</OutputType>
         <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+        <!-- ADR-023 D-2: a custom Program.Main runs the single-instance handshake (mutex + named pipe)
+             before any WPF Application is constructed. A Secondary process must never construct App —
+             otherwise it runs App.OnExit and can stomp the real Primary's ChildWindowsState (ADR-023
+             R-1) — so the WPF SDK's own auto-generated Main() (which always does `new App();
+             app.Run();`, wired up via the ApplicationDefinition build action below) cannot be used. -->
+        <StartupObject>DesktopOrganizer.UI.Program</StartupObject>
     </PropertyGroup>
 
     <ItemGroup>
         <Content Include="Resources\app.ico" CopyToOutputDirectory="PreserveNewest"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- See the StartupObject comment above: App.xaml keeps compiling to a BAML resource and
+             InitializeComponent() (via the Page build action), it just no longer gets the markup
+             compiler's auto-generated Main(). -->
+        <ApplicationDefinition Remove="App.xaml"/>
+        <Page Include="App.xaml" SubType="Designer" Generator="MSBuild:Compile"/>
     </ItemGroup>
 
     <ItemGroup>

@@ -1,8 +1,9 @@
-using System.Text.Json;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
+using DesktopOrganizer.UI.State;
+using DesktopOrganizer.UI.State.Dto;
 using DesktopOrganizer.UI.Views;
 using Moq;
 
@@ -10,7 +11,7 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 
 /// <summary>
 /// Unit tests for SystemIconsPanelManager.
-/// IAppSettings, IDesktopIntegrationService, IMonitorService and the window factory
+/// IApplicationStateService, IDesktopIntegrationService, IMonitorService and the window factory
 /// are all mocked — no WPF window is created.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
@@ -18,7 +19,7 @@ public class SystemIconsPanelManagerTests
 {
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    private readonly Mock<IAppSettings> _settingsMock = new();
+    private readonly Mock<IApplicationStateService> _stateServiceMock = new();
     private readonly Mock<IDesktopIntegrationService> _desktopMock = new();
     private readonly Mock<IMonitorService> _monitorMock = new();
     private readonly Mock<IVirtualDesktopService> _virtualDesktopMock = new();
@@ -27,7 +28,7 @@ public class SystemIconsPanelManagerTests
     private bool _factoryInvoked;
 
     private SystemIconsPanelManager BuildSut(
-        string settingsJson = "",
+        SystemIconsPanelStateDto? initialState = null,
         bool virtualDesktopSupported = true)
     {
         _virtualDesktopMock.SetupGet(v => v.IsSupported).Returns(virtualDesktopSupported);
@@ -40,8 +41,13 @@ public class SystemIconsPanelManagerTests
         _virtualDesktopMock.Setup(v => v.TryGetDefaultDesktopId()).Returns((Guid?)null);
         _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>())).Returns(false);
 
-        _settingsMock.SetupProperty(s => s.SystemIconsPanel, settingsJson);
-        _settingsMock.Setup(s => s.Save());
+        // SystemIconsPanel is read-only on IApplicationStateService — populated once by Load() and
+        // never written back by SystemIconsPanelManager.Save() (ADR-024 D-11/D-12: SaveNow() pulls the
+        // live Model straight from ISystemIconsPanelManager inside ApplicationStateService itself, so
+        // App.OnExit's single SaveNow() call always captures the current in-memory model, not a
+        // possibly-stale value pushed earlier in the session).
+        _stateServiceMock.SetupGet(s => s.SystemIconsPanel).Returns(initialState);
+        _stateServiceMock.Setup(s => s.SaveNow());
 
         _monitorMock.SetupAdd(m => m.MonitorsChanged += It.IsAny<Action>());
         _monitorMock.SetupRemove(m => m.MonitorsChanged -= It.IsAny<Action>());
@@ -74,7 +80,7 @@ public class SystemIconsPanelManagerTests
 #pragma warning restore CA1416
 
         return new SystemIconsPanelManager(
-            _settingsMock.Object,
+            _stateServiceMock.Object,
             _desktopMock.Object,
             _monitorMock.Object,
             _virtualDesktopMock.Object,
@@ -82,59 +88,30 @@ public class SystemIconsPanelManagerTests
     }
 
     /// <summary>
-    /// Builds a JSON string in the format expected by SystemIconsPanelManager.
-    /// Mirrors the private PanelDto / ItemDto structure.
+    /// Builds a <see cref="SystemIconsPanelStateDto"/> as <see cref="IApplicationStateService.SystemIconsPanel"/>
+    /// would already hold it after a real <c>Load()</c> (ADR-024 C6: the manager no longer parses raw
+    /// JSON itself — that happens once, in the store/service layer).
     /// <para>
-    /// When <paramref name="showOnAllVirtualDesktops"/> is <see langword="null"/> the key is
-    /// omitted entirely — that is exactly the shape of a settings file written by a build from
-    /// before the virtual desktop setting existed.
+    /// <paramref name="showOnAllVirtualDesktops"/> defaulting to <see langword="false"/> when omitted
+    /// mirrors a document written by a build from before the virtual desktop setting existed (the DTO
+    /// field itself always exists; only its JSON presence used to vary).
     /// </para>
     /// </summary>
-    private static string BuildJson(bool isEnabled, string iconSize = "Medium",
+    private static SystemIconsPanelStateDto BuildState(bool isEnabled, string iconSize = "Medium",
         IEnumerable<(SystemIconKind Kind, bool Visible, int Order)>? items = null,
         bool? showOnAllVirtualDesktops = null,
         string? anchorVirtualDesktopId = null)
     {
-        var itemList = (items ?? DefaultItemTuples()).Select(t => new
+        return new SystemIconsPanelStateDto
         {
-            Kind = t.Kind.ToString(),
-            t.Visible,
-            t.Order,
-        });
-
-        object dto = (showOnAllVirtualDesktops, anchorVirtualDesktopId) switch
-        {
-            (null, null) => new
-            {
-                IsEnabled = isEnabled,
-                IconSize = iconSize,
-                Items = itemList,
-            },
-            (not null, null) => new
-            {
-                IsEnabled = isEnabled,
-                ShowOnAllVirtualDesktops = showOnAllVirtualDesktops.Value,
-                IconSize = iconSize,
-                Items = itemList,
-            },
-            (null, not null) => new
-            {
-                IsEnabled = isEnabled,
-                IconSize = iconSize,
-                AnchorVirtualDesktopId = anchorVirtualDesktopId,
-                Items = itemList,
-            },
-            (not null, not null) => new
-            {
-                IsEnabled = isEnabled,
-                ShowOnAllVirtualDesktops = showOnAllVirtualDesktops.Value,
-                IconSize = iconSize,
-                AnchorVirtualDesktopId = anchorVirtualDesktopId,
-                Items = itemList,
-            },
+            IsEnabled = isEnabled,
+            ShowOnAllVirtualDesktops = showOnAllVirtualDesktops ?? false,
+            IconSize = iconSize,
+            AnchorVirtualDesktopId = anchorVirtualDesktopId,
+            Items = (items ?? DefaultItemTuples())
+                .Select(t => new SystemIconsPanelItemStateDto { Kind = t.Kind, IsVisible = t.Visible, Order = t.Order })
+                .ToList(),
         };
-
-        return JsonSerializer.Serialize(dto);
     }
 
     private static IEnumerable<(SystemIconKind Kind, bool Visible, int Order)> DefaultItemTuples() =>
@@ -152,7 +129,7 @@ public class SystemIconsPanelManagerTests
     public void Load_WithEmptySettings_UsesDefaults_IsEnabledFalse()
     {
         // Arrange
-        var sut = BuildSut(settingsJson: "");
+        var sut = BuildSut(initialState: null);
 
         // Act
         sut.Load();
@@ -165,7 +142,7 @@ public class SystemIconsPanelManagerTests
     public void Load_WithEmptySettings_UsesDefaults_AllFiveIconsPresent()
     {
         // Arrange
-        var sut = BuildSut(settingsJson: "");
+        var sut = BuildSut(initialState: null);
 
         // Act
         sut.Load();
@@ -184,7 +161,7 @@ public class SystemIconsPanelManagerTests
     public void Load_WithEmptySettings_UsesDefaults_AllIconsVisible()
     {
         // Arrange
-        var sut = BuildSut(settingsJson: "");
+        var sut = BuildSut(initialState: null);
 
         // Act
         sut.Load();
@@ -199,8 +176,8 @@ public class SystemIconsPanelManagerTests
     public void Load_WithSavedJson_RestoresIsEnabled()
     {
         // Arrange
-        var json = BuildJson(isEnabled: true);
-        var sut = BuildSut(settingsJson: json);
+        var json = BuildState(isEnabled: true);
+        var sut = BuildSut(initialState: json);
 
         // Act
         sut.Load();
@@ -221,8 +198,8 @@ public class SystemIconsPanelManagerTests
             (SystemIconKind.Network,      true,  3),
             (SystemIconKind.UserFolder,   true,  4),
         };
-        var json = BuildJson(isEnabled: false, items: items);
-        var sut = BuildSut(settingsJson: json);
+        var json = BuildState(isEnabled: false, items: items);
+        var sut = BuildSut(initialState: json);
 
         // Act
         sut.Load();
@@ -244,8 +221,8 @@ public class SystemIconsPanelManagerTests
             (SystemIconKind.ControlPanel, true, 3),
             (SystemIconKind.ThisPc,       true, 4),
         };
-        var json = BuildJson(isEnabled: false, items: items);
-        var sut = BuildSut(settingsJson: json);
+        var json = BuildState(isEnabled: false, items: items);
+        var sut = BuildSut(initialState: json);
 
         // Act
         sut.Load();
@@ -255,39 +232,27 @@ public class SystemIconsPanelManagerTests
         Assert.Equal(0, sut.Model.Items.Single(i => i.Kind == SystemIconKind.UserFolder).Order);
     }
 
-    // ── Save: serialises model to IAppSettings.SystemIconsPanel ──────────────
+    // ── Save: delegates to IApplicationStateService.SaveNow() ────────────────
+    //
+    // ADR-024 C6: Save() no longer builds/writes a DTO itself — ApplicationStateService.SaveNow()
+    // pulls the live Model straight from ISystemIconsPanelManager at write time (uniform pull model,
+    // same as WindowManager/PageManagerService/LayoutSnapshotService), so the manager's own contract
+    // here is purely "did it ask for a save". Mapping-correctness (Model -> SystemIconsPanelStateDto,
+    // including ShowOnAllVirtualDesktops/AnchorVirtualDesktopId round-tripping) is covered by
+    // SystemIconsPanelStateMapperTests instead.
 
     [Fact]
-    public void Save_SerializesModelToSettings()
+    public void Save_CallsApplicationStateServiceSaveNow()
     {
         // Arrange
-        var sut = BuildSut(settingsJson: "");
-        sut.Load();
-        sut.Model.IsEnabled = true;
-
-        // Act
-        sut.Save();
-
-        // Assert — property was written with non-empty JSON
-        var written = _settingsMock.Object.SystemIconsPanel;
-        Assert.False(string.IsNullOrWhiteSpace(written));
-
-        using var doc = JsonDocument.Parse(written);
-        Assert.True(doc.RootElement.GetProperty("IsEnabled").GetBoolean());
-    }
-
-    [Fact]
-    public void Save_CallsAppSettingsSave()
-    {
-        // Arrange
-        var sut = BuildSut(settingsJson: "");
+        var sut = BuildSut(initialState: null);
         sut.Load();
 
         // Act
         sut.Save();
 
-        // Assert — IAppSettings.Save() was called to flush to disk
-        _settingsMock.Verify(s => s.Save(), Times.Once);
+        // Assert — IApplicationStateService.SaveNow() was called to flush the whole document to disk.
+        _stateServiceMock.Verify(s => s.SaveNow(), Times.Once);
     }
 
     // ── Apply: disabled → factory not invoked ────────────────────────────────
@@ -296,7 +261,7 @@ public class SystemIconsPanelManagerTests
     public void Apply_WhenDisabled_DoesNotInvokeWindowFactory()
     {
         // Arrange
-        var sut = BuildSut(settingsJson: "");
+        var sut = BuildSut(initialState: null);
         sut.Load();
 
         Assert.False(sut.Model.IsEnabled); // precondition
@@ -312,8 +277,8 @@ public class SystemIconsPanelManagerTests
     public void Apply_WhenEnabled_InvokesWindowFactory()
     {
         // Arrange
-        var json = BuildJson(isEnabled: true);
-        var sut = BuildSut(settingsJson: json);
+        var json = BuildState(isEnabled: true);
+        var sut = BuildSut(initialState: json);
         sut.Load();
 
         // Act — factory throws (no WPF dispatcher), but we can detect it was called
@@ -323,13 +288,18 @@ public class SystemIconsPanelManagerTests
         Assert.True(_factoryInvoked);
     }
 
-    // ── Load: partial / invalid JSON → does not throw, uses defaults ─────────
+    // ── Load: no persisted state → does not throw, uses defaults ─────────────
+    //
+    // ADR-024 C6: SystemIconsPanelManager no longer parses raw JSON itself — the store/
+    // ApplicationStateService layer owns document validity (recovery ladder, SchemaContractTests),
+    // so a garbage-JSON scenario can no longer reach this manager at all. The one input shape left
+    // for this layer to defend is "no state was ever persisted" (SystemIconsPanel == null).
 
     [Fact]
-    public void Load_PartialJson_DoesNotThrow()
+    public void Load_NullState_DoesNotThrow()
     {
         // Arrange
-        var sut = BuildSut(settingsJson: "{\"IsEnabled\": true"); // truncated JSON
+        var sut = BuildSut(initialState: null);
 
         // Act & Assert
         var ex = Record.Exception(() => sut.Load());
@@ -337,10 +307,10 @@ public class SystemIconsPanelManagerTests
     }
 
     [Fact]
-    public void Load_InvalidJson_UsesDefaultModel()
+    public void Load_NullState_UsesDefaultModel()
     {
         // Arrange
-        var sut = BuildSut(settingsJson: "NOT_VALID_JSON");
+        var sut = BuildSut(initialState: null);
 
         // Act
         sut.Load();
@@ -356,7 +326,7 @@ public class SystemIconsPanelManagerTests
     public void Load_WithEmptySettings_ShowOnAllVirtualDesktopsIsFalseByDefault()
     {
         // Arrange
-        var sut = BuildSut(settingsJson: "");
+        var sut = BuildSut(initialState: null);
 
         // Act
         sut.Load();
@@ -366,12 +336,13 @@ public class SystemIconsPanelManagerTests
     }
 
     [Fact]
-    public void Load_LegacyJsonWithoutVirtualDesktopKey_DefaultsToFalse()
+    public void Load_LegacyStateWithoutVirtualDesktopFlag_DefaultsToFalse()
     {
-        // Arrange — settings written before the setting existed: the key is simply absent
-        var json = BuildJson(isEnabled: true, showOnAllVirtualDesktops: null);
-        Assert.DoesNotContain("ShowOnAllVirtualDesktops", json);
-        var sut = BuildSut(settingsJson: json);
+        // Arrange — a document written before the setting existed degrades to false (no migration
+        // needed) — see BuildState's remarks.
+        var state = BuildState(isEnabled: true, showOnAllVirtualDesktops: null);
+        Assert.False(state.ShowOnAllVirtualDesktops);
+        var sut = BuildSut(initialState: state);
 
         // Act
         sut.Load();
@@ -387,8 +358,8 @@ public class SystemIconsPanelManagerTests
     public void Load_WithSavedJson_RestoresShowOnAllVirtualDesktops(bool stored)
     {
         // Arrange
-        var json = BuildJson(isEnabled: true, showOnAllVirtualDesktops: stored);
-        var sut = BuildSut(settingsJson: json);
+        var json = BuildState(isEnabled: true, showOnAllVirtualDesktops: stored);
+        var sut = BuildSut(initialState: json);
 
         // Act
         sut.Load();
@@ -397,41 +368,10 @@ public class SystemIconsPanelManagerTests
         Assert.Equal(stored, sut.Model.ShowOnAllVirtualDesktops);
     }
 
-    [Fact]
-    public void Save_SerializesShowOnAllVirtualDesktops()
-    {
-        // Arrange
-        var sut = BuildSut(settingsJson: "");
-        sut.Load();
-        sut.Model.ShowOnAllVirtualDesktops = true;
-
-        // Act
-        sut.Save();
-
-        // Assert
-        using var doc = JsonDocument.Parse(_settingsMock.Object.SystemIconsPanel);
-        Assert.True(doc.RootElement.GetProperty("ShowOnAllVirtualDesktops").GetBoolean());
-    }
-
-    [Fact]
-    public void SaveThenLoad_RoundTripsShowOnAllVirtualDesktops()
-    {
-        // Arrange — write with the flag on
-        var writer = BuildSut(settingsJson: "");
-        writer.Load();
-        writer.Model.IsEnabled = true;
-        writer.Model.ShowOnAllVirtualDesktops = true;
-        writer.Save();
-
-        var persisted = _settingsMock.Object.SystemIconsPanel;
-
-        // Act — a fresh manager reads the very same JSON back
-        var reader = BuildSut(settingsJson: persisted);
-        reader.Load();
-
-        // Assert — survives an application restart
-        Assert.True(reader.Model.ShowOnAllVirtualDesktops);
-    }
+    // Save()'s effect on ShowOnAllVirtualDesktops content is no longer inspectable through
+    // IApplicationStateService (pull model — see the region comment above); covered instead by
+    // SystemIconsPanelStateMapperTests' round trip, and by Load_WithSavedJson_RestoresShowOnAllVirtualDesktops
+    // above for the Load() half.
 
     // ── Block E: virtual desktop poll timer policy (risk E-R4) ───────────────
 
@@ -439,7 +379,7 @@ public class SystemIconsPanelManagerTests
     public void Apply_WhenSettingOff_DoesNotStartVirtualDesktopTimer()
     {
         // Arrange — panel on, "all virtual desktops" off
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load();
 
         // Act
@@ -453,7 +393,7 @@ public class SystemIconsPanelManagerTests
     public void Apply_WhenPanelDisabled_DoesNotStartVirtualDesktopTimer()
     {
         // Arrange — setting on, but the panel itself is off, so there is no window to follow
-        var sut = BuildSut(BuildJson(isEnabled: false, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: false, showOnAllVirtualDesktops: true));
         sut.Load();
 
         // Act
@@ -467,7 +407,7 @@ public class SystemIconsPanelManagerTests
     public void Apply_WhenWindowMissing_DoesNotStartVirtualDesktopTimer()
     {
         // Arrange — everything enabled, but window creation fails in unit tests (_window stays null)
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
 
         // Act
@@ -483,7 +423,7 @@ public class SystemIconsPanelManagerTests
     {
         // Arrange — COM object unavailable on this system
         var sut = BuildSut(
-            BuildJson(isEnabled: true, showOnAllVirtualDesktops: true),
+            BuildState(isEnabled: true, showOnAllVirtualDesktops: true),
             virtualDesktopSupported: false);
         sut.Load();
 
@@ -498,7 +438,7 @@ public class SystemIconsPanelManagerTests
     public void Dispose_LeavesVirtualDesktopTimerStopped()
     {
         // Arrange
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
         sut.Apply();
 
@@ -516,7 +456,7 @@ public class SystemIconsPanelManagerTests
     {
         // Arrange — IsSupported == false for every call
         var sut = BuildSut(
-            BuildJson(isEnabled: true, showOnAllVirtualDesktops: true),
+            BuildState(isEnabled: true, showOnAllVirtualDesktops: true),
             virtualDesktopSupported: false);
 
         // Act & Assert — load / apply / save / dispose all stay silent
@@ -537,7 +477,7 @@ public class SystemIconsPanelManagerTests
     {
         // Arrange
         var sut = BuildSut(
-            BuildJson(isEnabled: true, showOnAllVirtualDesktops: true),
+            BuildState(isEnabled: true, showOnAllVirtualDesktops: true),
             virtualDesktopSupported: false);
         sut.Load();
 
@@ -645,7 +585,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void PollVirtualDesktopOnce_WithZeroHandle_TouchesNothing()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
 
         sut.PollVirtualDesktopOnce(IntPtr.Zero);
@@ -657,7 +597,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void PollVirtualDesktopOnce_WhenAlreadyOnCurrentDesktop_DoesNotMoveOrEmbed()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
         ScriptOnCurrentDesktop(true);
 
@@ -670,7 +610,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void PollVirtualDesktopOnce_WhenMoveIsRejected_DoesNotEmbed()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
         ScriptOnCurrentDesktop(false);
         _virtualDesktopMock.Setup(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>())).Returns(false);
@@ -684,7 +624,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void PollVirtualDesktopOnce_AfterEffectiveMove_ResetsCounterAndNeverEmbeds()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
 
         // Guard says "left behind", the post-move check says "arrived" => the move worked.
@@ -703,7 +643,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void PollVirtualDesktopOnce_WhenMoveIsSilentNoOp_NeverEmbeds()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
 
         // MoveWindowToDesktop returns S_OK but does nothing (ADR-016 §E0.2): the window is never
@@ -720,7 +660,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void PollVirtualDesktopOnce_AfterThreeIneffectiveMoves_TripsCircuitBreaker()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
 
         ScriptOnCurrentDesktop(false);
@@ -741,7 +681,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void PollVirtualDesktopOnce_ResetsCounterWhenPanelIsBackOnCurrentDesktop()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
 
         // Two ineffective rounds (2 answers each: guard + verify), then the panel is found on the
@@ -762,7 +702,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void PollVirtualDesktopOnce_WhenServiceThrows_DoesNotPropagate()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: true));
         sut.Load();
         _virtualDesktopMock
             .Setup(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>()))
@@ -779,7 +719,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void SendPanelToBackOnce_WithZeroHandle_TouchesNothing()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true));
+        var sut = BuildSut(BuildState(isEnabled: true));
         sut.Load();
 
         sut.SendPanelToBackOnce(IntPtr.Zero);
@@ -797,7 +737,7 @@ public class SystemIconsPanelManagerTests
     [InlineData(false)]
     public void SendPanelToBackOnce_PushesPanelBack_RegardlessOfVirtualDesktopSetting(bool showOnAll)
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: showOnAll));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: showOnAll));
         sut.Load();
 
         sut.SendPanelToBackOnce(PanelHwnd);
@@ -813,7 +753,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void SendPanelToBackOnce_NeverCallsEmbedInDesktop()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true));
+        var sut = BuildSut(BuildState(isEnabled: true));
         sut.Load();
 
         sut.SendPanelToBackOnce(PanelHwnd);
@@ -824,7 +764,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void SendPanelToBackOnce_WhenServiceThrows_DoesNotPropagate()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true));
+        var sut = BuildSut(BuildState(isEnabled: true));
         sut.Load();
         _desktopMock
             .Setup(d => d.SendToBackOfZOrder(It.IsAny<IntPtr>()))
@@ -854,7 +794,7 @@ public class SystemIconsPanelManagerTests
     public void UpdateZOrderTimerCore_RunsOnlyWhenPanelEnabledAndWindowExists(
         bool panelEnabled, bool hasWindow, bool expectedRunning)
     {
-        var sut = BuildSut(BuildJson(isEnabled: panelEnabled));
+        var sut = BuildSut(BuildState(isEnabled: panelEnabled));
         sut.Load();
 
         sut.UpdateZOrderTimerCore(panelEnabled, hasWindow);
@@ -874,7 +814,7 @@ public class SystemIconsPanelManagerTests
     public void UpdateZOrderTimerCore_StopsARunningTimer_WhenEitherInputGoesAway(
         bool panelEnabled, bool hasWindow)
     {
-        var sut = BuildSut(BuildJson(isEnabled: true));
+        var sut = BuildSut(BuildState(isEnabled: true));
         sut.Load();
         sut.UpdateZOrderTimerCore(true, true);
         Assert.True(sut.IsZOrderTimerRunning); // precondition, not the assertion under test
@@ -891,7 +831,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void Dispose_StopsARunningZOrderTimer()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true));
+        var sut = BuildSut(BuildState(isEnabled: true));
         sut.Load();
         sut.UpdateZOrderTimerCore(true, true);
         Assert.True(sut.IsZOrderTimerRunning); // precondition, not the assertion under test
@@ -909,7 +849,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void Apply_AfterDisablingPanel_StopsARunningZOrderTimer()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true));
+        var sut = BuildSut(BuildState(isEnabled: true));
         sut.Load();
         sut.UpdateZOrderTimerCore(true, true);
         Assert.True(sut.IsZOrderTimerRunning); // precondition, not the assertion under test
@@ -927,7 +867,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void UpdateZOrderTimerCore_IsIdempotent_AcrossRepeatedCalls()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true));
+        var sut = BuildSut(BuildState(isEnabled: true));
         sut.Load();
 
         sut.UpdateZOrderTimerCore(true, true);
@@ -943,7 +883,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void Apply_WhenPanelDisabled_DoesNotStartZOrderTimer()
     {
-        var sut = BuildSut(BuildJson(isEnabled: false));
+        var sut = BuildSut(BuildState(isEnabled: false));
         sut.Load();
 
         sut.Apply();
@@ -956,7 +896,7 @@ public class SystemIconsPanelManagerTests
     public void Apply_WhenWindowMissing_DoesNotStartZOrderTimer()
     {
         // Window creation fails in unit tests (_window stays null) — nothing to push back.
-        var sut = BuildSut(BuildJson(isEnabled: true));
+        var sut = BuildSut(BuildState(isEnabled: true));
         sut.Load();
 
         sut.Apply();
@@ -970,7 +910,7 @@ public class SystemIconsPanelManagerTests
     [InlineData(false)]
     public void Dispose_LeavesZOrderTimerStopped(bool showOnAll)
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: showOnAll));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: showOnAll));
         sut.Load();
         sut.Apply();
 
@@ -987,7 +927,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void Apply_AfterDisablingPanel_LeavesZOrderTimerStopped()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true));
+        var sut = BuildSut(BuildState(isEnabled: true));
         sut.Load();
         sut.Apply();
 
@@ -1002,7 +942,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void ApplyVirtualDesktopSetting_WhenPanelDisabled_DoesNotCreateWindow()
     {
-        var sut = BuildSut(BuildJson(isEnabled: false, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: false, showOnAllVirtualDesktops: true));
         sut.Load();
 
         sut.ApplyVirtualDesktopSetting();
@@ -1014,7 +954,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void ApplyVirtualDesktopSetting_ClearsTheIneffectiveLatch()
     {
-        var sut = BuildSut(BuildJson(isEnabled: false, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: false, showOnAllVirtualDesktops: true));
         sut.Load();
         sut.Model.VirtualDesktopFeatureIneffective = true;
 
@@ -1027,7 +967,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void Apply_ClearsTheIneffectiveLatch()
     {
-        var sut = BuildSut(BuildJson(isEnabled: false, showOnAllVirtualDesktops: true));
+        var sut = BuildSut(BuildState(isEnabled: false, showOnAllVirtualDesktops: true));
         sut.Load();
         sut.Model.VirtualDesktopFeatureIneffective = true;
 
@@ -1070,7 +1010,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void EnforceAnchorDesktopOnce_WithZeroHandle_TouchesNothing()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load();
 
         sut.EnforceAnchorDesktopOnce(IntPtr.Zero);
@@ -1090,7 +1030,7 @@ public class SystemIconsPanelManagerTests
     public void EnforceAnchorDesktopOnce_WhenUnsupported_ReturnsImmediately()
     {
         var sut = BuildSut(
-            BuildJson(isEnabled: true, showOnAllVirtualDesktops: false),
+            BuildState(isEnabled: true, showOnAllVirtualDesktops: false),
             virtualDesktopSupported: false);
         sut.Load();
 
@@ -1112,7 +1052,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void EnforceAnchorDesktopOnce_AlreadyOnAnchor_DoesNotMove_AndResetsIneffectiveCounter()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load();
         sut.Model.AnchorVirtualDesktopId = PersistedGuid;
 
@@ -1135,7 +1075,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void EnforceAnchorDesktopOnce_NotOnAnchor_SuccessfulMove_MovesOnceAndResetsCounter()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load();
         sut.Model.AnchorVirtualDesktopId = PersistedGuid;
 
@@ -1159,13 +1099,13 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void EnforceAnchorDesktopOnce_WhenAllSourcesNull_NeverMoves()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load(); // Model.AnchorVirtualDesktopId stays null: no anchor was ever persisted
 
         sut.EnforceAnchorDesktopOnce(PanelHwnd);
 
         _virtualDesktopMock.Verify(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>()), Times.Never);
-        _settingsMock.Verify(s => s.Save(), Times.Never);
+        _stateServiceMock.Verify(s => s.SaveNow(), Times.Never);
         Assert.Null(sut.Model.AnchorVirtualDesktopId);
     }
 
@@ -1179,7 +1119,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void EnforceAnchorDesktopOnce_SelfHeal_AfterTwoConsecutiveFailures_RecapturesAnchorAndSavesOnce()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load();
         sut.Model.AnchorVirtualDesktopId = PersistedGuid;
 
@@ -1189,12 +1129,12 @@ public class SystemIconsPanelManagerTests
 
         sut.EnforceAnchorDesktopOnce(PanelHwnd); // failure #1 — below the self-heal threshold
         Assert.Equal(PersistedGuid, sut.Model.AnchorVirtualDesktopId);
-        _settingsMock.Verify(s => s.Save(), Times.Never);
+        _stateServiceMock.Verify(s => s.SaveNow(), Times.Never);
 
         sut.EnforceAnchorDesktopOnce(PanelHwnd); // failure #2 — self-heal threshold reached
 
         Assert.Equal(PanelCurrentGuid, sut.Model.AnchorVirtualDesktopId);
-        _settingsMock.Verify(s => s.Save(), Times.Once);
+        _stateServiceMock.Verify(s => s.SaveNow(), Times.Once);
         Assert.Equal(0, sut.IneffectiveMoveCount);
         Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
     }
@@ -1202,7 +1142,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void EnforceAnchorDesktopOnce_WhenAnchorUnchanged_DoesNotCallSave()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load();
         sut.Model.AnchorVirtualDesktopId = SystemDefaultGuid;
         _virtualDesktopMock.Setup(v => v.TryGetDefaultDesktopId()).Returns(SystemDefaultGuid);
@@ -1211,7 +1151,7 @@ public class SystemIconsPanelManagerTests
         sut.EnforceAnchorDesktopOnce(PanelHwnd);
         sut.EnforceAnchorDesktopOnce(PanelHwnd);
 
-        _settingsMock.Verify(s => s.Save(), Times.Never);
+        _stateServiceMock.Verify(s => s.SaveNow(), Times.Never);
     }
 
     /// <summary>
@@ -1227,7 +1167,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void EnforceAnchorDesktopOnce_NeverRaisesVirtualDesktopFeatureIneffective_EvenAfterManyFailures()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load();
         sut.Model.AnchorVirtualDesktopId = SystemDefaultGuid;
 
@@ -1251,7 +1191,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void EnforceAnchorDesktopOnce_NeverCallsEmbedInDesktop()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load();
         sut.Model.AnchorVirtualDesktopId = PersistedGuid;
         _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns(PanelCurrentGuid);
@@ -1265,7 +1205,7 @@ public class SystemIconsPanelManagerTests
     [Fact]
     public void EnforceAnchorDesktopOnce_WhenServiceThrows_DoesNotPropagate()
     {
-        var sut = BuildSut(BuildJson(isEnabled: true, showOnAllVirtualDesktops: false));
+        var sut = BuildSut(BuildState(isEnabled: true, showOnAllVirtualDesktops: false));
         sut.Load();
         _virtualDesktopMock
             .Setup(v => v.TryGetDefaultDesktopId())
@@ -1277,30 +1217,17 @@ public class SystemIconsPanelManagerTests
     }
 
     // ── Persistence: AnchorVirtualDesktopId (ADR-019 §7) ──────────────────────
-
-    [Fact]
-    public void SaveThenLoad_RoundTripsAnchorVirtualDesktopId()
-    {
-        var writer = BuildSut(settingsJson: "");
-        writer.Load();
-        writer.Model.IsEnabled = true;
-        writer.Model.AnchorVirtualDesktopId = PersistedGuid;
-        writer.Save();
-
-        var persisted = _settingsMock.Object.SystemIconsPanel;
-
-        var reader = BuildSut(settingsJson: persisted);
-        reader.Load();
-
-        Assert.Equal(PersistedGuid, reader.Model.AnchorVirtualDesktopId);
-    }
+    //
+    // Save()'s round trip is a pull-model concern (see the "Save: delegates to
+    // IApplicationStateService.SaveNow()" region above) — covered by SystemIconsPanelStateMapperTests
+    // instead. The Load() half stays covered here.
 
     [Fact]
     public void Load_WithoutAnchorKey_LeavesAnchorNull()
     {
-        var json = BuildJson(isEnabled: true); // anchor argument omitted -> key absent from JSON
-        Assert.DoesNotContain("AnchorVirtualDesktopId", json);
-        var sut = BuildSut(settingsJson: json);
+        var state = BuildState(isEnabled: true); // anchor argument omitted -> AnchorVirtualDesktopId stays null
+        Assert.Null(state.AnchorVirtualDesktopId);
+        var sut = BuildSut(initialState: state);
 
         sut.Load();
 
@@ -1318,9 +1245,9 @@ public class SystemIconsPanelManagerTests
             (SystemIconKind.Network,      true,  3),
             (SystemIconKind.UserFolder,   true,  4),
         };
-        var json = BuildJson(
+        var json = BuildState(
             isEnabled: true, iconSize: "Large", items: items, anchorVirtualDesktopId: "not-a-guid");
-        var sut = BuildSut(settingsJson: json);
+        var sut = BuildSut(initialState: json);
 
         sut.Load();
 
@@ -1331,15 +1258,6 @@ public class SystemIconsPanelManagerTests
         Assert.Equal(Enum.GetValues<SystemIconKind>().Length, sut.Model.Items.Count);
     }
 
-    [Fact]
-    public void Save_DoesNotWriteAnchorKey_WhenAnchorIsNull()
-    {
-        var sut = BuildSut(settingsJson: "");
-        sut.Load(); // Model.AnchorVirtualDesktopId stays null
-
-        sut.Save();
-
-        using var doc = JsonDocument.Parse(_settingsMock.Object.SystemIconsPanel);
-        Assert.False(doc.RootElement.TryGetProperty("AnchorVirtualDesktopId", out _));
-    }
+    // Whether Save() ends up omitting a null anchorVirtualDesktopId key on disk is StateJson's
+    // DefaultIgnoreCondition.WhenWritingNull concern — see SchemaContractTests.
 }

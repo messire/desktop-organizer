@@ -314,6 +314,15 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     /// swallows shell failures, so it can neither throw nor block the shell's event source. Behaviour
     /// inside the running application (where <see cref="Application.Current"/> is always set) is
     /// unchanged.
+    /// <para>
+    /// NIT (P08 fix cycle 2 UiDispatch review): the marshal itself now goes through
+    /// <see cref="UiDispatch.TryBeginInvoke"/> rather than a bare <see cref="Dispatcher.BeginInvoke(Delegate, object[])"/>
+    /// — behaviorally equivalent today (a raw <c>BeginInvoke</c> on an already shut-down dispatcher
+    /// already degrades to a dropped, <c>Aborted</c> operation rather than throwing, per
+    /// <c>docs/Refactoring/Testing/sta-test-conventions.md</c>'s comparison table), but this keeps every
+    /// background→UI marshal in the codebase going through the one seam, rather than leaving this call
+    /// site looking like an exception to a convention it already satisfies.
+    /// </para>
     /// </remarks>
     private void OnRecycleBinChanged(object? sender, RecycleBinState state)
     {
@@ -325,7 +334,7 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
             return;
         }
 
-        dispatcher.BeginInvoke(RefreshRecycleBin);
+        UiDispatch.TryBeginInvoke(dispatcher, RefreshRecycleBin);
     }
 
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)

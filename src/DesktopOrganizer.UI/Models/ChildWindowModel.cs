@@ -16,14 +16,20 @@ namespace DesktopOrganizer.UI.Models;
 public class ChildWindowModel : INotifyPropertyChanged
 {
     private string _title = string.Empty;
-    private string _backgroundColor = "#1E1E1E";
-    private double _backgroundOpacity = 0.8;
+    private string _accentColor = "#6B7280";
+    private double _surfaceOpacity = 0.8;
+    private PanelSurfaceStyle _surfaceStyle = PanelSurfaceStyle.Ambient;
     private string _textColor = "#DDDDDD";
     private double _iconSize = 48;
     private PanelViewMode _viewMode = PanelViewMode.List;
     private PanelContentFilter _contentFilter = PanelContentFilter.ShowAll;
     private PanelSortMode _sortMode = PanelSortMode.Manual;
     private bool _isRolledUp;
+    private PanelGeometryMode _geometryMode = PanelGeometryMode.LegacyFreeform;
+    private int? _widthSpanUnits;
+    private int? _heightSpanUnits;
+    private PanelSizingMode _sizingMode = PanelSizingMode.Manual;
+    private IconLayoutPolicy _iconLayoutPolicy = IconLayoutPolicy.LegacyStretch;
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -43,21 +49,37 @@ public class ChildWindowModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Background colour of the panel as a hex string (e.g. <c>#1E1E1E</c>).
+    /// Semantic accent colour of the panel as a hex string (e.g. <c>#6B7280</c>). Unlike the old
+    /// <c>BackgroundColor</c> it replaces, this never fills the whole panel surface — it only tints
+    /// the indicator/selection/icon-hover chrome, and (for <see cref="PanelSurfaceStyle.Ambient"/>) is
+    /// subtly mixed into the neutral surface at <see cref="Theming.SurfaceComposer.AmbientAccentRatio"/>
+    /// (ADR-025, docs/PLANS/phase-5-ambient-accent-ui.md §1 D-3).
     /// </summary>
-    public string BackgroundColor
+    public string AccentColor
     {
-        get => _backgroundColor;
-        set => SetField(ref _backgroundColor, value);
+        get => _accentColor;
+        set => SetField(ref _accentColor, value);
     }
 
     /// <summary>
-    /// Background opacity (0.0–1.0). Applied to the background colour only, not the icons.
+    /// Opacity (0.0–1.0) of the panel's neutral surface fill. Applied to the surface only, not the
+    /// icons or text (renamed from <c>BackgroundOpacity</c> — same semantics, new name to match
+    /// <see cref="AccentColor"/> no longer being a background fill colour).
     /// </summary>
-    public double BackgroundOpacity
+    public double SurfaceOpacity
     {
-        get => _backgroundOpacity;
-        set => SetField(ref _backgroundOpacity, value);
+        get => _surfaceOpacity;
+        set => SetField(ref _surfaceOpacity, value);
+    }
+
+    /// <summary>
+    /// How the panel's neutral surface blends with <see cref="AccentColor"/> — see
+    /// <see cref="Theming.SurfaceComposer.ComposeSurface"/> and <see cref="PanelSurfaceStyle"/>.
+    /// </summary>
+    public PanelSurfaceStyle SurfaceStyle
+    {
+        get => _surfaceStyle;
+        set => SetField(ref _surfaceStyle, value);
     }
 
     /// <summary>
@@ -76,6 +98,18 @@ public class ChildWindowModel : INotifyPropertyChanged
     {
         get => _iconSize;
         set => SetField(ref _iconSize, value);
+    }
+
+    /// <summary>
+    /// How icons are distributed inside the panel's content area (ADR-029). Persisted
+    /// (<c>appearance.iconLayoutPolicy</c>, schema v5 — docs/PLANS/workspace-grid-migration.md); a
+    /// panel that existed before this feature migrates to <c>IconLayoutPolicy.LegacyStretch</c>
+    /// explicitly (never a silently-defaulted value — ADR-029 Decision 6).
+    /// </summary>
+    public IconLayoutPolicy IconLayoutPolicy
+    {
+        get => _iconLayoutPolicy;
+        set => SetField(ref _iconLayoutPolicy, value);
     }
 
     /// <summary>
@@ -129,6 +163,38 @@ public class ChildWindowModel : INotifyPropertyChanged
     public Size Size { get; set; }
 
     /// <summary>
+    /// How <see cref="Position"/>/<see cref="Size"/> relate to the workspace panel grid (ADR-028).
+    /// Persisted (<c>geometry.geometryMode</c>, schema v5 — docs/PLANS/workspace-grid-migration.md); a
+    /// panel that existed before this feature keeps <see cref="PanelGeometryMode.LegacyFreeform"/>
+    /// (the enum's own default — no jump on first launch after upgrade).
+    /// </summary>
+    public PanelGeometryMode GeometryMode
+    {
+        get => _geometryMode;
+        set => SetField(ref _geometryMode, value);
+    }
+
+    /// <summary>
+    /// Width as an integer span of workspace grid units, meaningful only when
+    /// <see cref="GeometryMode"/> is <see cref="PanelGeometryMode.GridAligned"/> — <see langword="null"/>
+    /// otherwise. Not the source of truth for on-screen width by itself: <see cref="Size"/> is always
+    /// kept as the consistent DIP projection at the moment of the last save (ADR-028;
+    /// docs/PLANS/workspace-grid-migration.md §2).
+    /// </summary>
+    public int? WidthSpanUnits
+    {
+        get => _widthSpanUnits;
+        set => SetField(ref _widthSpanUnits, value);
+    }
+
+    /// <summary>Symmetric to <see cref="WidthSpanUnits"/> for height.</summary>
+    public int? HeightSpanUnits
+    {
+        get => _heightSpanUnits;
+        set => SetField(ref _heightSpanUnits, value);
+    }
+
+    /// <summary>
     /// Gets or sets whether the window is visible.
     /// </summary>
     public bool IsVisible { get; set; } = true;
@@ -146,6 +212,19 @@ public class ChildWindowModel : INotifyPropertyChanged
     {
         get => _isRolledUp;
         set => SetField(ref _isRolledUp, value);
+    }
+
+    /// <summary>
+    /// Whether the panel's height follows its content (ADR-029 Decision 7). Persisted
+    /// (<c>geometry.sizingMode</c>, schema v5 — docs/PLANS/workspace-grid-migration.md); a panel that
+    /// existed before this feature migrates to <c>PanelSizingMode.Manual</c> explicitly (its persisted
+    /// height was never passively re-derived from content before this feature existed — a symbolically
+    /// neutral migration, ADR-029).
+    /// </summary>
+    public PanelSizingMode SizingMode
+    {
+        get => _sizingMode;
+        set => SetField(ref _sizingMode, value);
     }
 
     /// <summary>

@@ -132,3 +132,154 @@ independent units** (базовая линия 96 DPI). На масштабе э
 **Manual verify (Win10/Win11)** — см. `docs/ROADMAP.md`, «Сквозные задачи»: плавность магнита, HiDPI
 125%/150% (там был найден и исправлен MAJOR-баг, но вживую не проверялся), alt-tab/потеря фокуса
 посреди драга, поведение у краёв экрана/мультимонитор, двойной клик vs одиночный драг по тайтлбару.
+
+---
+
+## Amendment 2026-09-22 (ADR-028)
+
+[ADR-028](ADR-028-workspace-grid.md) вводит `PanelGeometryMode.GridAligned` — режим, в котором позиция
+панели квантуется **обязательно**, к линиям workspace-сетки (шаг `U`, per-monitor origin), а не
+по порогу-магниту. Это явно **другой механизм**, не расширение и не замена `GridSnap`/`GridSnapDistance`
+этого ADR:
+
+| | `GridSnap` (этот ADR) | Workspace-grid `SnapPosition` (ADR-028) |
+|---|---|---|
+| Применяется к | `PanelGeometryMode.LegacyFreeform` (все панели до этого amendment) | только `PanelGeometryMode.GridAligned` |
+| Модель | Порог-магнит (`GridSnapDistance`, default 12px); вне порога — свободное движение 1:1 с курсором | Безусловное квантование к ближайшей линии на каждом кадре (кроме удержания `Alt`, см. ADR-028) |
+| Шаг | `IAppSettings.GridSize` (1–128, глобальная настройка) | `WorkspaceGridMetrics.UnitSize` (`U`, по умолчанию 8 DIP, отдельная константа) |
+| Origin | Глобальный `(0,0)` виртуального рабочего стола (см. ниже) | Per-monitor `WorkArea.TopLeft` (ADR-028) |
+
+Для `PanelGeometryMode.LegacyFreeform` этот ADR **не меняется ни в одной детали**: `GridSnap.SnapAxis`,
+порог `GridSnapDistance`, глобальный origin `(0,0)`, поведение при `GridSize<=1` — всё байт-в-байт как
+описано выше. `GridSnap` не удаляется, не переименовывается и не получает нового смысла — он продолжает
+обслуживать ровно тот режим, для которого был спроектирован. Два похоже звучащих термина («сетка
+позиции» здесь и «шаг workspace-сетки» в ADR-028) — намеренно разведены, тот же принцип разделения,
+что уже применён в [ADR-015](ADR-015-panel-icon-grid-geometry.md) Решении 1 для `GridSize` vs
+`GridMetrics`, теперь расширенный на третий, workspace-уровень.
+
+---
+
+## Amendment 2026-09-24 — нормализация при смене `GridSize` («панель живёт в другой сетке»)
+
+### Контекст (дословный запрос пользователя)
+
+Панель была расставлена при `GridSize = 32`: позиция `(64, 64)`, размер `64×64` — оба числа кратны 32.
+Пользователь затем поставил `GridSize = 48`. Ни позиция, ни размер панели не кратны новому шагу. Драг
+(`GridSnap.SnapAxis`, порог `GridSnapDistance`) **не чинит** это само по себе: магнит лишь притягивает
+**текущую** позицию к ближайшей линии новой сетки, если она в пределах порога — он не «доезжает» панель
+до идеально круглого числа, потому что базой для расчёта остаётся уже сдвинутая, не кратная 48
+координата. Панель продолжает визуально «жить в старой сетке» относительно всех остальных панелей,
+расставленных/перетащенных уже при `GridSize = 48`.
+
+### Решение
+
+Новый чистый helper `GridSizeNormalizer` (`UI/Models/GridSizeNormalizer.cs`, без WPF/P/Invoke —
+unit-тестируемый так же, как `GridSnap`/`GridMetrics`) — **безусловно** (не порогово, в отличие от
+`GridSnap.SnapAxis`) квантует прямоугольник панели к текущему `GridSize`: позиция — к ближайшей линии от
+того же глобального origin `(0,0)`, что и `GridSnap` (см. таблицу выше — согласование origin обязательно,
+иначе normalize-результат и следующий драг разошлись бы по разным решёткам); ширина/высота — к ближайшей
+линии, но не ниже минимального размера панели (если ближайшая линия ниже минимума — берётся наименьшая
+линия, которая минимуму удовлетворяет); при заданной work area результат дополнительно вписывается в неё
+(шагами той же сетки, никогда не сдвигом на произвольный пиксель).
+
+Применяется (`WindowManager`, `docs/PLANS/...` — реализация в этом amendment, не отдельный документ):
+
+1. **При restore** (`ResolveMonitorPlacement`, вызывается на старте приложения и при добавлении
+   сохранённых панелей) — сразу после существующего `ClampIntoMonitor`, для `PanelGeometryMode.
+   LegacyFreeform`. Тот же путь при `MonitorsChanged` (`OnMonitorsChanged`) — тоже только для
+   `LegacyFreeform`; `Window.Width/Height` при этом переписываются только если панель не свёрнута
+   (`IsRolledUp`), потому что `ChildWindowModel.Size` всегда хранит **развёрнутый** размер независимо от
+   состояния roll-up, а `Window.Height` в свёрнутом состоянии — это высота заголовка, а не персистентный
+   размер.
+2. **При смене `GridSize` в окне настроек** (`GlobalDefaultsViewModel.GridSize`, сеттер) — новый метод
+   `IWindowManager.NormalizePanelsToGrid()` проходит по **всем** открытым панелям (без ограничения текущей
+   страницей — в отличие от `AlignPanelsToWorkspaceGrid`, здесь нет риска коллизии между панелями разных
+   страниц, потому что каждая панель квантуется независимо к глобальной сетке, а не к соседям) и
+   сохраняет один раз в конце, если что-то действительно изменилось.
+3. **`PanelGeometryMode.GridAligned`** — трогается **только если** `GridSize % WorkspaceGridMetrics.
+   UnitSize == 0` (например, `48` и `32` кратны `U=8`): тогда любая точка на решётке `GridSize` **обязана**
+   быть и на решётке `U` (кратное подмножество), так что квантование к `GridSize` не может увести панель
+   с workspace-сетки, к которой она привязана. Если `GridSize` **не** кратен `U` — `GridAligned`-панели
+   этим amendment'ом **не трогаются вовсе**: навязать им несоизмеримую решётку значило бы снять их с их
+   собственной сетки, что прямо противоречит ADR-028 («две сетки — намеренно несоизмеримы», см. таблицу
+   выше и `ADR-028`, «Три независимые системы координат»). При срабатывании — размер результата
+   пересчитывается обратно в spans через `WorkspaceLayoutPolicy.RoundBoundsToSpans`, чтобы `WidthSpanUnits`/
+   `HeightSpanUnits` остались согласованы с новым `Size` (тот же инвариант самосогласованности, что
+   `PanelDefaults.ReconcileGridAlignedSpans` уже поддерживает при создании панели).
+
+### Осознанное ослабление «нет jump on first launch» (ADR-028) — по прямому запросу пользователя
+
+ADR-028 формулирует «нет jump on first launch» как **сильную** гарантию: загрузка приложения никогда не
+меняет персистентные `Left/Top/Width/Height` ни на один DIP (см. Amendment P05 fix-cycle MAJOR-1 выше по
+документу, где даже неявный `SnapWidthToGrid()` на старте был удалён именно ради этой гарантии). Этот
+amendment **намеренно и явно** вводит исключение из неё: при `IAppSettings.GridSize > 1` restore теперь
+**может** подвинуть уже существующую `LegacyFreeform`-панель (и, при кратности `U`, `GridAligned`-панель)
+на величину до одного шага сетки в каждом измерении — ровно то поведение, о котором явно попросил
+пользователь («привести к ближайшей подходящей границе» при восстановлении).
+
+Это не отменяет и не ослабляет исходную гарантию ADR-028 **в её собственном сценарии** — обновление
+приложения без изменения `GridSize` (дефолт `1`, «сетка выключена») по-прежнему не двигает ни одну панель
+ни на пиксель, потому что `GridSizeNormalizer.Normalize`/`NormalizeLegacyFreeformToGridSize`/
+`NormalizeGridAlignedToGridSize` — все безусловно `return`-ят исходный прямоугольник при `gridSize <= 1`
+(см. код и тесты). Исключение активируется только при явном, осознанном действии пользователя — включении
+ненулевой сетки, — а не как побочный эффект самого факта перезапуска.
+
+### Резюме таблицей
+
+| | До этого amendment | После (`GridSize > 1`) |
+|---|---|---|
+| Restore, `GridSize` не менялся с прошлого сохранения | не двигает панель (D3-4/ADR-028) | не двигает панель (та же гарантия — normalize — no-op на уже кратных числах) |
+| Restore, `GridSize` изменился с прошлого сохранения | панель остаётся на СТАРОЙ решётке | панель квантуется к НОВОЙ решётке (до одного шага сдвига) |
+| Смена `GridSize` в настройках, панели уже открыты | ничего не происходит до следующего restart | все открытые панели квантуются к новой решётке немедленно (`NormalizePanelsToGrid`) |
+| `GridSize = 1` (дефолт) | без изменений | без изменений — весь новый код путь — no-op |
+
+### Снято ограничение (2026-09-24) — resize теперь тоже прилипает к `GridSize`
+
+Ограничение выше («resize вне scope») действовало до последующего amendment того же дня: пользователь явно
+попросил, чтобы ручной resize панели тоже квантовался к `GridSize`, а не только позиция при restore/drag.
+Реализовано новое поле `ResizeConstraints.SizeGridStep` (`Interaction/ResizeConstraints.cs`) — заполняется
+`ResizeConstraintsFactory.BuildConstraints` из `IAppSettings.GridSize` при `GridSize > 1` и имеет **приоритет
+над** `SnapResizeToIconGrid`: пока `GridSize > 1`, `ResizeGeometryCalculator.Apply` квантует RAW
+ширину/высоту окна (не через icon-grid chrome-strip, а напрямую, как `GridSizeNormalizer`/`WindowManager`
+уже делают для persisted-геометрии) к ближайшему кратному `GridSize` — тем же `GridSizeNormalizer.
+NormalizeExtent` (round-half-up), переиспользованным, а не продублированным. Работает как покадрово (во
+время самого жеста — пользователь видит шаги по `GridSize`), так и идемпотентно на commit
+(`PanelSizingGridSupport.NormalizeCommittedSize`, вызывается из обоих resize-контроллеров сразу после
+`PersistSpans`, до `_snapToGrid()`/`SaveWindowsState()` — safety net на случай, если весь жест прошёл под
+удержанным `Alt`).
+
+Для `PanelGeometryMode.GridAligned` (ADR-028) — правило снова «две сетки намеренно несоизмеримы»:
+`SizeGridStep` заполняется **только если** `GridSize % WorkspaceGridMetrics.UnitSize == 0` (например, 48 и
+32 кратны `U=8`) — тот же commensurability-гейт, что уже используют `WindowManager.
+NormalizeGridAlignedToGridSize`/`NormalizeGridAlignedToGridSize` (см. amendment выше) для restore-time
+нормализации GridAligned-панелей. Несоизмеримый `GridSize` (например, 50) для `GridAligned` — no-op:
+панель продолжает квантоваться только к `U`, ровно как до этого amendment'а.
+
+`Alt` (модификатор свободного resize, ADR-028 «Модификатор свободного движения», распространён на resize в
+P04 fix-cycle 1) расширен: теперь подавляет квантование к `SizeGridStep` за кадр для **любого**
+`PanelGeometryMode`, не только `GridAligned` — `ResizeGestureSession.IsFreeResizeFrame` проверяет
+`_gridState.IsGridAligned || _constraints.SizeGridStep > 0d`. При `GridSize <= 1` (дефолт) — код-путь
+`SizeGridStep` полностью не активируется (`Apply` не спрашивает клавиатуру ни разу за жест), старое
+поведение и все старые тесты не меняются ни на бит.
+
+Подробности реализации, D-4 golden equivalence (native `WM_SIZING` vs `Thumb`) и полный список тестов — см.
+`adr/ADR-021-interaction-state-and-gesture-lifecycle.md`/`adr/ADR-022-native-panel-sizing.md`'s
+`SizeGridStep`-заметки и тесты в `tests/DesktopOrganizer.Tests/Unit/Interaction/
+ResizeGeometryCalculatorSizeGridStepTests.cs`, `ResizeGestureSessionSizeGridStepTests.cs`,
+`tests/DesktopOrganizer.Tests/Unit/Behaviors/ResizeConstraintsFactorySizeGridStepTests.cs`,
+`PanelSizingGridSupportSizeGridStepTests.cs`.
+
+---
+
+### Оставленное вне scope — resize (историческое, снято выше)
+
+Ручной resize панели (по icon-grid, `SnapResizeToIconGrid`) этим amendment'ом не тронут: после resize
+ширина/высота квантуются к шагу icon-сетки (`GridMetrics.CellSize`/`RowHeight`), который в общем случае
+**не** совпадает с `IAppSettings.GridSize` — так что панель может снова оказаться не на `GridSize`-решётке
+сразу после ручного resize, до следующего restore/смены настройки. Задокументировано как известное,
+осознанно не устранённое ограничение (тот же паттерн «явный trade-off лучше молчаливого расхождения», уже
+принятый ADR-018/ADR-028 для похожих находок) — устранение потребовало бы либо распространить эту
+нормализацию на сам resize-конвейер (`ResizeConstraintsFactory`/`ResizeGeometryCalculator`, вне периметра
+этой узкой задачи), либо принять для панели новый continuous re-snap после каждого resize-жеста, что
+меняло бы визуальное поведение resize, а не только restore/persist — оставлено как рекомендация для
+будущей работы. **Снято см. раздел выше.**

@@ -13,14 +13,15 @@ public interface ISystemIconsPanelManager
     SystemIconsPanelModel Model { get; }
 
     /// <summary>
-    /// Deserialises the panel state from <see cref="IAppSettings.SystemIconsPanel"/>.
-    /// Falls back to built-in defaults when the stored JSON is absent or malformed.
+    /// Applies the persisted system icons panel state (ADR-024 C6:
+    /// <c>DesktopOrganizer.UI.State.IApplicationStateService.SystemIconsPanel</c>) onto <see cref="Model"/>.
+    /// Falls back to built-in defaults when no state was ever persisted.
     /// </summary>
     void Load();
 
     /// <summary>
-    /// Serialises <see cref="Model"/> into <see cref="IAppSettings.SystemIconsPanel"/> and calls
-    /// <see cref="IAppSettings.Save"/>.
+    /// Requests that <see cref="Model"/>'s current state be persisted as part of the shared
+    /// application-state document (ADR-024 C6).
     /// </summary>
     void Save();
 

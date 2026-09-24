@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "writtenAtUtc": "2026-09-01T08:00:00.0000000+00:00",
+  "appVersion": "0.3.0",
+  "panels": [
+    {
+      "Id": "11111111-1111-1111-1111-111111111111",
+      "Title": "Downloads",
+      "BackgroundColor": "#1E1E1E",
+      "BackgroundOpacity": 0.8,
+      "TextColor": "#DDDDDD",
+      "IconSize": 48,
+      "ViewMode": 1,
+      "ContentFilter": 2,
+      "SortMode": 1,
+      "MonitorDeviceId": "\\\\.\\DISPLAY1",
+      "Position": { "X": 100, "Y": 200, "IsEmpty": false },
+      "Size": { "Width": 300, "Height": 400, "IsEmpty": false },
+      "IsVisible": true,
+      "WindowState": 2,
+      "IsRolledUp": false,
+      "PageId": "default",
+      "SourceFolderPath": "C:\\Users\\test\\Downloads",
+      "FilePaths": []
+    },
+    {
+      "Id": "22222222-2222-2222-2222-222222222222",
+      "Title": "Notes",
+      "BackgroundColor": "#2A2A2A",
+      "BackgroundOpacity": 0.9,
+      "TextColor": "#FFFFFF",
+      "IconSize": 32,
+      "ViewMode": 0,
+      "ContentFilter": 0,
+      "SortMode": 0,
+      "MonitorDeviceId": null,
+      "Position": { "X": 500, "Y": 50, "IsEmpty": false },
+      "Size": { "Width": 250, "Height": 350, "IsEmpty": false },
+      "IsVisible": true,
+      "WindowState": 0,
+      "IsRolledUp": true,
+      "PageId": "work",
+      "SourceFolderPath": null,
+      "FilePaths": ["C:\\Users\\test\\Notes\\todo.txt", "C:\\Users\\test\\Notes\\ideas.txt"]
+    }
+  ],
+  "pages": {
+    "Ids": ["default", "work"],
+    "CurrentPageId": "work"
+  },
+  "layoutSnapshots": [
+    {
+      "Id": "snap-1",
+      "Name": "Morning Layout",
+      "CreatedAt": "2026-09-01T08:00:00.0000000",
+      "PanelJsonItems": [
+        "{\"Id\":\"33333333-3333-3333-3333-333333333333\",\"Title\":\"Snap Panel C\",\"BackgroundColor\":\"#1E1E1E\",\"BackgroundOpacity\":0.8,\"TextColor\":\"#DDDDDD\",\"IconSize\":48,\"ViewMode\":0,\"ContentFilter\":3,\"SortMode\":0,\"MonitorDeviceId\":null,\"Position\":{\"X\":10,\"Y\":10,\"IsEmpty\":false},\"Size\":{\"Width\":200,\"Height\":200,\"IsEmpty\":false},\"IsVisible\":true,\"WindowState\":0,\"IsRolledUp\":false,\"PageId\":\"default\",\"SourceFolderPath\":null,\"FilePaths\":[\"C:\\\\a.txt\"]}",
+        "{\"Id\":\"44444444-4444-4444-4444-444444444444\",\"Title\":\"Snap Panel D\",\"BackgroundColor\":\"#1E1E1E\",\"BackgroundOpacity\":0.8,\"TextColor\":\"#DDDDDD\",\"IconSize\":48,\"ViewMode\":1,\"ContentFilter\":1,\"SortMode\":1,\"MonitorDeviceId\":null,\"Position\":{\"X\":20,\"Y\":20,\"IsEmpty\":false},\"Size\":{\"Width\":150,\"Height\":150,\"IsEmpty\":false},\"IsVisible\":false,\"WindowState\":1,\"IsRolledUp\":false,\"PageId\":\"work\",\"SourceFolderPath\":\"C:\\\\Portal\",\"FilePaths\":[]}"
+      ]
+    }
+  ],
+  "systemIconsPanel": {
+    "IsEnabled": true,
+    "ShowOnAllVirtualDesktops": false,
+    "IconSize": "Large",
+    "AnchorVirtualDesktopId": "55555555-5555-5555-5555-555555555555",
+    "Items": [
+      { "Kind": "RecycleBin", "IsVisible": true, "Order": 0 },
+      { "Kind": "ThisPc", "IsVisible": false, "Order": 1 }
+    ]
+  }
+}

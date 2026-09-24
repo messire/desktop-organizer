@@ -17,10 +17,17 @@ public sealed class BoolToGlyphConverter : IValueConverter
         var isRolledUp = value is true;
         var isTooltip = parameter is string p && p.Equals("tooltip", StringComparison.OrdinalIgnoreCase);
 
+        // NIT fix (docs/PLANS/workspace-grid-07-visual.md fix-cycle 1): bare "Expand"/"Collapse" reads
+        // ambiguously out of context for a screen reader (could be confused with e.g. a tree-node
+        // disclosure control) — "panel" ties the announced action to what this button actually does,
+        // matching the "Roll up / down" wording used elsewhere for the same feature (HeaderContextMenu's
+        // MenuItem, ChildWindow.xaml). RollUpMenu_Click (the button's own Click handler) toggles the
+        // panel's roll-up state directly — it is also reused, unchanged, by that same context-menu
+        // MenuItem, which is the only reason "Menu" appears in its name; it does not itself open a menu.
         return isTooltip
             ? isRolledUp
-                ? "Expand"
-                : "Collapse"
+                ? "Expand panel"
+                : "Collapse panel"
             : isRolledUp
                 ? ""
                 : "";

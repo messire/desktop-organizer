@@ -28,6 +28,13 @@ public partial class MainWindow : Window
         InputBindings.Add(new KeyBinding(
             new RelayCommand(() => SwitchPage(next: false)),
             new KeyGesture(Key.Prior, ModifierKeys.Control)));
+
+        // Ctrl+E — toggle the app-global layout edit mode (docs/PLANS/phase-6-edit-layout-ux.md §1 D-9
+        // #3). This window is an ordinary activatable window (unlike ChildWindow's WS_EX_NOACTIVATE
+        // panels), so keyboard input here is not the unverified risk class Escape is on a panel (R-6).
+        InputBindings.Add(new KeyBinding(
+            _viewModel.ToggleEditLayoutCommand,
+            new KeyGesture(Key.E, ModifierKeys.Control)));
     }
 
     /// <inheritdoc />

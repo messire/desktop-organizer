@@ -1,5 +1,6 @@
 using System.IO;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 using static DesktopOrganizer.Services.Enums.FileAttribute;
 using static DesktopOrganizer.Services.Enums.FileFlag;
 using Directory = System.IO.Directory;
@@ -30,6 +31,7 @@ internal class IconProvider : IIconProvider
 
     private readonly IIconHandler _iconHandler;
     private readonly IIconFactory _iconFactory;
+    private readonly IDiagnosticsLog _diagnosticsLog;
     private readonly int _maxCachedIcons;
     private readonly object _cacheLock = new();
 
@@ -47,8 +49,13 @@ internal class IconProvider : IIconProvider
     /// </summary>
     /// <param name="iconHandler">Native icon handle retrieval.</param>
     /// <param name="iconFactory">Bitmap/placeholder factory.</param>
-    public IconProvider(IIconHandler iconHandler, IIconFactory iconFactory)
-        : this(iconHandler, iconFactory, DefaultMaxCachedIcons)
+    /// <param name="diagnosticsLog">
+    /// Structured diagnostics sink (ADR-027) icon-load/retrieval failures are reported to, replacing
+    /// the <c>Console.Error.WriteLine</c> calls the P00 baseline audit found silently discarded by
+    /// the <c>WinExe</c> process.
+    /// </param>
+    public IconProvider(IIconHandler iconHandler, IIconFactory iconFactory, IDiagnosticsLog diagnosticsLog)
+        : this(iconHandler, iconFactory, diagnosticsLog, DefaultMaxCachedIcons)
     {
     }
 
@@ -58,13 +65,15 @@ internal class IconProvider : IIconProvider
     /// </summary>
     /// <param name="iconHandler">Native icon handle retrieval.</param>
     /// <param name="iconFactory">Bitmap/placeholder factory.</param>
+    /// <param name="diagnosticsLog">Structured diagnostics sink — see the three-argument constructor.</param>
     /// <param name="maxCachedIcons">Maximum number of icon cache entries retained before LRU eviction.</param>
-    internal IconProvider(IIconHandler iconHandler, IIconFactory iconFactory, int maxCachedIcons)
+    internal IconProvider(IIconHandler iconHandler, IIconFactory iconFactory, IDiagnosticsLog diagnosticsLog, int maxCachedIcons)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxCachedIcons);
 
         _iconHandler = iconHandler;
         _iconFactory = iconFactory;
+        _diagnosticsLog = diagnosticsLog;
         _maxCachedIcons = maxCachedIcons;
     }
 
@@ -73,15 +82,47 @@ internal class IconProvider : IIconProvider
     private ImageSource PlaceholderIcon => _placeholderIcon ??= _iconFactory.CreateBitmap();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// NIT fix (P08 fix cycle 2, 2026-09-22): compares against the backing <see cref="_placeholderIcon"/>
+    /// field directly, never the <see cref="PlaceholderIcon"/> property. The property lazily allocates a
+    /// new 32×32 <c>RenderTargetBitmap</c> (<see cref="IIconFactory.CreateBitmap()"/>) on first access —
+    /// calling it here for every real, already-resolved icon would force that allocation on the UI thread
+    /// even in a session where no path has ever actually needed a placeholder yet. When
+    /// <see cref="_placeholderIcon"/> is still <see langword="null"/>, no placeholder has ever been
+    /// produced, so <paramref name="icon"/> trivially cannot be one.
+    /// </remarks>
+    public bool IsPlaceholder(ImageSource? icon) => icon is not null && _placeholderIcon is not null && ReferenceEquals(icon, _placeholderIcon);
+
+    /// <inheritdoc />
     public ImageSource GetIcon(string filePath)
     {
         var isFile = File.Exists(filePath);
-        if (!isFile && !Directory.Exists(filePath))
-        {
-            return PlaceholderIcon;
-        }
+        var exists = isFile || Directory.Exists(filePath);
 
-        var lastWriteTimeUtc = NeedsFreshnessCheck(filePath, isFile)
+        // UX P1 (P08 fix cycle 1, 2026-09-22): a permanently-missing item still deserves a real,
+        // type-specific icon wherever the OS can produce one — IconFlags already includes
+        // SHGFI_USEFILEATTRIBUTES, which asks the shell to resolve purely from the given attribute
+        // plus the path's own extension, without ever touching the file system. This matches
+        // Explorer's own behavior for a selected-but-vanished item (a missing "readme.txt" still
+        // shows a text-file icon) instead of the uniform gray square, which is now strictly the last
+        // resort — only when even this shell lookup itself fails (see TryRetrieveIcon). Directory-ness
+        // can't be checked on disk for a path that doesn't exist, so the presence of an extension is
+        // used as the best-effort heuristic: extension-less looks like a folder.
+        //
+        // Routed through the SAME cache-check/TryRetrieveIcon path as an existing file/directory below
+        // (not a separate early-return) for a single code path, but — MINOR-1 fix, P08 fix cycle 2,
+        // 2026-09-22 — its result is deliberately NOT cached (see the `exists` argument threaded through
+        // to TryRetrieveIcon below). A missing path always freshness-checks to `default` (NeedsFreshnessCheck
+        // is skipped whenever `!exists`, regardless of extension), and MOST extensions are not
+        // freshness-sensitive to begin with (see FreshnessSensitiveExtensions) — so once the file
+        // actually appears on disk, a non-freshness-sensitive extension keeps computing the SAME
+        // `default` timestamp, which used to hit this now-stale cache entry and serve the fallback
+        // forever, defeating RefreshItemsLiveness's missing->present re-fetch (BaseViewModel). The
+        // trade-off is a fresh (no-disk-I/O, SHGFI_USEFILEATTRIBUTES) shell round-trip on every call for
+        // a still-missing path rather than a wrong icon surviving the file's reappearance.
+        var effectiveIsFile = exists ? isFile : !string.IsNullOrEmpty(Path.GetExtension(filePath));
+
+        var lastWriteTimeUtc = exists && NeedsFreshnessCheck(filePath, isFile)
             ? TryGetLastWriteTimeUtc(filePath, isFile)
             : default;
 
@@ -90,7 +131,7 @@ internal class IconProvider : IIconProvider
             return cachedIcon;
         }
 
-        return TryRetrieveIcon(filePath, isFile, lastWriteTimeUtc) ?? PlaceholderIcon;
+        return TryRetrieveIcon(filePath, effectiveIsFile, lastWriteTimeUtc, cacheable: exists) ?? PlaceholderIcon;
     }
 
     /// <summary>
@@ -113,7 +154,7 @@ internal class IconProvider : IIconProvider
     /// <see cref="TryGetFreshCachedIcon"/> will consider the entry fresh and return the
     /// (potentially outdated) cached icon rather than forcing a re-read.
     /// </summary>
-    private static DateTime TryGetLastWriteTimeUtc(string filePath, bool isFile)
+    private DateTime TryGetLastWriteTimeUtc(string filePath, bool isFile)
     {
         try
         {
@@ -123,7 +164,18 @@ internal class IconProvider : IIconProvider
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error reading last write time for '{filePath}': {ex.Message}");
+            if (_diagnosticsLog.IsEnabled)
+            {
+                // Privacy invariant: extension + exception type name only — never the path or
+                // ex.Message (which frequently embeds the path itself).
+                _diagnosticsLog.Write(
+                    IconDiagnostics.Category,
+                    "IconFreshnessCheckFailed",
+                    null,
+                    new KeyValuePair<string, object?>("extension", IconDiagnostics.SafeExtension(filePath)),
+                    new KeyValuePair<string, object?>("errorType", ex.GetType().Name));
+            }
+
             return default;
         }
     }
@@ -140,19 +192,35 @@ internal class IconProvider : IIconProvider
     /// extension to key off and falls back to the generic "unknown file" icon instead of a folder icon.
     /// </param>
     /// <param name="lastWriteTimeUtc">Freshness timestamp to store alongside the cached icon.</param>
+    /// <param name="cacheable">
+    /// Whether a successfully retrieved icon may be stored in the LRU cache (MINOR-1 fix, P08 fix
+    /// cycle 2, 2026-09-22) — <see langword="false"/> for a path that did not exist at retrieval time,
+    /// so a stale-but-freshness-check-exempt fallback icon is never served once the path later becomes
+    /// real. See <see cref="GetIcon"/>'s remarks.
+    /// </param>
     /// <returns>A <see cref="BitmapSource"/> representing the icon, or <see langword="null"/> if retrieval fails.</returns>
-    private ImageSource? TryRetrieveIcon(string filePath, bool isFile, DateTime lastWriteTimeUtc)
+    private ImageSource? TryRetrieveIcon(string filePath, bool isFile, DateTime lastWriteTimeUtc, bool cacheable)
     {
         try
         {
             var fileInfo = default(ShellFileInfo);
             var fileAttributes = isFile ? FileAttributes : DirectoryAttributes;
             var iconHandle = _iconHandler.GetIconHandle(filePath, ref fileInfo, fileAttributes, IconFlags);
-            return iconHandle == IntPtr.Zero ? null : TryCreateBitmapSource(filePath, lastWriteTimeUtc, ref fileInfo);
+            return iconHandle == IntPtr.Zero ? null : TryCreateBitmapSource(filePath, lastWriteTimeUtc, cacheable, ref fileInfo);
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error retrieving icon for '{filePath}': {ex.Message}");
+            if (_diagnosticsLog.IsEnabled)
+            {
+                // Privacy invariant: extension + exception type name only — never the path or
+                // ex.Message (which frequently embeds the path itself).
+                _diagnosticsLog.Write(
+                    IconDiagnostics.Category,
+                    "IconRetrievalFailed",
+                    null,
+                    new KeyValuePair<string, object?>("extension", IconDiagnostics.SafeExtension(filePath)),
+                    new KeyValuePair<string, object?>("errorType", ex.GetType().Name));
+            }
         }
 
         return null;
@@ -163,14 +231,19 @@ internal class IconProvider : IIconProvider
     /// </summary>
     /// <param name="filePath">File path.</param>
     /// <param name="lastWriteTimeUtc">Freshness timestamp to store alongside the cached icon.</param>
+    /// <param name="cacheable">Whether the created icon may be stored in the LRU cache — see <see cref="TryRetrieveIcon"/>.</param>
     /// <param name="fileInfo">The shell file information structure containing icon details.</param>
     /// <returns>A <see cref="BitmapSource"/> representing the icon, or <see langword="null"/> if creation fails.</returns>
-    private ImageSource TryCreateBitmapSource(string filePath, DateTime lastWriteTimeUtc, ref ShellFileInfo fileInfo)
+    private ImageSource TryCreateBitmapSource(string filePath, DateTime lastWriteTimeUtc, bool cacheable, ref ShellFileInfo fileInfo)
     {
         try
         {
             var imageSource = _iconFactory.CreateBitmap(fileInfo.IconHandle);
-            StoreInCache(filePath, imageSource, lastWriteTimeUtc);
+            if (cacheable)
+            {
+                StoreInCache(filePath, imageSource, lastWriteTimeUtc);
+            }
+
             return imageSource;
         }
         finally

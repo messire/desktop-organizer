@@ -4,7 +4,11 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
 using DesktopOrganizer.Core;
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Behaviors;
+using DesktopOrganizer.UI.Diagnostics;
+using DesktopOrganizer.UI.Interaction;
+using DesktopOrganizer.UI.Interaction.Native;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -34,19 +38,71 @@ public partial class ChildWindow : Window
     private readonly IWindowManager _windowManager;
     private readonly IDesktopIntegrationService _desktopIntegration;
     private readonly IAppSettings _appSettings;
+    private readonly IGestureDiagnostics _diagnostics;
+    private readonly ILayoutEditModeService _layoutEditMode;
+    private readonly IMonitorService _monitorService;
+
+    // P06 (docs/fix-prompts/06-fit-content.md): backs ChildWindow.ContentSizing.cs's "Apply to all
+    // panels…" confirmation dialogs. IConfirmationService is already a DI singleton (Configuration/DiConfig.cs)
+    // used by MainWindowViewModel for the same purpose — MessageBox.Show has its own top-level HWND, so
+    // it receives input/activation normally regardless of this panel's own WS_EX_NOACTIVATE style.
+    private readonly IConfirmationService _confirmation;
+
     private ChildWindowModel? _model;
 
     private readonly PanelDragMoveBehavior _dragMoveBehavior;
-    private readonly PanelResizeController _resizeController;
+
+    // docs/PLANS/phase-6-edit-layout-ux.md §1 D-5: the gate wraps whichever IResizeAffordance this
+    // panel's resize path uses (ThumbOverlayAffordance or NativeSizingAffordance) and is what actually
+    // gets handed to RollUpBehavior — RollUpBehavior keeps calling SetEnabled(!collapsed) exactly as
+    // before, unaware a second, independent policy input now also gates the same affordance.
+    private readonly ResizeAffordanceGate _resizeGate;
+
+    // Phase 2 (docs/PLANS/phase-2-native-panel-sizing.md §1.6): _resizeController is the common
+    // IPanelResizeController surface (AbortResize/SnapWidthToGrid) used by every call site that does not
+    // care which path is active (Initialize, OnClosing, OnModelPropertyChanged, ChildWindow_Unloaded).
+    // Exactly one of _thumbResizeController/_nativeResizeController is non-null — set once, in the
+    // constructor, by NativeSizingSwitch.IsEnabled — and _resizeController points at whichever one that
+    // is. The Thumb-specific event handlers below (Resize_DragStarted/Delta/Completed,
+    // ResizeOverlay_LostMouseCapture, ResizeOverlay_PreviewMouseLeftButtonDown) go through
+    // _thumbResizeController directly (null-conditional) since those XAML events have no native-path
+    // equivalent — NativePanelResizeController is driven entirely by INativePanelSizingService callbacks
+    // instead, and the ResizeOverlay Thumbs are disabled up front on that path (R-9) so those handlers
+    // are never actually invoked when native sizing is active.
+    private readonly IPanelResizeController _resizeController;
+    private readonly PanelResizeController? _thumbResizeController;
+    private readonly NativePanelResizeController? _nativeResizeController;
     private readonly RollUpBehavior _rollUpBehavior;
     private readonly PanelTitleRenameBehavior _titleRename;
+    private readonly PanelVisualStateBehavior _panelVisualState;
+
+    // docs/PLANS/phase-6-edit-layout-ux.md §1 D-6: the direct sibling of _panelVisualState above — writes
+    // PanelTheme.IsLayoutEditingProperty onto the same PanelRoot instead of PanelTheme.VisualStateProperty.
+    private readonly LayoutEditModeBehavior _layoutEditModeVisual;
     private readonly ListReorderGestureController<FileItem> _reorderController;
     private readonly HintPopupController _hintPopups;
 
+    // Stage S (docs/PLANS/workspace-grid-03-04-integration.md §1.5): the single point P03/P04 write
+    // Left/Top/Width/Height + the model's Position/Size (+ span/MonitorDeviceId) through together, so
+    // OnLocationChanged/OnRenderSizeChanged below never fight a P03/P04-driven geometry write with their
+    // own redundant model write (baseline risk 17). Constructed once, unconditionally — used by both the
+    // Thumb and native resize paths.
+    private readonly PanelGeometryWriter _geometryWriter;
+
+    // ADR-021: one PanelInteractionTracker per panel, shared by every gesture behaviour below so "only
+    // one gesture owns capture at a time" is enforced across drag AND resize. Constructed before both
+    // behaviours (docs/PLANS/phase-1-resize-stabilization.md §3.5).
+    private readonly PanelInteractionTracker _interactionTracker = new();
+
     // Internal (rather than private) so WindowManager.CollectOtherPanelBounds can use it as the
     // target/final height of a rolled-up panel, instead of reading a mid-animation ActualHeight
-    // (finalization MAJOR M-2) — see the constant's use there for details.
-    internal const double TitleBarHeight = 32;
+    // (finalization MAJOR M-2) — see the constant's use there for details. Sourced from
+    // PanelMetrics.HeaderHeight (D-11, docs/PLANS/phase-5-ambient-accent-ui.md §1 D-11) rather than
+    // repeating its own literal — PanelMetrics.cs is the single source of truth for this value, also
+    // consumed directly by ChildWindow.xaml's PanelChrome/PanelRoot row heights and by
+    // RollUpBehavior's collapsed target height (via the titleBarHeight parameter passed below,
+    // unchanged from before).
+    internal const double TitleBarHeight = PanelMetrics.HeaderHeight;
 
     /// <summary>
     /// Custom <see cref="DataObject"/> format used to identify an in-panel drag-to-reorder gesture
@@ -66,41 +122,158 @@ public partial class ChildWindow : Window
         ChildWindowViewModel viewModel,
         IWindowManager windowManager,
         IDesktopIntegrationService desktopIntegration,
-        IAppSettings appSettings)
+        IAppSettings appSettings,
+        IGestureDiagnostics diagnostics,
+        INativePanelSizingService nativeSizingService,
+        ILayoutEditModeService layoutEditMode,
+        IMonitorService monitorService,
+        IConfirmationService confirmation)
     {
         InitializeComponent();
         _viewModel = viewModel;
         _windowManager = windowManager;
         _desktopIntegration = desktopIntegration;
         _appSettings = appSettings;
+        _diagnostics = diagnostics;
+        _layoutEditMode = layoutEditMode;
+        _monitorService = monitorService;
+        _confirmation = confirmation;
         DataContext = _viewModel;
+
+        // Phase 2 (docs/PLANS/phase-2-native-panel-sizing.md §1.6): decide once, here, which resize
+        // path this panel uses. NativeSizingSwitch itself needs no HWND — only the persisted setting
+        // and the process's CLI args/environment — so the decision does not have to wait for
+        // OnSourceInitialized. It is made this early specifically because RollUpBehavior (which needs
+        // the resulting IResizeAffordance) must itself be constructed before _dragMoveBehavior below
+        // (its onDoubleClick callback captures _rollUpBehavior). Only the native hook's actual
+        // installation (NativePanelResizeController.AttachTo, which DOES need a real HWND) is deferred
+        // to OnSourceInitialized, after EmbedInDesktop — see that method.
+        var nativeSizingEnabled = NativeSizingSwitch.IsEnabled(
+            Environment.GetCommandLineArgs(), Environment.GetEnvironmentVariable, _appSettings.NativePanelSizing);
+
+        // R-9: the Thumb overlay is wrapped by this affordance regardless of which path ends up active.
+        // On the native path it is disabled immediately below, before the panel is even shown, so the 8
+        // Thumbs can never intercept a click — RollUpBehavior only re-asserts overlay state on later
+        // roll-up/roll-down toggles, it does not run at construction time.
+        var thumbOverlayAffordance = new ThumbOverlayAffordance(ResizeOverlay);
+
+        // docs/PLANS/phase-6-edit-layout-ux.md §1 D-2/D-5: read fresh on every title-bar press by
+        // PanelDragMoveBehavior — never snapshotted — so a mode/lock/preference change made while no
+        // gesture is in flight is picked up by the very next press without this panel needing to do
+        // anything else.
+        bool CanMove() => LayoutGesturePolicy.Resolve(
+            _layoutEditMode.Mode,
+            _layoutEditMode.IsLayoutLocked,
+            NormalModeLayoutGesturesParser.ParseOrMoveOnly(_appSettings.NormalModeLayoutGestures)).CanMove;
+
+        // Constructed before _dragMoveBehavior/_resizeController (P03): both branches below hand it to
+        // PanelDragMoveBehavior, which commits every GridAligned drop through it (plan §1.5).
+        _geometryWriter = new PanelGeometryWriter(this, () => _model);
 
         // Constructed before _dragMoveBehavior: its onDoubleClick callback below captures
         // _rollUpBehavior, and assigning it first keeps that a real (non-nullable) reference
         // rather than a forward reference nullable analysis can't see through.
-        _rollUpBehavior = new RollUpBehavior(
-            this, _windowManager, ContentRow, FileListHost, ResizeOverlay, TitleBarHeight, () => _model);
+        if (nativeSizingEnabled)
+        {
+            thumbOverlayAffordance.SetEnabled(false);
+            var nativeAffordance = new NativeSizingAffordance();
+            _resizeGate = new ResizeAffordanceGate(nativeAffordance);
+            _rollUpBehavior = new RollUpBehavior(
+                this, _windowManager, ContentRow, FileListHost, _resizeGate, TitleBarHeight, () => _model);
 
-        _dragMoveBehavior = new PanelDragMoveBehavior(
-            this,
-            _appSettings,
-            _windowManager,
-            getPanelId: () => _model?.Id,
-            onDragGestureStarting: OnPanelGestureStarting,
-            onDoubleClick: () => _rollUpBehavior.ToggleRollUp());
+            _dragMoveBehavior = new PanelDragMoveBehavior(
+                this,
+                _appSettings,
+                _windowManager,
+                getPanelId: () => _model?.Id,
+                getModel: () => _model,
+                onDragGestureStarting: OnPanelGestureStarting,
+                onDoubleClick: () => _rollUpBehavior.ToggleRollUp(),
+                diagnostics: _diagnostics,
+                tracker: _interactionTracker,
+                canMove: CanMove,
+                layoutEditMode: _layoutEditMode,
+                monitorService: _monitorService,
+                geometryWriter: _geometryWriter);
 
-        _resizeController = new PanelResizeController(
-            this,
-            _appSettings,
-            _windowManager,
-            getModel: () => _model,
-            onResizeGestureStarting: OnPanelGestureStarting,
-            clearDragObstacles: _dragMoveBehavior.ClearDragObstacles,
-            snapToGrid: _dragMoveBehavior.SnapToGrid,
-            titleBarHeight: TitleBarHeight);
+            _nativeResizeController = new NativePanelResizeController(
+                this,
+                _appSettings,
+                _windowManager,
+                getModel: () => _model,
+                onResizeGestureStarting: OnPanelGestureStarting,
+                clearDragObstacles: _dragMoveBehavior.ClearDragObstacles,
+                snapToGrid: _dragMoveBehavior.SnapToGrid,
+                titleBarHeight: TitleBarHeight,
+                diagnostics: _diagnostics,
+                tracker: _interactionTracker,
+                nativeSizingService: nativeSizingService,
+                isResizeEnabled: () => nativeAffordance.IsEnabled);
+            _resizeController = _nativeResizeController;
+        }
+        else
+        {
+            _resizeGate = new ResizeAffordanceGate(thumbOverlayAffordance);
+            _rollUpBehavior = new RollUpBehavior(
+                this, _windowManager, ContentRow, FileListHost, _resizeGate, TitleBarHeight, () => _model);
+
+            _dragMoveBehavior = new PanelDragMoveBehavior(
+                this,
+                _appSettings,
+                _windowManager,
+                getPanelId: () => _model?.Id,
+                getModel: () => _model,
+                onDragGestureStarting: OnPanelGestureStarting,
+                onDoubleClick: () => _rollUpBehavior.ToggleRollUp(),
+                diagnostics: _diagnostics,
+                tracker: _interactionTracker,
+                canMove: CanMove,
+                layoutEditMode: _layoutEditMode,
+                monitorService: _monitorService,
+                geometryWriter: _geometryWriter);
+
+            _thumbResizeController = new PanelResizeController(
+                this,
+                _appSettings,
+                _windowManager,
+                getModel: () => _model,
+                onResizeGestureStarting: OnPanelGestureStarting,
+                clearDragObstacles: _dragMoveBehavior.ClearDragObstacles,
+                snapToGrid: _dragMoveBehavior.SnapToGrid,
+                titleBarHeight: TitleBarHeight,
+                diagnostics: _diagnostics,
+                tracker: _interactionTracker);
+            _resizeController = _thumbResizeController;
+        }
+
+        // D-5: apply the real policy value immediately — before the panel is ever shown — rather than
+        // leaving the gate at its true/true construction default (see ResizeAffordanceGate's remarks).
+        _resizeGate.SetAllowedByPolicy(LayoutGesturePolicy.Resolve(
+            _layoutEditMode.Mode,
+            _layoutEditMode.IsLayoutLocked,
+            NormalModeLayoutGesturesParser.ParseOrMoveOnly(_appSettings.NormalModeLayoutGestures)).CanResize);
+
+        // D-4: subscribed here (constructor) / unsubscribed in OnClosing, mirroring every other
+        // long-lived subscription this window makes to something that outlives it (_viewModel.PropertyChanged
+        // below). PropertyChanged is also subscribed (not just ModeChanged) so an IsLayoutLocked change
+        // that does NOT also transition Mode — e.g. locking while already in Normal — still re-applies
+        // the resize gate; see AbortGesturesAndApplyLayoutGate's remarks.
+        _layoutEditMode.ModeChanged += OnLayoutModeChanged;
+        _layoutEditMode.PropertyChanged += OnLayoutEditModePropertyChanged;
 
         _titleRename = new PanelTitleRenameBehavior(
             _windowManager, TitleText, TitleEditBox, () => _model, SyncToModel);
+
+        // D-6 (docs/PLANS/phase-5-ambient-accent-ui.md §1 D-6): the first real subscriber to
+        // PanelInteractionTracker.StateChanged, resolving PanelRoot/PanelTheme.VisualState from the
+        // tracker's gesture state plus PanelRoot's own IsMouseOver and _titleRename.IsEditingTitle.
+        // Constructed after _titleRename (its isTitleEditing callback reads it) and after
+        // _interactionTracker (field initializer above, already assigned).
+        _panelVisualState = new PanelVisualStateBehavior(PanelRoot, _interactionTracker, () => _titleRename.IsEditingTitle);
+
+        // D-6: the direct sibling of _panelVisualState above — writes PanelTheme.IsLayoutEditingProperty
+        // onto the same PanelRoot from ILayoutEditModeService.ModeChanged instead of PanelInteractionTracker.StateChanged.
+        _layoutEditModeVisual = new LayoutEditModeBehavior(PanelRoot, _layoutEditMode);
 
         _reorderController = new ListReorderGestureController<FileItem>(
             dragSource: FileListHost,
@@ -126,6 +299,9 @@ public partial class ChildWindow : Window
 
         // Non-blocking hint whenever an inline-rename attempt fails (see ChildWindowViewModel.RenameError).
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+
+        // P06 hook (docs/fix-prompts/06-fit-content.md) — see ChildWindow.ContentSizing.cs.
+        InitializeContentSizing();
     }
 
     /// <summary>
@@ -146,11 +322,28 @@ public partial class ChildWindow : Window
 
         _viewModel.LoadFromModel(model);
 
-        // Re-snap width to the icon grid on load so persisted sizes stay aligned even after
-        // the icon size was changed in a previous session.
-        _resizeController.SnapWidthToGrid();
-
+        // finalization MAJOR-1 (P05 fix-cycle, ADR-028/ADR-029 amendments): deliberately NO
+        // SnapWidthToGrid() call here. A prior version of this method re-snapped the persisted width on
+        // every load "so persisted sizes stay aligned even after the icon size was changed in a previous
+        // session" — but ADR-029's F-3 chrome fix (GridMetrics.FileListHPadding, 0 -> 8) changed WHAT
+        // COUNTS AS a valid snap point, so re-running that snap on load turned a byte-for-byte replay of
+        // a saved layout into a silent one-time width jump the very first time a panel was opened after
+        // upgrading (e.g. a persisted 344 DIP 3-column width became 352; a persisted 168 DIP 1-column
+        // width became 176) — a direct violation of ADR-028's "no jump on first launch" invariant, which
+        // this method must uphold for EVERY panel geometry mode, not just PanelGeometryMode.GridAligned.
+        // Loading a panel must NEVER mutate its saved bounds; only a user-driven action may
+        // (OnModelPropertyChanged below, still snapping on an actual IconSize/ViewMode change, and the
+        // live resize-drag path) — see ADR-029's Q2 amendment and ADR-028's LegacyFreeform section for
+        // the full analysis of why this is now a hard invariant, not merely today's happenstance.
         model.PropertyChanged += OnModelPropertyChanged;
+
+        // P06 hook (docs/fix-prompts/06-fit-content.md) — must run AFTER the resize-snap subscription
+        // immediately above: this partial's own OnModelPropertyChangedForContentSizing relies on
+        // subscription order to observe Window.Width AFTER any IconSize/ViewMode/IconLayoutPolicy-driven
+        // SnapWidthToGrid() the line above already triggered for the same PropertyChanged event — see
+        // ChildWindow.ContentSizing.cs's AttachContentSizing remarks. Deliberately does NOT force an
+        // immediate recompute here (see the same remarks for why).
+        AttachContentSizing(model);
 
         if (model.IsRolledUp) _rollUpBehavior.ApplyRollUp(true);
     }
@@ -174,14 +367,40 @@ public partial class ChildWindow : Window
         base.OnSourceInitialized(e);
         var hwnd = new WindowInteropHelper(this).Handle;
         _desktopIntegration.EmbedInDesktop(hwnd);
+
+        // Phase 2 (docs/PLANS/phase-2-native-panel-sizing.md §1.6): the native WM_SIZING hook is
+        // installed here — after EmbedInDesktop, once the panel's HWND is both valid and already
+        // reparented into WorkerW — even though which controller to use was already decided in the
+        // constructor (see its remarks). No-op when the Thumb path is active (_nativeResizeController
+        // is null).
+        _nativeResizeController?.AttachTo(hwnd);
     }
 
     /// <inheritdoc/>
     protected override void OnClosing(CancelEventArgs e)
     {
+        _diagnostics.PanelClosing(_model?.Id, (Mouse.Captured as Thumb)?.IsDragging ?? false);
+
+        // ADR-021 "window disposal forces state to Idle": end whatever resize gesture might still be
+        // active before the window (and its Thumbs) go away — mirrors ResizeOverlay_LostMouseCapture's
+        // "diagnostics call first, behavior second" ordering above (plan §3.5).
+        _resizeController.AbortResize(ResizeEndReason.Closing);
+
+        // R-10: deterministically remove the native WM_SIZING hook right next to the AbortResize call
+        // above — a no-op (and idempotent) when the Thumb path is active or AttachTo was never reached.
+        _nativeResizeController?.Dispose();
+
         if (_model is not null)
             _model.PropertyChanged -= OnModelPropertyChanged;
+
+        // P06 hook (docs/fix-prompts/06-fit-content.md) — see ChildWindow.ContentSizing.cs.
+        DetachContentSizing();
+
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _layoutEditMode.ModeChanged -= OnLayoutModeChanged;
+        _layoutEditMode.PropertyChanged -= OnLayoutEditModePropertyChanged;
+        _panelVisualState.Dispose();
+        _layoutEditModeVisual.Dispose();
         _hintPopups.StopTimers();
         SyncToModel();
         if (DataContext is IDisposable disposable) disposable.Dispose();
@@ -240,22 +459,40 @@ public partial class ChildWindow : Window
     /// editor for focus — or a file item rename is already in progress (repeated F2 would otherwise
     /// re-run <see cref="ChildWindowViewModel.BeginRenameCommand"/> and overwrite the text the user
     /// already typed with <see cref="FileItem.DisplayName"/> again).
+    /// <para>
+    /// Also handles <c>Escape</c>: exits <see cref="ILayoutEditModeService"/>'s Edit Layout mode
+    /// (docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #4). Best-effort only — this panel carries
+    /// <c>WS_EX_NOACTIVATE</c> and has never received keyboard input reliably in this state (same
+    /// unverified risk class as ADR-013 R1's F2/inline-rename) — the tray icon and this panel's own
+    /// <c>HeaderContextMenu</c> "Edit layout" item remain the guaranteed exit paths; <c>Escape</c> is
+    /// never the sole way out (R-6).
+    /// </para>
     /// </summary>
     private void ChildWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key != Key.F2) return;
-        if (_titleRename.IsEditingTitle) return;
-        if (_viewModel.EditingItem is not null) return;
-        if (_viewModel.SelectedFile is null) return;
+        if (e.Key == Key.F2)
+        {
+            if (_titleRename.IsEditingTitle) return;
+            if (_viewModel.EditingItem is not null) return;
+            if (_viewModel.SelectedFile is null) return;
 
-        _viewModel.BeginRenameCommand.Execute(_viewModel.SelectedFile);
-        e.Handled = true;
+            _viewModel.BeginRenameCommand.Execute(_viewModel.SelectedFile);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && _layoutEditMode.IsEditing)
+        {
+            _layoutEditMode.ExitEditLayout(LayoutModeChangeSource.Keyboard);
+            e.Handled = true;
+        }
     }
 
     /// <inheritdoc/>
     protected override void OnLocationChanged(EventArgs e)
     {
-        if (_model is null) return;
+        // Stage S guard (docs/PLANS/workspace-grid-03-04-integration.md §1.5): a PanelGeometryWriter.Apply
+        // call already wrote model.Position directly — this handler firing synchronously as a side
+        // effect of that same Left/Top assignment must not write it a second, redundant time.
+        if (_model is null || _geometryWriter.IsApplying) return;
         _model.Position = new Point((int)Left, (int)Top);
     }
 
@@ -269,8 +506,11 @@ public partial class ChildWindow : Window
     /// <inheritdoc/>
     protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
     {
-        // While rolled up, keep the persisted size at the expanded dimensions for restore.
-        if (_model is null || _model.IsRolledUp) return;
+        // While rolled up, keep the persisted size at the expanded dimensions for restore. Stage S guard
+        // (docs/PLANS/workspace-grid-03-04-integration.md §1.5): a PanelGeometryWriter.Apply call already
+        // wrote model.Size directly — skip the redundant write this handler would otherwise perform as a
+        // synchronous side effect of that same Width/Height assignment (baseline risk 17).
+        if (_model is null || _model.IsRolledUp || _geometryWriter.IsApplying) return;
         _model.Size = new Size((int)Width, (int)Height);
     }
 
@@ -288,11 +528,75 @@ public partial class ChildWindow : Window
 
     private void RollUpMenu_Click(object sender, RoutedEventArgs e) => _rollUpBehavior.ToggleRollUp();
 
-    private void RenameMenu_Click(object sender, RoutedEventArgs e) => _titleRename.BeginRename();
+    /// <summary>
+    /// <c>HeaderContextMenu</c>'s "Edit layout" item (docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #2) —
+    /// toggles the app-global <see cref="ILayoutEditModeService"/>. A no-op when
+    /// <see cref="ILayoutEditModeService.IsLayoutLocked"/> is <see langword="true"/> (the item is also
+    /// disabled then, via the <c>CanEnterEditLayout</c> binding in <c>ChildWindow.xaml</c>).
+    /// </summary>
+    private void EditLayoutMenu_Click(object sender, RoutedEventArgs e) =>
+        _layoutEditMode.Toggle(LayoutModeChangeSource.PanelMenu);
 
     /// <summary>
-    /// Clears this panel's selection when any of the three header buttons (Sort/View/RollUp) is
-    /// clicked (ui-polishing-1 §2.4 Block A1) — a single handler on the buttons' shared parent
+    /// <c>HeaderContextMenu</c>'s "Lock layout" item (D-9 #2/D-3). Locking while
+    /// <see cref="ILayoutEditModeService.Mode"/> is <see cref="LayoutInteractionMode.EditLayout"/> forces
+    /// an immediate exit back to <see cref="LayoutInteractionMode.Normal"/> — handled inside the service
+    /// itself (see its <c>IsLayoutLocked</c> setter remarks), not here.
+    /// </summary>
+    private void LockLayoutMenu_Click(object sender, RoutedEventArgs e) =>
+        _layoutEditMode.IsLayoutLocked = !_layoutEditMode.IsLayoutLocked;
+
+    /// <summary>
+    /// Opens the header overflow menu (§5.4, docs/PLANS/phase-5-ambient-accent-ui.md C6). Reuses the
+    /// <b>same</b> <see cref="ContextMenu"/> instance (<c>HeaderContextMenu</c>, declared once in
+    /// <c>ChildWindow.xaml</c>) the title bar's right-click already opens successfully — never
+    /// constructs a new <see cref="ContextMenu"/> (R-7): this panel carries <c>WS_EX_NOACTIVATE</c>
+    /// (ADR-013 R1), so a brand-new input surface would be an unproven risk with no upside over reusing
+    /// one already known to receive input correctly on this window. Anchors the menu under the button
+    /// that opened it, rather than <see cref="PlacementMode.MousePoint"/> (the right-click path's
+    /// effective default) — <see cref="HeaderContextMenu_Closed"/> restores that default afterward so a
+    /// subsequent right-click is unaffected by this button-anchored placement.
+    /// </summary>
+    private void OverflowButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button) return;
+
+        HeaderContextMenu.PlacementTarget = button;
+        HeaderContextMenu.Placement = PlacementMode.Bottom;
+        HeaderContextMenu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Restores <see cref="HeaderContextMenu"/>'s <see cref="ContextMenu.PlacementTarget"/>/
+    /// <see cref="ContextMenu.Placement"/> to "unset" after every close, regardless of which path opened
+    /// it. <see cref="OverflowButton_Click"/> sets both as local values so ClearValue is required (a
+    /// plain re-assignment to null/default would itself count as a new local value); with them cleared,
+    /// the next right-click invocation goes back through <c>ContextMenuService</c>'s own default
+    /// (<see cref="PlacementMode.MousePoint"/>, anchored at the cursor) instead of silently inheriting
+    /// the button-anchored placement <see cref="OverflowButton_Click"/> left behind.
+    /// </summary>
+    private void HeaderContextMenu_Closed(object sender, RoutedEventArgs e)
+    {
+        HeaderContextMenu.ClearValue(ContextMenu.PlacementTargetProperty);
+        HeaderContextMenu.ClearValue(ContextMenu.PlacementProperty);
+    }
+
+    /// <summary>
+    /// Begins the title rename, then re-resolves <see cref="PanelVisualStateBehavior"/>'s state: unlike
+    /// <see cref="_interactionTracker"/>'s gesture state or PanelRoot's own hover, "is the title being
+    /// edited" has no change notification of its own to subscribe to (<see cref="PanelTitleRenameBehavior"/>
+    /// is untouched by this phase — see its class remarks) — so every call site that changes it explicitly
+    /// nudges the visual state afterward instead.
+    /// </summary>
+    private void RenameMenu_Click(object sender, RoutedEventArgs e)
+    {
+        _titleRename.BeginRename();
+        _panelVisualState.Refresh();
+    }
+
+    /// <summary>
+    /// Clears this panel's selection when any header button (Sort/View/RollUp, and — since C6 — Overflow)
+    /// is clicked (ui-polishing-1 §2.4 Block A1) — a single handler on the buttons' shared parent
     /// <c>StackPanel</c>, rather than one per button. Runs on the tunneling Preview pass and
     /// deliberately never sets <c>e.Handled</c>, so each button's own <c>Command</c>/<c>Click</c> still
     /// fires normally afterwards on the bubbling pass — clearing the selection must never prevent the
@@ -339,19 +643,78 @@ public partial class ChildWindow : Window
     }
 
     private void TitleEditBox_KeyDown(object sender, KeyEventArgs e)
-        => _titleRename.OnTitleEditBoxKeyDown(sender, e);
+    {
+        _titleRename.OnTitleEditBoxKeyDown(sender, e);
+        _panelVisualState.Refresh();
+    }
 
     private void TitleEditBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
-        => _titleRename.OnTitleEditBoxLostKeyboardFocus(sender, e);
+    {
+        _titleRename.OnTitleEditBoxLostKeyboardFocus(sender, e);
+        _panelVisualState.Refresh();
+    }
 
     private void Resize_DragStarted(object sender, DragStartedEventArgs e)
-        => _resizeController.OnResizeDragStarted(sender, e);
+        => _thumbResizeController?.OnResizeDragStarted(sender, e);
 
     private void Resize_DragDelta(object sender, DragDeltaEventArgs e)
-        => _resizeController.OnResizeDragDelta(sender, e);
+        => _thumbResizeController?.OnResizeDragDelta(sender, e);
 
     private void Resize_DragCompleted(object sender, DragCompletedEventArgs e)
-        => _resizeController.OnResizeDragCompleted(sender, e);
+        => _thumbResizeController?.OnResizeDragCompleted(sender, e);
+
+    /// <summary>
+    /// Log-only observer of the <c>ResizeOverlay</c>'s bubbling <c>Mouse.GotMouseCapture</c> (one
+    /// handler for all 8 <c>Thumb</c>s — docs/Refactoring/ §3.4). Never sets <c>e.Handled</c>.
+    /// </summary>
+    private void ResizeOverlay_GotMouseCapture(object sender, MouseEventArgs e)
+        => _diagnostics.CaptureGot(_model?.Id, e.OriginalSource?.GetType().Name ?? "null", Mouse.Captured?.GetType().Name);
+
+    /// <summary>
+    /// Observer of the <c>ResizeOverlay</c>'s bubbling <c>Mouse.LostMouseCapture</c> — see
+    /// <see cref="ResizeOverlay_GotMouseCapture"/>. Never sets <c>e.Handled</c>. As of Phase 1 resize
+    /// stabilization (commit C5), this is no longer purely log-only: the existing
+    /// <see cref="IGestureDiagnostics.CaptureLost"/> call stays first (unchanged order/position — the
+    /// diagnostics-log-events.md contract), and is now followed by the REAL cleanup path
+    /// (<see cref="PanelResizeController.OnCaptureLost"/>), which ends any gesture still active for this
+    /// panel — an involuntary capture loss (Alt+Tab, system dialog, WorkerW/native capture theft) is
+    /// exactly the scenario H2/H4 describe (plan §6).
+    /// </summary>
+    private void ResizeOverlay_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        _diagnostics.CaptureLost(
+            _model?.Id,
+            e.OriginalSource?.GetType().Name ?? "null",
+            Mouse.Captured?.GetType().Name,
+            (e.OriginalSource as Thumb)?.IsDragging ?? false);
+
+        _thumbResizeController?.OnCaptureLost(sender, e);
+    }
+
+    /// <summary>
+    /// Stale-drag self-heal entry point (plan §3.4/§6 H4) — runs on the tunneling <c>Preview</c> pass,
+    /// BEFORE the individual <c>Thumb</c>'s own <c>MouseLeftButtonDown</c> handler (which silently
+    /// no-ops while <see cref="Thumb.IsDragging"/> is already <see langword="true"/>). Never sets
+    /// <c>e.Handled</c> — the <c>Thumb</c> underneath must still receive this same click normally
+    /// afterwards to start its own (now un-stuck) drag.
+    /// </summary>
+    private void ResizeOverlay_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        => _thumbResizeController?.RecoverStaleDrag(e.OriginalSource);
+
+    /// <summary>
+    /// ADR-021 "window disposal forces state to Idle": ends any resize gesture still active when this
+    /// panel unloads, and forces the shared <see cref="PanelInteractionTracker"/> back to
+    /// <see cref="PanelInteractionState.Idle"/> as a final backstop (in case some future gesture type
+    /// besides resize/drag ever fails to release it itself).
+    /// </summary>
+    private void ChildWindow_Unloaded(object sender, RoutedEventArgs e)
+    {
+        // IPanelResizeController.AbortResize(Unloaded) is the shared-contract equivalent of
+        // PanelResizeController.OnUnloaded() (which itself just calls AbortResize(Unloaded)) — routed
+        // through the common interface so this works for both resize paths.
+        _resizeController.AbortResize(ResizeEndReason.Unloaded);
+        _interactionTracker.ForceIdle();
+    }
 
     /// <summary>
     /// Opens the double-clicked file. The original source's DataContext is the <see cref="FileItem"/>
@@ -561,9 +924,95 @@ public partial class ChildWindow : Window
             _viewModel.SelectedFile = item;
     }
 
+    /// <summary>
+    /// Re-snaps the panel's width whenever a property that feeds <see cref="GridMetrics"/>/
+    /// <see cref="AdaptiveGridLayout"/>'s icon-grid math changes on a user-driven gesture (never on
+    /// passive load — see <c>Initialize</c>'s own remarks and ADR-029's Q2 amendment). Fix-cycle 2
+    /// MAJOR-2 (adr/ADR-029-icon-layout-policy.md "Fix-цикл P05"): <see cref="ChildWindowModel.IconLayoutPolicy"/>
+    /// joins <see cref="ChildWindowModel.IconSize"/>/<see cref="ChildWindowModel.ViewMode"/> here —
+    /// switching a live panel from <see cref="IconLayoutPolicy.LegacyStretch"/> to
+    /// <see cref="IconLayoutPolicy.FixedGap"/> (or back) changes <see cref="GridMetrics.ContentHorizontalChrome"/>/
+    /// <see cref="GridMetrics.MinPanelWidth(double, IconLayoutPolicy, double)"/> (the M-2 scrollbar
+    /// reservation) for the SAME persisted window width, so the persisted width can silently stop
+    /// matching what <see cref="Controls.AdaptiveIconGridPanel"/> actually renders (the exact "lost column" class
+    /// of bug ADR-029's F-3 fix already closed once for <c>IconSize</c>/<c>ViewMode</c> changes) unless
+    /// this handler re-snaps here too. <see cref="IPanelResizeController.SnapWidthToGrid"/> itself already
+    /// gates on Grid mode and <c>IAppSettings.SnapResizeToIconGrid</c> — no extra guard is needed here,
+    /// mirroring exactly how the pre-existing <c>IconSize</c>/<c>ViewMode</c> triggers rely on that same
+    /// internal gate rather than duplicating it.
+    /// <para>
+    /// <b>Known, pre-existing, unchanged scope gap (not introduced or fixed by this addition):</b>
+    /// <see cref="IPanelResizeController.SnapWidthToGrid"/> does not special-case
+    /// <see cref="ChildWindowModel.GeometryMode"/> — a <see cref="PanelGeometryMode.GridAligned"/> panel's
+    /// width is snapped to the icon-grid cell size here exactly as a <see cref="PanelGeometryMode.LegacyFreeform"/>
+    /// one is, same as it already was for <c>IconSize</c>/<c>ViewMode</c> before this fix-cycle. Owning
+    /// that interaction is ADR-028/the workspace-grid geometry package's territory, explicitly out of
+    /// this fix-cycle's zone (P02 fix-2) — adding <c>IconLayoutPolicy</c> to this list keeps it perfectly
+    /// consistent with the two triggers that were already here, not better or worse with respect to
+    /// <c>GeometryMode</c>.
+    /// </para>
+    /// </summary>
     private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ChildWindowModel.IconSize) or nameof(ChildWindowModel.ViewMode))
+        if (e.PropertyName is nameof(ChildWindowModel.IconSize)
+            or nameof(ChildWindowModel.ViewMode)
+            or nameof(ChildWindowModel.IconLayoutPolicy))
             _resizeController.SnapWidthToGrid();
+    }
+
+    /// <summary>
+    /// <see cref="ILayoutEditModeService.ModeChanged"/> subscriber (docs/PLANS/phase-6-edit-layout-ux.md
+    /// §1 D-4) — a real <see cref="LayoutInteractionMode"/> transition (entering or leaving Edit Layout).
+    /// Delegates to <see cref="AbortGesturesAndApplyLayoutGate"/>, which every subscriber is required to
+    /// run in full (abort THEN repaint) before returning — see that method's remarks for the exact order.
+    /// </summary>
+    private void OnLayoutModeChanged(object? sender, LayoutModeChangedEventArgs e) =>
+        AbortGesturesAndApplyLayoutGate();
+
+    /// <summary>
+    /// <see cref="ILayoutEditModeService.PropertyChanged"/> subscriber — catches the one live-gate input
+    /// <see cref="OnLayoutModeChanged"/> does NOT: <see cref="ILayoutEditModeService.IsLayoutLocked"/>
+    /// toggled while <see cref="ILayoutEditModeService.Mode"/> stays <see cref="LayoutInteractionMode.Normal"/>
+    /// throughout (locking while already editing instead forces an internal exit back to <c>Normal</c>,
+    /// which raises <see cref="ILayoutEditModeService.ModeChanged"/> on its own and reaches
+    /// <see cref="AbortGesturesAndApplyLayoutGate"/> that way — this handler is the second, narrower
+    /// entry point for the case where <c>Mode</c> never actually changes). Every other property this
+    /// service raises (<c>Mode</c>/<c>IsEditing</c>/<c>CanEnterEditLayout</c>) is either already covered
+    /// by <see cref="OnLayoutModeChanged"/> or does not affect <see cref="LayoutGesturePolicy.Resolve"/>'s
+    /// inputs, so they are ignored here.
+    /// </summary>
+    private void OnLayoutEditModePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(ILayoutEditModeService.IsLayoutLocked)) return;
+
+        AbortGesturesAndApplyLayoutGate();
+    }
+
+    /// <summary>
+    /// D-4's abort sequence, run in this exact order before the resize gate (D-5) is re-applied with the
+    /// freshly-resolved <see cref="LayoutGesturePolicy"/> allowance:
+    /// <list type="number">
+    /// <item><description><see cref="_resizeController"/>.<c>AbortResize(ResizeEndReason.SourceChanged)</c> — idempotent on both resize paths (ADR-022 §1.6).</description></item>
+    /// <item><description><see cref="_dragMoveBehavior"/>.<c>AbortDrag()</c> — idempotent (docs/PLANS/phase-6-edit-layout-ux.md §1 D-4).</description></item>
+    /// <item><description><see cref="_interactionTracker"/>.<c>ForceIdle()</c> — backstop (ADR-021 escape hatch), in case some future gesture type fails to release itself via the two calls above.</description></item>
+    /// <item><description><see cref="_resizeGate"/>.<c>SetAllowedByPolicy</c> — only NOW, after every active gesture has had a chance to cleanly end against the OLD policy, is the resize affordance re-gated for the new one.</description></item>
+    /// </list>
+    /// <see cref="_dragMoveBehavior"/>'s own <c>canMove</c> delegate needs no equivalent explicit refresh
+    /// here — it is a live <c>Func&lt;bool&gt;</c> that re-reads <see cref="LayoutGesturePolicy.Resolve"/>
+    /// fresh on every title-bar press (see its constructor doc comment), so the very next press already
+    /// sees the new policy without this method touching it.
+    /// </summary>
+    private void AbortGesturesAndApplyLayoutGate()
+    {
+        _resizeController.AbortResize(ResizeEndReason.SourceChanged);
+        _dragMoveBehavior.AbortDrag();
+        _interactionTracker.ForceIdle();
+
+        var allowance = LayoutGesturePolicy.Resolve(
+            _layoutEditMode.Mode,
+            _layoutEditMode.IsLayoutLocked,
+            NormalModeLayoutGesturesParser.ParseOrMoveOnly(_appSettings.NormalModeLayoutGestures));
+
+        _resizeGate.SetAllowedByPolicy(allowance.CanResize);
     }
 }

@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 5,
+  "writtenAtUtc": "2026-09-19T08:00:00.0000000+00:00",
+  "appVersion": "0.4.0",
+  "panels": [
+    {
+      "id": "cccccccc-0000-0000-0000-000000000001",
+      "title": "Current Panel",
+      "pageId": "default",
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 400,
+        "monitorDeviceId": "\\\\.\\DISPLAY1",
+        "windowState": "Normal",
+        "isRolledUp": false,
+        "isVisible": true,
+        "geometryMode": "LegacyFreeform",
+        "sizingMode": "Manual"
+      },
+      "appearance": {
+        "accentColor": "#6B7280",
+        "surfaceOpacity": 0.8,
+        "surfaceStyle": "Ambient",
+        "textColor": "#DDDDDD",
+        "iconSize": 48,
+        "iconLayoutPolicy": "LegacyStretch"
+      },
+      "content": {
+        "viewMode": "List",
+        "contentFilter": "ShowAll",
+        "sortMode": "Manual",
+        "sourceFolderPath": null,
+        "filePaths": ["C:\\Desktop\\a.txt"]
+      }
+    }
+  ],
+  "pages": {
+    "ids": ["default"],
+    "currentPageId": "default"
+  },
+  "layoutSnapshots": [
+    {
+      "id": "snap-v3-1",
+      "name": "Baseline",
+      "createdAt": "2026-09-19T07:00:00.0000000",
+      "panels": [
+        {
+          "id": "cccccccc-0000-0000-0000-000000000002",
+          "title": "Snap G",
+          "pageId": "default",
+          "geometry": {
+            "x": 50,
+            "y": 60,
+            "width": 100,
+            "height": 100,
+            "monitorDeviceId": null,
+            "windowState": "Maximized",
+            "isRolledUp": false,
+            "isVisible": true,
+            "geometryMode": "LegacyFreeform",
+            "sizingMode": "Manual"
+          },
+          "appearance": {
+            "accentColor": "#6B7280",
+            "surfaceOpacity": 0.8,
+            "surfaceStyle": "Ambient",
+            "textColor": "#DDDDDD",
+            "iconSize": 48,
+            "iconLayoutPolicy": "LegacyStretch"
+          },
+          "content": {
+            "viewMode": "Grid",
+            "contentFilter": "HideShortcuts",
+            "sortMode": "Name",
+            "sourceFolderPath": null,
+            "filePaths": []
+          }
+        },
+        {
+          "id": "cccccccc-0000-0000-0000-000000000003",
+          "title": "Snap H",
+          "pageId": "default",
+          "geometry": {
+            "x": 70,
+            "y": 80,
+            "width": 110,
+            "height": 110,
+            "monitorDeviceId": null,
+            "windowState": "Minimized",
+            "isRolledUp": true,
+            "isVisible": false,
+            "geometryMode": "LegacyFreeform",
+            "sizingMode": "Manual"
+          },
+          "appearance": {
+            "accentColor": "#6B7280",
+            "surfaceOpacity": 0.8,
+            "surfaceStyle": "Ambient",
+            "textColor": "#DDDDDD",
+            "iconSize": 48,
+            "iconLayoutPolicy": "LegacyStretch"
+          },
+          "content": {
+            "viewMode": "List",
+            "contentFilter": "FoldersOnly",
+            "sortMode": "Manual",
+            "sourceFolderPath": "G:\\Portal3",
+            "filePaths": []
+          }
+        }
+      ]
+    }
+  ],
+  "systemIconsPanel": {
+    "isEnabled": true,
+    "showOnAllVirtualDesktops": false,
+    "iconSize": "Medium",
+    "anchorVirtualDesktopId": "cccccccc-1111-1111-1111-111111111111",
+    "items": [{ "kind": "RecycleBin", "isVisible": true, "order": 0 }]
+  }
+}

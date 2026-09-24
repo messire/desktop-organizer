@@ -39,11 +39,15 @@ public class SelectedPanelSettingsViewModel : INotifyPropertyChanged
         set => Apply(p => p.Title = value);
     }
 
-    /// <summary>Background colour (hex) of the selected panel.</summary>
-    public string SelectedPanelBackgroundColor
+    /// <summary>
+    /// Semantic accent colour (hex) of the selected panel — proxies <see cref="ChildWindowModel.AccentColor"/>
+    /// (ADR-025 D-10; renamed from <c>SelectedPanelBackgroundColor</c> now that the settings-UI-facing
+    /// name matches the model property it edits).
+    /// </summary>
+    public string SelectedPanelAccentColor
     {
-        get => _panel?.BackgroundColor ?? string.Empty;
-        set => Apply(p => p.BackgroundColor = value);
+        get => _panel?.AccentColor ?? string.Empty;
+        set => Apply(p => p.AccentColor = value);
     }
 
     /// <summary>Text colour (hex) of the selected panel.</summary>
@@ -53,12 +57,29 @@ public class SelectedPanelSettingsViewModel : INotifyPropertyChanged
         set => Apply(p => p.TextColor = value);
     }
 
-    /// <summary>Background opacity (0–1) of the selected panel.</summary>
-    public double SelectedPanelOpacity
+    /// <summary>
+    /// Surface opacity (0–1) of the selected panel — proxies <see cref="ChildWindowModel.SurfaceOpacity"/>
+    /// (ADR-025 D-10; renamed from <c>SelectedPanelOpacity</c>, see the remarks on
+    /// <see cref="SelectedPanelAccentColor"/>).
+    /// </summary>
+    public double SelectedPanelSurfaceOpacity
     {
-        get => _panel?.BackgroundOpacity ?? 1.0;
-        set => Apply(p => p.BackgroundOpacity = value);
+        get => _panel?.SurfaceOpacity ?? 1.0;
+        set => Apply(p => p.SurfaceOpacity = value);
     }
+
+    /// <summary>
+    /// How the selected panel's surface blends with <see cref="SelectedPanelAccentColor"/> — proxies
+    /// <see cref="ChildWindowModel.SurfaceStyle"/> (ADR-025 D-10).
+    /// </summary>
+    public PanelSurfaceStyle SelectedPanelSurfaceStyle
+    {
+        get => _panel?.SurfaceStyle ?? PanelSurfaceStyle.Ambient;
+        set => Apply(p => p.SurfaceStyle = value);
+    }
+
+    /// <summary>All <see cref="PanelSurfaceStyle"/> members, for the settings window's surface-style selector.</summary>
+    public IReadOnlyList<PanelSurfaceStyle> SurfaceStyles { get; } = Enum.GetValues<PanelSurfaceStyle>();
 
     /// <summary>Icon size (px) of the selected panel.</summary>
     public double SelectedPanelIconSize
@@ -100,9 +121,10 @@ public class SelectedPanelSettingsViewModel : INotifyPropertyChanged
 
         OnPropertyChanged(nameof(HasSelectedPanel));
         OnPropertyChanged(nameof(SelectedPanelTitle));
-        OnPropertyChanged(nameof(SelectedPanelBackgroundColor));
+        OnPropertyChanged(nameof(SelectedPanelAccentColor));
         OnPropertyChanged(nameof(SelectedPanelTextColor));
-        OnPropertyChanged(nameof(SelectedPanelOpacity));
+        OnPropertyChanged(nameof(SelectedPanelSurfaceOpacity));
+        OnPropertyChanged(nameof(SelectedPanelSurfaceStyle));
         OnPropertyChanged(nameof(SelectedPanelIconSize));
         OnPropertyChanged(nameof(SelectedPanelViewMode));
         OnPropertyChanged(nameof(SelectedPanelSortMode));

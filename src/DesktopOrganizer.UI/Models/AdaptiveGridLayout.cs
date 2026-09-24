@@ -205,6 +205,38 @@ public static class AdaptiveGridLayout
     }
 
     /// <summary>
+    /// Policy-aware overload (ADR-029 Решение 1/Решение 3 — the "single new switch-point" the ADR's
+    /// "Инварианты/API" table calls for): <see cref="IconLayoutPolicy.FixedGap"/> returns
+    /// <paramref name="minGap"/> UNCONDITIONALLY, even for a full row with more than one item — i.e. it
+    /// is exactly today's "incomplete row" branch of the six-argument overload above, applied to every
+    /// row. <see cref="IconLayoutPolicy.LegacyStretch"/> delegates to that same six-argument overload
+    /// with NO CHANGE whatsoever, so every existing caller/test that predates <see cref="IconLayoutPolicy"/>
+    /// (and every caller that never passes one) keeps observing bit-for-bit ADR-018 stretch-gap
+    /// behavior. This is the ONLY point in <see cref="AdaptiveGridLayout"/> where
+    /// <see cref="IconLayoutPolicy"/> is allowed to influence the pure math — <see cref="RowCapacity"/>,
+    /// <see cref="RowCount"/>, <see cref="ItemsInRow"/>, <see cref="Offset"/>, <see cref="Extent"/>,
+    /// <see cref="CountForExtent"/>, and <see cref="SnapExtent"/> are all policy-agnostic by design
+    /// (ADR-029 Решение 3: no second, competing "gap" concept is introduced — the policy only chooses
+    /// which of the two ALREADY-EXISTING <see cref="RowGap"/> branches applies to a full row).
+    /// </summary>
+    /// <param name="itemsInRow">The number of items actually placed in this row (<see cref="ItemsInRow"/>).</param>
+    /// <param name="rowCapacity">The row's maximum capacity (<see cref="RowCapacity"/>'s <c>k_max</c>).</param>
+    /// <param name="available">The available length along the axis.</param>
+    /// <param name="cell">The cell size along the axis.</param>
+    /// <param name="minGap">The minimum gap between adjacent cells (<c>pmin</c>).</param>
+    /// <param name="edgePadding">The edge padding (<c>m</c>).</param>
+    /// <param name="policy">Which of the two ADR-029 gap-distribution policies to apply.</param>
+    /// <returns>
+    /// <paramref name="minGap"/> unconditionally when <paramref name="policy"/> is
+    /// <see cref="IconLayoutPolicy.FixedGap"/>; otherwise exactly what the six-argument
+    /// <see cref="RowGap(int, int, double, double, double, double)"/> overload returns.
+    /// </returns>
+    public static double RowGap(int itemsInRow, int rowCapacity, double available, double cell, double minGap, double edgePadding, IconLayoutPolicy policy)
+        => policy == IconLayoutPolicy.FixedGap
+            ? minGap
+            : RowGap(itemsInRow, rowCapacity, available, cell, minGap, edgePadding);
+
+    /// <summary>
     /// Computes the offset of the <paramref name="indexInLine"/>-th cell along an axis. Axis-agnostic:
     /// pass horizontal values for column offsets, vertical values for row offsets.
     /// </summary>

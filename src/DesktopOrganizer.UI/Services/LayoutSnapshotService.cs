@@ -1,13 +1,15 @@
 using System.Text.Json;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Models;
+using DesktopOrganizer.UI.State;
 
 namespace DesktopOrganizer.UI.Services;
 
 /// <summary>
-/// Implements named layout snapshots — capture, restore, delete and JSON persistence.
-/// Snapshots are stored in <see cref="IAppSettings.LayoutSnapshots"/> as a JSON array.
-/// Maximum of 10 snapshots; the oldest is automatically removed when the limit is exceeded.
+/// Implements named layout snapshots — capture, restore, delete and persistence.
+/// Snapshots are persisted as part of the shared versioned JSON application-state document
+/// (<see cref="IApplicationStateService"/>, ADR-024 C6). Maximum of 10 snapshots; the oldest is
+/// automatically removed when the limit is exceeded.
 /// </summary>
 internal sealed class LayoutSnapshotService : ILayoutSnapshotService
 {
@@ -19,16 +21,30 @@ internal sealed class LayoutSnapshotService : ILayoutSnapshotService
     };
 
     private readonly IWindowManager _windowManager;
-    private readonly IAppSettings _appSettings;
+    private readonly IApplicationStateService _applicationStateService;
+    private readonly IPanelItemStorageService _itemStorage;
     private readonly List<LayoutSnapshot> _snapshots = [];
+
+    // Guards Load() so only the first call actually seeds _snapshots — see Load()'s remarks.
+    private bool _loaded;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LayoutSnapshotService"/> class.
     /// </summary>
-    public LayoutSnapshotService(IWindowManager windowManager, IAppSettings appSettings)
+    /// <param name="windowManager">Creates/removes/syncs the live panels a snapshot captures or restores.</param>
+    /// <param name="applicationStateService">Persists captured/deleted snapshots.</param>
+    /// <param name="itemStorage">
+    /// Provides read-only manifest lookups for <see cref="WindowManager.ResolveStalePanelPaths"/>
+    /// (MAJOR-1 fix, P08 fix cycle 2, 2026-09-22) — see <see cref="Restore"/>'s remarks.
+    /// </param>
+    public LayoutSnapshotService(
+        IWindowManager windowManager,
+        IApplicationStateService applicationStateService,
+        IPanelItemStorageService itemStorage)
     {
         _windowManager = windowManager;
-        _appSettings = appSettings;
+        _applicationStateService = applicationStateService;
+        _itemStorage = itemStorage;
     }
 
     /// <inheritdoc />
@@ -70,6 +86,20 @@ internal sealed class LayoutSnapshotService : ILayoutSnapshotService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// MAJOR-1 fix (P08 fix cycle 2, 2026-09-22): every panel model is deserialized up front, into an
+    /// in-memory list, BEFORE any of them is (re)constructed via <see cref="IWindowManager.CreateChildWindow"/>
+    /// — mirroring <see cref="IWindowManager.LoadWindowsState"/>'s own pre-construction resolution pass
+    /// (M1, fix cycle 1). The previous single-loop implementation deserialized-then-immediately-created
+    /// one panel at a time, so each panel's stale-original-path self-heal only ever ran through
+    /// <c>ChildWindowViewModel.LoadFromModel</c>'s own per-panel <c>TryFindManagedPath</c> — which has no
+    /// visibility into sibling panels not yet constructed. Two snapshot panels whose stale originals both
+    /// unambiguously resolved to the SAME single managed copy would therefore both have been handed that
+    /// same copy — the exact cross-panel-ownership bug <see cref="WindowManager.ResolveStalePanelPaths"/>
+    /// already fixed for the regular startup load path (M1) — because that centralized, cross-panel-aware
+    /// pass was never invoked here at all. Calling it here, across every about-to-be-recreated panel at
+    /// once before any of them exists, closes the same gap for snapshot restore.
+    /// </remarks>
     public void Restore(string snapshotId)
     {
         var snapshot = _snapshots.FirstOrDefault(s => s.Id == snapshotId);
@@ -84,7 +114,9 @@ internal sealed class LayoutSnapshotService : ILayoutSnapshotService
         foreach (var id in currentIds)
             _windowManager.RemoveChildWindow(id, releaseManagedItems: false, deferSave: true);
 
-        // Re-create panels from the snapshot.
+        // Deserialize every panel model up front — see this method's remarks for why this must happen
+        // before ANY panel is created.
+        var models = new List<ChildWindowModel>();
         foreach (var json in snapshot.PanelJsonItems)
         {
             ChildWindowModel? model = null;
@@ -102,7 +134,15 @@ internal sealed class LayoutSnapshotService : ILayoutSnapshotService
             // Assign a fresh Id so we never collide with panels that may still be
             // in the process of being cleaned up by the window system.
             model.Id = Guid.NewGuid();
+            models.Add(model);
+        }
 
+        // Cross-panel-aware stale-path resolution across every panel about to be recreated at once —
+        // see this method's remarks (MAJOR-1).
+        WindowManager.ResolveStalePanelPaths(models, _itemStorage);
+
+        foreach (var model in models)
+        {
             // Skip panels with invalid paths — show nothing rather than crashing.
             _windowManager.CreateChildWindow(model);
         }
@@ -123,37 +163,34 @@ internal sealed class LayoutSnapshotService : ILayoutSnapshotService
     }
 
     /// <inheritdoc />
-    public void Save()
-    {
-        try
-        {
-            var json = JsonSerializer.Serialize(_snapshots, SerializerOptions);
-            _appSettings.LayoutSnapshots = json;
-            _appSettings.Save();
-        }
-        catch (JsonException)
-        {
-            // If serialization fails (e.g. some model contains non-serialisable data), keep last good state.
-        }
-    }
+    /// <remarks>
+    /// Persists synchronously via <see cref="IApplicationStateService.SaveNow"/> — snapshot
+    /// create/delete is structural (ADR-024 D-12). <see cref="IApplicationStateService.SaveNow"/>
+    /// itself pulls the <em>current</em> <see cref="Snapshots"/> value at write time (uniform pull
+    /// model, ADR-024 D-11), so this call only needs to make sure <see cref="_snapshots"/> already
+    /// reflects the desired state before asking for the write.
+    /// </remarks>
+    public void Save() => _applicationStateService.SaveNow();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Reads <see cref="IApplicationStateService.Snapshots"/> — the already-loaded, already-migrated
+    /// snapshot list from the single <c>ApplicationStateService.Load()</c> call in <c>Program.Main</c>
+    /// (ADR-024 D-11) — rather than parsing JSON off settings itself, but only on the <em>first</em>
+    /// call: <see cref="IApplicationStateService.Snapshots"/> is a value frozen at that single startup
+    /// <c>Load()</c> call and is never updated afterwards as snapshots are captured/deleted during the
+    /// session (those live only in <see cref="_snapshots"/>). Idempotent — safe to call more than once
+    /// (e.g. every time the settings window is opened, via <c>LayoutSnapshotsViewModel</c>'s
+    /// constructor): every call after the first is a no-op, so a snapshot captured or deleted earlier
+    /// in the session is never wiped out and replaced by the stale startup snapshot list (ADR-024
+    /// finalization MAJOR M-2 — the previous Clear()+re-add-every-call behavior did exactly that).
+    /// </remarks>
     public void Load()
     {
+        if (_loaded) return;
+        _loaded = true;
+
         _snapshots.Clear();
-
-        var json = _appSettings.LayoutSnapshots;
-        if (string.IsNullOrWhiteSpace(json) || json == "[]") return;
-
-        try
-        {
-            var loaded = JsonSerializer.Deserialize<List<LayoutSnapshot>>(json, SerializerOptions);
-            if (loaded is not null)
-                _snapshots.AddRange(loaded);
-        }
-        catch (JsonException)
-        {
-            // Corrupt persistence — start with an empty list rather than crashing.
-        }
+        _snapshots.AddRange(_applicationStateService.Snapshots);
     }
 }

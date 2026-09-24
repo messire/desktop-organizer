@@ -1,0 +1,441 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
+                    xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
+                    xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+                    xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming">
+    <!--
+        Ambient Accent Visual System — PanelChrome default style (D-8, docs/PLANS/phase-5-ambient-accent-ui.md
+        §1 D-8, §5.3/§5.4/§5.6 of the phase spec). Controls/PanelChrome.cs's static constructor points
+        DefaultStyleKeyProperty at typeof(PanelChrome), which WPF resolves against Application.Resources —
+        built from every dictionary in App.xaml's MergedDictionaries — so this Style (an implicit
+        TargetType style, keyed by the type itself) is found without a Themes/Generic.xaml.
+
+        The four Ambient-Accent converters below are registered HERE, not in Templates.xaml (which — per
+        D-2 — keeps registering the converters ITS OWN remaining content, FileContextMenu/ListViewTemplate/
+        GridViewTemplate/FileNameTextStyle/FileNameEditBoxStyle, needs): Templates.xaml is merged AFTER
+        this dictionary (Colors -> [Colors.HighContrast] -> Spacing -> Brushes -> Typography -> Icons ->
+        Controls -> Panels -> Templates, built in App.xaml.cs's LoadResourceDictionaries()), so a
+        StaticResource reference in THIS file's own ControlTemplate could never resolve a key defined in
+        Templates.xaml (D-1's "backwards only" merge-order rule). Declaring them here, right
+        next to their only consumer so far, keeps the dependency direction correct; nothing stops a later
+        commit (SystemIconsPanelWindow.xaml/MainWindow.xaml, C5-C7) from referencing them too, since by the
+        time any Window-level XAML resolves a StaticResource, ALL of App.xaml's MergedDictionaries —
+        Panels.xaml included — are already fully merged into the flat Application.Resources.
+    -->
+    <conv:PanelSurfaceBrushConverter x:Key="PanelSurfaceBrush"/>
+    <conv:AccentBrushConverter x:Key="AccentBrush"/>
+    <conv:VisualStateToDoubleConverter x:Key="VisualStateToDouble"/>
+    <conv:ItemCountToTextConverter x:Key="ItemCountToText"/>
+    <conv:AccentIndicatorWidthConverter x:Key="AccentIndicatorWidth"/>
+
+    <!-- docs/PLANS/phase-6-edit-layout-ux.md §1 D-6: edit-aware siblings of VisualStateToDouble/
+         AccentIndicatorWidth above — MultiValueConverters over [VisualState, IsLayoutEditing] that
+         delegate to LayoutEditVisuals (Theming/LayoutEditVisuals.cs) instead of InteractionVisualState
+         directly. LayoutEditVisuals itself returns InteractionVisualState's exact values whenever
+         isLayoutEditing is false, so PART_InteractionOverlay/PART_HeaderActions/PART_AccentIndicator
+         below render byte-for-byte as they did in Phase 5 outside Edit Layout mode; the original two
+         single-value converters above are left untouched (still covered by their own dedicated tests). -->
+    <conv:EditAwareVisualStateToDoubleConverter x:Key="EditAwareVisualStateToDouble"/>
+    <conv:EditAwareAccentIndicatorWidthConverter x:Key="EditAwareAccentIndicatorWidth"/>
+
+    <!-- docs/PLANS/workspace-grid-07-visual.md "Border radius": clips PART_Chrome's own content
+         (header/content host) to the exact rounded rectangle its Background already paints — see the
+         converter's own remarks for why this is required BEFORE Radius.Panel (Spacing.xaml) could safely
+         be widened, and why it can never affect ResizeOverlay/native hit-testing (both are outside
+         PART_Chrome's subtree). -->
+    <conv:RoundedRectClipConverter x:Key="RoundedRectClip"/>
+
+    <Style TargetType="{x:Type controls:PanelChrome}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type controls:PanelChrome}">
+                    <!--
+                        PART_Chrome is the panel's actual visible surface — it replaces the outer
+                        <Border CornerRadius="6"> that used to live directly in ChildWindow.xaml (its
+                        Background was a ColorOpacityBrush MultiBinding over the now-removed
+                        Model.BackgroundColor/BackgroundOpacity; SurfaceBrush, from
+                        PanelSurfaceBrushConverter over Model.AccentColor/SurfaceOpacity/SurfaceStyle, is
+                        its direct replacement — same corner radius token, same role).
+                    -->
+                    <Border x:Name="PART_Chrome"
+                            Background="{TemplateBinding SurfaceBrush}"
+                            CornerRadius="{StaticResource Radius.Panel}"
+                            SnapsToDevicePixels="True">
+                        <!--
+                            docs/PLANS/workspace-grid-07-visual.md "Border radius": clips this Border's
+                            own content (the Grid below — header, accent indicator, content host) to its
+                            own rounded rectangle. Without this, a Border only paints its OWN
+                            Background/BorderBrush with rounded corners; square-cornered descendants
+                            (the ListBox's scrollbar, a selection rectangle flush against an edge) can
+                            render straight past the rounded corner into the transparent area outside it
+                            — invisible at the previous CornerRadius=6 (barely a few tenths of a DIP of
+                            overhang) but visibly wrong at the new, wider radius (see Spacing.xaml's
+                            Radius.Panel remarks) without this fix. RelativeSource Self (not
+                            TemplatedParent): this binds to PART_Chrome's OWN ActualWidth/ActualHeight/
+                            CornerRadius, the exact rectangle its Background already paints — not
+                            PanelChrome's (the templated control's) size, which happens to be identical
+                            here (PART_Chrome fills its templated parent) but is the wrong THING to name
+                            in the binding regardless. This Clip cannot reach ResizeOverlay's OWN WPF
+                            hit-test routing (a sibling, outside this Border's subtree) or the native
+                            WM_NCHITTEST path (which has no notion of corner radius at all) — but see
+                            RoundedRectClipConverter's own remarks for a SEPARATE, real risk this does NOT
+                            rule out: AllowsTransparency="True" routes clicks on a fully alpha-0 pixel
+                            straight to the desktop at the OS level, regardless of what WPF element sits
+                            there — mitigated (MAJOR-1, docs/PLANS/workspace-grid-07-visual.md fix-cycle 1)
+                            by widening ResizeOverlay's own corner strips to match Radius.Panel.
+                        -->
+                        <Border.Clip>
+                            <MultiBinding Converter="{StaticResource RoundedRectClip}">
+                                <Binding Path="ActualWidth" RelativeSource="{RelativeSource Self}"/>
+                                <Binding Path="ActualHeight" RelativeSource="{RelativeSource Self}"/>
+                                <Binding Path="CornerRadius" RelativeSource="{RelativeSource Self}"/>
+                            </MultiBinding>
+                        </Border.Clip>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <!--
+                                    Fixed at 8 (MAJOR-1 fix, widened again for the Edit Layout emphasis
+                                    channel — see below) — NOT Auto sized to PART_AccentIndicator's own
+                                    bound Width below. PART_AccentIndicator's Width is ALWAYS bound through
+                                    the EditAwareAccentIndicatorWidth MultiBinding (below), never directly
+                                    through AccentIndicatorWidthConverter (MINOR fix, fix-cycle round 2 —
+                                    corrected from an earlier version of this comment): EditAwareAccentIndicatorWidth
+                                    delegates to LayoutEditVisuals.AccentEmphasisFor(state, isLayoutEditing),
+                                    which itself calls InteractionVisualState.AccentEmphasisFor(state) — the
+                                    same baseline that ranges 1.0 (Idle) .. 1.7 (Resizing), i.e. the strip's
+                                    rendered width varies between 3.0px and 5.1px as VisualState changes when
+                                    isLayoutEditing is false. While Edit Layout mode IS active,
+                                    LayoutEditVisuals.AccentEmphasisFor layers a further AccentEmphasis
+                                    multiplier (1.35x, Theming/LayoutEditVisuals.cs) on top of that SAME
+                                    InteractionVisualState baseline, so the true combined maximum is
+                                    3.0 * 1.7 * 1.35 = 6.885px (Resizing while IsLayoutEditing=true — Edit
+                                    Layout mode permits resize, so this combination is reachable, not just
+                                    theoretical). An Auto column tracks that varying desired width exactly,
+                                    which resized PART_ContentHost (the * column next door — the whole icon
+                                    grid/file list) sideways by up to ~2.1px on every hover/drag/resize
+                                    transition (MAJOR-1, review round 3). 8 is a fixed upper bound
+                                    comfortably above the 6.885px combined max, so the column's width — and
+                                    therefore every sibling element's position — never moves; only the strip
+                                    drawn inside it grows/shrinks. Border.Width (below) is itself a double,
+                                    so x:Static/the converter binding assigns it directly with no
+                                    GridLength conversion needed at all.
+
+                                    P05/ADR-029 (F-3 fix): the "8" here is no longer JUST a resize-jitter
+                                    fix constant — it is also the exact width the icon-grid snap-time math
+                                    (GridMetrics.FileListHPadding, PanelResizeController/
+                                    NativePanelResizeController.SnapWidthToGrid) now subtracts from
+                                    Window.Width before computing RowCapacity, via the single source of
+                                    truth PanelMetrics.ContentLeftInset. Unlike AccentIndicatorWidth
+                                    (a double, bindable to Border.Width directly with no conversion),
+                                    ColumnDefinition.Width is a GridLength with no double->GridLength
+                                    TypeConverter — a bare x:Static of a double still cannot be assigned
+                                    here. PanelMetrics.ContentLeftInsetColumnWidth (a real GridLength
+                                    constant, the same "wrap the double in a GridLength" pattern as
+                                    HeaderRowHeight below) closes that gap, so this column and
+                                    GridMetrics.FileListHPadding now read the same literal "8" from one
+                                    place instead of two independently-maintained copies.
+                                -->
+                                <ColumnDefinition Width="{x:Static models:PanelMetrics.ContentLeftInsetColumnWidth}"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <!--
+                                    PanelMetrics.HeaderRowHeight (a real GridLength), not
+                                    TemplateBinding HeaderHeight (a double): RowDefinition.Height has no
+                                    double->GridLength auto-conversion (GridLengthConverter only accepts a
+                                    string), so binding it directly would be a binding error that only
+                                    shows up at runtime, never at `dotnet build`. HeaderRowHeight is the
+                                    exact GridLength PanelMetrics.cs itself documents as "for direct use in
+                                    a RowDefinition" — it also keeps this row's height tied to the SAME
+                                    fixed constant RollUpBehavior's collapsed target height uses (D-11),
+                                    rather than to a per-instance-overridable DP that could silently
+                                    desync from it.
+                                -->
+                                <RowDefinition Height="{x:Static models:PanelMetrics.HeaderRowHeight}"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <!--
+                                Accent indicator (§5.3): a thin strip along the panel's left edge, spanning
+                                the HEADER row only (2026-09-23, per the Ambient Accent reference: the bright
+                                accent strip is exactly header-tall; below the header the panel edge is just the
+                                dim border — measured on the reference at lum ~120 inside the header vs ~55
+                                below it). Previously it spanned both rows (full panel height). Still a
+                                persistent, LOCAL identifier (never a full-panel fill; see
+                                SurfaceComposer.ComposeSurface's own Solid-ignores-accent contract) that stays
+                                visible whether the panel is expanded or rolled up — the header row is the one
+                                row a rolled-up panel keeps.
+
+                                Width (MAJOR-B fix) is no longer the fixed x:Static PanelMetrics.AccentIndicatorThickness
+                                literal — it is bound through the EditAwareAccentIndicatorWidth MultiBinding
+                                (below), which scales that SAME base thickness by
+                                InteractionVisualState.AccentEmphasisFor(VisualState) (and, while Edit Layout
+                                mode is active, a further LayoutEditVisuals.AccentEmphasisFor multiplier —
+                                see the column comment above), so the strip visibly thickens through
+                                Idle -> Hover -> Editing -> Dragging -> Resizing. This is the "third channel"
+                                (alongside PART_InteractionOverlay's border opacity and PART_HeaderActions'
+                                chrome opacity below) the phase spec's DoD relies on — previously computed by
+                                AccentEmphasisFor but never actually bound to anything in this file.
+
+                                HorizontalAlignment="Left" (MAJOR-1 fix) is load-bearing now that the column
+                                itself is a fixed Width="8" (above) rather than Auto: WPF centers a
+                                FrameworkElement with an explicit Width inside whatever space its column
+                                actually gives it unless told otherwise, so without this the strip would grow
+                                from its CENTER as VisualState changes — nudging its left edge into
+                                PART_Chrome's own rounded corner/border by up to ~1.05px per side — instead of
+                                growing from a fixed left edge flush against the panel's own edge, which is
+                                the actual visual the accent indicator is meant to give (a persistent stripe
+                                anchored to the panel's edge, not a bar that expands outward in both
+                                directions).
+                            -->
+                            <Border x:Name="PART_AccentIndicator"
+                                    Grid.Column="0" Grid.Row="0"
+                                    HorizontalAlignment="Left"
+                                    Background="{TemplateBinding AccentBrush}">
+                                <!-- D-6: MultiBinding over [VisualState, IsLayoutEditing] — see
+                                     EditAwareAccentIndicatorWidthConverter's remarks above. -->
+                                <Border.Width>
+                                    <MultiBinding Converter="{StaticResource EditAwareAccentIndicatorWidth}">
+                                        <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                        <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                    </MultiBinding>
+                                </Border.Width>
+                            </Border>
+
+                            <!--
+                                Header (§5.4): icon (optional) | title/rename editor (star) | rolled-up item
+                                count (optional) | header actions. PART_Header is layout-only — it never
+                                attaches its own interaction handlers (see this control's class remarks and
+                                R-5/R-6/R-7): the ContextMenu and title-bar drag handlers live on the actual
+                                element ChildWindow.xaml supplies via PanelChrome.TitleEditor, which THAT file
+                                declares (and can therefore wire to its own code-behind), not on anything
+                                declared in this ResourceDictionary.
+                            -->
+                            <Grid x:Name="PART_Header" Grid.Row="0" Grid.Column="1" ToolTip="{TemplateBinding Title}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- §5.4 "optional semantic icon" — reserved, no current consumer sets SemanticIcon (see the DP's doc comment). -->
+                                <TextBlock x:Name="PART_SemanticIcon"
+                                           Grid.Column="0"
+                                           Text="{TemplateBinding SemanticIcon}"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="12"
+                                           Foreground="{StaticResource Brush.Text.Secondary}"
+                                           VerticalAlignment="Center"
+                                           Margin="8,0,0,0"/>
+
+                                <ContentPresenter Grid.Column="1"
+                                                   Content="{TemplateBinding TitleEditor}"
+                                                   VerticalAlignment="Stretch"/>
+
+                                <!-- §5.6 rolled-up state: "Accent | Title | optional item count | expand control" — visible only while IsRolledUp (trigger below). -->
+                                <TextBlock x:Name="PART_ItemCount"
+                                           Grid.Column="2"
+                                           Text="{Binding ItemCount, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ItemCountToText}}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0"
+                                           Style="{StaticResource Typography.Caption}"
+                                           Visibility="Collapsed"/>
+
+                                <!--
+                                    "Actions muted in idle" (§5.4 DoD): opacity driven by VisualState via
+                                    VisualStateToDoubleConverter (parameter="chrome" -> InteractionVisualState.ChromeOpacityFor),
+                                    not a hardcoded number here, so it can never drift out of sync with
+                                    InteractionVisualStateTests' own asserted values (C2).
+                                -->
+                                <ContentPresenter x:Name="PART_HeaderActions"
+                                                   Grid.Column="3"
+                                                   Content="{TemplateBinding HeaderActions}"
+                                                   VerticalAlignment="Center">
+                                    <!-- D-6: MultiBinding over [VisualState, IsLayoutEditing] — see
+                                         EditAwareVisualStateToDoubleConverter's remarks above; "chrome"
+                                         forces full opacity for Idle while editing (LayoutEditVisuals.ChromeOpacityFor). -->
+                                    <ContentPresenter.Opacity>
+                                        <MultiBinding Converter="{StaticResource EditAwareVisualStateToDouble}" ConverterParameter="chrome">
+                                            <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                            <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                        </MultiBinding>
+                                    </ContentPresenter.Opacity>
+                                </ContentPresenter>
+                            </Grid>
+
+                            <!-- Content host (§5.3) — hosts ChildWindow.xaml's existing FileListHost, supplied as this control's Content. -->
+                            <ContentPresenter x:Name="PART_ContentHost" Grid.Row="1" Grid.Column="1"/>
+
+                            <!--
+                                Interaction overlay (D-6): purely visual border feedback for the resolved
+                                VisualState. IsHitTestVisible="False" is load-bearing (R-5) — this element
+                                sits on top of the whole chrome (last child = highest z-order within this
+                                Grid) and must never intercept a mouse event ChildWindow.xaml's own
+                                ResizeOverlay/drag/drop siblings, or this template's own header buttons/title
+                                editor, need to receive.
+                            -->
+                            <Border x:Name="PART_InteractionOverlay"
+                                    Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Grid.ColumnSpan="2"
+                                    IsHitTestVisible="False"
+                                    BorderBrush="{StaticResource Brush.Border.Default}"
+                                    BorderThickness="1"
+                                    CornerRadius="{StaticResource Radius.Panel}">
+                                <!-- D-6: MultiBinding over [VisualState, IsLayoutEditing] — see
+                                     EditAwareVisualStateToDoubleConverter's remarks above; "border" applies
+                                     LayoutEditVisuals' EditBorderFloor (0.60) while editing. -->
+                                <Border.Opacity>
+                                    <MultiBinding Converter="{StaticResource EditAwareVisualStateToDouble}" ConverterParameter="border">
+                                        <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                        <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                    </MultiBinding>
+                                </Border.Opacity>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="SemanticIcon" Value="">
+                            <Setter TargetName="PART_SemanticIcon" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+
+                        <Trigger Property="IsRolledUp" Value="True">
+                            <Setter TargetName="PART_ItemCount" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+
+                        <!-- R-8: Glass is "lower opacity + a stronger border", never a real backdrop-blur — the only extra visual this template gives it beyond what SurfaceComposer.ComposeSurface already lowers. -->
+                        <Trigger Property="SurfaceStyle" Value="Glass">
+                            <Setter TargetName="PART_InteractionOverlay" Property="BorderThickness" Value="1.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+        Shared selection/hover chrome for both panel item containers (wrap and list) AND
+        SystemIconsPanelWindow's sidebar list — relocated from Templates.xaml (C5, D-2; the "item
+        container" entry D-1 names for this dictionary). Deliberately reacts to IsSelected only —
+        never IsSelectionActive — because the panel window carries WS_EX_NOACTIVATE and is never the
+        active/focused window, so the default ListBoxItem theme's IsSelectionActive-gated highlight
+        would be permanently invisible.
+
+        Background/Padding Setters used to be declared here too, but neither is read by the
+        ControlTemplate below (it draws its own Border(s) and never TemplateBinds Background, and
+        ContentPresenter never consults ListBoxItem.Padding) — they were dead weight that misleadingly
+        implied the container's own chrome mattered. Foreground *is* live: nothing in either item
+        DataTemplate overrides it, so it flows down via WPF's Foreground property-value inheritance to
+        any descendant that doesn't set its own (e.g. TextBox's default style).
+
+        SelectionBorder used to be declared with BorderThickness="1" and a compensating Margin="-1":
+        a Border with no Padding adds its BorderThickness to its own measured (desired) size, which
+        would otherwise inflate every ListBoxItem in grid mode by 2px beyond its DataTemplate content
+        — desynchronising the WrapPanel's actual per-item footprint from GridMetrics.CellSize/BoxSize
+        (grid-snap math, see Resize_DragDelta/SnapWidthToGrid in ChildWindow.xaml.cs). The negative
+        Margin cancelled that out in measurement, but it also pushed the 1px border stroke *outside*
+        the ListBoxItem's own arrange box — for the first row/column, that stroke fell outside the
+        ScrollViewer's clip region and was silently cut off (ADR-015, ui-polishing-1 §3.3).
+
+        Fix (B-F1): the border no longer has a compensating negative Margin (Margin="0"), so its
+        stroke always stays inside the arrange box and is never clipped. To keep GridMetrics.CellSize
+        exactly byte-for-byte unchanged, the compensation moved into the *content* instead: the item
+        StackPanel's own Margin in GridViewTemplate was reduced from 6 to 5. The per-side footprint is
+        now split as "5px template margin + 1px selection border" = 6px per side (same total as
+        before, hence GridMetrics.ItemMargin — read as "Gutter" in the ui-polishing-1 plan — is still
+        6 and CellSize's formula is unchanged), but the border itself now lives fully inside that 6px,
+        instead of poking 1px past it.
+
+        Icon tiles (§5.5, C5): "neutral hover surface" is unchanged (Brush.Overlay.Hover — the same
+        non-accent hover wash every other hover trigger in the app uses). "Selected uses accent at low
+        alpha" is new in C5: SelectionFillBrush/SelectionStrokeBrush's fixed blue is retired for THIS
+        style only — PanelHeaderToggleButtonStyle/FileNameEditBoxStyle keep using those tokens
+        unchanged (Controls.xaml/Templates.xaml), since a Sort-button "active" indicator is not the
+        same concept as a panel's own semantic accent identity. Selection now reads
+        PanelTheme.Accent (D-7's inherited attached DP, Theming/PanelTheme.cs) — never a DataContext
+        binding, because this style is shared by ChildWindow (DataContext = ChildWindowViewModel,
+        which owns an accent via PanelTheme.Accent on PanelRoot) and SystemIconsPanelWindow
+        (DataContext = SystemIconsPanelViewModel, which has no AccentColor at all and never sets
+        PanelTheme.Accent — it gets the attached property's own neutral default for free).
+
+        SelectionFill is a Border SIBLING of SelectionBorder in the Grid below, not a parent of
+        ContentPresenter: this style's "accent at low alpha" needs to dim only the fill colour, never
+        the item's icon/label. Setting Opacity on a Border that has ContentPresenter as an actual
+        child (the pre-C5 structure had one Border wrapping ContentPresenter directly) would visibly
+        fade the icon/label too, since Border.Opacity applies to its whole subtree — the same reason
+        PART_HeaderActions/PART_InteractionOverlay above use Opacity only on elements with no unrelated
+        content of their own. SelectionFill.Opacity's value is
+        <c>{x:Static conv:AccentBrushConverter.SelectionAlpha}</c> (a real reference, not a hand-mirrored
+        literal — MAJOR-2 fix) — the same "accent tinted to a low, fixed alpha" algorithm
+        SurfaceComposer.AccentTint implements — because AccentBrushConverter's own Convert(value, ...)
+        expects a hex <see cref="string"/> (it feeds Model.AccentColor, ChildWindow's OWN DataContext
+        binding, in Panels.xaml's PanelChrome AccentBrush/SurfaceBrush wiring), not a Brush — and
+        PanelTheme.Accent is already a Brush by the time it reaches here (D-7's whole point) — so the
+        converter itself can't be called directly for this Setter; x:Static against SelectionAlpha
+        (now public — was internal, which was itself CRITICAL-1 from review round 2: x:Static resolves
+        via public-only reflection on .NET (Core), even within the same assembly) keeps the two values
+        impossible to desync instead.
+
+        Selected+hovered (MAJOR-3 fix): IsMouseOver and IsSelected write to DIFFERENT elements
+        (SelectionBorder.Background vs. SelectionFill.Opacity/SelectionBorder.BorderBrush), so both
+        triggers apply simultaneously when both facts are true — without the MultiTrigger below, the
+        hover wash (SelectionBorder.Background) would paint OVER the accent fill (SelectionFill sits
+        underneath in z-order), which does not match "selected wins" pre-C5 behaviour. The MultiTrigger
+        resets SelectionBorder.Background to Transparent when IsSelected is ALSO true, restoring a clean
+        accent-only look for that combination.
+    -->
+    <Style x:Key="PanelItemContainerStyle" TargetType="ListBoxItem">
+        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Primary}"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Grid SnapsToDevicePixels="True">
+                        <!-- Accent fill layer (selection only) — see this Style's remarks above for why
+                             it is a separate element from SelectionBorder/ContentPresenter. -->
+                        <Border x:Name="SelectionFill"
+                                Margin="0"
+                                Background="{Binding Path=(theming:PanelTheme.Accent), RelativeSource={RelativeSource Self}}"
+                                CornerRadius="{StaticResource Radius.Control}"
+                                Opacity="0"/>
+                        <Border x:Name="SelectionBorder"
+                                Margin="0"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="1"
+                                CornerRadius="{StaticResource Radius.Control}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- Declared before IsSelected so IsSelected's own Setters (below) win when both
+                             are active for the properties they BOTH touch; where they touch DIFFERENT
+                             properties (this is exactly that case), the MultiTrigger further below
+                             reconciles the combination explicitly. -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="SelectionBorder" Property="Background" Value="{StaticResource Brush.Overlay.Hover}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="SelectionFill" Property="Opacity" Value="{x:Static conv:AccentBrushConverter.SelectionAlpha}"/>
+                            <Setter TargetName="SelectionBorder" Property="BorderBrush" Value="{Binding Path=(theming:PanelTheme.Accent), RelativeSource={RelativeSource Self}}"/>
+                        </Trigger>
+                        <!-- MAJOR-3 fix: selected+hovered must render as clean accent, not hover-wash
+                             layered on top of it — see this Style's remarks above. -->
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                                <Condition Property="IsSelected" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="SelectionBorder" Property="Background" Value="Transparent"/>
+                        </MultiTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

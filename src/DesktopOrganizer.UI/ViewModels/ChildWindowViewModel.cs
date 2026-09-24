@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Commands;
+using DesktopOrganizer.UI.Diagnostics;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using Microsoft.Win32;
@@ -29,6 +30,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private readonly IFileItemRenameService _renameService;
     private readonly IAppSettings _appSettings;
     private readonly IPanelSelectionCoordinator _selectionCoordinator;
+    private readonly IGestureDiagnostics _diagnostics;
     private readonly DataTemplate _listTemplate;
     private readonly DataTemplate _gridTemplate;
     private readonly System.Threading.Timer _existenceTimer;
@@ -41,6 +43,13 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private FileItem? _editingItem;
     private string _editingName = string.Empty;
     private RenameOutcome? _renameError;
+
+    /// <summary>
+    /// Single-flight guard for <see cref="RefreshExistence"/> (MAJOR M-1, P08 fix cycle 2): 0 when no
+    /// dispatched refresh is outstanding, 1 while one has been queued but not yet serviced by the UI
+    /// thread. See <see cref="RefreshExistence"/>'s own remarks for why an unguarded queue is dangerous.
+    /// </summary>
+    private int _existenceRefreshPending;
 
     /// <summary>
     /// Set for the duration of clearing <see cref="BaseViewModel.SelectedFile"/> from
@@ -230,6 +239,20 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     public ICommand SetSortModeCommand { get; }
 
     /// <summary>
+    /// Sets the panel's <see cref="ChildWindowModel.IconLayoutPolicy"/> (ADR-029, P06 —
+    /// <c>docs/fix-prompts/06-fit-content.md</c>). Accepts an <see cref="IconLayoutPolicy"/> value as the
+    /// command parameter — the "Icon layout" context-menu radio group's two items both bind to this one
+    /// command, mirroring <see cref="SetContentFilterCommand"/>/<see cref="SetSortModeCommand"/>'s exact
+    /// shape. A pure model mutation: the resulting resize-snap (<c>ChildWindow.xaml.cs</c>'s
+    /// <c>OnModelPropertyChanged</c>, ADR-029 fix-cycle MAJOR-2) and, when
+    /// <see cref="ChildWindowModel.SizingMode"/> is <see cref="PanelSizingMode.AutoContent"/>, height
+    /// recompute (<c>Views/ChildWindow.ContentSizing.cs</c>) both react to the resulting
+    /// <see cref="ChildWindowModel.PropertyChanged"/> independently — this command does not call either
+    /// directly.
+    /// </summary>
+    public ICommand SetIconLayoutPolicyCommand { get; }
+
+    /// <summary>
     /// Toggles the panel's sort order between <see cref="PanelSortMode.Manual"/> and
     /// <see cref="PanelSortMode.Name"/> — bound to the header's sort button, a quicker one-click
     /// alternative to the "Arrange icons" context-menu items backed by <see cref="SetSortModeCommand"/>.
@@ -292,6 +315,15 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// every other panel's selection stay mutually exclusive despite none of these <c>WS_EX_NOACTIVATE</c>
     /// windows ever receiving normal focus.
     /// </param>
+    /// <param name="diagnostics">
+    /// Records <see cref="RefreshExistence"/> failures (UX P2, P08 fix cycle 1, 2026-09-22) — resolved
+    /// from the same <c>AddTransient&lt;IGestureDiagnostics, GestureDiagnostics&gt;</c> DI registration
+    /// <c>ChildWindow</c> already uses for gesture-lifecycle events (NIT fix, P08 fix cycle 2,
+    /// 2026-09-22: this is a NEW instance per resolution, not the same live object <c>ChildWindow</c>
+    /// holds — <c>DiConfig.cs</c> registers <see cref="IGestureDiagnostics"/> transient, not singleton),
+    /// reused as a lightweight, already-privacy-audited sink rather than adding a second
+    /// <see cref="Services.Abstractions.IDiagnosticsLog"/> dependency.
+    /// </param>
     public ChildWindowViewModel(
         IIconProvider iconProvider,
         IFileLauncher fileLauncher,
@@ -299,7 +331,8 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         IPanelItemStorageService itemStorage,
         IFileItemRenameService renameService,
         IAppSettings appSettings,
-        IPanelSelectionCoordinator selectionCoordinator)
+        IPanelSelectionCoordinator selectionCoordinator,
+        IGestureDiagnostics diagnostics)
         : base(iconProvider)
     {
         _fileLauncher = fileLauncher;
@@ -308,6 +341,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         _renameService = renameService;
         _appSettings = appSettings;
         _selectionCoordinator = selectionCoordinator;
+        _diagnostics = diagnostics;
         _selectionCoordinator.SelectionClaimed += OnSelectionClaimed;
         _listTemplate = GetTemplate(ListViewTemplate);
         _gridTemplate = GetTemplate(GridViewTemplate);
@@ -321,6 +355,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         SelectSourceFolderCommand = new RelayCommand(SelectSourceFolder);
         SetContentFilterCommand = new RelayCommand<PanelContentFilter>(filter => Model.ContentFilter = filter);
         SetSortModeCommand = new RelayCommand<PanelSortMode>(mode => Model.SortMode = mode, _ => !IsPortal);
+        SetIconLayoutPolicyCommand = new RelayCommand<IconLayoutPolicy>(policy => Model.IconLayoutPolicy = policy);
         ToggleSortModeCommand = new RelayCommand(ToggleSortMode, () => !IsPortal);
         BeginRenameCommand = new RelayCommand<FileItem>(BeginRename);
         CommitRenameCommand = new RelayCommand(CommitRename);
@@ -515,12 +550,31 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     {
         Model = model; // subscribes to Model.PropertyChanged; unsubscribes any previous model first
 
+        var sourceFiles = GetSourceFiles(model);
+        var resolved = ResolveManagedReplacements(sourceFiles);
+
         // ReplaceAll (not AddFiles): re-binding to a different model must replace the file set, not
         // accumulate onto whatever was already loaded — otherwise a second LoadFromModel call leaves
         // the panel showing the union of both models' files, and SyncToModel would persist that union
         // back onto the new model's FilePaths.
-        ReplaceAll(GetSourceFiles(model));
+        ReplaceAll(resolved);
         ApplyViewMode();
+
+        // CRITICAL C1 fix, part (b) (P08 fix cycle 1, 2026-09-22): when ResolveManagedReplacements
+        // actually remapped a stale path, write it onto Model.FilePaths immediately, in memory — not
+        // only whenever some unrelated future SyncToModel() call happens to run — and request a
+        // (debounced, not immediate — ADR-012 Decision 1 is unaffected) save so it's durable soon.
+        // Without this, any code that reads Model.FilePaths directly before that unrelated trigger
+        // fires (e.g. MainWindowViewModel.RemovePanel's/PageManagerService.RemovePage's "does this
+        // panel have anything to lose" check) still sees the stale, pre-remap path. A Folder Portal
+        // never persists FilePaths at all (SyncToModel skips it — see IsPortal), so this only applies
+        // to a non-portal remap; ReferenceEquals is enough to detect one, since
+        // ResolveManagedReplacements only ever clones+mutates when it actually changed something.
+        if (!ReferenceEquals(resolved, sourceFiles) && string.IsNullOrWhiteSpace(model.SourceFolderPath))
+        {
+            model.FilePaths = [.. resolved];
+            FilesChanged?.Invoke(this, EventArgs.Empty);
+        }
 
         if (!string.IsNullOrWhiteSpace(model.SourceFolderPath) && Directory.Exists(model.SourceFolderPath))
         {
@@ -632,14 +686,36 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// <summary>
     /// Handles incremental file-system change events from the folder watcher.
     /// All UI mutations are marshalled to the UI thread via <see cref="Application.Current"/> Dispatcher.
-    /// Guards against <see cref="Application.Current"/> being <see langword="null"/> during shutdown.
     /// </summary>
+    /// <remarks>
+    /// Arrives on <c>FolderWatcher</c>'s debounce thread-pool timer, never the UI thread, so the
+    /// marshalling goes through <see cref="UiDispatch.TryBeginInvoke"/> rather than a bare
+    /// <c>Dispatcher.Invoke</c>/<see cref="UiDispatch.TryInvoke"/>: a missing
+    /// <see cref="Application.Current"/> (headless test host) AND an already-shut-down dispatcher
+    /// (application shutdown) both have to degrade to "drop this notification", because an exception
+    /// escaping a thread-pool timer callback takes the entire process down — see <see cref="UiDispatch"/>'s
+    /// own remarks for the full mechanism.
+    /// <para>
+    /// CRITICAL C-1 fix (P08 fix cycle 2): this used to call the BLOCKING <see cref="UiDispatch.TryInvoke"/>
+    /// from inside <c>FolderWatcher</c>'s own debounce callback, which can run while that callback thread
+    /// holds <c>FolderWatcher</c>'s debounce lock. If the UI thread's very next action is closing this
+    /// panel (<see cref="DetachWatcher"/> → <c>IFolderWatcher.Dispose</c>/<c>Stop</c> → the SAME lock), the
+    /// callback thread blocks forever waiting for the UI thread to service the queued action while the UI
+    /// thread blocks forever waiting for the callback thread to release the lock — the whole application
+    /// hangs. <see cref="UiDispatch.TryBeginInvoke"/> is fire-and-forget: this method returns to the
+    /// caller (and, by extension, releases whatever lock it might be holding) without ever waiting for the
+    /// UI thread at all.
+    /// </para>
+    /// </remarks>
     private void OnFolderChanged(object? sender, FolderChangeEventArgs e)
     {
-        var app = Application.Current;
-
-        app?.Dispatcher.Invoke(() =>
+        UiDispatch.TryBeginInvoke(Application.Current?.Dispatcher, () =>
         {
+            // Fire-and-forget means this can run AFTER the panel was closed on the UI thread (Dispose ->
+            // DetachWatcher) — same guard as RefreshExistence's dispatched half: never rebuild the item
+            // list (blocking directory IO + icon resolution) on a disposed view-model.
+            if (_disposed) return;
+
             switch (e.Kind)
             {
                 case FolderChangeKind.Created:
@@ -665,29 +741,87 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
     /// <summary>
     /// Re-validates <see cref="FileItem.Exists"/>/<see cref="FileItem.IsDirectory"/> for every item in
-    /// this panel against the current file-system state. Runs on a thread-pool timer; marshals to the
-    /// UI thread before touching <see cref="FileItem"/> instances (they're bound to the live UI) and
-    /// must never throw or it takes the timer down silently.
+    /// this panel against the current file-system state, and re-resolves the icon for any item that
+    /// just reappeared (see <see cref="BaseViewModel.RefreshItemsLiveness"/>). Runs on a thread-pool
+    /// timer; marshals to the UI thread before touching <see cref="FileItem"/> instances (they're bound
+    /// to the live UI) and must never throw — an exception escaping a <see cref="System.Threading.Timer"/>
+    /// callback is an UNHANDLED exception on a thread-pool thread, which terminates the whole process.
     /// </summary>
-    private void RefreshExistence(object? state)
+    /// <remarks>
+    /// <para>
+    /// The <see langword="try"/>/<see langword="catch"/> around <see cref="BaseViewModel.RefreshItemsLiveness"/>
+    /// below is a SEPARATE concern from the marshalling itself: a bare <c>Dispatcher.Invoke</c> onto an
+    /// already-shut-down dispatcher rethrows <see cref="System.Threading.Tasks.TaskCanceledException"/> at
+    /// this thread-pool timer thread and kills the process (intermittent, order-dependent
+    /// "Test Run Aborted" with zero failing tests; in production, a tick landing during application
+    /// shutdown). <see cref="UiDispatch.TryBeginInvoke"/> is the fire-and-forget guarded marshal — see its
+    /// own remarks.
+    /// </para>
+    /// <para>
+    /// MAJOR M-1 fix (P08 fix cycle 2): this used to call the BLOCKING <see cref="UiDispatch.TryInvoke"/>,
+    /// which occupies the calling thread-pool thread until the UI thread services it — indefinitely, if
+    /// that dispatcher is busy or never pumps at all. Because this timer keeps firing every
+    /// <see cref="ExistenceCheckIntervalMs"/>, a busy/blocked UI thread used to accumulate one occupied
+    /// thread-pool thread per tick, which can starve the pool (see
+    /// <c>docs/Refactoring/Testing/sta-test-conventions.md</c>'s "second, unrelated flake"). Switching to
+    /// <see cref="UiDispatch.TryBeginInvoke"/> alone would still let an UNBOUNDED number of dispatched
+    /// operations pile up on a busy dispatcher's queue, so <see cref="_existenceRefreshPending"/> is an
+    /// explicit single-flight guard: a tick that finds a previous refresh still outstanding skips queuing
+    /// another one entirely, rather than adding to a backlog nobody is servicing yet.
+    /// </para>
+    /// </remarks>
+    internal void RefreshExistence(object? state)
     {
         if (_disposed) return;
 
-        var app = Application.Current;
-        app?.Dispatcher.Invoke(() =>
-        {
-            if (_disposed) return;
+        // Single-flight guard (MAJOR M-1, see remarks): 0 -> 1 means "no refresh outstanding, this tick
+        // claims the slot"; any other tick finding it already 1 backs off instead of queuing a second
+        // Dispatcher operation on top of the still-unserviced first one.
+        if (System.Threading.Interlocked.CompareExchange(ref _existenceRefreshPending, 1, 0) != 0)
+            return;
 
+        var queued = UiDispatch.TryBeginInvoke(Application.Current?.Dispatcher, () =>
+        {
             try
             {
-                foreach (var item in AllItems) item.Refresh();
+                if (_disposed) return;
+
+                try
+                {
+                    RefreshItemsLiveness();
+                }
+                catch (Exception ex)
+                {
+                    // UX P2 fix (P08 fix cycle 1, 2026-09-22): Console.Error is never read by a WinExe
+                    // process (see the icon pipeline's own identical fix, IconHandler/IconProvider) — route
+                    // to the structured diagnostics log instead. Privacy invariant: exception TYPE NAME
+                    // only, never ex.Message, which may embed a file path.
+                    _diagnostics.ExistenceRefreshFailed(Model.Id, ex.GetType().Name);
+                }
             }
-            catch (Exception ex)
+            finally
             {
-                Console.Error.WriteLine($"Existence refresh failed: {ex.Message}");
+                // Frees the slot for the NEXT tick only once this one has actually run — not merely been
+                // queued. Runs even if RefreshItemsLiveness() itself was skipped (_disposed) or failed.
+                System.Threading.Volatile.Write(ref _existenceRefreshPending, 0);
             }
         });
+
+        if (!queued)
+        {
+            // Dropped before it could even be queued (no Application yet, or its dispatcher is already
+            // shutting down/shut down) — nothing will ever run to clear the flag above, so clear it here
+            // instead of permanently wedging every future tick into "always pending".
+            System.Threading.Volatile.Write(ref _existenceRefreshPending, 0);
+        }
     }
+
+    /// <summary>
+    /// Test seam only (MAJOR M-1 regression coverage, P08 fix cycle 2): observes whether a dispatched
+    /// <see cref="RefreshExistence"/> tick is still waiting to be serviced by the UI thread. Never read by
+    /// production code.
+    /// </summary>
+    internal bool IsExistenceRefreshPending => System.Threading.Volatile.Read(ref _existenceRefreshPending) != 0;
 
     /// <inheritdoc/>
     public void Dispose()
@@ -726,6 +860,42 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
             Console.Error.WriteLine($"Failed to read folder '{model.SourceFolderPath}': {ex.Message}");
             return [];
         }
+    }
+
+    /// <summary>
+    /// Read-time self-heal for stale <see cref="ChildWindowModel.FilePaths"/> entries (ADR-009
+    /// Amendment 2026-09-22, P08): any path that no longer exists but has a recorded managed copy
+    /// (see <see cref="IPanelItemStorageService.TryFindManagedPath"/>) is swapped for that managed
+    /// path before the panel's <see cref="FileItem"/>s are built — so both the icon and a future
+    /// launch resolve against the item's real, current location instead of a permanently-broken
+    /// placeholder (P00 baseline finding F-9/H2: 20 of 26 real-world items were affected this way).
+    /// Folder Portal listings (see <see cref="GetSourceFiles"/>) are already guaranteed to exist and
+    /// pass through unchanged — the loop below is a no-op for every already-existing path.
+    /// </summary>
+    /// <remarks>
+    /// Purely a read: no manifest or file-system mutation happens here. The self-heal only becomes
+    /// durable once this panel's next save round-trips the (now-corrected) <see cref="FileItem.Path"/>
+    /// values back into <see cref="ChildWindowModel.FilePaths"/> (see <c>ChildWindow.xaml.cs</c>'s
+    /// sync-back on <c>FilesChanged</c>) — a stale entry with no live managed copy is left exactly as
+    /// it was (still shown, still greyed out via <c>Exists == false</c>), never invented or dropped.
+    /// </remarks>
+    /// <param name="paths">The panel's raw source paths, as returned by <see cref="GetSourceFiles"/>.</param>
+    private string[] ResolveManagedReplacements(string[] paths)
+    {
+        string[]? resolved = null;
+
+        for (var i = 0; i < paths.Length; i++)
+        {
+            var path = paths[i];
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            if (System.IO.File.Exists(path) || System.IO.Directory.Exists(path)) continue;
+            if (!_itemStorage.TryFindManagedPath(path, out var managedPath) || managedPath is null) continue;
+
+            resolved ??= (string[])paths.Clone();
+            resolved[i] = managedPath;
+        }
+
+        return resolved ?? paths;
     }
 
     /// <inheritdoc/>

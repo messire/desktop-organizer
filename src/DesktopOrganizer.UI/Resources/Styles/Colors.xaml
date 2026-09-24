@@ -1,0 +1,116 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Ambient Accent Visual System — base color tokens (ADR-025, docs/PLANS/phase-5-ambient-accent-ui.md
+        §1 D-1). Only <Color> elements live here — no Brush/Style (those live in Brushes.xaml,
+        Typography.xaml, Controls.xaml — merged, in that order, right after this dictionary; see the
+        merge-order remarks on App.xaml.cs's LoadResourceDictionaries(): StaticResource only resolves
+        "backwards" along the merge order). Nothing in the app references these tokens yet (commit C1 —
+        dictionaries only, no consumers); C2-C7 wire them up.
+
+        Panel-facing tokens (Surface/Text/Border/Overlay/Accent) target the dark, semi-transparent panel
+        chrome that already exists today (ChildWindowModel defaults: BackgroundColor "#1E1E1E", TextColor
+        "#DDDDDD"). Color.Surface.* is intentionally fully opaque (alpha FF) — SurfaceOpacity is applied
+        at runtime by Theming/SurfaceComposer.cs (C2) via PanelSurfaceBrushConverter, not baked into the
+        token, so one neutral base color serves every SurfaceOpacity/PanelSurfaceStyle combination.
+
+        Color.Settings.* (bottom section) is a separate, deliberately light palette for the Settings
+        window (MainWindow.xaml), which Phase 5 does NOT restyle (D-9) — only its inline hex literals are
+        hoisted here verbatim, same RGB values.
+
+        Colors.HighContrast.xaml overlays the Surface/Text/Border/Overlay/Selection/Sidebar/Settings
+        groups below (every group except Accent — a per-panel user choice, left as-is) when
+        SystemParameters.HighContrast is true (D-12; MAJOR-A widened the overlay past Surface/Text/Border).
+    -->
+
+    <!-- Surface: neutral panel background — accent is never mixed in here (DoD "accent is local, not a
+         full-panel fill"; enforced in code by SurfaceComposer.ComposeSurface(..., Solid, ...) ignoring
+         its accent parameter). -->
+    <Color x:Key="Color.Surface.Base">#1E1E1E</Color>
+    <Color x:Key="Color.Surface.Elevated">#262626</Color>
+
+    <!-- Text -->
+    <Color x:Key="Color.Text.Primary">#DDDDDD</Color>
+    <Color x:Key="Color.Text.Secondary">#AAAAAA</Color>
+    <Color x:Key="Color.Text.Muted">#8A8A8A</Color>
+    <Color x:Key="Color.Text.Disabled">#668A8A8A</Color>
+
+    <!-- Border -->
+    <Color x:Key="Color.Border.Default">#33FFFFFF</Color>
+    <Color x:Key="Color.Border.Subtle">#1AFFFFFF</Color>
+    <Color x:Key="Color.Border.Hover">#45FFFFFF</Color>
+    <Color x:Key="Color.Border.Focus">#3B82F6</Color>
+
+    <!-- Overlay: non-accent hover/press washes. Color.Overlay.Hover reuses the exact literal already
+         used twice today (PanelHeaderButtonStyle's and PanelItemContainerStyle's IsMouseOver trigger,
+         Templates.xaml) — named here ahead of the commit that migrates those triggers onto it, so the
+         migration is a pure rename with zero visual change. -->
+    <Color x:Key="Color.Overlay.Hover">#1AFFFFFF</Color>
+    <Color x:Key="Color.Overlay.Pressed">#26FFFFFF</Color>
+
+    <!--
+        Accent palette (ADR-025 §3.1 / Theming/AccentPalette.cs, C2). Kept in sync by construction: the
+        seven hex strings below are exactly the literals AccentPalette.cs's C# constants use (Neutral is
+        the migration fallback / non-accented default — see AccentPalette.Default — not one of the six
+        selectable Presets).
+    -->
+    <Color x:Key="Color.Accent.Neutral">#6B7280</Color>
+    <Color x:Key="Color.Accent.Blue">#3B82F6</Color>
+    <Color x:Key="Color.Accent.Violet">#A855F7</Color>
+    <Color x:Key="Color.Accent.Amber">#F59E0B</Color>
+    <Color x:Key="Color.Accent.Green">#22C55E</Color>
+    <Color x:Key="Color.Accent.Cyan">#06B6D4</Color>
+    <Color x:Key="Color.Accent.Coral">#F06464</Color>
+
+    <!--
+        Selection: shared "selected/active" chrome (Templates.xaml finalization m-1 — see
+        Brushes.xaml's SelectionFillBrush/SelectionStrokeBrush, the consumer-facing key names, which
+        stay unchanged). Used by Controls.xaml's PanelHeaderToggleButtonStyle (Sort-button highlight)
+        and Templates.xaml's FileNameEditBoxStyle (inline-rename editor chrome) — the same fixed blue
+        both used before C5, unrelated to any panel's own AccentColor. Named here (rather than left as
+        an inline Color on the SolidColorBrush in Brushes.xaml) purely so Brushes.xaml keeps sourcing
+        every brush from a Colors.xaml token like its own top-of-file comment documents; the merge
+        order (D-1) is *why* this had to move out of Templates.xaml in C5 at all: once
+        PanelHeaderToggleButtonStyle relocates to Controls.xaml (merged before Templates.xaml), a
+        StaticResource reference from Controls.xaml back to something still declared in Templates.xaml
+        (merged after) would be an unresolvable forward reference.
+    -->
+    <Color x:Key="Color.Selection.Fill">#4D3D8BFF</Color>
+    <Color x:Key="Color.Selection.Stroke">#B33D8BFF</Color>
+
+    <!--
+        Selection.Text (MAJOR-2 fix, review round 3): the paired foreground for Color.Selection.Fill
+        above. #DDDDDD deliberately matches Color.Text.Primary exactly — in normal mode the Sort
+        button's active background is a low-alpha blue wash (#4D3D8BFF) light text already reads fine
+        against, so introducing this token changes zero pixels there. It only diverges from
+        Color.Text.Primary in Colors.HighContrast.xaml, where it maps to SystemColors.HighlightTextColor
+        instead of WindowTextColor — see that file's own remarks for why the un-paired foreground was a
+        readability bug in HC mode specifically.
+    -->
+    <Color x:Key="Color.Selection.Text">#DDDDDD</Color>
+
+    <!--
+        Sidebar (SystemIconsPanelWindow, C5): the desktop-icons sidebar's own translucent background
+        strip. Deliberately its own token, not a reuse of Color.Surface.Base (that token is fully
+        opaque by design, per this file's own top-of-file comment — SurfaceOpacity is applied at
+        runtime by SurfaceComposer, not baked in) or the PanelSurfaceBrushConverter/PanelTheme
+        machinery ChildWindow uses: the sidebar is not a themed panel with its own AccentColor (D-7 —
+        SystemIconsPanelViewModel has no such concept), and swapping in either would change its
+        rendered colour, not just name it. Same RGBA value the inline literal already had.
+    -->
+    <Color x:Key="Color.Sidebar.Background">#55000000</Color>
+
+    <!--
+        Settings window (DO-003, D-9): inline hex literals from MainWindow.xaml hoisted verbatim (same
+        RGB values, only named — see D-9's table for the exact line numbers each token replaces). Not
+        part of the dark Ambient Accent palette above — the settings window stays a light, system-styled
+        window; these are consumed starting C7.
+    -->
+    <Color x:Key="Color.Settings.ChromeBackground">#F0F0F0</Color>
+    <Color x:Key="Color.Settings.ChromeBorder">#CCCCCC</Color>
+    <Color x:Key="Color.Settings.TabActiveBackground">White</Color>
+    <Color x:Key="Color.Settings.IconMuted">#888888</Color>
+    <Color x:Key="Color.Settings.TextMuted">#666666</Color>
+    <Color x:Key="Color.Settings.SwatchBorder">#888</Color>
+    <Color x:Key="Color.Settings.Warning">#B8860B</Color>
+</ResourceDictionary>

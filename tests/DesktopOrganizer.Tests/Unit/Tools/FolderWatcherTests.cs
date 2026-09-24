@@ -159,6 +159,102 @@ public class FolderWatcherTests
         }
     }
 
+    // ── OnDebounceElapsed subscriber isolation (Task 2, sta-test-conventions.md "known remaining hazards") ──
+
+    [Fact]
+    public void Changed_SubscriberThrows_TimerKeepsRunning_NextEventStillDelivered()
+    {
+        // Arrange
+        var tempDir = CreateTempDirectory();
+        try
+        {
+            using var watcher = new FolderWatcher();
+            var goodSubscriberCalls = 0;
+            var secondCallSignal = new ManualResetEventSlim(false);
+
+            // A throwing subscriber used to be an unhandled exception on the Timer callback thread —
+            // which would have killed this entire test process, not just failed this one test. If this
+            // regresses, the whole run aborts rather than this Assert failing cleanly.
+            watcher.Changed += (_, _) => throw new InvalidOperationException(
+                "Simulated subscriber bug — must not crash the process or stop delivery to other subscribers.");
+
+            watcher.Changed += (_, _) =>
+            {
+                if (Interlocked.Increment(ref goodSubscriberCalls) >= 2)
+                    secondCallSignal.Set();
+            };
+
+            watcher.Start(tempDir);
+
+            // Act — two changes far enough apart to land in two separate debounce windows (debounce is
+            // 300ms; sleeping comfortably past it mirrors FolderChanged_NotRaised_DuringDebounceWindow's
+            // own convention above).
+            File.WriteAllText(Path.Combine(tempDir, "first.txt"), "a");
+            Thread.Sleep(500);
+            File.WriteAllText(Path.Combine(tempDir, "second.txt"), "b");
+
+            // Assert
+            Assert.True(secondCallSignal.Wait(TimeSpan.FromSeconds(5)), "The well-behaved subscriber never received the second event — the throwing subscriber may have stopped the debounce timer or the watcher itself.");
+            Assert.Equal(2, Volatile.Read(ref goodSubscriberCalls));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Stop_WhileSubscriberIsStillRunningOnTheTimerThread_DoesNotDeadlock()
+    {
+        // Arrange
+        var tempDir = CreateTempDirectory();
+        using var releaseHandler = new ManualResetEventSlim(false);
+        try
+        {
+            using var watcher = new FolderWatcher();
+            var handlerEntered = new ManualResetEventSlim(false);
+
+            // Stands in for ChildWindowViewModel.OnFolderChanged's UiDispatch.TryInvoke: a subscriber
+            // that blocks the timer-callback thread until some other thread (in production, the UI
+            // thread's dispatcher) lets it proceed.
+            watcher.Changed += (_, _) =>
+            {
+                handlerEntered.Set();
+                releaseHandler.Wait(TimeSpan.FromSeconds(5));
+            };
+
+            watcher.Start(tempDir);
+            File.WriteAllText(Path.Combine(tempDir, "trigger.txt"), "x");
+
+            Assert.True(handlerEntered.Wait(TimeSpan.FromSeconds(5)), "Changed handler never ran.");
+
+            // Act — Stop() must be able to take _debounceLock immediately: with the pre-fix code (the
+            // subscriber invoked from inside `lock (_debounceLock)`), this thread would never signal
+            // completion within the timeout because Stop() would block on the same lock the timer
+            // thread still holds while stuck in the subscriber above. A raw Thread + signal (rather than
+            // Task.Run().Wait()) avoids blocking on a Task in a test method (xUnit1031).
+            var stopCompleted = new ManualResetEventSlim(false);
+            new Thread(() =>
+            {
+                watcher.Stop();
+                stopCompleted.Set();
+            })
+            { IsBackground = true }.Start();
+
+            var completedInTime = stopCompleted.Wait(TimeSpan.FromSeconds(2));
+
+            // Assert
+            Assert.True(completedInTime, "Stop() did not return within 2s — it deadlocked against a subscriber still running on the timer thread.");
+        }
+        finally
+        {
+            // Unblock the still-parked timer-thread subscriber immediately instead of letting it idle
+            // out its own 5s Wait budget after this test has already moved on.
+            releaseHandler.Set();
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
     private static string CreateTempDirectory()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"do_fw_{Guid.NewGuid():N}");

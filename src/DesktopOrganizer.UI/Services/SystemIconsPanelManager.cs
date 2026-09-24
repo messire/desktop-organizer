@@ -1,11 +1,10 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Models;
+using DesktopOrganizer.UI.State;
 using DesktopOrganizer.UI.Views;
 
 namespace DesktopOrganizer.UI.Services;
@@ -26,13 +25,6 @@ namespace DesktopOrganizer.UI.Services;
 /// </summary>
 internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDisposable
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = false,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter() },
-    };
-
     /// <summary>
     /// Poll interval for the "follow the active virtual desktop" feature. One second is the same
     /// order of magnitude as the Recycle Bin poll (ADR-007) and keeps the worst-case lag after a
@@ -86,7 +78,7 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     /// </summary>
     private const int SelfHealMinConsecutiveFailures = 2;
 
-    private readonly IAppSettings _appSettings;
+    private readonly IApplicationStateService _applicationStateService;
     private readonly IDesktopIntegrationService _desktopIntegration;
     private readonly IMonitorService _monitorService;
     private readonly IVirtualDesktopService _virtualDesktopService;
@@ -101,13 +93,13 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     /// Initializes a new instance of <see cref="SystemIconsPanelManager"/>.
     /// </summary>
     public SystemIconsPanelManager(
-        IAppSettings appSettings,
+        IApplicationStateService applicationStateService,
         IDesktopIntegrationService desktopIntegration,
         IMonitorService monitorService,
         IVirtualDesktopService virtualDesktopService,
         Func<SystemIconsPanelWindow> windowFactory)
     {
-        _appSettings = appSettings;
+        _applicationStateService = applicationStateService;
         _desktopIntegration = desktopIntegration;
         _monitorService = monitorService;
         _virtualDesktopService = virtualDesktopService;
@@ -145,82 +137,30 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     public SystemIconsPanelModel Model { get; } = new();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Reads <see cref="IApplicationStateService.SystemIconsPanel"/> — the already-loaded,
+    /// already-migrated, typed DTO from the single <c>ApplicationStateService.Load()</c> call in
+    /// <c>Program.Main</c> (ADR-024 D-11) — rather than parsing JSON off settings itself.
+    /// <see langword="null"/> (no document ever persisted this section) leaves <see cref="Model"/> at
+    /// its own built-in defaults, exactly like the pre-ADR-024 "blank settings value" behaviour.
+    /// </remarks>
     public void Load()
     {
-        var json = _appSettings.SystemIconsPanel;
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            // Use built-in defaults already set in Model
-            return;
-        }
+        var dto = _applicationStateService.SystemIconsPanel;
+        if (dto is null) return;
 
-        try
-        {
-            var dto = JsonSerializer.Deserialize<PanelDto>(json, JsonOptions);
-            if (dto is null) return;
-
-            Model.IsEnabled = dto.IsEnabled;
-
-            // Key absent in settings written by older builds -> stays false. No migration needed.
-            Model.ShowOnAllVirtualDesktops = dto.ShowOnAllVirtualDesktops;
-
-            if (Enum.TryParse<SystemIconSize>(dto.IconSize, out var size))
-            {
-                Model.IconSize = size;
-            }
-
-            // Parsed separately from the surrounding try/catch's implicit fallback: Load() wraps the
-            // whole deserialisation in one catch, so a corrupt anchor typed as Guid? would have
-            // discarded EVERY panel setting. TryParse never throws, so a garbage or absent string
-            // degrades to "no anchor" without touching anything else that was read above.
-            Model.AnchorVirtualDesktopId =
-                Guid.TryParse(dto.AnchorVirtualDesktopId, out var anchor) ? anchor : null;
-
-            if (dto.Items is { Count: > 0 })
-            {
-                foreach (var itemDto in dto.Items)
-                {
-                    var existing = Model.Items.FirstOrDefault(i => i.Kind == itemDto.Kind);
-                    if (existing is null) continue;
-                    existing.IsVisible = itemDto.IsVisible;
-                    existing.Order = itemDto.Order;
-                }
-
-                // Re-sort by persisted order
-                var sorted = Model.Items.OrderBy(i => i.Order).ToList();
-                Model.Items.Clear();
-                foreach (var item in sorted)
-                {
-                    Model.Items.Add(item);
-                }
-            }
-        }
-        catch
-        {
-            // Malformed JSON — silently fall back to current (default) state
-        }
+        SystemIconsPanelStateMapper.ApplyTo(dto, Model);
     }
 
     /// <inheritdoc />
-    public void Save()
-    {
-        var dto = new PanelDto
-        {
-            IsEnabled = Model.IsEnabled,
-            ShowOnAllVirtualDesktops = Model.ShowOnAllVirtualDesktops,
-            IconSize = Model.IconSize.ToString(),
-            AnchorVirtualDesktopId = Model.AnchorVirtualDesktopId?.ToString(),
-            Items = Model.Items.Select((item, _) => new ItemDto
-            {
-                Kind = item.Kind,
-                IsVisible = item.IsVisible,
-                Order = item.Order,
-            }).ToList(),
-        };
-
-        _appSettings.SystemIconsPanel = JsonSerializer.Serialize(dto, JsonOptions);
-        _appSettings.Save();
-    }
+    /// <remarks>
+    /// Delegates to <see cref="IApplicationStateService.SaveNow"/>, which pulls <see cref="Model"/>'s
+    /// <em>current</em> state directly (uniform pull model, ADR-024 D-11/D-12) rather than this method
+    /// pushing a snapshot ahead of time — so a single <c>ApplicationStateService.SaveNow()</c> call
+    /// elsewhere (e.g. <c>App.OnExit</c>) always captures whatever <see cref="Model"/> holds at that
+    /// moment, even if <see cref="Save"/> itself was never called again after the last model change.
+    /// </remarks>
+    public void Save() => _applicationStateService.SaveNow();
 
     /// <inheritdoc />
     public void Apply()
@@ -765,42 +705,5 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
             }
         }
         catch { /* degrade silently */ }
-    }
-
-    // -------------------------------------------------------------------------
-    // JSON DTOs (private, internal to this class)
-    // -------------------------------------------------------------------------
-
-    private sealed class PanelDto
-    {
-        public bool IsEnabled { get; set; }
-
-        /// <summary>
-        /// Added after the initial release. Absent in older settings files, which System.Text.Json
-        /// leaves at the default <see langword="false"/> — backwards compatible by construction.
-        /// </summary>
-        public bool ShowOnAllVirtualDesktops { get; set; }
-
-        public string IconSize { get; set; } = nameof(SystemIconSize.Medium);
-
-        /// <summary>
-        /// GUID of the virtual desktop the panel is pinned to while "show on all virtual desktops"
-        /// is off. Stored as a string, not a <see cref="Guid"/>?: <see cref="Load"/> wraps the whole
-        /// deserialisation in one catch, so a corrupt value typed as <see cref="Guid"/>? would
-        /// discard EVERY panel setting. As a string it degrades to "no anchor" instead (see the
-        /// dedicated <see cref="Guid.TryParse(string?, out Guid)"/> call in <see cref="Load"/>).
-        /// Absent in settings files written before ADR-019 -&gt; <see langword="null"/> -&gt;
-        /// captured on first use.
-        /// </summary>
-        public string? AnchorVirtualDesktopId { get; set; }
-
-        public List<ItemDto>? Items { get; set; }
-    }
-
-    private sealed class ItemDto
-    {
-        public SystemIconKind Kind { get; set; }
-        public bool IsVisible { get; set; }
-        public int Order { get; set; }
     }
 }

@@ -17,14 +17,14 @@
     <conv:IconBoxWidthConverter x:Key="IconBoxWidth"/>
 
     <!--
-        Shared "selected/active" chrome tokens (finalization MINOR m-1). Used everywhere this exact
-        visual language appears: PanelItemContainerStyle's SelectionBorder, PanelHeaderToggleButtonStyle
-        (Sort button highlight, including its hover-preserving MultiDataTrigger below), and
-        FileNameEditBoxStyle (inline-rename editor chrome) — previously three independent copies of the
-        same two hex literals, which would silently drift out of sync if only one were ever updated.
+        Shared "selected/active" chrome tokens (finalization MINOR m-1) moved to
+        Resources/Styles/Brushes.xaml as of C5 (D-2) — same key names (SelectionFillBrush/
+        SelectionStrokeBrush), still consumed here by FileNameEditBoxStyle below and by
+        Resources/Styles/Controls.xaml's PanelHeaderToggleButtonStyle (moved there in the same
+        commit). The move was forced by merge order (D-1): PanelHeaderToggleButtonStyle now lives in
+        a dictionary merged BEFORE this one, and StaticResource only resolves backwards along the
+        merge order, so the brushes could no longer stay declared here.
     -->
-    <SolidColorBrush x:Key="SelectionFillBrush" Color="#4D3D8BFF"/>
-    <SolidColorBrush x:Key="SelectionStrokeBrush" Color="#B33D8BFF"/>
 
     <!--
         Shared context menu for a file item.
@@ -55,20 +55,14 @@
                   CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
     </ContextMenu>
 
-    <!-- Transparent but hit-testable resize handle (used by the panel edge/corner thumbs). -->
-    <Style x:Key="ResizeThumbStyle" TargetType="Thumb">
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Thumb">
-                    <Border Background="{TemplateBinding Background}"/>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- Greys out items whose file/folder no longer exists on disk. -->
-    <Style x:Key="FileItemRootStyle" TargetType="StackPanel">
+    <!-- Greys out items whose file/folder no longer exists on disk. TargetType="Panel" (not
+         "StackPanel") since UX-P2 fix (docs/PLANS/workspace-grid-07-visual.md fix-cycle 1): List mode's
+         item root switched from StackPanel to Grid so its label can actually truncate with an ellipsis
+         (see ListViewTemplate below) — a Style's TargetType must be the element's own type or a base of
+         it, and Panel is the common base both StackPanel (GridViewTemplate's own item root, unchanged)
+         and Grid (ListViewTemplate's new item root) share; none of this Style's Setters
+         (Background/Tag/ContextMenu/Opacity) are StackPanel-specific. -->
+    <Style x:Key="FileItemRootStyle" TargetType="Panel">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"/>
         <Setter Property="ContextMenu" Value="{StaticResource FileContextMenu}"/>
@@ -80,171 +74,15 @@
     </Style>
 
     <!--
-        Shared chrome for the three panel title-bar buttons (Sort/View/RollUp — ui-polishing-1 §4.3).
-        Replaces three separate copies of the same Width/Height/FontFamily/FontSize/Foreground/
-        Background/BorderThickness attribute set in ChildWindow.xaml with one style, and centralises
-        the hover/disabled visuals so all three buttons stay visually identical by construction.
+        PanelHeaderButtonStyle/PanelHeaderToggleButtonStyle/PanelItemContainerStyle moved out of this
+        file as of C5 (D-2): the first two to Resources/Styles/Controls.xaml, the last (the "item
+        container" D-1 names for it) to Resources/Styles/Panels.xaml. All three keep their exact
+        original key names — nothing below or in ChildWindow.xaml/SystemIconsPanelWindow.xaml needed to
+        change its own StaticResource reference for the move, since StaticResource resolves against the
+        fully-merged Application.Resources regardless of which dictionary declares a key. (A fourth
+        style, ResizeThumbStyle, moved here alongside them in C5 but was later deleted as dead code in
+        d16aab6 — MINOR fix, fix-cycle round 2: this comment previously still counted it among the four.)
     -->
-    <Style x:Key="PanelHeaderButtonStyle" TargetType="Button">
-        <Setter Property="Width" Value="28"/>
-        <Setter Property="Height" Value="28"/>
-        <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
-        <Setter Property="FontSize" Value="12"/>
-        <Setter Property="Foreground" Value="#AAAAAA"/>
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="HeaderButtonBorder"
-                            Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="3">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="HeaderButtonBorder" Property="Background" Value="#1AFFFFFF"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.5"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!--
-        Sort button only (ui-polishing-1 §4.3): highlighted whenever
-        ChildWindowViewModel.IsSortedByName is true, using the exact same SelectionFillBrush/
-        SelectionStrokeBrush tokens as PanelItemContainerStyle's selected-item chrome below — one shared
-        visual language for "selected/active" across the whole app (also reused by the sidebar panel in
-        Block D). A plain Button (not ToggleButton) is used deliberately: ToggleButton drives its own
-        IsChecked locally on click, which would fight the OneWay-in-effect binding here in the Folder
-        Portal edge case (the command is disabled but the highlight must still reflect the forced Name
-        mode).
-
-        Re-declares Template (rather than just adding a Style.Triggers DataTrigger, which is all the
-        Background/BorderBrush Setters below would need on their own) purely to append the
-        MultiDataTrigger at the bottom of ControlTemplate.Triggers (finalization MINOR m-6): the
-        inherited PanelHeaderButtonStyle's own IsMouseOver trigger sets HeaderButtonBorder.Background
-        directly by TargetName, which — as a template trigger — takes precedence over anything the
-        Background/BorderBrush Setters above (a plain Style trigger) can express on the Button element
-        itself. Without a same-precedence-tier trigger of its own, hovering the sort button would always
-        blank its active highlight back to the plain hover tint, active or not. The MultiDataTrigger is
-        declared last in the same ControlTemplate.Triggers collection specifically so it wins the
-        same-tier "last declared wins" tie-break against the inherited IsMouseOver trigger whenever both
-        conditions hold — the plain hover-only case (unsorted button) is untouched, still handled by
-        that first trigger alone.
-    -->
-    <Style x:Key="PanelHeaderToggleButtonStyle" TargetType="Button" BasedOn="{StaticResource PanelHeaderButtonStyle}">
-        <Style.Triggers>
-            <DataTrigger Binding="{Binding IsSortedByName}" Value="True">
-                <Setter Property="Background" Value="{StaticResource SelectionFillBrush}"/>
-                <Setter Property="BorderBrush" Value="{StaticResource SelectionStrokeBrush}"/>
-                <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="Foreground" Value="#FFFFFF"/>
-            </DataTrigger>
-        </Style.Triggers>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="HeaderButtonBorder"
-                            Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="3">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <!-- (a) Plain hover for a NOT currently sorted-by-name button — unchanged from
-                             PanelHeaderButtonStyle. -->
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="HeaderButtonBorder" Property="Background" Value="#1AFFFFFF"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.5"/>
-                        </Trigger>
-                        <!-- (b) Hover OVER an already-active (sorted-by-name) button: re-assert the
-                             active highlight so it survives hover instead of being blanked by (a) above
-                             — see this Style's remarks (finalization MINOR m-6). -->
-                        <MultiDataTrigger>
-                            <MultiDataTrigger.Conditions>
-                                <Condition Binding="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=IsMouseOver}" Value="True"/>
-                                <Condition Binding="{Binding IsSortedByName}" Value="True"/>
-                            </MultiDataTrigger.Conditions>
-                            <Setter TargetName="HeaderButtonBorder" Property="Background" Value="{StaticResource SelectionFillBrush}"/>
-                            <Setter TargetName="HeaderButtonBorder" Property="BorderBrush" Value="{StaticResource SelectionStrokeBrush}"/>
-                        </MultiDataTrigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!--
-        Shared selection/hover chrome for both panel item containers (wrap and list). Deliberately
-        reacts to IsSelected only — never IsSelectionActive — because the panel window carries
-        WS_EX_NOACTIVATE and is never the active/focused window, so the default ListBoxItem theme's
-        IsSelectionActive-gated highlight would be permanently invisible.
-
-        Background/Padding Setters used to be declared here too, but neither is read by the
-        ControlTemplate below (it draws its own always-Transparent Border and never TemplateBinds
-        Background, and ContentPresenter never consults ListBoxItem.Padding) — they were dead weight
-        that misleadingly implied the container's own chrome mattered. Foreground *is* live: nothing
-        in either item DataTemplate overrides it, so it flows down via WPF's Foreground property-value
-        inheritance to any descendant that doesn't set its own (e.g. TextBox's default style).
-
-        SelectionBorder used to be declared with BorderThickness="1" and a compensating Margin="-1":
-        a Border with no Padding adds its BorderThickness to its own measured (desired) size, which
-        would otherwise inflate every ListBoxItem in grid mode by 2px beyond its DataTemplate content
-        — desynchronising the WrapPanel's actual per-item footprint from GridMetrics.CellSize/BoxSize
-        (grid-snap math, see Resize_DragDelta/SnapWidthToGrid in ChildWindow.xaml.cs). The negative
-        Margin cancelled that out in measurement, but it also pushed the 1px border stroke *outside*
-        the ListBoxItem's own arrange box — for the first row/column, that stroke fell outside the
-        ScrollViewer's clip region and was silently cut off (ADR-015, ui-polishing-1 §3.3).
-
-        Fix (B-F1): the border no longer has a compensating negative Margin (Margin="0"), so its
-        stroke always stays inside the arrange box and is never clipped. To keep GridMetrics.CellSize
-        exactly byte-for-byte unchanged, the compensation moved into the *content* instead: the item
-        StackPanel's own Margin in GridViewTemplate was reduced from 6 to 5. The per-side footprint is
-        now split as "5px template margin + 1px selection border" = 6px per side (same total as
-        before, hence GridMetrics.ItemMargin — read as "Gutter" in the ui-polishing-1 plan — is still
-        6 and CellSize's formula is unchanged), but the border itself now lives fully inside that 6px,
-        instead of poking 1px past it.
-    -->
-    <Style x:Key="PanelItemContainerStyle" TargetType="ListBoxItem">
-        <Setter Property="Foreground" Value="#DDDDDD"/>
-        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="ListBoxItem">
-                    <Border x:Name="SelectionBorder"
-                            Margin="0"
-                            Background="Transparent"
-                            BorderBrush="Transparent"
-                            BorderThickness="1"
-                            CornerRadius="3"
-                            SnapsToDevicePixels="True">
-                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <!-- Declared before IsSelected so IsSelected wins when both are active. -->
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="SelectionBorder" Property="Background" Value="#1AFFFFFF"/>
-                        </Trigger>
-                        <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="SelectionBorder" Property="Background" Value="{StaticResource SelectionFillBrush}"/>
-                            <Setter TargetName="SelectionBorder" Property="BorderBrush" Value="{StaticResource SelectionStrokeBrush}"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
 
     <!--
         Inline-rename editor visibility (ADR-013 Decision 6): the display TextBlock and the edit
@@ -272,10 +110,14 @@
         instead of a stock white system TextBox. Foreground/CaretBrush reuse the same
         DataContext.Model.TextColor + HexBrush pattern as the sibling display TextBlock (see
         FileNameTextStyle above and the ListView/GridView DataTemplates below); Border/SelectionBrush
-        reuse the shared SelectionFillBrush/SelectionStrokeBrush resources also used by
-        PanelItemContainerStyle's SelectionBorder (finalization MINOR m-1) so the editor's chrome stays
-        visually consistent with the (already-selected, since renaming starts from a selected item)
-        container behind it.
+        reuse the shared SelectionFillBrush/SelectionStrokeBrush resources (finalization MINOR m-1,
+        Resources/Styles/Brushes.xaml as of C5) also used by Controls.xaml's
+        PanelHeaderToggleButtonStyle, so the editor's chrome stays visually consistent with that same
+        fixed-blue "selected/active" language elsewhere in the app. As of C5, Panels.xaml's
+        PanelItemContainerStyle no longer uses these two brushes for its own selected-item chrome — it
+        reads the panel's PanelTheme.Accent instead (see that Style's remarks) — so this editor's
+        border/selection colour and the container behind it are no longer the exact same pixels, only
+        the same visual family.
     -->
     <Style x:Key="FileNameEditBoxStyle" TargetType="TextBox">
         <Setter Property="Visibility" Value="Collapsed"/>
@@ -285,6 +127,12 @@
         <Setter Property="BorderBrush" Value="{StaticResource SelectionStrokeBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="SelectionBrush" Value="{StaticResource SelectionFillBrush}"/>
+        <!-- MAJOR-2 fix (review round 3): TextBox.SelectionTextBrush was left unset, so the inline-rename
+             editor's selected-text run fell back to the TextBox's own default foreground handling instead
+             of the paired token for SelectionBrush above — same unpaired-foreground risk as
+             PanelHeaderToggleButtonStyle's Foreground fix in Controls.xaml (see Colors.xaml's
+             Color.Selection.Text remarks). -->
+        <Setter Property="SelectionTextBrush" Value="{StaticResource SelectionTextBrush}"/>
         <Setter Property="Padding" Value="1,0"/>
         <Style.Triggers>
             <DataTrigger Value="True">
@@ -302,9 +150,10 @@
     <DataTemplate x:Key="ListViewTemplate">
         <!--
             Padding="0": the default ListBox theme applies Padding="1" (visible via its default
-            style), which — like PanelItemContainerStyle's SelectionBorder BorderThickness above —
-            adds unaccounted chrome inside FileListHost that GridMetrics.FileListHPadding doesn't
-            know about. NOT because both view modes resize with the same icon-grid quantisation — they
+            style), which — like Resources/Styles/Panels.xaml's PanelItemContainerStyle's
+            SelectionBorder BorderThickness — adds unaccounted chrome inside FileListHost that
+            GridMetrics.FileListHPadding doesn't know about. NOT because both view modes resize with
+            the same icon-grid quantisation — they
             don't: Resize_DragStarted in ChildWindow.xaml.cs zeroes BOTH _snapCellWidth/_snapCellHeight
             for List mode, which is free-form/pixel-accurate on both axes, unlike Grid mode (finalization
             m-9 — corrects a prior version of this comment that claimed otherwise). Rather, both view
@@ -312,11 +161,29 @@
             content width before comparing against the MinPanelSize/MinPanelWidth floor, whether or not
             that width ends up snapped — so this override matters here just as much as on
             GridViewTemplate below, independent of quantisation.
+
+            MAJOR-B fix (docs/PLANS/workspace-grid-07-visual.md fix-cycle 2): ScrollViewer.
+            HorizontalScrollBarVisibility="Disabled" — GridViewTemplate below has always set this (it is
+            a hard precondition of AdaptiveIconGridPanel.MeasureOverride there), but this ListBox never
+            did, so its default ("Auto") left CanHorizontallyScroll=true on the ListBox's internal
+            ScrollContentPresenter. That measures the ItemsPresenter/its panel with an INFINITE available
+            width, which the fix-cycle 1 Grid-column item root (see the ItemTemplate below) still needs a
+            FINITE available width from its ANCESTOR to constrain its star column against — a StackPanel-
+            hosted item (vertical orientation) is measured with the SAME width its own parent panel was
+            measured with, so an infinite width here propagates all the way down and TextTrimming=
+            "CharacterEllipsis" never had anything finite to trim against; a horizontal scrollbar appeared
+            instead of the label being clipped. The fix-cycle 1 STA regression test below this DataTemplate
+            (ResourceDictionaryMergeTests.ListViewTemplate_LongDisplayName_LabelTextBlockStaysWithinAvailableWidth)
+            measured the item root's DataTemplate content directly, bypassing the real ListBox/ScrollViewer
+            entirely, so it stayed green through this bug — see
+            ResourceDictionaryMergeTests.ListViewTemplate_NarrowWidth_RealListBoxClampsLabelAndHasNoHorizontalOverflow
+            for the honest, ListBox-level regression pin added alongside this fix.
         -->
         <ListBox ItemsSource="{Binding}"
                  Background="Transparent"
                  BorderThickness="0"
                  Padding="0"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  SelectionMode="Single"
                  SelectedItem="{Binding DataContext.SelectedFile, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
                  ItemContainerStyle="{StaticResource PanelItemContainerStyle}"
@@ -324,20 +191,44 @@
                  VerticalAlignment="Stretch">
             <ListBox.ItemTemplate>
                 <DataTemplate DataType="{x:Type models:FileItem}">
-                    <StackPanel Orientation="Horizontal" Margin="2" Style="{StaticResource FileItemRootStyle}"
-                                ToolTip="{Binding Path}">
-                        <Image Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"/>
-                        <TextBlock Text="{Binding DisplayName}"
+                    <!--
+                        UX-P2 fix (docs/PLANS/workspace-grid-07-visual.md fix-cycle 1): Grid, not
+                        StackPanel — a horizontal StackPanel always measures its children with an
+                        INFINITE available width along its own orientation axis, so a long DisplayName's
+                        TextBlock never actually gets constrained and TextTrimming has nothing to trim
+                        against (verified: adding TextTrimming alone, without this structural change, has
+                        no effect). A Grid's star column, by contrast, is given the item's real
+                        (finite) arranged width during Arrange even though Measure saw the same infinite
+                        constraint — this is what lets TextTrimming="CharacterEllipsis" below actually
+                        truncate. The icon column stays Auto-sized to the Image's own fixed 16+margin
+                        footprint, so a missing icon still reserves the same slot width as before
+                        (Image's explicit Width/Height are unaffected by a null Source). Verified this
+                        does not change ListReorderGeometry's hit-testing/selection math — that operates
+                        on the ListBoxItem CONTAINER's own bounds (Behaviors/ListReorderGeometry.cs),
+                        never on this DataTemplate's internal element type.
+                    -->
+                    <Grid Margin="2" Style="{StaticResource FileItemRootStyle}"
+                          ToolTip="{Binding Path}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Image Grid.Column="0" Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"/>
+                        <TextBlock x:Name="DisplayNameText"
+                                   Grid.Column="1"
+                                   Text="{Binding DisplayName}"
                                    Foreground="{Binding DataContext.Model.TextColor, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource HexBrush}}"
                                    VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
                                    Style="{StaticResource FileNameTextStyle}"/>
-                        <TextBox Text="{Binding DataContext.EditingName, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding DataContext.EditingName, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  VerticalAlignment="Center"
                                  VerticalContentAlignment="Center"
                                  MinWidth="120"
                                  Style="{StaticResource FileNameEditBoxStyle}"
                                  behaviors:RenameEditBehavior.IsRenameEditor="True"/>
-                    </StackPanel>
+                    </Grid>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
@@ -368,18 +259,47 @@
                  VerticalAlignment="Stretch">
             <ListBox.ItemsPanel>
                 <ItemsPanelTemplate>
-                    <controls:AdaptiveIconGridPanel UseLayoutRounding="True"/>
+                    <!--
+                        LayoutPolicy (ADR-029 P05): bound to the owning panel's model, same
+                        "RelativeSource AncestorType=Window, then DataContext.Model.*" idiom as
+                        Model.IconSize below in the item DataTemplate — this ItemsPanelTemplate's own
+                        DataContext is the ListBox's (FileItems, the ContentPresenter's content), not the
+                        window, so escaping to the Window ancestor is required here too.
+                        ChildWindowModel.IconLayoutPolicy landed with P02b (schema v5) — this binding now
+                        resolves at runtime for every panel; a panel whose persisted/default value is
+                        IconLayoutPolicy.LegacyStretch (existing panels post-migration, or a new panel
+                        while IAppSettings.DefaultIconLayoutPolicy is set to it) simply renders
+                        byte-for-byte the same as before this DP existed — that is the DP's own default
+                        and LegacyStretch's whole point, not a sign the binding failed.
+
+                        CapacityWidth (ADR-029 P05 fix-cycle 2, CRITICAL-1): bound to the ScrollViewer
+                        generated by THIS ListBox's own (unmodified, default) ControlTemplate —
+                        RelativeSource AncestorType=ScrollViewer walks the VISUAL tree, so it finds that
+                        internal ScrollViewer the same way every "AncestorType=Window" binding above finds
+                        the panel's own Window across the same kind of template boundary. This
+                        ScrollViewer's own ActualWidth is set by ITS parent's layout (the Window's content
+                        column), NOT by whether ITS OWN VerticalScrollBarVisibility="Auto" scrollbar is
+                        currently showing — unlike the availableSize/finalSize this panel's
+                        Measure/ArrangeOverride receive, which DOES shrink once that scrollbar appears.
+                        AdaptiveIconGridPanel.ResolveAvailableForCapacity subtracts FixedGap's M-2
+                        scrollbar reservation from THIS stable value instead of the fluctuating one,
+                        fixing the double-subtraction CRITICAL-1 found in fix-cycle 1's amendment (see
+                        AdaptiveIconGridPanel.CapacityWidthProperty's doc comment for the full mechanism).
+                    -->
+                    <controls:AdaptiveIconGridPanel UseLayoutRounding="True"
+                        LayoutPolicy="{Binding DataContext.Model.IconLayoutPolicy, RelativeSource={RelativeSource AncestorType=Window}}"
+                        CapacityWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"/>
                 </ItemsPanelTemplate>
             </ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
                 <DataTemplate DataType="{x:Type models:FileItem}">
                     <!--
-                        Margin="5": see the doc comment on PanelItemContainerStyle/SelectionBorder above
-                        — this 5px template margin plus the 1px selection border chrome adds up to the
-                        6px-per-side footprint GridMetrics.CellSize expects (B-F1, ui-polishing-1 §3.3).
-                        Do not change this back to 6 without also restoring SelectionBorder's negative
-                        Margin compensation, or the first row/column's selection stroke will be clipped
-                        again.
+                        Margin="5": see the doc comment on Resources/Styles/Panels.xaml's
+                        PanelItemContainerStyle/SelectionBorder (relocated there in C5, D-2) — this 5px
+                        template margin plus the 1px selection border chrome adds up to the 6px-per-side
+                        footprint GridMetrics.CellSize expects (B-F1, ui-polishing-1 §3.3). Do not change
+                        this back to 6 without also restoring SelectionBorder's negative Margin
+                        compensation, or the first row/column's selection stroke will be clipped again.
                     -->
                     <StackPanel Orientation="Vertical" Margin="5"
                                 Width="{Binding DataContext.Model.IconSize, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource IconBoxWidth}}"

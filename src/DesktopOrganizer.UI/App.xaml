@@ -4,11 +4,24 @@
     x:Class="DesktopOrganizer.UI.App"
     Startup="StartApp"
     ShutdownMode="OnExplicitShutdown">
-    <Application.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="/Resources/Templates.xaml" />
-            </ResourceDictionary.MergedDictionaries>
-        </ResourceDictionary>
-    </Application.Resources>
+    <!--
+        Ambient Accent Visual System (ADR-025, docs/PLANS/phase-5-ambient-accent-ui.md §1 D-1, D-12):
+        Application.Resources' merge chain (Colors -> Spacing -> Brushes -> Typography -> Icons ->
+        Controls -> Panels -> Templates, with Colors.HighContrast.xaml inserted conditionally) is built
+        entirely in code — App.xaml.cs's LoadResourceDictionaries(), called once at startup — NOT
+        declared here as a static <ResourceDictionary.MergedDictionaries> list.
+
+        Reason: Brushes.xaml's entries are plain `<SolidColorBrush ... po:Freeze="True"/>` objects, not
+        deferred content the way Style/ControlTemplate/DataTemplate resources are (WPF only defers THOSE
+        types' parsing until first lookup) — so each brush, and the `{StaticResource Color.*}` reference
+        inside it, is resolved as soon as Brushes.xaml itself is parsed/merged, not lazily on first
+        consumer access, and `po:Freeze="True"` then locks that resolved value into an immutable Brush
+        instance that can never change afterwards. Whether the high-contrast Colors override is in effect
+        has to be decided — and Colors.HighContrast.xaml merged in, ahead of Brushes.xaml — BEFORE that
+        parse happens; a fixed, statically-ordered list declared here has no way to conditionally insert a
+        dictionary partway through itself. See LoadResourceDictionaries()'s own remarks for the exact
+        order (unchanged from before this comment, for the non-high-contrast case) and reasoning.
+
+        Do not add <Application.Resources> back here without re-reading that method.
+    -->
 </Application>

@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 5,
+  "writtenAtUtc": "2026-08-15T20:00:00.0000000+00:00",
+  "appVersion": "0.3.5",
+  "panels": [
+    {
+      "id": "aaaaaaaa-0000-0000-0000-000000000001",
+      "title": "Projects",
+      "pageId": "default",
+      "geometry": {
+        "x": 10,
+        "y": 20,
+        "width": 320,
+        "height": 240,
+        "monitorDeviceId": "\\\\.\\DISPLAY2",
+        "windowState": "Minimized",
+        "isRolledUp": false,
+        "isVisible": true,
+        "geometryMode": "LegacyFreeform",
+        "sizingMode": "Manual"
+      },
+      "appearance": {
+        "accentColor": "#101010",
+        "surfaceOpacity": 0.75,
+        "surfaceStyle": "Ambient",
+        "textColor": "#EEEEEE",
+        "iconSize": 40,
+        "iconLayoutPolicy": "LegacyStretch"
+      },
+      "content": {
+        "viewMode": "List",
+        "contentFilter": "HideAll",
+        "sortMode": "Name",
+        "sourceFolderPath": "D:\\Projects",
+        "filePaths": []
+      }
+    },
+    {
+      "id": "aaaaaaaa-0000-0000-0000-000000000002",
+      "title": "Scratch",
+      "pageId": "scratch",
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "monitorDeviceId": null,
+        "windowState": "Maximized",
+        "isRolledUp": true,
+        "isVisible": false,
+        "geometryMode": "LegacyFreeform",
+        "sizingMode": "Manual"
+      },
+      "appearance": {
+        "accentColor": "#333333",
+        "surfaceOpacity": 1.0,
+        "surfaceStyle": "Ambient",
+        "textColor": "#CCCCCC",
+        "iconSize": 64,
+        "iconLayoutPolicy": "LegacyStretch"
+      },
+      "content": {
+        "viewMode": "Grid",
+        "contentFilter": "FoldersOnly",
+        "sortMode": "Manual",
+        "sourceFolderPath": null,
+        "filePaths": ["E:\\a.txt", "E:\\b.txt"]
+      }
+    }
+  ],
+  "pages": {
+    "ids": ["default", "scratch"],
+    "currentPageId": "default"
+  },
+  "layoutSnapshots": [
+    {
+      "id": "snap-v2-1",
+      "name": "Evening",
+      "createdAt": "2026-08-15T20:00:00.0000000",
+      "panels": [
+        {
+          "id": "aaaaaaaa-0000-0000-0000-0000000000e1",
+          "title": "Snap E",
+          "pageId": "default",
+          "geometry": {
+            "x": 5,
+            "y": 5,
+            "width": 100,
+            "height": 100,
+            "monitorDeviceId": null,
+            "windowState": "Normal",
+            "isRolledUp": false,
+            "isVisible": true,
+            "geometryMode": "LegacyFreeform",
+            "sizingMode": "Manual"
+          },
+          "appearance": {
+            "accentColor": "#6B7280",
+            "surfaceOpacity": 0.8,
+            "surfaceStyle": "Ambient",
+            "textColor": "#DDDDDD",
+            "iconSize": 48,
+            "iconLayoutPolicy": "LegacyStretch"
+          },
+          "content": {
+            "viewMode": "List",
+            "contentFilter": "ShowAll",
+            "sortMode": "Manual",
+            "sourceFolderPath": null,
+            "filePaths": []
+          }
+        },
+        {
+          "id": "aaaaaaaa-0000-0000-0000-0000000000f1",
+          "title": "Snap F",
+          "pageId": "scratch",
+          "geometry": {
+            "x": 15,
+            "y": 15,
+            "width": 120,
+            "height": 120,
+            "monitorDeviceId": "\\\\.\\DISPLAY1",
+            "windowState": "Maximized",
+            "isRolledUp": false,
+            "isVisible": true,
+            "geometryMode": "LegacyFreeform",
+            "sizingMode": "Manual"
+          },
+          "appearance": {
+            "accentColor": "#6B7280",
+            "surfaceOpacity": 0.8,
+            "surfaceStyle": "Ambient",
+            "textColor": "#DDDDDD",
+            "iconSize": 48,
+            "iconLayoutPolicy": "LegacyStretch"
+          },
+          "content": {
+            "viewMode": "Grid",
+            "contentFilter": "HideShortcuts",
+            "sortMode": "Name",
+            "sourceFolderPath": "F:\\Portal2",
+            "filePaths": []
+          }
+        }
+      ]
+    }
+  ],
+  "systemIconsPanel": {
+    "isEnabled": false,
+    "showOnAllVirtualDesktops": true,
+    "iconSize": "Small",
+    "anchorVirtualDesktopId": null,
+    "items": [{ "kind": "Network", "isVisible": true, "order": 0 }]
+  }
+}

@@ -97,6 +97,18 @@ namespace DesktopOrganizer.UI.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("Ambient")]
+        public string DefaultSurfaceStyle {
+            get {
+                return ((string)(this["DefaultSurfaceStyle"]));
+            }
+            set {
+                this["DefaultSurfaceStyle"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("[\"default\"]")]
         public string Pages {
             get {
@@ -146,6 +158,18 @@ namespace DesktopOrganizer.UI.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool NativePanelSizing {
+            get {
+                return ((bool)(this["NativePanelSizing"]));
+            }
+            set {
+                this["NativePanelSizing"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("12")]
         public int GridSnapDistance {
             get {
@@ -177,6 +201,54 @@ namespace DesktopOrganizer.UI.Properties {
             }
             set {
                 this["SystemIconsPanel"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool IsLayoutLocked {
+            get {
+                return ((bool)(this["IsLayoutLocked"]));
+            }
+            set {
+                this["IsLayoutLocked"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("MoveOnly")]
+        public string NormalModeLayoutGestures {
+            get {
+                return ((string)(this["NormalModeLayoutGestures"]));
+            }
+            set {
+                this["NormalModeLayoutGestures"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("GridAligned")]
+        public string DefaultPanelGeometryMode {
+            get {
+                return ((string)(this["DefaultPanelGeometryMode"]));
+            }
+            set {
+                this["DefaultPanelGeometryMode"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("FixedGap")]
+        public string DefaultIconLayoutPolicy {
+            get {
+                return ((string)(this["DefaultIconLayoutPolicy"]));
+            }
+            set {
+                this["DefaultIconLayoutPolicy"] = value;
             }
         }
     }

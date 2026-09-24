@@ -18,6 +18,13 @@ internal class AppSettings : IAppSettings
     }
 
     /// <inheritdoc />
+    public bool NativePanelSizing
+    {
+        get => Properties.Settings.Default.NativePanelSizing;
+        set => Properties.Settings.Default.NativePanelSizing = value;
+    }
+
+    /// <inheritdoc />
     public int GridSnapDistance
     {
         get => Properties.Settings.Default.GridSnapDistance;
@@ -57,6 +64,48 @@ internal class AppSettings : IAppSettings
     {
         get => Properties.Settings.Default.DefaultIconSize;
         set => Properties.Settings.Default.DefaultIconSize = value;
+    }
+
+    /// <inheritdoc />
+    public string DefaultSurfaceStyle
+    {
+        get => Properties.Settings.Default.DefaultSurfaceStyle;
+        set => Properties.Settings.Default.DefaultSurfaceStyle = value;
+    }
+
+    /// <inheritdoc />
+    public string DefaultPanelGeometryMode
+    {
+        get => Properties.Settings.Default.DefaultPanelGeometryMode;
+        set => Properties.Settings.Default.DefaultPanelGeometryMode = value;
+    }
+
+    /// <inheritdoc />
+    public string DefaultIconLayoutPolicy
+    {
+        get => Properties.Settings.Default.DefaultIconLayoutPolicy;
+        set => Properties.Settings.Default.DefaultIconLayoutPolicy = value;
+    }
+
+    /// <inheritdoc />
+    public bool IsLayoutLocked
+    {
+        get => Properties.Settings.Default.IsLayoutLocked;
+        set => Properties.Settings.Default.IsLayoutLocked = value;
+    }
+
+    /// <inheritdoc />
+    public string NormalModeLayoutGestures
+    {
+        get => Properties.Settings.Default.NormalModeLayoutGestures;
+        set => Properties.Settings.Default.NormalModeLayoutGestures = value;
+    }
+
+    /// <inheritdoc />
+    public string ChildWindowsState
+    {
+        get => Properties.Settings.Default.ChildWindowsState;
+        set => Properties.Settings.Default.ChildWindowsState = value;
     }
 
     /// <inheritdoc />

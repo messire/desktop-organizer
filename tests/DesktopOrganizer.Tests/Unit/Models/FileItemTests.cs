@@ -364,4 +364,50 @@ public class FileItemTests
             File.Delete(oldPath);
         }
     }
+
+    // ---------------------------------------------------------------------------
+    // UpdateIcon (P08, file-based invalidation): re-resolves Icon in place without touching
+    // Path/Name/DisplayName/Type/IsShortcut the way Relocate does.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// A genuinely different icon instance is applied and raises <c>PropertyChanged(Icon)</c>, while
+    /// every other derived property (Path/Name/DisplayName/Type/IsShortcut) is left untouched.
+    /// </summary>
+    [Fact]
+    public void UpdateIcon_DifferentInstance_AppliesIconAndRaisesPropertyChanged()
+    {
+        var item = new FileItem(@"C:\fake\Chrome.lnk", null);
+        var newIcon = new BitmapImage();
+
+        var raised = new List<string?>();
+        item.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        var changed = item.UpdateIcon(newIcon);
+
+        Assert.True(changed);
+        Assert.Same(newIcon, item.Icon);
+        Assert.Equal([nameof(FileItem.Icon)], raised);
+        Assert.Equal(@"C:\fake\Chrome.lnk", item.Path);
+        Assert.Equal("Chrome.lnk", item.Name);
+    }
+
+    /// <summary>
+    /// Re-applying the same icon instance (reference equality) is a no-op: no
+    /// <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/> is raised.
+    /// </summary>
+    [Fact]
+    public void UpdateIcon_SameInstance_IsNoOp()
+    {
+        var icon = new BitmapImage();
+        var item = new FileItem(@"C:\fake\Chrome.lnk", icon);
+
+        var raised = 0;
+        item.PropertyChanged += (_, _) => raised++;
+
+        var changed = item.UpdateIcon(icon);
+
+        Assert.False(changed);
+        Assert.Equal(0, raised);
+    }
 }

@@ -119,6 +119,18 @@ internal sealed class MonitorService(INativeApi nativeApi) : IMonitorService
             string.Equals(m.DeviceName, deviceName, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <inheritdoc />
+    public double GetSystemDpiScale() => nativeApi.GetSystemDpiScale();
+
+    /// <inheritdoc />
+    public Rect? GetWindowRectDip(IntPtr hwnd)
+    {
+        if (!nativeApi.GetWindowRect(hwnd, out var rect)) return null;
+
+        var scale = nativeApi.GetSystemDpiScale();
+        return ToDipRect(new System.Drawing.Rectangle(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top), scale);
+    }
+
     private static Rect ToDipRect(System.Drawing.Rectangle r, double scale)
     {
         var safeScale = scale > 0 ? scale : 1.0;

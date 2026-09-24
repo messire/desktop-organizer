@@ -1,0 +1,77 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sysc="clr-namespace:System.Windows;assembly=PresentationFramework">
+    <!--
+        Ambient Accent Visual System — high-contrast color overlay (D-12). Overrides the
+        Color.Surface.*/Color.Text.*/Color.Border.* keys declared in Colors.xaml (same key names, so a
+        later merge of this dictionary shadows them in place) with values sourced from SystemColors,
+        which already track the user's chosen high-contrast theme.
+
+        MAJOR-A fix: Color.Overlay.*/Color.Selection.*/Color.Sidebar.Background/Color.Settings.* are now
+        ALSO overridden here — they used to be deliberately left out on the theory that "readability
+        comes from SurfaceComposer forcing alpha=255 in high-contrast mode", but SurfaceComposer.ComposeSurface's
+        highContrast branch only ever forces the PANEL SURFACE fill (PanelSurfaceBrushConverter's own
+        output) to opaque; it has no effect at all on these other brushes. Left un-overridden, Color.Overlay.Hover/
+        Pressed stayed their normal-mode translucent white washes (#1AFFFFFF/#26FFFFFF) painted over an
+        already-white SystemColors.WindowColor surface — i.e. invisible hover/pressed feedback — and
+        Color.Sidebar.Background stayed a semi-transparent black wash (#55000000) that read as a dirty
+        grey smear over a white surface rather than a real system-consistent panel. Color.Accent.* is
+        still intentionally NOT overridden — a user-chosen panel accent is a deliberate per-panel identity,
+        not a semantic chrome color, and stays as-is in high-contrast mode too (same rationale as before).
+
+        NOT merged unconditionally — merged conditionally, ONCE at startup (App.xaml.cs's
+        LoadResourceDictionaries(), called from StartApp before any Window is constructed), only when
+        SystemParameters.HighContrast is true, and BEFORE Brushes.xaml loads (D-12; see
+        LoadResourceDictionaries()'s own remarks for why the ordering relative to Brushes.xaml is
+        load-bearing). "Minimum at startup" per D-12: toggling Windows High Contrast while the app is
+        already running requires an app restart to pick up the change — SystemParameters.StaticPropertyChanged
+        / SystemEvents.UserPreferenceChanged live re-theming is explicitly out of scope here.
+    -->
+    <x:Static x:Key="Color.Surface.Base" Member="sysc:SystemColors.WindowColor"/>
+    <x:Static x:Key="Color.Surface.Elevated" Member="sysc:SystemColors.ControlColor"/>
+
+    <x:Static x:Key="Color.Text.Primary" Member="sysc:SystemColors.WindowTextColor"/>
+    <x:Static x:Key="Color.Text.Secondary" Member="sysc:SystemColors.ControlTextColor"/>
+    <x:Static x:Key="Color.Text.Muted" Member="sysc:SystemColors.GrayTextColor"/>
+    <x:Static x:Key="Color.Text.Disabled" Member="sysc:SystemColors.GrayTextColor"/>
+
+    <x:Static x:Key="Color.Border.Default" Member="sysc:SystemColors.ActiveBorderColor"/>
+    <x:Static x:Key="Color.Border.Subtle" Member="sysc:SystemColors.InactiveBorderColor"/>
+    <x:Static x:Key="Color.Border.Hover" Member="sysc:SystemColors.HighlightColor"/>
+    <x:Static x:Key="Color.Border.Focus" Member="sysc:SystemColors.HighlightColor"/>
+
+    <!-- Overlay (MAJOR-A): non-accent hover/press washes, now opaque system tones instead of a
+         translucent white wash invisible against SystemColors.WindowColor. -->
+    <x:Static x:Key="Color.Overlay.Hover" Member="sysc:SystemColors.ControlLightColor"/>
+    <x:Static x:Key="Color.Overlay.Pressed" Member="sysc:SystemColors.HighlightColor"/>
+
+    <!-- Selection (MAJOR-A): PanelHeaderToggleButtonStyle's Sort-button "active" indicator and
+         FileNameEditBoxStyle's inline-rename editor chrome — same system highlight already used for
+         Color.Border.Hover/Focus above, for visual consistency within this overlay. -->
+    <x:Static x:Key="Color.Selection.Fill" Member="sysc:SystemColors.HighlightColor"/>
+    <x:Static x:Key="Color.Selection.Stroke" Member="sysc:SystemColors.HighlightColor"/>
+
+    <!-- Selection.Text (MAJOR-2 fix, review round 3): the paired foreground for Color.Selection.Fill/
+         Color.Selection.Stroke's SystemColors.HighlightColor above. Windows' HC themes intentionally
+         invert Highlight/HighlightText relative to Window/WindowText, so painting text over a Highlight-
+         colored background with Color.Text.Primary (WindowTextColor) risks a same-tone, unreadable
+         combination in the two shipped HC themes (HC Black/HC White) — HighlightTextColor is the
+         system's own paired answer to "what foreground reads on Highlight", exactly like every other
+         *Color/*TextColor pair in this file. -->
+    <x:Static x:Key="Color.Selection.Text" Member="sysc:SystemColors.HighlightTextColor"/>
+
+    <!-- Sidebar (MAJOR-A): SystemIconsPanelWindow's background strip — opaque system control color
+         instead of a semi-transparent black wash that reads as a dirty grey smear on a white surface. -->
+    <x:Static x:Key="Color.Sidebar.Background" Member="sysc:SystemColors.ControlColor"/>
+
+    <!-- Settings window (MAJOR-A, D-9): MainWindow.xaml's chrome. Phase 5 deliberately does not restyle
+         this window's layout, but its fixed light-theme literals still need to give way to the user's
+         chosen high-contrast system colors, the same as every other chrome color in this file. -->
+    <x:Static x:Key="Color.Settings.ChromeBackground" Member="sysc:SystemColors.ControlColor"/>
+    <x:Static x:Key="Color.Settings.ChromeBorder" Member="sysc:SystemColors.ActiveBorderColor"/>
+    <x:Static x:Key="Color.Settings.TabActiveBackground" Member="sysc:SystemColors.WindowColor"/>
+    <x:Static x:Key="Color.Settings.IconMuted" Member="sysc:SystemColors.GrayTextColor"/>
+    <x:Static x:Key="Color.Settings.TextMuted" Member="sysc:SystemColors.GrayTextColor"/>
+    <x:Static x:Key="Color.Settings.SwatchBorder" Member="sysc:SystemColors.ActiveBorderColor"/>
+    <x:Static x:Key="Color.Settings.Warning" Member="sysc:SystemColors.HighlightColor"/>
+</ResourceDictionary>

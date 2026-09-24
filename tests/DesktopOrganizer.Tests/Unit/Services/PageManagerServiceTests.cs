@@ -1,28 +1,32 @@
-using System.Text.Json;
+using System.Windows;
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
+using DesktopOrganizer.UI.State;
 using Moq;
 
 namespace DesktopOrganizer.Tests.Unit.Services;
 
 /// <summary>
 /// Unit tests for <see cref="PageManagerService"/>.
-/// Dependencies <see cref="IWindowManager"/> and <see cref="IAppSettings"/> are mocked.
+/// Dependencies <see cref="IWindowManager"/> and <see cref="IApplicationStateService"/> are mocked.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class PageManagerServiceTests
 {
     private readonly Mock<IWindowManager> _windowManagerMock = new();
-    private readonly Mock<IAppSettings> _appSettingsMock = new();
+    private readonly Mock<IApplicationStateService> _applicationStateServiceMock = new();
+    private readonly Mock<IConfirmationService> _confirmationMock = new();
+    private readonly Mock<IPanelItemStorageService> _itemStorageMock = new();
 
     private PageManagerService BuildSut(
         IEnumerable<ChildWindowModel>? panels = null,
-        string pagesJson = "",
-        string currentPage = "")
+        IReadOnlyList<string>? pageIds = null,
+        string currentPageId = "default")
     {
-        _appSettingsMock.SetupProperty(s => s.Pages, pagesJson);
-        _appSettingsMock.SetupProperty(s => s.CurrentPage, currentPage);
-        _appSettingsMock.Setup(s => s.Save());
+        _applicationStateServiceMock.SetupGet(s => s.PageIds).Returns(pageIds ?? ["default"]);
+        _applicationStateServiceMock.SetupGet(s => s.CurrentPageId).Returns(currentPageId);
+        _applicationStateServiceMock.Setup(s => s.SaveNow());
 
         var panelList = (panels ?? Enumerable.Empty<ChildWindowModel>()).ToList();
         _windowManagerMock.Setup(wm => wm.GetAllChildWindows()).Returns(panelList);
@@ -31,8 +35,21 @@ public class PageManagerServiceTests
         _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>()));
         _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()));
         _windowManagerMock.Setup(wm => wm.SaveWindowsStateNow());
+        _windowManagerMock.Setup(wm => wm.SyncAllWindowsToModels());
 
-        return new PageManagerService(_windowManagerMock.Object, _appSettingsMock.Object);
+        // Default: no managed files anywhere, and the confirmation gate (CRITICAL C1, P08 fix cycle 1)
+        // is granted — matches the pre-existing (pre-fix) behavior for every test that doesn't care
+        // about the confirm gate itself. Tests that DO care override these explicitly.
+        _itemStorageMock.Setup(s => s.IsManaged(It.IsAny<string>())).Returns(false);
+        _confirmationMock
+            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
+            .Returns(true);
+
+        return new PageManagerService(
+            _windowManagerMock.Object,
+            _applicationStateServiceMock.Object,
+            _confirmationMock.Object,
+            _itemStorageMock.Object);
     }
 
     // ── AddPage ──────────────────────────────────────────────────────────────────
@@ -81,11 +98,22 @@ public class PageManagerServiceTests
         var pageCountBefore = sut.Pages.Count;
 
         // Act — "default" must never be removed
-        sut.RemovePage("default");
+        var removed = sut.RemovePage("default");
 
         // Assert
+        Assert.False(removed); // CRITICAL-1 (P08 fix cycle 2): callers must be able to tell nothing happened
         Assert.Equal(pageCountBefore, sut.Pages.Count);
         Assert.Contains("default", sut.Pages);
+    }
+
+    [Fact]
+    public void RemovePage_UnknownPageId_ReturnsFalse()
+    {
+        var sut = BuildSut();
+
+        var removed = sut.RemovePage("does-not-exist");
+
+        Assert.False(removed);
     }
 
     [Fact]
@@ -143,10 +171,100 @@ public class PageManagerServiceTests
         sut.AddPage("work");
 
         // Act
-        sut.RemovePage("work");
+        var removed = sut.RemovePage("work");
 
         // Assert
+        Assert.True(removed); // CRITICAL-1 (P08 fix cycle 2): callers rely on this to know it actually happened
         Assert.DoesNotContain("work", sut.Pages);
+    }
+
+    // ── CRITICAL C1 (P08 fix cycle 1, 2026-09-22): confirmation gate mirrors RemovePanel's own ──────
+
+    [Fact]
+    public void RemovePage_HasManagedFiles_AsksForWarningConfirmation()
+    {
+        var panel = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work", FilePaths = ["C:\\managed\\a.txt"] };
+        var sut = BuildSut(panels: [panel]);
+        sut.AddPage("work");
+        _itemStorageMock.Setup(s => s.IsManaged("C:\\managed\\a.txt")).Returns(true);
+
+        sut.RemovePage("work");
+
+        _confirmationMock.Verify(
+            c => c.Confirm(
+                It.Is<string>(m => m.Contains("deleted from disk")),
+                It.IsAny<string>(),
+                MessageBoxImage.Warning),
+            Times.Once);
+    }
+
+    [Fact]
+    public void RemovePage_NoManagedFiles_UsesNeutralConfirmationWithoutWarningIcon()
+    {
+        var panel = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work", FilePaths = ["C:\\desktop\\shortcut.lnk"] };
+        var sut = BuildSut(panels: [panel]);
+        sut.AddPage("work");
+
+        sut.RemovePage("work");
+
+        _confirmationMock.Verify(
+            c => c.Confirm(
+                It.Is<string>(m => !m.Contains("deleted from disk")),
+                It.IsAny<string>(),
+                MessageBoxImage.Question),
+            Times.Once);
+        _confirmationMock.Verify(
+            c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), MessageBoxImage.Warning),
+            Times.Never);
+    }
+
+    [Fact]
+    public void RemovePage_ConfirmationDeclined_DoesNotRemoveAnyPanelOrPage()
+    {
+        var panel = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work" };
+        var sut = BuildSut(panels: [panel]);
+        sut.AddPage("work");
+        _confirmationMock
+            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
+            .Returns(false);
+
+        var removed = sut.RemovePage("work");
+
+        Assert.False(removed); // CRITICAL-1 (P08 fix cycle 2): declined confirmation must report "nothing happened"
+        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
+        _windowManagerMock.Verify(wm => wm.SaveWindowsStateNow(), Times.Never);
+        Assert.Contains("work", sut.Pages);
+    }
+
+    [Fact]
+    public void RemovePage_SyncsAllWindowsToModelsBeforeCheckingManagedFiles()
+    {
+        // Regression for CRITICAL C1: a panel remapped from a stale original path to its managed copy
+        // (ADR-009 Amendment) only reflects that on Model.FilePaths once synced — the hasManagedFiles
+        // check below must see the POST-sync state, not whatever was there before this page removal
+        // even started, or the warning dialog can be skipped for a removal that actually deletes a
+        // managed file. Callback-based mock (rather than plain reference sharing) proves the *order*:
+        // SyncAllWindowsToModels() must run, and its effect must already be visible, before IsManaged
+        // is ever consulted.
+        var panel = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work", FilePaths = ["C:\\stale\\original.lnk"] };
+        var sut = BuildSut(panels: [panel]);
+        sut.AddPage("work");
+
+        _itemStorageMock.Setup(s => s.IsManaged("C:\\stale\\original.lnk")).Returns(false);
+        _itemStorageMock.Setup(s => s.IsManaged("C:\\managed\\original.lnk")).Returns(true);
+        _windowManagerMock
+            .Setup(wm => wm.SyncAllWindowsToModels())
+            .Callback(() => panel.FilePaths = ["C:\\managed\\original.lnk"]);
+
+        sut.RemovePage("work");
+
+        _confirmationMock.Verify(
+            c => c.Confirm(
+                It.Is<string>(m => m.Contains("deleted from disk")),
+                It.IsAny<string>(),
+                MessageBoxImage.Warning),
+            Times.Once);
+        _windowManagerMock.Verify(wm => wm.SyncAllWindowsToModels(), Times.Once);
     }
 
     // ── SwitchTo ─────────────────────────────────────────────────────────────────
@@ -229,13 +347,10 @@ public class PageManagerServiceTests
     // ── Persistence ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Constructor_LoadsPagesFromJson()
+    public void Constructor_LoadsPagesFromApplicationStateService()
     {
-        // Arrange
-        var json = JsonSerializer.Serialize(new List<string> { "default", "home", "work" });
-
-        // Act
-        var sut = BuildSut(pagesJson: json, currentPage: "home");
+        // Arrange / Act
+        var sut = BuildSut(pageIds: ["default", "home", "work"], currentPageId: "home");
 
         // Assert
         Assert.Contains("home", sut.Pages);
@@ -244,12 +359,27 @@ public class PageManagerServiceTests
     }
 
     [Fact]
-    public void Constructor_InvalidJson_FallsBackToDefaultPage()
+    public void Constructor_EmptyPageIds_FallsBackToDefaultPage()
     {
-        // Arrange / Act
-        var sut = BuildSut(pagesJson: "NOT_JSON");
+        // Arrange / Act — IApplicationStateService.PageIds is never actually empty in production (it
+        // always contains at least "default" — see its own remarks), but the constructor still
+        // defends against it, mirroring the pre-ADR-024 "invalid/blank Pages JSON" fallback.
+        var sut = BuildSut(pageIds: []);
 
         // Assert
         Assert.Contains("default", sut.Pages);
+    }
+
+    [Fact]
+    public void Save_DelegatesToApplicationStateServiceSaveNow()
+    {
+        // Arrange
+        var sut = BuildSut();
+
+        // Act
+        sut.Save();
+
+        // Assert
+        _applicationStateServiceMock.Verify(s => s.SaveNow(), Times.Once);
     }
 }

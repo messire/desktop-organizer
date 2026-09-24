@@ -4,16 +4,26 @@
      ChildWindow.xaml.cs's own MinPanelSize and App.xaml.cs's lasso-drawn panel minimum) — if one
      changes, change all three by hand, or ChildWindow.Resize_DragDelta's Left/Width math for the
      LEFT resize handle can desync when this coercion silently clamps a computed Width below what the
-     code assumed (finalization MAJOR M-1). -->
+     code assumed (finalization MAJOR M-1).
+
+     MinHeight below is the same kind of hard coercion, on Window.Height, and for the same reason
+     (Window.MinHeight has no data-binding path to a C# constant without a converter) stays a literal
+     too. It MUST stay numerically equal to DesktopOrganizer.UI.Models.PanelMetrics.HeaderHeight —
+     RollUpBehavior's own collapsed target height (D-11) — so a panel can never be resized shorter than
+     its own rolled-up state; if PanelMetrics.HeaderHeight ever changes, change this literal to match. -->
 <Window x:Class="DesktopOrganizer.UI.Views.ChildWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:uimodels="clr-namespace:DesktopOrganizer.UI.Models"
+        xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
+        xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
+        xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
         mc:Ignorable="d"
         Title="{Binding Model.Title}"
-        Height="300" Width="260"
+        AutomationProperties.Name="{Binding Model.Title}"
+        Height="{x:Static uimodels:PanelMetrics.DefaultPanelHeight}" Width="{x:Static uimodels:PanelMetrics.DefaultPanelWidth}"
         MinHeight="32" MinWidth="120"
         WindowStartupLocation="Manual"
         WindowStyle="None"
@@ -21,35 +31,265 @@
         AllowsTransparency="True"
         Background="Transparent"
         AllowDrop="True"
-        PreviewKeyDown="ChildWindow_PreviewKeyDown">
-    <Border CornerRadius="6"
-            BorderThickness="0">
-        <Border.Background>
-            <MultiBinding Converter="{StaticResource ColorOpacityBrush}">
-                <Binding Path="Model.BackgroundColor"/>
-                <Binding Path="Model.BackgroundOpacity"/>
-            </MultiBinding>
-        </Border.Background>
-        <Grid>
-            <!-- Panel content -->
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="32"/>
-                    <RowDefinition x:Name="ContentRow" Height="*"/>
-                </Grid.RowDefinitions>
+        PreviewKeyDown="ChildWindow_PreviewKeyDown"
+        Unloaded="ChildWindow_Unloaded">
+    <!--
+        PanelRoot replaces the old outer <Border CornerRadius="6"> — the panel's rounded surface now
+        lives inside PanelChrome's own default style (Panels.xaml, D-8); this Grid's only remaining job
+        is (1) the header/content row split ContentRow needs to exist as a literal RowDefinition (see
+        below) and (2) carrying the Ambient Accent theme (PanelTheme.Accent/SurfaceStyle, D-7) down to
+        every descendant — PanelChrome, and (via inheritance) anything a later commit themes the same way
+        (e.g. PanelItemContainerStyle, C5) — without a DataContext-shaped binding that would break for a
+        window like SystemIconsPanelWindow whose DataContext has no Model.AccentColor (D-7's whole point).
+    -->
+    <Grid x:Name="PanelRoot"
+          theming:PanelTheme.Accent="{Binding Model.AccentColor, Converter={StaticResource AccentBrush}, ConverterParameter=indicator}"
+          theming:PanelTheme.SurfaceStyle="{Binding Model.SurfaceStyle}">
+        <Grid.RowDefinitions>
+            <!--
+                ContentRow MUST stay a literal, directly-addressable RowDefinition here (not inside
+                PanelChrome's template): Behaviors/RollUpBehavior.cs (§0 — logic untouched) takes a
+                RowDefinition reference in its constructor and collapses/restores it by mutating
+                Height directly. PanelChrome spans BOTH rows below (Grid.RowSpan="2"), so whatever total
+                height these two rows sum to is what PanelChrome — and its OWN internal header/content
+                row split, sized off PanelMetrics.HeaderRowHeight the same way — has to work with; when
+                RollUpBehavior collapses ContentRow to 0, that total is exactly PanelMetrics.HeaderHeight,
+                matching RollUpBehavior's own collapsed target height (TitleBarHeight, D-11) exactly.
+            -->
+            <RowDefinition Height="{x:Static uimodels:PanelMetrics.HeaderRowHeight}"/>
+            <RowDefinition x:Name="ContentRow" Height="*"/>
+        </Grid.RowDefinitions>
 
-                <!-- Title bar — drag zone (single click = move, double click = roll up) -->
-                <Border Grid.Row="0"
-                        Background="Transparent"
-                        CornerRadius="6,6,0,0"
-                        MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"
-                        MouseMove="TitleBar_MouseMove"
-                        MouseLeftButtonUp="TitleBar_MouseLeftButtonUp"
-                        LostMouseCapture="TitleBar_LostMouseCapture">
-                    <Border.ContextMenu>
-                        <ContextMenu>
+        <controls:PanelChrome Grid.Row="0" Grid.RowSpan="2"
+                               Title="{Binding Model.Title}"
+                               IsRolledUp="{Binding Model.IsRolledUp}"
+                               ItemCount="{Binding FileItems.Count}"
+                               AccentBrush="{Binding Path=(theming:PanelTheme.Accent), RelativeSource={RelativeSource Self}}"
+                               SurfaceStyle="{Binding Path=(theming:PanelTheme.SurfaceStyle), RelativeSource={RelativeSource Self}}"
+                               VisualState="{Binding Path=(theming:PanelTheme.VisualState), RelativeSource={RelativeSource Self}}"
+                               IsLayoutEditing="{Binding Path=(theming:PanelTheme.IsLayoutEditing), RelativeSource={RelativeSource Self}}">
+            <controls:PanelChrome.SurfaceBrush>
+                <!-- 4th binding (highContrast) — CRITICAL-2/MAJOR-4 fix: without it,
+                     PanelSurfaceBrushConverter's `values.Length > 3` check never has a value to read, and
+                     the panel surface is never forced fully opaque under Windows High Contrast (D-12).
+                     Source is HighContrastState.IsActive — read once at app startup
+                     (App.xaml.cs's LoadResourceDictionaries()) — via x:Static, not a live Binding: this
+                     panel doesn't need to react to a High Contrast toggle while running (D-12 "minimum
+                     at startup"), it only needs the value that was true when this window was constructed. -->
+                <MultiBinding Converter="{StaticResource PanelSurfaceBrush}">
+                    <Binding Path="Model.AccentColor"/>
+                    <Binding Path="Model.SurfaceOpacity"/>
+                    <Binding Path="Model.SurfaceStyle"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                </MultiBinding>
+            </controls:PanelChrome.SurfaceBrush>
+
+            <!--
+                Title bar — drag zone (single click = move, double click = roll up). This Grid — not
+                PanelChrome's own PART_Header, which is layout-only and lives in a ResourceDictionary with
+                no code-behind class — carries the title-bar drag handlers and the panel's context menu,
+                because both reference ChildWindow.xaml.cs methods by name; it fills PanelChrome's whole
+                title column (Background="Transparent" makes the entire cell — not just the TitleText/
+                TitleEditBox glyphs — hit-testable), exactly matching the old header Border's click
+                coverage.
+            -->
+            <controls:PanelChrome.TitleEditor>
+                <Grid Background="Transparent"
+                      MouseLeftButtonDown="TitleBar_MouseLeftButtonDown"
+                      MouseMove="TitleBar_MouseMove"
+                      MouseLeftButtonUp="TitleBar_MouseLeftButtonUp"
+                      LostMouseCapture="TitleBar_LostMouseCapture">
+                    <Grid.ContextMenu>
+                        <!--
+                            Named (unlike before C6) so OverflowButton_Click can reuse this EXACT instance
+                            instead of constructing a new ContextMenu (R-7, docs/PLANS/phase-5-ambient-
+                            accent-ui.md §6): the panel carries WS_EX_NOACTIVATE (ADR-013 R1), and this
+                            menu is already proven to receive input correctly via the right-click path
+                            below — a freshly-constructed ContextMenu would be an unproven input surface
+                            on a window that never activates, with no upside over reusing this one.
+                            Control.ContextMenu/Control.MenuItem (Controls.xaml, staged in C4 with no
+                            consumer until now) replace the previous unstyled system ContextMenu chrome —
+                            the implicit MenuItem style applies to every item below without touching their
+                            existing Header/Command/IsChecked markup.
+                        -->
+                        <ContextMenu x:Name="HeaderContextMenu"
+                                     Style="{StaticResource Control.ContextMenu}"
+                                     Closed="HeaderContextMenu_Closed">
+                            <ContextMenu.Resources>
+                                <Style TargetType="MenuItem" BasedOn="{StaticResource Control.MenuItem}"/>
+                                <!-- P06 (docs/fix-prompts/06-fit-content.md): combines CanEnterEditLayout
+                                     (StaticResource LayoutEditMode) with a per-panel ViewMode==Grid check
+                                     for the "Auto-size to content"/"Fit panel to content" IsEnabled
+                                     bindings below — see AllTrueMultiConverter's own remarks. -->
+                                <conv:AllTrueMultiConverter x:Key="AllTrue"/>
+                                <!-- P04 fix-cycle 1 (MV-21): the NOT gate the "Size" submenu's
+                                     "…AND NOT IsRolledUp" rule needs — see NotBooleanConverter. -->
+                                <conv:NotBooleanConverter x:Key="Not"/>
+                            </ContextMenu.Resources>
                             <MenuItem Header="Rename" Click="RenameMenu_Click"/>
                             <MenuItem Header="Roll up / down" Click="RollUpMenu_Click"/>
+                            <!--
+                                Stage S (docs/PLANS/workspace-grid-03-04-integration.md §1.4) created both
+                                items below as placeholders; both are implemented now — "Size" by P04
+                                (§3.5, ChildWindow.Sizing.cs) and "Align to workspace grid" by P03 (§2.5,
+                                ChildWindow.WorkspaceGrid.cs). Gating mirrors "Edit layout" below:
+                                IsEnabled reuses LayoutEditMode's CanEnterEditLayout (== !IsLayoutLocked —
+                                ADR-026 "Gating": these are explicit commands, blocked only by the layout
+                                lock, never by NormalModeLayoutGestures).
+
+                                P04 fix-cycle 1 (MV-21): "Size" adds a second condition — NOT
+                                Model.IsRolledUp. A preset has no meaning for a collapsed panel (its
+                                height is the header, and model.Size deliberately still holds the EXPANDED
+                                size), so SizePresetMenu_Click has always returned early there; the
+                                MultiBinding below makes that rule visible instead of looking like a dead
+                                click. Applying a preset also switches the panel to
+                                PanelSizingMode.Manual — an explicit size wins over "Auto-size to content"
+                                (ADR-029 Решение 7) — which the ToolTip states so the interaction between
+                                the two menu items is discoverable.
+                            -->
+                            <MenuItem Header="Size" x:Name="SizePresetMenu"
+                                      ToolTip="Resizes the panel to a named size. Turns off &quot;Auto-size to content&quot;. Unavailable while the panel is rolled up. Hold Alt while dragging an edge to resize off-grid; the panel snaps back to the workspace grid when you release.">
+                                <MenuItem.IsEnabled>
+                                    <MultiBinding Converter="{StaticResource AllTrue}">
+                                        <Binding Path="CanEnterEditLayout" Source="{StaticResource LayoutEditMode}" Mode="OneWay"/>
+                                        <Binding Path="PlacementTarget.DataContext.Model.IsRolledUp"
+                                                 RelativeSource="{RelativeSource AncestorType=ContextMenu}"
+                                                 Converter="{StaticResource Not}"
+                                                 Mode="OneWay"/>
+                                    </MultiBinding>
+                                </MenuItem.IsEnabled>
+                                <MenuItem Header="Small"       Tag="Small"      Click="SizePresetMenu_Click"
+                                          ToolTip="Compact 20 x 20 units (152 x 152 DIP) — fits about 2 x 1 icons at 32 px."/>
+                                <MenuItem Header="Medium"      Tag="Medium"     Click="SizePresetMenu_Click"/>
+                                <MenuItem Header="Large"       Tag="Large"      Click="SizePresetMenu_Click"/>
+                                <MenuItem Header="Extra large" Tag="ExtraLarge" Click="SizePresetMenu_Click"/>
+                            </MenuItem>
+                            <!--
+                                OQ-3 = B (docs/PLANS/workspace-grid-03-04-integration.md §8): IsCheckable,
+                                checked reflects Model.GeometryMode == GridAligned (one-way — Stage S wires
+                                only the display; P03's Click handler implements the actual toggle: turning
+                                it ON aligns the panel, turning it OFF clears spans back to LegacyFreeform,
+                                keeping the current Position/Size as-is).
+                            -->
+                            <MenuItem Header="Align to workspace grid" x:Name="AlignToGridMenu"
+                                      IsCheckable="True" Click="AlignToGridMenu_Click"
+                                      ToolTip="Hold Alt while dragging to move freely"
+                                      IsChecked="{Binding PlacementTarget.DataContext.Model.GeometryMode,
+                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                          Converter={StaticResource EnumEquals},
+                                                          ConverterParameter={x:Static uimodels:PanelGeometryMode.GridAligned},
+                                                          Mode=OneWay}"
+                                      IsEnabled="{Binding CanEnterEditLayout, Source={StaticResource LayoutEditMode}, Mode=OneWay}"/>
+                            <!--
+                                P06 (docs/fix-prompts/06-fit-content.md, ADR-029 Решение 1/6/7): per-panel
+                                IconLayoutPolicy radio group (mirrors the "Content"/"Arrange icons" radio
+                                groups below — bound via ChildWindowViewModel.SetIconLayoutPolicyCommand,
+                                not a Click handler, since this is a pure model mutation with no window-
+                                geometry side effect of its own) plus a confirmation-gated "Apply to all
+                                panels" broadcast (Click handler — ChildWindow.ContentSizing.cs — since it
+                                needs IWindowManager/IConfirmationService, not just this panel's Model).
+                                Gated by CanEnterEditLayout like "Size"/"Align to workspace grid" above:
+                                switching IconLayoutPolicy re-snaps this panel's width (ADR-029 fix-cycle
+                                MAJOR-2), the same class of geometry side effect those two items already
+                                gate on. NOT gated by ViewMode==Grid — unlike "Auto-size to
+                                content"/"Fit panel to content" below, IconLayoutPolicy is harmless (simply
+                                inert) while List mode is active, same as the "Size" submenu above.
+                            -->
+                            <MenuItem Header="Icon layout" x:Name="IconLayoutMenu"
+                                      IsEnabled="{Binding CanEnterEditLayout, Source={StaticResource LayoutEditMode}, Mode=OneWay}">
+                                <MenuItem Header="Adaptive stretch (legacy)"
+                                          IsCheckable="True"
+                                          IsChecked="{Binding PlacementTarget.DataContext.Model.IconLayoutPolicy,
+                                                              RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                              Converter={StaticResource EnumEquals},
+                                                              ConverterParameter={x:Static uimodels:IconLayoutPolicy.LegacyStretch},
+                                                              Mode=OneWay}"
+                                          Command="{Binding PlacementTarget.DataContext.SetIconLayoutPolicyCommand,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                          CommandParameter="{x:Static uimodels:IconLayoutPolicy.LegacyStretch}"/>
+                                <MenuItem Header="Fixed spacing"
+                                          IsCheckable="True"
+                                          IsChecked="{Binding PlacementTarget.DataContext.Model.IconLayoutPolicy,
+                                                              RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                              Converter={StaticResource EnumEquals},
+                                                              ConverterParameter={x:Static uimodels:IconLayoutPolicy.FixedGap},
+                                                              Mode=OneWay}"
+                                          Command="{Binding PlacementTarget.DataContext.SetIconLayoutPolicyCommand,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                          CommandParameter="{x:Static uimodels:IconLayoutPolicy.FixedGap}"/>
+                                <Separator/>
+                                <MenuItem Header="Apply to all panels…" Click="ApplyIconLayoutPolicyToAllMenu_Click"
+                                          IsEnabled="{Binding CanEnterEditLayout, Source={StaticResource LayoutEditMode}, Mode=OneWay}"/>
+                            </MenuItem>
+
+                            <!--
+                                P06 fix-cycle UX-P2 (docs/fix-prompts/06-fit-content.md, ADR-029 Решение 7):
+                                "Panel sizing" submenu — mirrors "Icon layout" above: "Fit panel to
+                                content" (one-shot action, works even in Manual — ADR-029 Решение 7),
+                                "Auto-size to content" (persistent PanelSizingMode.AutoContent toggle,
+                                single IsCheckable item — Manual is simply "not checked") and a
+                                confirmation-gated "Apply to all panels…" broadcast, same shape as "Icon
+                                layout"'s own broadcast item. The whole submenu (and, defensively, its
+                                "Apply to all panels…" child) is gated by the same
+                                CanEnterEditLayout-AND-ViewMode==Grid AllTrueMultiConverter the two content
+                                actions needed individually before this fix-cycle — Q3 = B
+                                (adr/ADR-029-icon-layout-policy.md "Открытые вопросы") limits the fit
+                                formula to Grid mode; List mode has no equivalent and stays Manual-only,
+                                disabled here (not merely a silent no-op) so the user gets a discoverable
+                                reason via the ToolTip rather than a dead click.
+                            -->
+                            <MenuItem Header="Panel sizing" x:Name="PanelSizingMenu"
+                                      ToolTip="Fit-to-content actions apply to Grid view only.">
+                                <MenuItem.IsEnabled>
+                                    <MultiBinding Converter="{StaticResource AllTrue}">
+                                        <Binding Path="CanEnterEditLayout" Source="{StaticResource LayoutEditMode}" Mode="OneWay"/>
+                                        <Binding Path="PlacementTarget.DataContext.Model.ViewMode"
+                                                 RelativeSource="{RelativeSource AncestorType=ContextMenu}"
+                                                 Converter="{StaticResource EnumEquals}"
+                                                 ConverterParameter="{x:Static uimodels:PanelViewMode.Grid}"
+                                                 Mode="OneWay"/>
+                                    </MultiBinding>
+                                </MenuItem.IsEnabled>
+                                <MenuItem Header="Fit panel to content" x:Name="FitPanelToContentMenu"
+                                          Click="FitPanelToContentMenu_Click"
+                                          ToolTip="Resizes the panel's height to fit its current icons (Grid view only)."/>
+                                <MenuItem Header="Auto-size to content" x:Name="AutoSizeToContentMenu"
+                                          IsCheckable="True"
+                                          Click="AutoSizeToContentMenu_Click"
+                                          ToolTip="Keeps the panel's height matched to its icons automatically (Grid view only — unavailable in List view)."
+                                          IsChecked="{Binding PlacementTarget.DataContext.Model.SizingMode,
+                                                              RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                              Converter={StaticResource EnumEquals},
+                                                              ConverterParameter={x:Static uimodels:PanelSizingMode.AutoContent},
+                                                              Mode=OneWay}"/>
+                                <Separator/>
+                                <MenuItem Header="Apply to all panels…" Click="ApplySizingModeToAllMenu_Click">
+                                    <MenuItem.IsEnabled>
+                                        <MultiBinding Converter="{StaticResource AllTrue}">
+                                            <Binding Path="CanEnterEditLayout" Source="{StaticResource LayoutEditMode}" Mode="OneWay"/>
+                                            <Binding Path="PlacementTarget.DataContext.Model.ViewMode"
+                                                     RelativeSource="{RelativeSource AncestorType=ContextMenu}"
+                                                     Converter="{StaticResource EnumEquals}"
+                                                     ConverterParameter="{x:Static uimodels:PanelViewMode.Grid}"
+                                                     Mode="OneWay"/>
+                                        </MultiBinding>
+                                    </MenuItem.IsEnabled>
+                                </MenuItem>
+                            </MenuItem>
+                            <Separator/>
+                            <!--
+                                docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #2 / D-12: bound through
+                                {StaticResource LayoutEditMode} (published in App.xaml.cs's StartApp,
+                                right after LoadResourceDictionaries()) — NOT through PanelTheme's
+                                attached DP and NOT through ChildWindowViewModel. This ContextMenu lives
+                                in its own visual tree and does not inherit attached DPs (R-4), and
+                                ChildWindowViewModel must stay at zero changed lines (DO-002, §0).
+                            -->
+                            <MenuItem Header="Edit layout" IsCheckable="True" Click="EditLayoutMenu_Click"
+                                      IsChecked="{Binding IsEditing, Source={StaticResource LayoutEditMode}, Mode=OneWay}"
+                                      IsEnabled="{Binding CanEnterEditLayout, Source={StaticResource LayoutEditMode}, Mode=OneWay}"/>
+                            <MenuItem Header="Lock layout" IsCheckable="True" Click="LockLayoutMenu_Click"
+                                      IsChecked="{Binding IsLayoutLocked, Source={StaticResource LayoutEditMode}, Mode=OneWay}"/>
                             <Separator/>
                             <MenuItem Header="Content" IsEnabled="False" FontWeight="SemiBold"/>
                             <MenuItem Header="Show all"
@@ -115,184 +355,256 @@
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelSortMode.Name}"/>
                         </ContextMenu>
-                    </Border.ContextMenu>
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
+                    </Grid.ContextMenu>
 
-                        <TextBlock x:Name="TitleText"
-                                   Grid.Column="0"
-                                   Text="{Binding Model.Title}"
-                                   Foreground="{Binding Model.TextColor, Converter={StaticResource HexBrush}}"
-                                   FontSize="12"
-                                   FontWeight="SemiBold"
-                                   VerticalAlignment="Center"
-                                   Margin="10,0,0,0"/>
+                    <TextBlock x:Name="TitleText"
+                               Text="{Binding Model.Title}"
+                               Foreground="{Binding Model.TextColor, Converter={StaticResource HexBrush}}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Margin="10,0,0,0"/>
 
-                        <TextBox x:Name="TitleEditBox"
-                                 Grid.Column="0"
-                                 Text="{Binding Model.Title, UpdateSourceTrigger=PropertyChanged}"
-                                 Visibility="Collapsed"
-                                 FontSize="12"
-                                 FontWeight="SemiBold"
-                                 VerticalAlignment="Center"
-                                 VerticalContentAlignment="Center"
-                                 Margin="8,2,4,2"
-                                 KeyDown="TitleEditBox_KeyDown"
-                                 LostKeyboardFocus="TitleEditBox_LostKeyboardFocus"/>
+                    <TextBox x:Name="TitleEditBox"
+                             Text="{Binding Model.Title, UpdateSourceTrigger=PropertyChanged}"
+                             Visibility="Collapsed"
+                             FontSize="12"
+                             FontWeight="SemiBold"
+                             VerticalAlignment="Center"
+                             VerticalContentAlignment="Center"
+                             Margin="8,2,4,2"
+                             KeyDown="TitleEditBox_KeyDown"
+                             LostKeyboardFocus="TitleEditBox_LostKeyboardFocus"/>
+                </Grid>
+            </controls:PanelChrome.TitleEditor>
 
-                        <!-- Header buttons: Sort → View → RollUp (roll up/down is the outermost, most
-                             "closing"-like action — ui-polishing-1 §4.1). All three share
-                             PanelHeaderButtonStyle for a single visual language (font, size, color,
-                             hover) instead of repeating the same attributes on each Button. -->
-                        <StackPanel Grid.Column="1"
-                                    Orientation="Horizontal"
-                                    VerticalAlignment="Center"
-                                    Margin="0,0,4,0"
-                                    PreviewMouseLeftButtonDown="HeaderButtons_PreviewMouseLeftButtonDown">
-                            <!-- Sort: the glyph is constant (Sort, &#xE8CB; — same glyph the "Name"
-                                 branch already used before this button had a highlight state).
-                                 Function (toggle Manual/Name) never changes on click, only the
-                                 highlight does — PanelHeaderToggleButtonStyle's DataTrigger on
-                                 IsSortedByName (ui-polishing-1 §4.3). In a Folder Portal,
-                                 ToggleSortModeCommand.CanExecute is false while EffectiveSortMode is
-                                 forced to Name, so the button renders highlighted AND disabled at once
-                                 — expected: "sorted by name, portal content can't be re-ordered". -->
-                            <Button x:Name="SortModeToggleButton"
-                                    Style="{StaticResource PanelHeaderToggleButtonStyle}"
-                                    Content="&#xE8CB;"
-                                    ToolTip="{Binding EffectiveSortMode, Converter={StaticResource SortModeTooltip}}"
-                                    Command="{Binding ToggleSortModeCommand}"/>
-                            <!-- View: the glyph shows the TARGET mode — what a click switches TO, not
-                                 the mode currently active (ui-polishing-1 §4.2), matching the ToolTip. -->
-                            <Button x:Name="ViewModeToggleButton"
-                                    Style="{StaticResource PanelHeaderButtonStyle}"
-                                    Content="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}}"
-                                    ToolTip="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}, ConverterParameter=tooltip}"
-                                    Command="{Binding SwitchViewCommand}"/>
-                            <Button x:Name="RollUpToggleButton"
-                                    Style="{StaticResource PanelHeaderButtonStyle}"
-                                    Content="{Binding Model.IsRolledUp, Converter={StaticResource RollUpGlyph}}"
-                                    ToolTip="{Binding Model.IsRolledUp, Converter={StaticResource RollUpTooltip}, ConverterParameter=tooltip}"
-                                    Click="RollUpMenu_Click"/>
-                        </StackPanel>
-                    </Grid>
-                </Border>
+            <!-- Header buttons: Sort → View → RollUp → Overflow (roll up/down is the outermost,
+                 most "closing"-like action of the original three — ui-polishing-1 §4.1; Overflow
+                 is appended last, the conventional trailing-catch-all toolbar position — C6,
+                 docs/PLANS/phase-5-ambient-accent-ui.md §5.4). Sort/View/RollUp share
+                 PanelHeaderButtonStyle for a single visual language (font, size, color, hover)
+                 instead of repeating the same attributes on each Button; Overflow uses
+                 Control.Button.Icon (Controls.xaml) — same 28x28/Segoe MDL2/hover-tint shape,
+                 expressed through the Ambient Accent token set now that this button has no
+                 legacy PanelHeaderButtonStyle history to match byte-for-byte. This whole group
+                 sits inside PanelChrome's PART_HeaderActions ContentPresenter, whose Opacity is
+                 already driven by VisualState (see Panels.xaml, C4) — muted in Idle, full opacity
+                 on Hover/Editing/Dragging/Resizing — so Overflow is muted-in-idle "for free" by
+                 being a sibling of the other three inside the same StackPanel, no separate binding
+                 needed here. -->
+            <controls:PanelChrome.HeaderActions>
+                <StackPanel Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Margin="0,0,4,0"
+                            PreviewMouseLeftButtonDown="HeaderButtons_PreviewMouseLeftButtonDown">
+                    <!-- Sort: the glyph is constant (Sort, &#xE8CB; — same glyph the "Name"
+                         branch already used before this button had a highlight state).
+                         Function (toggle Manual/Name) never changes on click, only the
+                         highlight does — PanelHeaderToggleButtonStyle's DataTrigger on
+                         IsSortedByName (ui-polishing-1 §4.3). In a Folder Portal,
+                         ToggleSortModeCommand.CanExecute is false while EffectiveSortMode is
+                         forced to Name, so the button renders highlighted AND disabled at once
+                         — expected: "sorted by name, portal content can't be re-ordered". -->
+                    <!-- AutomationProperties.Name (docs/PLANS/workspace-grid-07-visual.md "keyboard-
+                         доступные tooltips"): mirrors each button's own ToolTip so a screen
+                         reader/UI Automation client announces the same text a sighted user hovers to
+                         see — these buttons have no visible text label of their own (Segoe MDL2 glyph
+                         only), so without this their accessible name would be empty. Bound to the same
+                         source as ToolTip rather than hand-duplicated as a literal, so the two can never
+                         drift out of sync. -->
+                    <Button x:Name="SortModeToggleButton"
+                            Style="{StaticResource PanelHeaderToggleButtonStyle}"
+                            Content="&#xE8CB;"
+                            ToolTip="{Binding EffectiveSortMode, Converter={StaticResource SortModeTooltip}}"
+                            AutomationProperties.Name="{Binding EffectiveSortMode, Converter={StaticResource SortModeTooltip}}"
+                            Command="{Binding ToggleSortModeCommand}"/>
+                    <!-- View: the glyph shows the TARGET mode — what a click switches TO, not
+                         the mode currently active (ui-polishing-1 §4.2), matching the ToolTip. -->
+                    <Button x:Name="ViewModeToggleButton"
+                            Style="{StaticResource PanelHeaderButtonStyle}"
+                            Content="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}}"
+                            ToolTip="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}, ConverterParameter=tooltip}"
+                            AutomationProperties.Name="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}, ConverterParameter=tooltip}"
+                            Command="{Binding SwitchViewCommand}"/>
+                    <Button x:Name="RollUpToggleButton"
+                            Style="{StaticResource PanelHeaderButtonStyle}"
+                            Content="{Binding Model.IsRolledUp, Converter={StaticResource RollUpGlyph}}"
+                            ToolTip="{Binding Model.IsRolledUp, Converter={StaticResource RollUpTooltip}, ConverterParameter=tooltip}"
+                            AutomationProperties.Name="{Binding Model.IsRolledUp, Converter={StaticResource RollUpTooltip}, ConverterParameter=tooltip}"
+                            Click="RollUpMenu_Click"/>
+                    <!-- Overflow (§5.4 "overflow menu"): opens HeaderContextMenu — the SAME instance
+                         the title bar's right-click already opens (see its declaration above) — anchored
+                         under this button instead of at the mouse. Never constructs a new ContextMenu
+                         (R-7). -->
+                    <Button x:Name="OverflowButton"
+                            Style="{StaticResource Control.Button.Icon}"
+                            Content="{StaticResource Icon.Glyph.Overflow}"
+                            ToolTip="More"
+                            AutomationProperties.Name="More"
+                            Click="OverflowButton_Click"/>
+                </StackPanel>
+            </controls:PanelChrome.HeaderActions>
 
-                <!-- File list. AllowDrop is duplicated here (on top of the Window-level AllowDrop
-                     used for incoming desktop/Explorer file drops) so this element itself becomes
-                     the nearest drop-target recipient for drag-reorder gestures that start/end
-                     directly over the list content (ADR-014 Blocks C). DragOver/Drop below leave
-                     e.Effects/e.Handled completely untouched for a foreign format, so an incoming
-                     DataFormats.FileDrop still bubbles up to Window.OnDragEnter/OnDrop with exactly
-                     the effect WPF/OLE computed for it — never overwritten to None here (critical
-                     risk R1). PreviewMouseLeftButtonUp resets the drag-to-reorder candidate so a
-                     plain click without a following drag never leaves it dangling (see
-                     FileListHost_PreviewMouseLeftButtonUp). No left/right margin (ui-polishing-1
-                     §3.5): the icon grid item itself already contributes GridMetrics.ItemMargin (6px)
-                     of chrome on each side, which is exactly half the 12px inter-column seam — adding
-                     host-level margin on top of that would make the left/right edge look thicker than
-                     the seam between two columns. Bottom margin (4) is unrelated chrome (kept as-is;
-                     not part of GridMetrics.FileListHPadding, which only tracks horizontal chrome). -->
-                <ContentControl x:Name="FileListHost"
-                                Grid.Row="1"
-                                Content="{Binding FileItems}"
-                                ContentTemplate="{Binding CurrentViewTemplate}"
-                                MouseDoubleClick="FileList_MouseDoubleClick"
-                                PreviewMouseLeftButtonDown="FileListHost_PreviewMouseLeftButtonDown"
-                                PreviewMouseLeftButtonUp="FileListHost_PreviewMouseLeftButtonUp"
-                                PreviewMouseRightButtonDown="FileListHost_PreviewMouseRightButtonDown"
-                                PreviewMouseMove="FileListHost_PreviewMouseMove"
-                                AllowDrop="True"
-                                DragOver="FileListHost_DragOver"
-                                DragLeave="FileListHost_DragLeave"
-                                Drop="FileListHost_Drop"
-                                Margin="0,0,0,0"/>
-            </Grid>
+            <!-- File list. AllowDrop is duplicated here (on top of the Window-level AllowDrop
+                 used for incoming desktop/Explorer file drops) so this element itself becomes
+                 the nearest drop-target recipient for drag-reorder gestures that start/end
+                 directly over the list content (ADR-014 Blocks C). DragOver/Drop below leave
+                 e.Effects/e.Handled completely untouched for a foreign format, so an incoming
+                 DataFormats.FileDrop still bubbles up to Window.OnDragEnter/OnDrop with exactly
+                 the effect WPF/OLE computed for it — never overwritten to None here (critical
+                 risk R1). PreviewMouseLeftButtonUp resets the drag-to-reorder candidate so a
+                 plain click without a following drag never leaves it dangling (see
+                 FileListHost_PreviewMouseLeftButtonUp). No left/right margin (ui-polishing-1
+                 §3.5): the icon grid item itself already contributes GridMetrics.ItemMargin (6px)
+                 of chrome on each side, which is exactly half the 12px inter-column seam — adding
+                 host-level margin on top of that would make the left/right edge look thicker than
+                 the seam between two columns. Bottom margin (4) is unrelated chrome (kept as-is;
+                 not part of GridMetrics.FileListHPadding, which only tracks horizontal chrome).
+                 This is PanelChrome's Content (ContentControl's default content property) —
+                 PanelChrome.PART_ContentHost just hosts it via a plain ContentPresenter. -->
+            <ContentControl x:Name="FileListHost"
+                            Content="{Binding FileItems}"
+                            ContentTemplate="{Binding CurrentViewTemplate}"
+                            MouseDoubleClick="FileList_MouseDoubleClick"
+                            PreviewMouseLeftButtonDown="FileListHost_PreviewMouseLeftButtonDown"
+                            PreviewMouseLeftButtonUp="FileListHost_PreviewMouseLeftButtonUp"
+                            PreviewMouseRightButtonDown="FileListHost_PreviewMouseRightButtonDown"
+                            PreviewMouseMove="FileListHost_PreviewMouseMove"
+                            AllowDrop="True"
+                            DragOver="FileListHost_DragOver"
+                            DragLeave="FileListHost_DragLeave"
+                            Drop="FileListHost_Drop"
+                            Margin="0,0,0,0"/>
+        </controls:PanelChrome>
 
-            <!-- Resize overlay: transparent thumbs on edges/corners; centre cell is empty so
-                 clicks pass through to the content underneath. -->
-            <Grid x:Name="ResizeOverlay">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="6"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="6"/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="6"/>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="6"/>
-                </Grid.RowDefinitions>
+        <!-- Resize overlay: transparent thumbs on edges/corners; centre cell is empty so
+             clicks pass through to the content underneath. Grid.RowSpan="2" — a sibling of
+             PanelChrome, not a child of its Content (R-5): z-order/hit-testing relative to the
+             chrome above must not change by a single pixel. -->
+        <Grid x:Name="ResizeOverlay"
+              Grid.RowSpan="2"
+              Mouse.GotMouseCapture="ResizeOverlay_GotMouseCapture"
+              Mouse.LostMouseCapture="ResizeOverlay_LostMouseCapture"
+              PreviewMouseLeftButtonDown="ResizeOverlay_PreviewMouseLeftButtonDown">
+            <!-- P09 release-gate fix (docs/PLANS/workspace-grid-07-visual.md, defect list, P1): the outer
+                 row/column cells are now dedicated to PanelMetrics.ResizeCornerThicknessLength (8 DIP) —
+                 NOT ResizeEdgeThickness (6) as fix-cycle 2 had them. Fix-cycle 2's corner Thumbs (explicit
+                 Width/Height=8 inside a 6-DIP cell, relying on Horizontal/VerticalAlignment to "overflow"
+                 the extra 2 DIP) never actually rendered/hit-tested at 8x8 on this WPF path: WPF applies
+                 an automatic per-element layout clip (FrameworkElement's internal NeedsClipBounds
+                 mechanism — separate from, and NOT bypassed by, Panel.ClipToBounds or alignment) to ANY
+                 child whose resolved RenderSize exceeds the arrange slot the Grid actually gave it,
+                 silently cropping the "overflow" straight back down to 6x6 — alignment only ever
+                 controlled WHICH 6x6 corner of the 8x8 desired size survived the clip, never whether the
+                 clip applied at all. The comment this replaces claimed the opposite ("WPF does not clip a
+                 Grid child to its cell unless ClipToBounds is set") — that was simply wrong for this
+                 shape of oversized-child-in-undersized-cell; confirmed with a real, on-Windows STA
+                 regression test (Unit.Views.ResizeOverlayGeometryTests) before this fix, see
+                 PanelMetrics.ResizeCornerThickness's own remarks for the full explanation. Fix: give the
+                 outer cells the WIDER corner thickness, then make the straight-edge Thumbs below the
+                 SMALLER ones (ResizeEdgeThickness, anchored to their own outer edge via
+                 Horizontal/VerticalAlignment) — a child SMALLER than its own cell is never auto-clipped
+                 regardless of alignment, so this needs no overflow trick in either direction. The corner
+                 Thumbs simply fill their own dedicated cell (default Stretch alignment, no explicit
+                 Width/Height needed at all), matching NativeHitTestMapper.Map's cornerDip band exactly
+                 with no reliance on clip semantics either way. Declared AFTER the straight-edge Thumbs
+                 below (same z-order rule NativeHitTestMapper.Map mirrors on the native path: corner
+                 classification wins first) — the two Grid cells are now fully disjoint (unlike fix-cycle
+                 2's shared-cell overflow), so this ordering is a belt-and-braces consistency choice with
+                 the native path rather than a load-bearing requirement of this Grid's own hit-testing. -->
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="{x:Static uimodels:PanelMetrics.ResizeCornerThicknessLength}"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="{x:Static uimodels:PanelMetrics.ResizeCornerThicknessLength}"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="{x:Static uimodels:PanelMetrics.ResizeCornerThicknessLength}"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="{x:Static uimodels:PanelMetrics.ResizeCornerThicknessLength}"/>
+            </Grid.RowDefinitions>
 
-                <Thumb Grid.Row="0" Grid.Column="0" Tag="TopLeft"     Cursor="SizeNWSE" Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="0" Grid.Column="1" Tag="Top"         Cursor="SizeNS"   Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="0" Grid.Column="2" Tag="TopRight"    Cursor="SizeNESW" Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="1" Grid.Column="0" Tag="Left"        Cursor="SizeWE"   Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="1" Grid.Column="2" Tag="Right"       Cursor="SizeWE"   Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="2" Grid.Column="0" Tag="BottomLeft"  Cursor="SizeNESW" Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="2" Grid.Column="1" Tag="Bottom"      Cursor="SizeNS"   Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-                <Thumb Grid.Row="2" Grid.Column="2" Tag="BottomRight" Cursor="SizeNWSE" Style="{StaticResource ResizeThumbStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-            </Grid>
+            <!-- Straight edges — explicit ResizeEdgeThickness (6 DIP), SMALLER than their own
+                 ResizeCornerThickness-sized (8 DIP) host cell and anchored to the panel's own outer edge.
+                 A child smaller than its Grid cell is never auto-clipped (only an OVERSIZED child
+                 triggers WPF's automatic layout clip — see this Grid's own remarks above), so this
+                 renders/hit-tests at the exact intended 6 DIP thickness with no clip involved at all. -->
+            <Thumb Grid.Row="0" Grid.Column="1" Tag="Top"
+                   Height="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" VerticalAlignment="Top"
+                   Cursor="SizeNS" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+            <Thumb Grid.Row="1" Grid.Column="0" Tag="Left"
+                   Width="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" HorizontalAlignment="Left"
+                   Cursor="SizeWE" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+            <Thumb Grid.Row="1" Grid.Column="2" Tag="Right"
+                   Width="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" HorizontalAlignment="Right"
+                   Cursor="SizeWE" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+            <Thumb Grid.Row="2" Grid.Column="1" Tag="Bottom"
+                   Height="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" VerticalAlignment="Bottom"
+                   Cursor="SizeNS" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
 
-            <!-- Drag-to-reorder insertion indicator (ADR-014 Decision 5, Block C5). Lives in the same
-                 outer Grid as FileListHost so it can be positioned above it via Margin. A thin line —
-                 vertical between columns in Grid mode, horizontal between rows in List mode — shown
-                 and positioned from FileListHost_DragOver, hidden from FileListHost_DragLeave/Drop
-                 and after DoDragDrop returns. Never a hit-test target itself. -->
-            <Border x:Name="ReorderInsertionIndicator"
-                    Background="#FF4080FF"
-                    HorizontalAlignment="Left"
-                    VerticalAlignment="Top"
-                    Visibility="Collapsed"
-                    IsHitTestVisible="False"/>
-
-            <!-- One-time, non-blocking Move-semantics hint (see ChildWindowViewModel.MoveHintRequested).
-                 Not a modal dialog: StaysOpen=false, no hit-testing, doesn't steal focus from the drop
-                 gesture or any in-progress rename. Auto-dismissed from code-behind after ~4s. -->
-            <Popup x:Name="MoveHintPopup"
-                   PlacementTarget="{Binding ElementName=TitleText}"
-                   Placement="Bottom"
-                   AllowsTransparency="True"
-                   StaysOpen="False"
-                   Focusable="False"
-                   IsHitTestVisible="False">
-                <Border Background="#EE1E1E1E"
-                        BorderBrush="#33FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="4"
-                        Padding="10,7"
-                        MaxWidth="260">
-                    <TextBlock TextWrapping="Wrap"
-                               Foreground="White"
-                               FontSize="11"
-                               Text="The file was moved into the panel — the original was removed from the desktop."/>
-                </Border>
-            </Popup>
-
-            <!-- Non-blocking rename-error hint (ChildWindowViewModel.RenameError). Same pattern as
-                 MoveHintPopup above — never a MessageBox: the panel carries WS_EX_NOACTIVATE, so a
-                 modal dialog would never receive activation/input either (ADR-013 risk R1). -->
-            <Popup x:Name="RenameErrorPopup"
-                   PlacementTarget="{Binding ElementName=FileListHost}"
-                   Placement="Center"
-                   AllowsTransparency="True"
-                   StaysOpen="False"
-                   Focusable="False"
-                   IsHitTestVisible="False">
-                <Border Background="#EE1E1E1E"
-                        BorderBrush="#33FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="4"
-                        Padding="10,7"
-                        MaxWidth="260">
-                    <TextBlock x:Name="RenameErrorText"
-                               TextWrapping="Wrap"
-                               Foreground="White"
-                               FontSize="11"/>
-                </Border>
-            </Popup>
+            <!-- Corners — fill their own dedicated ResizeCornerThickness (8 DIP) cell exactly (default
+                 Stretch alignment; no explicit Width/Height/overflow needed, unlike fix-cycle 2). -->
+            <Thumb Grid.Row="0" Grid.Column="0" Tag="TopLeft"
+                   Cursor="SizeNWSE" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+            <Thumb Grid.Row="0" Grid.Column="2" Tag="TopRight"
+                   Cursor="SizeNESW" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+            <Thumb Grid.Row="2" Grid.Column="0" Tag="BottomLeft"
+                   Cursor="SizeNESW" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+            <Thumb Grid.Row="2" Grid.Column="2" Tag="BottomRight"
+                   Cursor="SizeNWSE" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
         </Grid>
-    </Border>
+
+        <!-- Drag-to-reorder insertion indicator (ADR-014 Decision 5, Block C5). Lives in the same
+             outer Grid as FileListHost so it can be positioned above it via Margin. A thin line —
+             vertical between columns in Grid mode, horizontal between rows in List mode — shown
+             and positioned from FileListHost_DragOver, hidden from FileListHost_DragLeave/Drop
+             and after DoDragDrop returns. Never a hit-test target itself. Brush.Border.Focus
+             (Ambient Accent token — the same blue the old hardcoded literal here approximated) —
+             not PanelTheme.Accent: the insertion line is a system affordance, not part of the
+             panel's own semantic accent identity. -->
+        <Border x:Name="ReorderInsertionIndicator"
+                Grid.RowSpan="2"
+                Background="{StaticResource Brush.Border.Focus}"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Visibility="Collapsed"
+                IsHitTestVisible="False"/>
+
+        <!-- One-time, non-blocking Move-semantics hint (see ChildWindowViewModel.MoveHintRequested).
+             Not a modal dialog: StaysOpen=false, no hit-testing, doesn't steal focus from the drop
+             gesture or any in-progress rename. Auto-dismissed from code-behind after ~4s. -->
+        <Popup x:Name="MoveHintPopup"
+               PlacementTarget="{Binding ElementName=TitleText}"
+               Placement="Bottom"
+               AllowsTransparency="True"
+               StaysOpen="False"
+               Focusable="False"
+               IsHitTestVisible="False">
+            <Border Style="{StaticResource Control.Popup.Chrome}"
+                    MaxWidth="260">
+                <TextBlock TextWrapping="Wrap"
+                           Foreground="{StaticResource Brush.Text.Primary}"
+                           FontSize="11"
+                           Text="The file was moved into the panel — the original was removed from the desktop."/>
+            </Border>
+        </Popup>
+
+        <!-- Non-blocking rename-error hint (ChildWindowViewModel.RenameError). Same pattern as
+             MoveHintPopup above — never a MessageBox: the panel carries WS_EX_NOACTIVATE, so a
+             modal dialog would never receive activation/input either (ADR-013 risk R1). -->
+        <Popup x:Name="RenameErrorPopup"
+               PlacementTarget="{Binding ElementName=FileListHost}"
+               Placement="Center"
+               AllowsTransparency="True"
+               StaysOpen="False"
+               Focusable="False"
+               IsHitTestVisible="False">
+            <Border Style="{StaticResource Control.Popup.Chrome}"
+                    MaxWidth="260">
+                <TextBlock x:Name="RenameErrorText"
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource Brush.Text.Primary}"
+                           FontSize="11"/>
+            </Border>
+        </Popup>
+    </Grid>
 </Window>

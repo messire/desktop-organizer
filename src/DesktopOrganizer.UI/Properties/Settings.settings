@@ -3,6 +3,12 @@
               GeneratedClassNamespace="DesktopOrganizer.UI.Properties" GeneratedClassName="Settings">
     <Profiles/>
     <Settings>
+        <!-- ChildWindowsState, Pages, CurrentPage, LayoutSnapshots and SystemIconsPanel below are
+             legacy, read-only, see ADR-024 D-10: structural state moved to the versioned JSON
+             application-state document (DesktopOrganizer.UI.State.IApplicationStateService, ADR-024
+             C6). These five keys are frozen — no longer written by the app — and kept only so
+             LegacySettingsImporter can migrate a fresh install that has no JSON document yet. Do not
+             remove before Phase 9 (see BACKLOG.md). -->
         <Setting Name="ChildWindowsState" Type="System.String" Scope="User">
             <Value Profile="(Default)"/>
         </Setting>
@@ -11,6 +17,9 @@
         </Setting>
         <Setting Name="SnapResizeToIconGrid" Type="System.Boolean" Scope="User">
             <Value Profile="(Default)">True</Value>
+        </Setting>
+        <Setting Name="NativePanelSizing" Type="System.Boolean" Scope="User">
+            <Value Profile="(Default)">False</Value>
         </Setting>
         <Setting Name="GridSnapDistance" Type="System.Int32" Scope="User">
             <Value Profile="(Default)">12</Value>
@@ -30,6 +39,11 @@
         <Setting Name="DefaultIconSize" Type="System.Double" Scope="User">
             <Value Profile="(Default)">48</Value>
         </Setting>
+        <!-- ADR-025 D-10 (DO-014): DefaultBackgroundColor above now seeds AccentColor, kept as-is;
+             DefaultSurfaceStyle is the one new key this phase adds, its name matches its meaning. -->
+        <Setting Name="DefaultSurfaceStyle" Type="System.String" Scope="User">
+            <Value Profile="(Default)">Ambient</Value>
+        </Setting>
         <Setting Name="Pages" Type="System.String" Scope="User">
             <Value Profile="(Default)">["default"]</Value>
         </Setting>
@@ -41,6 +55,24 @@
         </Setting>
         <Setting Name="SystemIconsPanel" Type="System.String" Scope="User">
             <Value Profile="(Default)"/>
+        </Setting>
+        <!-- Phase 6 (Edit Layout UX, docs/PLANS/phase-6-edit-layout-ux.md §1 D-8): global scalars, no
+             JSON schema migration needed for these two (unrelated to the ADR-028/029 v5 bump below). -->
+        <Setting Name="IsLayoutLocked" Type="System.Boolean" Scope="User">
+            <Value Profile="(Default)">False</Value>
+        </Setting>
+        <Setting Name="NormalModeLayoutGestures" Type="System.String" Scope="User">
+            <Value Profile="(Default)">MoveOnly</Value>
+        </Setting>
+        <!-- ADR-028/ADR-029 (docs/PLANS/workspace-grid-migration.md, StateEnvelope.CurrentSchemaVersion
+             bumped to 5): global scalars applied only to NEW panels at creation time; existing panels
+             keep whatever the v4->v5 migration assigned them (LegacyFreeform/LegacyStretch), unaffected
+             by these settings. -->
+        <Setting Name="DefaultPanelGeometryMode" Type="System.String" Scope="User">
+            <Value Profile="(Default)">GridAligned</Value>
+        </Setting>
+        <Setting Name="DefaultIconLayoutPolicy" Type="System.String" Scope="User">
+            <Value Profile="(Default)">FixedGap</Value>
         </Setting>
     </Settings>
 </SettingsFile>

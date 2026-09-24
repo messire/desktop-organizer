@@ -132,4 +132,54 @@ public interface IPanelItemStorageService
     /// failed).
     /// </returns>
     RenameResult RenameManaged(string storedPath, string newName);
+
+    /// <summary>
+    /// Read-only lookup of the managed copy for a stale <paramref name="originalPath"/> — the reverse
+    /// direction of the manifest from <see cref="Restore"/> (managed path → original path). Added for
+    /// ADR-009 Amendment 2026-09-22: a panel's persisted <c>FilePaths</c> can end up pointing at a
+    /// pre-Move original location (e.g. a legacy-imported <c>user.config</c> snapshot recorded before
+    /// Move semantics existed, or a restored layout snapshot captured before a later Move) for an item
+    /// that was, in fact, already moved into managed storage under a different, still-live path.
+    /// Performs no writes of any kind — the manifest and the file system are only ever read.
+    /// </summary>
+    /// <param name="originalPath">The (possibly stale) original path recorded in a panel's saved state.</param>
+    /// <param name="managedPath">
+    /// The managed path currently on disk for <paramref name="originalPath"/>, or <see langword="null"/>
+    /// if no manifest entry maps to it, or the recorded managed path no longer exists on disk (e.g. the
+    /// item was since restored or released — see <see cref="Restore"/>/<see cref="Release"/>).
+    /// </param>
+    /// <returns><see langword="true"/> if a live managed copy was found; otherwise <see langword="false"/>.</returns>
+    /// <remarks>
+    /// <b>Ambiguity (M1 fix, P08 fix cycle 1, 2026-09-22):</b> the manifest is keyed by managed path,
+    /// not by original path — nothing prevents two different manifest entries from recording the same
+    /// original path. Delegates to <see cref="FindManagedCandidates"/> and only returns
+    /// <see langword="true"/> when exactly one live candidate exists; an ambiguous manifest (2+ live
+    /// candidates) returns <see langword="false"/> rather than arbitrarily picking one — the same
+    /// "explicit refusal over probabilistic guessing" principle <see cref="RestoreOutcome.OriginalPathUnknown"/>
+    /// already applies. This method alone cannot detect the OTHER half of M1 (a candidate that's
+    /// unambiguous by manifest but already directly referenced by a different panel's own current
+    /// <c>FilePaths</c>) — that requires visibility into every panel's current state at once, which this
+    /// service does not have; see <c>WindowManager.ResolveStalePanelPaths</c>, which uses
+    /// <see cref="FindManagedCandidates"/> directly for that cross-panel check instead of this method.
+    /// </remarks>
+    bool TryFindManagedPath(string originalPath, out string? managedPath);
+
+    /// <summary>
+    /// Returns every currently-live managed path whose manifest entry records
+    /// <paramref name="originalPath"/> as its original location (case-insensitive) — the plural,
+    /// disambiguation-aware counterpart to <see cref="TryFindManagedPath"/>. Added for M1 (P08 fix
+    /// cycle 1, 2026-09-22): a caller with visibility into multiple panels' current file lists (see
+    /// <c>WindowManager.ResolveStalePanelPaths</c>) needs the full candidate set — not just the first
+    /// or only one — so it can exclude candidates already claimed by another panel before deciding
+    /// whether what remains is unambiguous. Performs no writes of any kind, same as
+    /// <see cref="TryFindManagedPath"/>.
+    /// </summary>
+    /// <param name="originalPath">The (possibly stale) original path recorded in a panel's saved state.</param>
+    /// <returns>
+    /// Every live managed path recorded against <paramref name="originalPath"/>, in manifest iteration
+    /// order (not meaningful/stable — callers must not rely on ordering to break ties). Empty if
+    /// <paramref name="originalPath"/> is null/blank/malformed, has no manifest entry, or every
+    /// recorded managed path for it has since vanished from disk.
+    /// </returns>
+    IReadOnlyList<string> FindManagedCandidates(string originalPath);
 }

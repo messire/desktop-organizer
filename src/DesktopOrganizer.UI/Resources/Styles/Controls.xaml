@@ -1,0 +1,329 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+                    xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
+                    xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming">
+    <!--
+        Ambient Accent Visual System — minimal control chrome over Typography.xaml/Icons.xaml (D-1).
+        Deliberately thin in this commit: PanelHeaderButtonStyle/PanelHeaderToggleButtonStyle/
+        FileContextMenu/FileNameEditBoxStyle etc. stay in Templates.xaml (D-2) until the commit that
+        migrates their consumers (C4/C6) — moving a style here without its consumer in the same commit
+        would leave two near-duplicate styles with hex literals free to drift apart, exactly the trap
+        Templates.xaml's own top-of-file comment about SelectionFillBrush/SelectionStrokeBrush already
+        warns against. C4-C7 extend this dictionary as ChildWindow.xaml/MainWindow.xaml migrate onto it.
+
+        R-6: PanelTheme.Accent (Theming/PanelTheme.cs, C2) is an inherited attached DependencyProperty
+        and does NOT cross into a ContextMenu/Popup's separate visual tree. Any accent-dependent chrome
+        added to Control.ContextMenu/Control.MenuItem/Control.Popup.Chrome below MUST come from a
+        StaticResource token, never from PanelTheme.Accent.
+    -->
+    <!-- MAJOR-3 fix (docs/PLANS/workspace-grid-07-visual.md fix-cycle 1): header icon buttons'
+         (Sort/View/RollUp/Overflow) hover wash now picks its own lighten/darken direction from the
+         panel's own composed surface luminance (Theming/HoverOverlayPolicy.cs), instead of always
+         painting the same translucent WHITE — see Control.Button.Icon/PanelHeaderButtonStyle/
+         PanelHeaderToggleButtonStyle's own IsMouseOver triggers below for the 3 consumers. Registered
+         here (not Panels.xaml) because all 3 consumers live in THIS dictionary; Panels.xaml's own
+         PanelItemContainerStyle hover (icon-tile selection, a different affordance, not part of this
+         finding) is deliberately left on the plain Brush.Overlay.Hover StaticResource. -->
+    <conv:HoverOverlayBrushConverter x:Key="HoverOverlayBrush"/>
+
+    <Style x:Key="Control.Button.Icon" TargetType="Button">
+        <Setter Property="Width" Value="{x:Static models:PanelMetrics.HeaderButtonSize}"/>
+        <Setter Property="Height" Value="{x:Static models:PanelMetrics.HeaderButtonSize}"/>
+        <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Secondary}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Chrome"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource Radius.Control}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <!-- MAJOR-3 fix: direction-aware hover wash (Theming/HoverOverlayPolicy.cs) —
+                             see this dictionary's own HoverOverlayBrush registration comment above. -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background">
+                                <Setter.Value>
+                                    <MultiBinding Converter="{StaticResource HoverOverlayBrush}">
+                                        <Binding Path="Model.AccentColor"/>
+                                        <Binding Path="Model.SurfaceStyle"/>
+                                        <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                        <Binding Source="{StaticResource Brush.Overlay.Hover}"/>
+                                    </MultiBinding>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="Control.ContextMenu" TargetType="ContextMenu">
+        <Setter Property="Background" Value="{StaticResource Brush.Surface.Elevated}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border.Default}"/>
+        <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
+        <Setter Property="Padding" Value="2"/>
+    </Style>
+
+    <Style x:Key="Control.MenuItem" TargetType="MenuItem">
+        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Primary}"/>
+        <Setter Property="Background" Value="Transparent"/>
+    </Style>
+
+    <!-- Shared chrome for non-blocking Border-in-Popup hints (MoveHintPopup/RenameErrorPopup today;
+         the C6 overflow menu's Border-based affordances later). Values match the popups' current inline
+         Background="#EE1E1E1E" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="4"
+         Padding="10,7" (ChildWindow.xaml) — not yet applied there (no consumers in this commit). -->
+    <Style x:Key="Control.Popup.Chrome" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource Brush.Surface.Elevated}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border.Default}"/>
+        <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
+        <Setter Property="CornerRadius" Value="{StaticResource Radius.Popup}"/>
+        <Setter Property="Padding" Value="{StaticResource Thickness.PopupPadding}"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <!--
+        Edit Layout resize handle (docs/PLANS/phase-6-edit-layout-ux.md §1 D-6, R-5). ChildWindow.xaml's 8
+        ResizeOverlay Thumbs reference THIS style — per R-5, the Style attribute value was the ONLY
+        change made to that XAML region when it was introduced (P6-4, replacing the now-removed
+        ResizeThumbStyle, which every ResizeOverlay Thumb used before this style existed); the
+        ResizeOverlay Grid's ColumnDefinition/RowDefinition geometry (6/*/6), and every Thumb's
+        Tag/Cursor/DragStarted/DragDelta/DragCompleted wiring, stay byte-for-byte — this Style changes
+        ONLY the ControlTemplate (visual), never hit-test geometry.
+
+        Default appearance (Normal mode, or Edit Layout before the trigger below applies) is pixel-identical
+        to the plain Border-filling-the-Thumb template ResizeThumbStyle used to provide: a Transparent
+        (but still hit-testable) Background — same 6px-square hit region either way. A Style.Trigger on
+        the inherited theming:PanelTheme.IsLayoutEditing attached property (Theming/PanelTheme.cs) then
+        swaps in a visible, accent-tinted grip while editing — the property flows to these Thumbs
+        directly via normal WPF inheritance (they are descendants of PanelRoot, not across a
+        ContextMenu/Popup boundary — the R-6 trap documented on PanelTheme only applies there — which is
+        why PanelTheme's inherited attached properties reach them). Accent colour comes from the SAME
+        {Binding Path=(theming:PanelTheme.Accent), RelativeSource={RelativeSource Self}} pattern
+        Panels.xaml's PanelItemContainerStyle (SelectionBorder) already uses — never a hex literal
+        (DoD-10).
+    -->
+    <Style x:Key="ResizeHandleStyle" TargetType="Thumb">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border x:Name="HandleChrome"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="{StaticResource Radius.Control}"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="theming:PanelTheme.IsLayoutEditing" Value="True">
+                <Setter Property="Background">
+                    <Setter.Value>
+                        <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!--
+        Shared chrome for the three panel title-bar buttons (Sort/View/RollUp — ui-polishing-1 §4.3).
+        Relocated from Templates.xaml (C5, D-2); retokenized (Foreground #AAAAAA -> Brush.Text.Secondary,
+        hover wash #1AFFFFFF -> Brush.Overlay.Hover, CornerRadius 3 -> Radius.Control) with zero visual
+        change — every token below carries the exact same colour/geometry the literal it replaces did.
+    -->
+    <Style x:Key="PanelHeaderButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="{x:Static models:PanelMetrics.HeaderButtonSize}"/>
+        <Setter Property="Height" Value="{x:Static models:PanelMetrics.HeaderButtonSize}"/>
+        <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Secondary}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="HeaderButtonBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource Radius.Control}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <!-- MAJOR-3 fix: direction-aware hover wash — see this dictionary's own
+                             HoverOverlayBrush registration comment (top of file). -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HeaderButtonBorder" Property="Background">
+                                <Setter.Value>
+                                    <MultiBinding Converter="{StaticResource HoverOverlayBrush}">
+                                        <Binding Path="Model.AccentColor"/>
+                                        <Binding Path="Model.SurfaceStyle"/>
+                                        <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                        <Binding Source="{StaticResource Brush.Overlay.Hover}"/>
+                                    </MultiBinding>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+        Sort button only (ui-polishing-1 §4.3): highlighted whenever ChildWindowViewModel.IsSortedByName
+        is true, using the exact same SelectionFillBrush/SelectionStrokeBrush tokens as
+        PanelItemContainerStyle's SelectionBorder used before C5 (finalization MINOR m-1's shared
+        "selected/active" visual language — Panels.xaml's PanelItemContainerStyle moves to an
+        accent-based selection fill in C5 per the icon-tiles spec, but this button intentionally keeps
+        the fixed-blue tokens: it signals "sort is active", not the panel's own semantic accent
+        identity). A plain Button (not ToggleButton) is used deliberately: ToggleButton drives its own
+        IsChecked locally on click, which would fight the OneWay-in-effect binding here in the Folder
+        Portal edge case (the command is disabled but the highlight must still reflect the forced Name
+        mode).
+
+        Relocated from Templates.xaml (C5, D-2); retokenized (Foreground #FFFFFF -> Brush.Text.Primary,
+        hover wash #1AFFFFFF -> Brush.Overlay.Hover). Foreground #FFFFFF -> Brush.Text.Primary (#DDDDDD)
+        is this style's one deliberate (not purely mechanical) colour choice in C5: it is a few percent
+        darker than pure white, but it is the same "primary readable text" token every other panel
+        surface in the app already uses, which is what the phase's "same appearance for Grid/List/
+        Portal/SystemIcons" DoD asks for — a sidebar-only pixel-exact clone would have worked against
+        that goal for no functional benefit.
+
+        Re-declares Template (rather than just adding a Style.Triggers DataTrigger, which is all the
+        Background/BorderBrush Setters below would need on their own) purely to append the
+        MultiDataTrigger at the bottom of ControlTemplate.Triggers (finalization MINOR m-6): the
+        inherited PanelHeaderButtonStyle's own IsMouseOver trigger sets HeaderButtonBorder.Background
+        directly by TargetName, which — as a template trigger — takes precedence over anything the
+        Background/BorderBrush Setters above (a plain Style trigger) can express on the Button element
+        itself. Without a same-precedence-tier trigger of its own, hovering the sort button would always
+        blank its active highlight back to the plain hover tint, active or not. The MultiDataTrigger is
+        declared last in the same ControlTemplate.Triggers collection specifically so it wins the
+        same-tier "last declared wins" tie-break against the inherited IsMouseOver trigger whenever both
+        conditions hold — the plain hover-only case (unsorted button) is untouched, still handled by
+        that first trigger alone.
+
+        ⚠️ The order of ControlTemplate.Triggers below (plain hover, then IsEnabled, then the
+        MultiDataTrigger last) is preserved verbatim from Templates.xaml — do not reorder it; the
+        "last declared wins" tie-break this comment describes depends on it.
+    -->
+    <Style x:Key="PanelHeaderToggleButtonStyle" TargetType="Button" BasedOn="{StaticResource PanelHeaderButtonStyle}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsSortedByName}" Value="True">
+                <Setter Property="Background" Value="{StaticResource SelectionFillBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource SelectionStrokeBrush}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <!-- MAJOR-2 fix (review round 3): was Brush.Text.Primary — a foreground unpaired with
+                     the SelectionFillBrush background above. In Colors.HighContrast.xaml,
+                     Color.Selection.Fill maps to SystemColors.HighlightColor while Color.Text.Primary
+                     maps to SystemColors.WindowTextColor, an independent (and in both shipped HC themes,
+                     same-tone) pairing — SelectionTextBrush is the paired token instead (see Colors.xaml's
+                     Color.Selection.Text remarks), with zero visual change in normal mode (#DDDDDD both
+                     ways). -->
+                <Setter Property="Foreground" Value="{StaticResource SelectionTextBrush}"/>
+            </DataTrigger>
+        </Style.Triggers>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="HeaderButtonBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource Radius.Control}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <!-- (a) Plain hover for a NOT currently sorted-by-name button — same
+                             direction-aware hover wash as PanelHeaderButtonStyle (MAJOR-3 fix,
+                             docs/PLANS/workspace-grid-07-visual.md fix-cycle 1; no longer byte-for-byte
+                             "unchanged" the way this comment used to say, since that fix touches this
+                             trigger too). -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HeaderButtonBorder" Property="Background">
+                                <Setter.Value>
+                                    <MultiBinding Converter="{StaticResource HoverOverlayBrush}">
+                                        <Binding Path="Model.AccentColor"/>
+                                        <Binding Path="Model.SurfaceStyle"/>
+                                        <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                        <Binding Source="{StaticResource Brush.Overlay.Hover}"/>
+                                    </MultiBinding>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                        <!-- (b) Hover OVER an already-active (sorted-by-name) button: re-assert the
+                             active highlight so it survives hover instead of being blanked by (a) above
+                             — see this Style's remarks (finalization MINOR m-6). -->
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=IsMouseOver}" Value="True"/>
+                                <Condition Binding="{Binding IsSortedByName}" Value="True"/>
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="HeaderButtonBorder" Property="Background" Value="{StaticResource SelectionFillBrush}"/>
+                            <Setter TargetName="HeaderButtonBorder" Property="BorderBrush" Value="{StaticResource SelectionStrokeBrush}"/>
+                        </MultiDataTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+        DO-003 / ADR-025 D-9 (C7): Settings window (MainWindow.xaml) page-tab chrome, hoisted verbatim
+        out of its former inline Button.Style (same triggers, same behavior). The Settings window stays
+        the light, system-styled window it always was (D-9) — these two styles consume only
+        Color.Settings.*/Brush.Settings.* tokens, never the dark Ambient Accent ones above.
+
+        The active-tab DataTrigger's MultiBinding.Converter is instantiated inline rather than via
+        {StaticResource EqualityToBool}: that converter is registered in Templates.xaml, which merges
+        AFTER this dictionary (D-1's forward-only StaticResource order) — an inline converter instance
+        sidesteps that ordering constraint entirely instead of relying on it.
+    -->
+    <Style x:Key="Settings.PageTabButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Style.Triggers>
+            <DataTrigger Value="True">
+                <DataTrigger.Binding>
+                    <MultiBinding>
+                        <MultiBinding.Converter>
+                            <conv:EqualityToBoolConverter/>
+                        </MultiBinding.Converter>
+                        <Binding/>
+                        <Binding Path="DataContext.CurrentPage" RelativeSource="{RelativeSource AncestorType=Window}"/>
+                    </MultiBinding>
+                </DataTrigger.Binding>
+                <Setter Property="Background" Value="{StaticResource Brush.Settings.TabActiveBackground}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Remove button — hidden for the "default" page (DataContext is the page id string itself). -->
+    <Style x:Key="Settings.PageTabCloseButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource Brush.Settings.IconMuted}"/>
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding}" Value="default">
+                <Setter Property="Visibility" Value="Collapsed"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+</ResourceDictionary>

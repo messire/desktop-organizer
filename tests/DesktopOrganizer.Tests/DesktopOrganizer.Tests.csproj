@@ -29,6 +29,9 @@
         <Content Include="Resources\\TestFile.txt">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </Content>
+        <Content Include="Resources\Storage\golden\**\*.json">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </Content>
     </ItemGroup>
 
     <ItemGroup>

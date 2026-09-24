@@ -1,4 +1,6 @@
-﻿namespace DesktopOrganizer.Services.Tools;
+﻿using DesktopOrganizer.Services.Abstractions;
+
+namespace DesktopOrganizer.Services.Tools;
 
 /// <inheritdoc />
 internal partial class NativeApi: INativeApi
@@ -95,6 +97,26 @@ internal partial class NativeApi: INativeApi
     /// <inheritdoc />
     public IntPtr GetForegroundWindow()
         => NativeMethods.GetForegroundWindow();
+
+    /// <inheritdoc />
+    public bool AllowSetForegroundWindow(int processId)
+    {
+        try
+        {
+            if (NativeMethods.AllowSetForegroundWindow(processId)) return true;
+
+            // Expected and harmless in the ADR-023 R-13 flow: a process that is not itself in the
+            // foreground has no foreground right to hand over. Traced (not thrown, not surfaced) —
+            // the caller degrades to "the primary's window flashes in the taskbar" rather than failing.
+            System.Diagnostics.Trace.WriteLine($"AllowSetForegroundWindow({processId}) failed, Win32 error {Marshal.GetLastWin32Error()}.");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"AllowSetForegroundWindow({processId}) threw: {ex.Message}");
+            return false;
+        }
+    }
 
     /// <inheritdoc />
     public IntPtr GetKnownFolderPidl(Guid knownFolderId)
@@ -562,6 +584,74 @@ internal partial class NativeApi: INativeApi
     public IntPtr DefaultWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam)
         => NativeMethods.DefWindowProcW(hwnd, msg, wParam, lParam);
 
+    // ── Native panel sizing primitives (ADR-022 / Phase 2) ──────────────────────────────────────
+
+    /// <inheritdoc />
+    public bool GetWindowRect(IntPtr hwnd, out NativeRectPx rect)
+    {
+        rect = default;
+        if (hwnd == IntPtr.Zero) return false;
+
+        if (!NativeMethods.GetWindowRect(hwnd, out var native))
+        {
+            // Defensive: a destroyed/invalid HWND must not throw into a window procedure.
+            Console.Error.WriteLine($"GetWindowRect failed: {Marshal.GetLastWin32Error()}");
+            return false;
+        }
+
+        rect = new NativeRectPx(native.left, native.top, native.right, native.bottom);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public NativeRectPx ReadRect(IntPtr lParam)
+    {
+        // Deliberately not guarded, exactly like ReadMouseHookPoint: a garbage lParam must surface to
+        // the caller's own try/catch (the sizing hook wraps every message) rather than be silently
+        // reported as an empty rectangle at the screen origin.
+        var native = Marshal.PtrToStructure<NativeMethods.RECT>(lParam);
+        return new NativeRectPx(native.left, native.top, native.right, native.bottom);
+    }
+
+    /// <inheritdoc />
+    public void WriteRect(IntPtr lParam, NativeRectPx rect)
+    {
+        var native = new NativeMethods.RECT
+        {
+            left = rect.Left,
+            top = rect.Top,
+            right = rect.Right,
+            bottom = rect.Bottom,
+        };
+
+        // fDeleteOld: false — RECT is blittable and owns no unmanaged references, so there is nothing
+        // in the destination buffer to release (the buffer belongs to the sizing loop, not to us).
+        Marshal.StructureToPtr(native, lParam, false);
+    }
+
+    /// <inheritdoc />
+    public double GetDpiScaleForWindow(IntPtr hwnd)
+    {
+        if (hwnd != IntPtr.Zero)
+        {
+            try
+            {
+                var dpi = NativeMethods.GetDpiForWindow(hwnd);
+                if (dpi > 0) return dpi / 96.0;
+            }
+            catch (EntryPointNotFoundException)
+            {
+                // Windows older than 10/1607 has no GetDpiForWindow — fall through to system DPI.
+            }
+            catch (DllNotFoundException)
+            {
+                // Same fallback path; keeps the caller (a window procedure) exception-free.
+            }
+        }
+
+        return GetSystemDpiScale();
+    }
+
     private static System.Drawing.Rectangle ToRectangle(NativeMethods.RECT r)
         => System.Drawing.Rectangle.FromLTRB(r.left, r.top, r.right, r.bottom);
 
@@ -681,6 +771,13 @@ internal partial class NativeApi: INativeApi
 
         [LibraryImport("User32.dll", EntryPoint = "GetForegroundWindow")]
         public static partial IntPtr GetForegroundWindow();
+
+        // ASFW_ANY == -1. Grants the foreground-set right away so another process (here: the
+        // single-instance primary, known only by pipe name) can call SetForegroundWindow/Activate
+        // successfully instead of merely flashing its taskbar button (ADR-023 D-8/R-13).
+        [LibraryImport("User32.dll", EntryPoint = "AllowSetForegroundWindow", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool AllowSetForegroundWindow(int dwProcessId);
 
         // ShellExecuteEx carries a struct with string fields — DllImport (not source-gen LibraryImport)
         [DllImport("Shell32.dll", EntryPoint = "ShellExecuteExW", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -955,6 +1052,16 @@ internal partial class NativeApi: INativeApi
 
         [LibraryImport("User32.dll", EntryPoint = "GetSystemMetrics")]
         public static partial int GetSystemMetrics(int nIndex);
+
+        // ── Native panel sizing (ADR-022 / Phase 2) ─────────────────────────────────────────────
+        [LibraryImport("User32.dll", EntryPoint = "GetWindowRect", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        // Windows 10 1607+ only. Resolved lazily on first call, so an older OS surfaces as an
+        // EntryPointNotFoundException at the call site (handled there with a system-DPI fallback).
+        [LibraryImport("User32.dll", EntryPoint = "GetDpiForWindow")]
+        public static partial uint GetDpiForWindow(IntPtr hWnd);
 
         [LibraryImport("User32.dll", EntryPoint = "GetDC")]
         public static partial IntPtr GetDC(IntPtr hWnd);

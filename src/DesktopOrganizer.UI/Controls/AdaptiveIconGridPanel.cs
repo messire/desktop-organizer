@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Controls;
 using DesktopOrganizer.UI.Models;
 
@@ -97,12 +98,109 @@ public sealed class AdaptiveIconGridPanel : Panel
         IsNonNegativeDouble);
 
     /// <summary>
+    /// Which of the two ADR-029 gap-distribution policies this panel uses. Default is
+    /// <see cref="IconLayoutPolicy.LegacyStretch"/> — the value ADR-018's original stretch-gap math
+    /// already produced before this property existed — so a panel with no explicit binding renders
+    /// byte-for-byte as it always has. As of the M-2 fix-cycle amendment (adr/ADR-029-icon-layout-policy.md
+    /// Решение 4) BOTH overrides below read it, not just <see cref="ArrangeOverride"/>: HORIZONTAL row
+    /// gaps (<see cref="AdaptiveGridLayout.RowGap(int, int, double, double, double, double, IconLayoutPolicy)"/>,
+    /// arrange-only) AND <see cref="AdaptiveGridLayout.RowCapacity"/>'s available-width term (measure
+    /// AND arrange — <see cref="GridMetrics.ReservedVerticalScrollBarWidth"/> reserves extra width for
+    /// <see cref="IconLayoutPolicy.FixedGap"/>, resolved against <see cref="CapacityWidth"/> rather than
+    /// the raw measure/arrange width (fix-cycle 2 CRITICAL-1 — see <see cref="CapacityWidthProperty"/>'s
+    /// doc comment) so the vertical scrollbar's appearance/disappearance never changes the column count)
+    /// now depend on this property's value — see
+    /// <see cref="MeasureOverride"/>/<see cref="ArrangeOverride"/>'s own remarks. The VERTICAL axis's
+    /// GAP (as opposed to row capacity) is unaffected by this property under either policy: vertical
+    /// gaps are ALWAYS <see cref="MinGap"/> (ADR-018 D-3, untouched by ADR-029) —
+    /// <see cref="ArrangeOverride"/>'s vertical <see cref="AdaptiveGridLayout.Offset"/> call never goes
+    /// through <see cref="AdaptiveGridLayout.RowGap"/> at all, policy-aware or not.
+    /// <para>
+    /// Deliberately left unset in <c>GridViewTemplate</c>'s <c>ItemsPanelTemplate</c> literal markup —
+    /// same reasoning as <see cref="MinGapProperty"/>'s doc comment: the real value always arrives
+    /// through an explicit <c>Binding</c> to the owning panel's model
+    /// (<c>ChildWindowModel.IconLayoutPolicy</c>) in <c>Templates.xaml</c>, not a hand-authored default
+    /// here.
+    /// </para>
+    /// </summary>
+    public static readonly DependencyProperty LayoutPolicyProperty = DependencyProperty.Register(
+        nameof(LayoutPolicy),
+        typeof(IconLayoutPolicy),
+        typeof(AdaptiveIconGridPanel),
+        new FrameworkPropertyMetadata(
+            IconLayoutPolicy.LegacyStretch,
+            FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsArrange),
+        IsDefinedIconLayoutPolicy);
+
+    /// <summary>
+    /// Stable, scrollbar-visibility-INDEPENDENT width fed to <see cref="AdaptiveGridLayout.RowCapacity"/>
+    /// for <see cref="IconLayoutPolicy.FixedGap"/> (fix-cycle 2 CRITICAL-1, adr/ADR-029-icon-layout-policy.md
+    /// "Fix-цикл P05"). Default is <see cref="double.NaN"/> ("unbound" — see
+    /// <see cref="ResolveAvailableForCapacity"/> for the fallback this triggers).
+    /// <para>
+    /// <b>The bug this fixes.</b> The M-2 fix-cycle 1 amendment subtracted
+    /// <see cref="GridMetrics.ReservedVerticalScrollBarWidth"/> directly from
+    /// <c>availableSize</c>/<c>finalSize</c>.Width — but <c>GridViewTemplate</c>'s
+    /// <c>ScrollViewer.VerticalScrollBarVisibility="Auto"</c> ALREADY hands this panel a narrower width
+    /// once its own vertical scrollbar actually becomes visible. The reservation was therefore applied
+    /// TWICE in that case (once by the real <see cref="ScrollViewer"/>, once by this panel), so the
+    /// column count still flipped exactly at the scrollbar-appearance threshold — the very thing the
+    /// fix-cycle 1 amendment was meant to eliminate.
+    /// </para>
+    /// <para>
+    /// <b>The fix.</b> <c>Templates.xaml</c> binds this property to the SAME <see cref="ScrollViewer"/>'s
+    /// own <c>ActualWidth</c> — a value set by the <see cref="ScrollViewer"/>'s PARENT layout, which does
+    /// NOT shrink when the <see cref="ScrollViewer"/>'s own vertical scrollbar appears (unlike
+    /// <c>availableSize</c>/<c>finalSize</c>, which are exactly that shrunk viewport width). The
+    /// reservation is now subtracted exactly once, from this stable value, so <see cref="AdaptiveGridLayout.RowCapacity"/>
+    /// stops depending on whether a scrollbar happens to be visible on this particular measure/arrange
+    /// pass. See <see cref="ResolveAvailableForCapacity"/> for the exact formula, including why
+    /// <see cref="IconLayoutPolicy.LegacyStretch"/> is deliberately left reading the raw, fluctuating
+    /// width (its own accepted ADR-018 M-2 trade-off, variant (c), unaffected by this fix).
+    /// </para>
+    /// <para>
+    /// Deliberately left unset in <c>GridViewTemplate</c>'s <c>ItemsPanelTemplate</c> literal markup —
+    /// same reasoning as <see cref="MinGapProperty"/>'s doc comment: the real value always arrives
+    /// through an explicit <c>Binding</c> (<c>RelativeSource AncestorType=ScrollViewer</c>) in
+    /// <c>Templates.xaml</c>, not a hand-authored default here. A panel constructed directly, outside
+    /// that template (e.g. most of this class's own unit tests), simply keeps the <see cref="double.NaN"/>
+    /// default — see <see cref="ResolveAvailableForCapacity"/>'s fallback branch.
+    /// </para>
+    /// </summary>
+    public static readonly DependencyProperty CapacityWidthProperty = DependencyProperty.Register(
+        nameof(CapacityWidth),
+        typeof(double),
+        typeof(AdaptiveIconGridPanel),
+        new FrameworkPropertyMetadata(
+            double.NaN,
+            FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsArrange),
+        IsNaNOrNonNegativeDouble);
+
+    /// <summary>
     /// Shared <see cref="ValidateValueCallback"/> for <see cref="MinGapProperty"/>,
     /// <see cref="EdgePaddingRatioProperty"/>, and <see cref="VerticalEdgePaddingRatioProperty"/>: rejects
     /// negative or <c>NaN</c> values so the "cells never overlap" invariant documented in this class's
     /// remarks (<c>MinGap &gt;= 0</c>) is actually enforced rather than merely asserted in a comment.
     /// </summary>
     private static bool IsNonNegativeDouble(object value) => (double)value >= 0d && !double.IsNaN((double)value);
+
+    /// <summary>
+    /// <see cref="ValidateValueCallback"/> for <see cref="CapacityWidthProperty"/>: unlike
+    /// <see cref="IsNonNegativeDouble"/>, <see cref="double.NaN"/> is explicitly ALLOWED here — it is this
+    /// property's own "unbound" sentinel (see its doc comment), not an invalid input.
+    /// </summary>
+    private static bool IsNaNOrNonNegativeDouble(object value)
+    {
+        var d = (double)value;
+        return double.IsNaN(d) || d >= 0d;
+    }
+
+    /// <summary>
+    /// <see cref="ValidateValueCallback"/> for <see cref="LayoutPolicyProperty"/>: rejects any boxed
+    /// <see cref="int"/>/enum value outside the two defined <see cref="IconLayoutPolicy"/> members, the
+    /// same defense-in-depth already applied to the panel's <see langword="double"/> DPs above.
+    /// </summary>
+    private static bool IsDefinedIconLayoutPolicy(object value) => value is IconLayoutPolicy policy && Enum.IsDefined(policy);
 
     /// <summary>Gets or sets the minimum gap between adjacent cells (<c>pmin</c>/<c>pmin_v</c>).</summary>
     public double MinGap
@@ -124,6 +222,59 @@ public sealed class AdaptiveIconGridPanel : Panel
         get => (double)GetValue(VerticalEdgePaddingRatioProperty);
         set => SetValue(VerticalEdgePaddingRatioProperty, value);
     }
+
+    /// <summary>Gets or sets which ADR-029 gap-distribution policy this panel's horizontal axis uses.</summary>
+    public IconLayoutPolicy LayoutPolicy
+    {
+        get => (IconLayoutPolicy)GetValue(LayoutPolicyProperty);
+        set => SetValue(LayoutPolicyProperty, value);
+    }
+
+    /// <summary>Gets or sets the stable width fed to <see cref="AdaptiveGridLayout.RowCapacity"/>'s M-2
+    /// scrollbar reservation. See <see cref="CapacityWidthProperty"/>'s doc comment.</summary>
+    public double CapacityWidth
+    {
+        get => (double)GetValue(CapacityWidthProperty);
+        set => SetValue(CapacityWidthProperty, value);
+    }
+
+    /// <summary>
+    /// Resolves the width <see cref="AdaptiveGridLayout.RowCapacity"/> is computed against (fix-cycle 2
+    /// CRITICAL-1 — see <see cref="CapacityWidthProperty"/>'s doc comment for the double-subtraction bug
+    /// this replaces).
+    /// </summary>
+    /// <param name="rawWidth">
+    /// The width WPF actually handed this pass (<c>availableSize</c>/<c>finalSize</c>.Width) — the SAME
+    /// value <c>GridViewTemplate</c>'s <see cref="ScrollViewer"/> already narrows once its own Auto
+    /// vertical scrollbar becomes visible.
+    /// </param>
+    /// <param name="reservedScrollBar">
+    /// <see cref="GridMetrics.ReservedVerticalScrollBarWidth"/> for <see cref="LayoutPolicy"/> — <c>0</c>
+    /// for <see cref="IconLayoutPolicy.LegacyStretch"/>, the real scrollbar width for
+    /// <see cref="IconLayoutPolicy.FixedGap"/>.
+    /// </param>
+    /// <returns>
+    /// <list type="bullet">
+    /// <item><description><paramref name="reservedScrollBar"/> == <c>0</c> (<see cref="IconLayoutPolicy.LegacyStretch"/>):
+    /// always <paramref name="rawWidth"/>, unchanged — this policy's own accepted ADR-018 M-2 trade-off
+    /// (variant (c)) keeps fluctuating with the real, possibly scrollbar-narrowed viewport exactly as it
+    /// did before this fix.</description></item>
+    /// <item><description><paramref name="reservedScrollBar"/> &gt; <c>0</c> AND <see cref="CapacityWidth"/>
+    /// is bound (not <see cref="double.NaN"/>): <c>max(0, CapacityWidth - reservedScrollBar)</c> — the
+    /// reservation applied exactly once, against the STABLE outer width, independent of whether a
+    /// scrollbar happens to be visible on this particular pass.</description></item>
+    /// <item><description><paramref name="reservedScrollBar"/> &gt; <c>0</c> but <see cref="CapacityWidth"/>
+    /// is unbound (e.g. this panel constructed directly in a unit test, outside <c>GridViewTemplate</c>'s
+    /// <see cref="ScrollViewer"/>): no stable width exists to reserve against, so this degrades
+    /// gracefully to <paramref name="rawWidth"/> with NO reservation at all — the same formula
+    /// <see cref="IconLayoutPolicy.LegacyStretch"/> always uses — rather than risk double-subtracting a
+    /// second time from an already-narrowed width.</description></item>
+    /// </list>
+    /// </returns>
+    private double ResolveAvailableForCapacity(double rawWidth, double reservedScrollBar)
+        => reservedScrollBar > 0d && !double.IsNaN(CapacityWidth)
+            ? Math.Max(0d, CapacityWidth - reservedScrollBar)
+            : rawWidth;
 
     /// <summary>
     /// Measures every child at its natural (unconstrained) size to determine the uniform cell size,
@@ -166,6 +317,16 @@ public sealed class AdaptiveIconGridPanel : Panel
         var m = AdaptiveGridLayout.EdgePadding(cell, EdgePaddingRatio);
         var mv = AdaptiveGridLayout.EdgePadding(rowHeight, VerticalEdgePaddingRatio);
 
+        // M-2 fix-cycle amendment (adr/ADR-029-icon-layout-policy.md Решение 4): FixedGap reserves the
+        // vertical scrollbar's width UNCONDITIONALLY — independent of whether GridViewTemplate's
+        // ScrollViewer.VerticalScrollBarVisibility="Auto" actually shows one right now — so RowCapacity
+        // never flips as items are added/removed near the threshold where a scrollbar would appear.
+        // LegacyStretch is unaffected (ReservedVerticalScrollBarWidth returns 0 for it). Fix-cycle 2
+        // CRITICAL-1: the reservation is resolved via CapacityWidth (ResolveAvailableForCapacity), NOT
+        // subtracted from availableSize directly — see that method's doc comment for why the earlier,
+        // direct-subtraction version double-counted the scrollbar once a real one became visible.
+        var reservedScrollBar = GridMetrics.ReservedVerticalScrollBarWidth(LayoutPolicy, SystemParameters.VerticalScrollBarWidth);
+
         double width;
         int rowCapacity;
         if (double.IsPositiveInfinity(availableSize.Width))
@@ -176,7 +337,8 @@ public sealed class AdaptiveIconGridPanel : Panel
         }
         else
         {
-            rowCapacity = AdaptiveGridLayout.RowCapacity(availableSize.Width, cell, minGap, m);
+            var availableForCapacity = ResolveAvailableForCapacity(availableSize.Width, reservedScrollBar);
+            rowCapacity = AdaptiveGridLayout.RowCapacity(availableForCapacity, cell, minGap, m);
             width = availableSize.Width;
         }
 
@@ -220,7 +382,17 @@ public sealed class AdaptiveIconGridPanel : Panel
         var m = AdaptiveGridLayout.EdgePadding(cell, EdgePaddingRatio);
         var mv = AdaptiveGridLayout.EdgePadding(rowHeight, VerticalEdgePaddingRatio);
 
-        var rowCapacity = AdaptiveGridLayout.RowCapacity(finalSize.Width, cell, minGap, m);
+        // M-2 fix-cycle amendment — see MeasureOverride's matching remark; RowCapacity must be computed
+        // from the SAME scrollbar-reserved width here as in MeasureOverride, or ArrangeOverride could
+        // legitimately compute a different rowCapacity than the size MeasureOverride already reported
+        // (this method's own doc comment already documents that finalSize.Width and the measure pass's
+        // availableSize.Width can legitimately differ — a real Auto scrollbar appearing between passes —
+        // this reservation exists precisely so that FixedGap's rowCapacity does NOT also differ then).
+        // Fix-cycle 2 CRITICAL-1: resolved via CapacityWidth (ResolveAvailableForCapacity), not a direct
+        // subtraction from finalSize.Width — see that method's doc comment.
+        var reservedScrollBar = GridMetrics.ReservedVerticalScrollBarWidth(LayoutPolicy, SystemParameters.VerticalScrollBarWidth);
+        var availableForCapacity = ResolveAvailableForCapacity(finalSize.Width, reservedScrollBar);
+        var rowCapacity = AdaptiveGridLayout.RowCapacity(availableForCapacity, cell, minGap, m);
         var rowCount = AdaptiveGridLayout.RowCount(children.Count, rowCapacity);
 
         var index = 0;
@@ -228,9 +400,11 @@ public sealed class AdaptiveIconGridPanel : Panel
         {
             var itemsInRow = AdaptiveGridLayout.ItemsInRow(children.Count, rowCapacity, row);
 
-            // Horizontal gaps stretch to fill a full row's leftover space; vertical gaps never stretch
-            // (plan §5, "D-3": "вертикальные зазоры никогда не растягиваются") — always MinGap.
-            var gap = AdaptiveGridLayout.RowGap(itemsInRow, rowCapacity, finalSize.Width, cell, minGap, m);
+            // Horizontal gaps stretch to fill a full row's leftover space under LegacyStretch, or stay
+            // pinned at MinGap under FixedGap (ADR-029 Решение 1/Решение 3 — LayoutPolicy is the ONLY
+            // switch-point between the two); vertical gaps never stretch under EITHER policy (plan §5,
+            // "D-3": "вертикальные зазоры никогда не растягиваются") — always MinGap, policy-agnostic.
+            var gap = AdaptiveGridLayout.RowGap(itemsInRow, rowCapacity, finalSize.Width, cell, minGap, m, LayoutPolicy);
             var y = AdaptiveGridLayout.Offset(row, rowHeight, minGap, mv);
 
             for (var column = 0; column < itemsInRow; column++)

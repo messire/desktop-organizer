@@ -23,38 +23,12 @@ public class PanelDragPipelineTests
     // A monitor left of and above the primary — the negative-coordinate case ADR-028 calls out.
     private static readonly Rect NegativeWorkArea = new(-1366, -160, 1366, 728);
 
-    private static PanelGridState State(Rect? workArea = null, string? deviceId = Display1)
-    {
-        var area = workArea ?? PrimaryWorkArea;
-        return new PanelGridState(
-            IsGridAligned: true,
-            Origin: area.TopLeft,
-            WorkArea: area,
-            UnitSize: U,
-            Gap: G,
-            MinSpan: WorkspaceGridMetrics.MinSpanExpanded,
-            MonitorDeviceId: deviceId);
-    }
-
-    /// <summary>
-    /// M-1 fix-cycle 1: a single, effectively unbounded monitor whose work area is <paramref name="workArea"/>
-    /// — reproduces <see cref="ResolveGridFrame"/>'s PRE-fix behavior (a single, gesture-start-frozen work
-    /// area used for every frame) for every test below that is not itself exercising the per-frame
-    /// monitor resolution the fix adds. <c>Bounds</c> is deliberately huge so it contains every coordinate
-    /// any test in this file ever proposes.
-    /// </summary>
-    private static IReadOnlyList<(string DeviceName, Rect Bounds, Rect WorkArea)> SingleMonitor(Rect? workArea = null, string deviceId = Display1) =>
-        [(deviceId, new Rect(-1_000_000, -1_000_000, 2_000_000, 2_000_000), workArea ?? PrimaryWorkArea)];
-
-    /// <summary>Asserts that <paramref name="coordinate"/> sits exactly on a grid line measured from <paramref name="origin"/>.</summary>
-    private static void AssertOnGrid(double coordinate, double origin)
-    {
-        var offset = (coordinate - origin) / U;
-        Assert.Equal(Math.Round(offset), offset, 9);
-    }
-
     // ── ResolveGridFrame: step 1, quantisation relative to the monitor origin ─────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelDragPipeline.ResolveGridFrame"/> quantises the proposed position
+    /// to grid lines measured from the monitor's own work-area origin, not from global zero.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_QuantisesToTheMonitorWorkAreaOrigin_NotGlobalZero()
     {
@@ -72,6 +46,10 @@ public class PanelDragPipelineTests
         AssertOnGrid(result.Y, state.Origin.Y);
     }
 
+    /// <summary>
+    /// Verifies that on a monitor with a negative-coordinate work area, quantisation is still measured
+    /// relative to that monitor's own origin rather than global zero.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_NegativeOriginMonitor_SnapsRelativeToThatOrigin()
     {
@@ -87,6 +65,10 @@ public class PanelDragPipelineTests
         Assert.True(Math.Abs(result.Y - (-101.5)) <= U / 2d);
     }
 
+    /// <summary>
+    /// Verifies that re-snapping the output of <see cref="PanelDragPipeline.ResolveGridFrame"/> through
+    /// the same function again changes nothing.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_IsIdempotent_ReSnappingItsOwnOutputChangesNothing()
     {
@@ -103,6 +85,10 @@ public class PanelDragPipelineTests
 
     // ── ResolveGridFrame: the Alt free-move modifier (D3-9) ───────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that with <c>freeMove: true</c>, the raw proposed point is returned unchanged —
+    /// grid quantisation is fully suppressed.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_FreeMove_SuppressesQuantisationOnly()
     {
@@ -115,6 +101,10 @@ public class PanelDragPipelineTests
         Assert.Equal(raw, free);
     }
 
+    /// <summary>
+    /// Verifies that even with <c>freeMove: true</c>, the hard-wall collision clamp still applies —
+    /// Alt loosens the grid quantisation only, never the wall.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_FreeMove_StillClampedByTheHardWall()
     {
@@ -129,6 +119,11 @@ public class PanelDragPipelineTests
         Assert.True(free.X + current.Width <= obstacle.X - G + 0.001);
     }
 
+    /// <summary>
+    /// Verifies that with <c>freeMove: true</c> and <c>isEditingLayout: true</c>, the ADR-026 edge
+    /// guide still fires and aligns the panel's left edge to the neighbour's edge — the guide magnet
+    /// is independent of the grid step Alt suppressed.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_FreeMove_StillRunsGuidesInEditLayout()
     {
@@ -145,6 +140,10 @@ public class PanelDragPipelineTests
 
     // ── ResolveGridFrame: step 2, ADR-026 guides, Edit Layout only ────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the ADR-026 edge guide only fires when <c>isEditingLayout: true</c>, and that it
+    /// runs after quantisation — outside Edit Layout the result is only grid-quantised.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_GuidesRunOnlyInEditLayout_AndAfterQuantisation()
     {
@@ -162,6 +161,10 @@ public class PanelDragPipelineTests
 
     // ── ResolveGridFrame: step 3, the hard wall is always last (D3-10) ────────────────────────────
 
+    /// <summary>
+    /// Verifies that grid quantisation never overrides the hard-wall collision clamp — the final
+    /// result never overlaps a neighbour, even when the quantised position alone would.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_QuantisationNeverPushesThePanelIntoANeighbour()
     {
@@ -176,6 +179,13 @@ public class PanelDragPipelineTests
         Assert.False(PanelCollision.Overlaps(moved, obstacle));
     }
 
+    /// <summary>
+    /// Verifies, across 1000 random drag trajectories and every combination of editing/free-move
+    /// flags, that <see cref="PanelDragPipeline.ResolveGridFrame"/> never produces a frame that newly
+    /// overlaps a stationary obstacle.
+    /// </summary>
+    /// <param name="isEditingLayout">Whether Edit Layout mode (and its guides) is active for the run.</param>
+    /// <param name="freeMove">Whether the Alt free-move modifier is held for the run.</param>
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -216,6 +226,11 @@ public class PanelDragPipelineTests
 
     // ── M-1 fix-cycle 1: the guide step's work area is resolved PER FRAME, not frozen at gesture start ─
 
+    /// <summary>
+    /// Verifies that the guide step resolves the ADR-026 work area per frame from the panel's current
+    /// monitor, rather than reusing the work area frozen at gesture start — a mid-drag cross-monitor
+    /// guide correction on the new monitor is accepted instead of discarded.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_GuideWorkArea_IsResolvedPerFrame_NotFrozenAtGestureStart()
     {
@@ -245,6 +260,11 @@ public class PanelDragPipelineTests
         Assert.Equal(obstacle.X, result.X);
     }
 
+    /// <summary>
+    /// Verifies that when the proposed position falls outside every snapshotted monitor, the guide
+    /// step falls back to a disabled guard (accepts unconditionally) rather than reusing a stale work
+    /// area.
+    /// </summary>
     [Fact]
     public void ResolveGridFrame_GuideWorkArea_FallsBackToDisabledGuard_WhenNoMonitorMatches()
     {
@@ -265,6 +285,10 @@ public class PanelDragPipelineTests
 
     // ── ResolveGridDrop (D3-5, D3-9's "drop always quantises") ────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that dropping a panel that ended a gesture off-grid still quantises its position to
+    /// the grid on release, while leaving its size untouched.
+    /// </summary>
     [Fact]
     public void ResolveGridDrop_QuantisesEvenWhenTheGestureEndedOffGrid()
     {
@@ -278,6 +302,10 @@ public class PanelDragPipelineTests
         Assert.Equal(current.Size, dropped.Size);
     }
 
+    /// <summary>
+    /// Verifies that dropping an already-dropped rectangle a second time produces the same result —
+    /// the drop quantisation is idempotent.
+    /// </summary>
     [Fact]
     public void ResolveGridDrop_IsIdempotent()
     {
@@ -290,6 +318,11 @@ public class PanelDragPipelineTests
         Assert.Equal(once, twice);
     }
 
+    /// <summary>
+    /// Verifies that a panel dropped hanging off the work area's right/bottom edges is pulled back
+    /// fully inside the work area while staying on the grid, and that re-dropping the result changes
+    /// nothing further.
+    /// </summary>
     [Fact]
     public void ResolveGridDrop_OutsideTheWorkArea_PulledBackOnGridAndInsideIt()
     {
@@ -307,6 +340,10 @@ public class PanelDragPipelineTests
         Assert.Equal(dropped, PanelDragPipeline.ResolveGridDrop(dropped, state, []));
     }
 
+    /// <summary>
+    /// Verifies that dropping a panel on a monitor with a negative-coordinate work area still
+    /// quantises and clamps relative to that monitor's own origin and bounds.
+    /// </summary>
     [Fact]
     public void ResolveGridDrop_NegativeOriginMonitor_StaysOnThatMonitorsGrid()
     {
@@ -323,6 +360,11 @@ public class PanelDragPipelineTests
 
     // ── m-2 fix-cycle 1: SafeClamp reasons about the EXPANDED size for a rolled-up panel ─────────────
 
+    /// <summary>
+    /// Verifies that dropping a rolled-up panel clamps its position by its persisted EXPANDED size,
+    /// not its live collapsed header height, so unrolling it later never pushes it past the work
+    /// area's bottom edge.
+    /// </summary>
     [Fact]
     public void ResolveGridDrop_RolledUpPanelExpandedSizeForClamp_KeepsFullFootprintInsideWorkArea()
     {
@@ -346,6 +388,11 @@ public class PanelDragPipelineTests
         Assert.Equal(current.Size, dropped.Size);
     }
 
+    /// <summary>
+    /// Verifies backward compatibility: the three-argument <c>ResolveGridDrop</c> overload (used by
+    /// every pre-existing caller) still clamps by the rectangle's own live size, matching the
+    /// four-argument overload called explicitly with that same size.
+    /// </summary>
     [Fact]
     public void ResolveGridDrop_ThreeArgumentOverload_StillClampsByTheLiveSize_UnchangedFromBeforeTheFix()
     {
@@ -362,6 +409,10 @@ public class PanelDragPipelineTests
 
     // ── ClampHardWall (D3-2 equal gaps, D3-10 the wall is never pierced) ──────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelDragPipeline.ClampHardWall"/> stops the panel exactly one gap
+    /// short of a neighbour it is moving toward, rather than flush against it or past it.
+    /// </summary>
     [Fact]
     public void ClampHardWall_StopsExactlyOneGapShortOfTheNeighbour()
     {
@@ -373,6 +424,10 @@ public class PanelDragPipelineTests
         Assert.Equal(G, obstacle.X - result.Right, 9);
     }
 
+    /// <summary>
+    /// Verifies that approaching two neighbours from opposite sides leaves the exact same gap on
+    /// either side — the wall's gap is symmetric regardless of approach direction.
+    /// </summary>
     [Fact]
     public void ClampHardWall_TwoNeighboursApproachedFromBothSides_LeaveTheSameGap()
     {
@@ -385,6 +440,11 @@ public class PanelDragPipelineTests
         Assert.Equal(fromLeft.X - left.Right, right.X - fromRight.Right, 9);
     }
 
+    /// <summary>
+    /// Verifies the <see cref="PanelCollision"/> inflate-X regression guard: a neighbour positioned
+    /// above the panel (closer than the gap on the Y axis) does not block a purely horizontal move,
+    /// since it is not actually in the way of that move.
+    /// </summary>
     [Fact]
     public void ClampHardWall_SlidingAlongAWall_IsNotBlockedByAPerpendicularNeighbour()
     {
@@ -398,6 +458,11 @@ public class PanelDragPipelineTests
         Assert.Equal(300d, result.X);
     }
 
+    /// <summary>
+    /// Verifies the R1 amnesty: a panel that already overlaps an obstacle before the move is still
+    /// allowed to move freely away from it, rather than being blocked by the very overlap it is
+    /// escaping.
+    /// </summary>
     [Fact]
     public void ClampHardWall_PreExistingOverlap_IsStillAmnestied_R1()
     {
@@ -409,6 +474,9 @@ public class PanelDragPipelineTests
         Assert.Equal(400d, away.X); // can still be dragged apart
     }
 
+    /// <summary>
+    /// Verifies that with an empty obstacle list, the proposed position is returned unchanged.
+    /// </summary>
     [Fact]
     public void ClampHardWall_NoObstacles_ReturnsTheProposedPositionUnchanged()
     {
@@ -420,13 +488,17 @@ public class PanelDragPipelineTests
     }
 
     // ── ResolveDropMonitor (F-6, D3-7) ────────────────────────────────────────────────────────────
-
     private static IReadOnlyList<(string DeviceName, Rect Bounds, Rect WorkArea)> TwoMonitors =>
     [
         (Display1, new Rect(0, 0, 1920, 1080), PrimaryWorkArea),
         (Display2, new Rect(1920, 0, 1920, 1080), new Rect(1920, 0, 1920, 1080)),
     ];
 
+    /// <summary>
+    /// Verifies that when the final rectangle's center lands on a different monitor than the one the
+    /// gesture started on, <see cref="PanelDragPipeline.ResolveDropMonitor"/> returns that other
+    /// monitor's device name — only the center decides (ADR-028), not the top-left corner.
+    /// </summary>
     [Fact]
     public void ResolveDropMonitor_CenterOnTheOtherMonitor_ReturnsItsDeviceName()
     {
@@ -438,6 +510,10 @@ public class PanelDragPipelineTests
         Assert.Equal(Display2, result);
     }
 
+    /// <summary>
+    /// Verifies that when the final rectangle's center stays on the current monitor,
+    /// <see cref="PanelDragPipeline.ResolveDropMonitor"/> returns null (no retarget needed).
+    /// </summary>
     [Fact]
     public void ResolveDropMonitor_CenterOnTheSameMonitor_ReturnsNull()
     {
@@ -446,6 +522,10 @@ public class PanelDragPipelineTests
         Assert.Null(PanelDragPipeline.ResolveDropMonitor(final, TwoMonitors, Display1));
     }
 
+    /// <summary>
+    /// Verifies that the current device id comparison is case-insensitive: an upper-cased current id
+    /// still matches the same monitor, so no retarget is reported.
+    /// </summary>
     [Fact]
     public void ResolveDropMonitor_DeviceNameComparisonIsCaseInsensitive()
     {
@@ -454,6 +534,10 @@ public class PanelDragPipelineTests
         Assert.Null(PanelDragPipeline.ResolveDropMonitor(final, TwoMonitors, Display1.ToUpperInvariant()));
     }
 
+    /// <summary>
+    /// Verifies that when the final rectangle's center falls outside every known monitor, the method
+    /// returns null, effectively keeping the panel on its current monitor id.
+    /// </summary>
     [Fact]
     public void ResolveDropMonitor_CenterOutsideEveryMonitor_KeepsTheCurrentId()
     {
@@ -462,6 +546,10 @@ public class PanelDragPipelineTests
         Assert.Null(PanelDragPipeline.ResolveDropMonitor(final, TwoMonitors, Display1));
     }
 
+    /// <summary>
+    /// Verifies that both an empty monitor list and a degenerate (NaN-coordinate) rectangle make
+    /// <see cref="PanelDragPipeline.ResolveDropMonitor"/> return null rather than throwing.
+    /// </summary>
     [Fact]
     public void ResolveDropMonitor_NoMonitorsOrDegenerateRect_ReturnsNull()
     {
@@ -469,6 +557,10 @@ public class PanelDragPipelineTests
         Assert.Null(PanelDragPipeline.ResolveDropMonitor(new Rect(double.NaN, 0, 10, 10), TwoMonitors, Display1));
     }
 
+    /// <summary>
+    /// Verifies that a panel with no current monitor id (<c>currentDeviceId: null</c>) adopts the
+    /// device name of the monitor its center landed on.
+    /// </summary>
     [Fact]
     public void ResolveDropMonitor_PanelWithNoMonitorIdYet_AdoptsTheMonitorItLandedOn()
     {
@@ -482,6 +574,10 @@ public class PanelDragPipelineTests
     //    far (ActualWidth/Height lags one layout pass) — otherwise an Alt-resize that ended at a live 480
     //    but committed 320 is clamped as if it were still 480 and the anchor edge jumps. ─────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelDragPipeline.CommittedSize"/> prefers the explicit window
+    /// width/height over a stale <c>ActualWidth</c>/<c>ActualHeight</c> when both are finite.
+    /// </summary>
     [Fact]
     public void CommittedSize_PrefersExplicitWindowSize_OverStaleActualSize()
     {
@@ -490,6 +586,10 @@ public class PanelDragPipelineTests
         Assert.Equal(new Size(320, 248), size);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelDragPipeline.CommittedSize"/> falls back to
+    /// <c>actualWidth</c>/<c>actualHeight</c> when the window's own width/height is NaN.
+    /// </summary>
     [Fact]
     public void CommittedSize_FallsBackToActualSize_WhenWindowSizeIsNaN()
     {
@@ -498,6 +598,11 @@ public class PanelDragPipelineTests
         Assert.Equal(new Size(480, 248), size);
     }
 
+    /// <summary>
+    /// Verifies that dropping with the resize-committed size (rather than the layout-lagging
+    /// <c>ActualWidth</c>) keeps the panel's anchored edge exactly at the work-area wall it was
+    /// resized against.
+    /// </summary>
     [Fact]
     public void ResolveGridDrop_UsingCommittedSize_KeepsTheAnchorEdgeAtTheWorkAreaWall()
     {
@@ -515,6 +620,12 @@ public class PanelDragPipelineTests
 
     // ── C-1 fix-cycle 1: RetargetToDropMonitor (the F-6 teleport-back-to-origin-monitor bug) ─────────
 
+    /// <summary>
+    /// Verifies that when a dragged panel's center crossed onto another monitor,
+    /// <see cref="PanelDragPipeline.RetargetToDropMonitor"/> updates the grid state's origin, work
+    /// area, and monitor device id to that monitor's, while leaving unit size, gap, and min span
+    /// unchanged.
+    /// </summary>
     [Fact]
     public void RetargetToDropMonitor_CenterCrossedToTheOtherMonitor_RetargetsOriginWorkAreaAndDeviceId()
     {
@@ -526,12 +637,19 @@ public class PanelDragPipelineTests
         Assert.Equal(Display2, retargeted.MonitorDeviceId);
         Assert.Equal(TwoMonitors[1].WorkArea.TopLeft, retargeted.Origin);
         Assert.Equal(TwoMonitors[1].WorkArea, retargeted.WorkArea);
+
         // Everything that does NOT depend on which monitor is unchanged.
         Assert.Equal(state.UnitSize, retargeted.UnitSize);
         Assert.Equal(state.Gap, retargeted.Gap);
         Assert.Equal(state.MinSpan, retargeted.MinSpan);
     }
 
+    /// <summary>
+    /// Reproduces the C-1 fix-cycle 1 teleport-back bug and verifies the fix: without retargeting,
+    /// dropping on another monitor with the stale gesture-start state clamps the panel back near its
+    /// origin monitor; composing <see cref="PanelDragPipeline.RetargetToDropMonitor"/> before the drop
+    /// keeps the panel on the monitor it was actually dropped on.
+    /// </summary>
     [Fact]
     public void RetargetToDropMonitor_ComposedWithResolveGridDrop_KeepsThePanelOnTheMonitorItWasDroppedOn()
     {
@@ -556,6 +674,11 @@ public class PanelDragPipelineTests
         AssertOnGrid(dropped.X, retargeted.Origin.X);
     }
 
+    /// <summary>
+    /// Verifies that when the panel's center never left its starting monitor,
+    /// <see cref="PanelDragPipeline.RetargetToDropMonitor"/> returns the same state instance
+    /// unchanged.
+    /// </summary>
     [Fact]
     public void RetargetToDropMonitor_PanelNeverLeftItsMonitor_ReturnsTheSameStateInstance()
     {
@@ -567,6 +690,10 @@ public class PanelDragPipelineTests
         Assert.Equal(state, retargeted);
     }
 
+    /// <summary>
+    /// Verifies that retargeting a non-grid-aligned (legacy) state is a no-op — the legacy state is
+    /// returned unchanged.
+    /// </summary>
     [Fact]
     public void RetargetToDropMonitor_NotGridAligned_IsANoOp()
     {
@@ -577,6 +704,10 @@ public class PanelDragPipelineTests
         Assert.Equal(PanelGridState.Legacy, retargeted);
     }
 
+    /// <summary>
+    /// Verifies that retargeting with an empty monitor list is a no-op — the original state is
+    /// returned unchanged.
+    /// </summary>
     [Fact]
     public void RetargetToDropMonitor_NoMonitors_IsANoOp()
     {
@@ -586,5 +717,36 @@ public class PanelDragPipelineTests
         var retargeted = PanelDragPipeline.RetargetToDropMonitor(raw, state, []);
 
         Assert.Equal(state, retargeted);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static PanelGridState State(Rect? workArea = null, string? deviceId = Display1)
+    {
+        var area = workArea ?? PrimaryWorkArea;
+        return new PanelGridState(
+            IsGridAligned: true,
+            Origin: area.TopLeft,
+            WorkArea: area,
+            UnitSize: U,
+            Gap: G,
+            MinSpan: WorkspaceGridMetrics.MinSpanExpanded,
+            MonitorDeviceId: deviceId);
+    }
+
+    /// <summary>
+    /// M-1 fix-cycle 1: a single, effectively unbounded monitor whose work area is <paramref name="workArea"/>
+    /// — reproduces <see cref="PanelDragPipeline.ResolveGridFrame"/>'s PRE-fix behavior (a single, gesture-start-frozen work
+    /// area used for every frame) for every test below that is not itself exercising the per-frame
+    /// monitor resolution the fix adds. <c>Bounds</c> is deliberately huge so it contains every coordinate
+    /// any test in this file ever proposes.
+    /// </summary>
+    private static IReadOnlyList<(string DeviceName, Rect Bounds, Rect WorkArea)> SingleMonitor(Rect? workArea = null, string deviceId = Display1) =>
+        [(deviceId, new Rect(-1_000_000, -1_000_000, 2_000_000, 2_000_000), workArea ?? PrimaryWorkArea)];
+
+    /// <summary>Asserts that <paramref name="coordinate"/> sits exactly on a grid line measured from <paramref name="origin"/>.</summary>
+    private static void AssertOnGrid(double coordinate, double origin)
+    {
+        var offset = (coordinate - origin) / U;
+        Assert.Equal(Math.Round(offset), offset, 9);
     }
 }

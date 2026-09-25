@@ -25,6 +25,10 @@ public class LassoPanelGeometryTests
 
     // ── ToDip (D3-8) ──────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> divides every physical-pixel component by
+    /// the DPI scale at 150%.
+    /// </summary>
     [Fact]
     public void ToDip_At150Percent_DividesEveryComponentByTheScale()
     {
@@ -33,6 +37,15 @@ public class LassoPanelGeometryTests
         Assert.Equal(new Rect(200, 200, 400, 400), dip);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> divides every component by the DPI scale
+    /// correctly across a table of scale factors, including a non-integral 175% scale.
+    /// </summary>
+    /// <param name="scale">The DPI scale factor passed to <c>ToDip</c>.</param>
+    /// <param name="x">The expected DIP x-coordinate.</param>
+    /// <param name="y">The expected DIP y-coordinate.</param>
+    /// <param name="width">The expected DIP width.</param>
+    /// <param name="height">The expected DIP height.</param>
     [Theory]
     [InlineData(1.0, 400, 400, 800, 600)]
     [InlineData(1.25, 320, 320, 640, 480)]
@@ -47,6 +60,11 @@ public class LassoPanelGeometryTests
         Assert.Equal(height, dip.Height, 9);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> applies the minimum-size floor AFTER
+    /// converting to DIP, not before — comparing the floor against physical pixels would let an
+    /// undersized result through at scales above 100%.
+    /// </summary>
     [Fact]
     public void ToDip_MinimumSizeIsAppliedAfterTheConversion_SoItMeansTheSameAtEveryDpi()
     {
@@ -58,6 +76,11 @@ public class LassoPanelGeometryTests
         Assert.Equal(MinSize, dip.Height);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> falls back to a 1:1 (no-op) scale for
+    /// degenerate scale values (zero, negative, NaN, or infinite) rather than producing garbage output.
+    /// </summary>
+    /// <param name="scale">The degenerate DPI scale factor passed to <c>ToDip</c>.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(-1d)]
@@ -70,6 +93,10 @@ public class LassoPanelGeometryTests
         Assert.Equal(new Rect(300, 300, 600, 600), dip);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> scales negative monitor coordinates (a
+    /// monitor left of/above the primary) with the same formula, no sign-sensitive special case.
+    /// </summary>
     [Fact]
     public void ToDip_NegativeMonitorCoordinates_ScaleWithoutSignSpecialCasing()
     {
@@ -81,6 +108,11 @@ public class LassoPanelGeometryTests
 
     // ── ApplyTo ───────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ApplyTo"/> writes the DIP rectangle verbatim (no
+    /// grid alignment) onto a <see cref="PanelGeometryMode.LegacyFreeform"/> panel, leaving
+    /// <see cref="ChildWindowModel.MonitorDeviceId"/> untouched.
+    /// </summary>
     [Fact]
     public void ApplyTo_LegacyFreeformPanel_WritesTheDipRectangleVerbatim()
     {
@@ -93,6 +125,11 @@ public class LassoPanelGeometryTests
         Assert.Null(model.MonitorDeviceId); // untouched for the legacy mode
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ApplyTo"/> snaps a
+    /// <see cref="PanelGeometryMode.GridAligned"/> panel's position onto the lassoed monitor's own grid
+    /// origin and records that monitor's device id.
+    /// </summary>
     [Fact]
     public void ApplyTo_GridAlignedPanel_SnapsThePositionToTheLassoedMonitorsOrigin()
     {
@@ -107,6 +144,10 @@ public class LassoPanelGeometryTests
         Assert.Equal(Display1, model.MonitorDeviceId);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ApplyTo"/> picks the correct monitor and grid origin
+    /// even when the lassoed rectangle is on a monitor with negative screen coordinates.
+    /// </summary>
     [Fact]
     public void ApplyTo_GridAlignedPanelOnANegativeCoordinateMonitor_UsesThatMonitorsOrigin()
     {
@@ -119,6 +160,10 @@ public class LassoPanelGeometryTests
         Assert.Equal(0, (model.Position.Y - (-160)) % (int)U);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ApplyTo"/> rounds fractional DIP coordinates
+    /// instead of truncating them, so negative coordinates are not biased toward zero.
+    /// </summary>
     [Fact]
     public void ApplyTo_RoundsInsteadOfTruncating_SoNegativeCoordinatesAreNotBiasedTowardZero()
     {

@@ -6,7 +6,10 @@ namespace DesktopOrganizer.Tests.Unit.SingleInstance;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class SingleInstanceNamingTests
 {
-    // T-NAM-01
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceNaming.InstallerDetectionMutexName"/> matches the literal
+    /// name consumed by the installer script (T-NAM-01).
+    /// </summary>
     [Fact]
     public void InstallerDetectionMutexName_MatchesInstallerLiteral()
     {
@@ -15,7 +18,10 @@ public class SingleInstanceNamingTests
         Assert.Equal("DesktopOrganizerSingleInstanceMutex", SingleInstanceNaming.InstallerDetectionMutexName);
     }
 
-    // T-NAM-02
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceNaming.GuardMutexName"/> always starts with the
+    /// <c>Local\</c> namespace prefix (T-NAM-02).
+    /// </summary>
     [Fact]
     public void GuardMutexName_StartsWithLocalNamespacePrefix()
     {
@@ -24,7 +30,10 @@ public class SingleInstanceNamingTests
         Assert.StartsWith(@"Local\", name, StringComparison.Ordinal);
     }
 
-    // T-NAM-03
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceNaming.UserKeyHash"/> is deterministic for the same input
+    /// and never leaks the raw SID (or its well-known prefix) into the hash (T-NAM-03).
+    /// </summary>
     [Fact]
     public void UserKeyHash_IsDeterministic_AndDoesNotContainRawInput()
     {
@@ -39,7 +48,11 @@ public class SingleInstanceNamingTests
         Assert.DoesNotContain("S-1-5-21", first, StringComparison.Ordinal);
     }
 
-    // T-NAM-04
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceNaming.UserKeyHash"/> produces different hashes for
+    /// different SIDs, and that the derived guard mutex/activation pipe names differ accordingly
+    /// (T-NAM-04).
+    /// </summary>
     [Fact]
     public void UserKeyHash_DifferentSids_ProduceDifferentNames()
     {
@@ -55,12 +68,20 @@ public class SingleInstanceNamingTests
             SingleInstanceNaming.ActivationPipeName(second));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceNaming.UserKeyHash"/> throws
+    /// <see cref="ArgumentNullException"/> for a <see langword="null"/> input.
+    /// </summary>
     [Fact]
     public void UserKeyHash_NullInput_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => SingleInstanceNaming.UserKeyHash(null!));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceNaming.ActivationPipeName"/> includes the given user key
+    /// hash verbatim.
+    /// </summary>
     [Fact]
     public void ActivationPipeName_IncludesUserKey()
     {

@@ -41,6 +41,8 @@ internal sealed class ApplicationStateService : IApplicationStateService
     /// <summary>
     /// Initializes a new instance of the <see cref="ApplicationStateService"/> class.
     /// </summary>
+    /// <param name="store">The underlying persistence store for the application-state document.</param>
+    /// <param name="serviceProvider">Used to lazily resolve the services this document is saved from, avoiding a construction-time dependency cycle.</param>
     public ApplicationStateService(IApplicationStateStore store, IServiceProvider serviceProvider)
     {
         _store = store;
@@ -91,6 +93,7 @@ internal sealed class ApplicationStateService : IApplicationStateService
             // existing partial-load quarantine path (ADR-024 finalization C-1) and degrade to an empty,
             // writable structural state instead of crashing.
             _store.QuarantineLoadedDocument("PayloadDeserializationFailed");
+
             // NIT N-8, fix-cycle 2 (docs/PLANS/workspace-grid-migration.md §10.8): the returned
             // StateLoadStatus is deliberately, permanently collapsed to Quarantined below (see this
             // method's own XML doc) — a more specific original status (e.g. RecoveredFromBackup,
@@ -169,6 +172,60 @@ internal sealed class ApplicationStateService : IApplicationStateService
     }
 
     /// <summary>
+    /// Maps a schema-v3 <see cref="LayoutSnapshotStateDto"/> (real, typed panel objects) back to the
+    /// runtime-only <see cref="LayoutSnapshot"/> shape (<c>PanelJsonItems</c> strings) that
+    /// <c>LayoutSnapshotService</c>/<c>LayoutSnapshotsViewModel</c> already work with. See
+    /// <see cref="LayoutSnapshot"/>'s remarks: it stays JSON-string-based purely so
+    /// <c>DesktopOrganizer.Core</c> never has to reference <c>DesktopOrganizer.UI</c>'s
+    /// <c>ChildWindowModel</c> — the on-disk schema itself has carried real objects since schema v2.
+    /// </summary>
+    private static LayoutSnapshot ToLayoutSnapshot(LayoutSnapshotStateDto dto) => new()
+    {
+        Id = dto.Id,
+        Name = dto.Name,
+        CreatedAt = dto.CreatedAt,
+        PanelJsonItems = (dto.Panels ?? [])
+            .Where(p => p is not null)
+            .Select(PanelStateMapper.FromDto)
+            .Select(model => JsonSerializer.Serialize(model, SnapshotPanelJsonOptions))
+            .ToList(),
+    };
+
+    /// <summary>The inverse of <see cref="ToLayoutSnapshot"/>, used by <see cref="PersistNow"/>.</summary>
+    private static LayoutSnapshotStateDto ToSnapshotDto(LayoutSnapshot snapshot)
+    {
+        var panels = new List<PanelStateDto>();
+
+        foreach (var json in snapshot.PanelJsonItems)
+        {
+            ChildWindowModel? model;
+            try
+            {
+                model = JsonSerializer.Deserialize<ChildWindowModel>(json, SnapshotPanelJsonOptions);
+            }
+            catch (JsonException)
+            {
+                // A single corrupt panel entry must not drop the whole snapshot from the save —
+                // mirrors the per-item isolation used elsewhere (WindowManager.CreateEachIsolated).
+                continue;
+            }
+
+            if (model is not null)
+            {
+                panels.Add(PanelStateMapper.ToDto(model));
+            }
+        }
+
+        return new LayoutSnapshotStateDto
+        {
+            Id = snapshot.Id,
+            Name = snapshot.Name,
+            CreatedAt = snapshot.CreatedAt,
+            Panels = panels,
+        };
+    }
+
+    /// <summary>
     /// The actual persistence work deferred/synchronized by <see cref="_saveScheduler"/>: pulls the
     /// <em>current</em> live state from all four owning services, assembles the single document, and
     /// hands it to <see cref="IApplicationStateStore.Save"/>. Never throws — a write failure (disk
@@ -227,60 +284,6 @@ internal sealed class ApplicationStateService : IApplicationStateService
         {
             Console.Error.WriteLine($"Failed to save application state: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// Maps a schema-v3 <see cref="LayoutSnapshotStateDto"/> (real, typed panel objects) back to the
-    /// runtime-only <see cref="LayoutSnapshot"/> shape (<c>PanelJsonItems</c> strings) that
-    /// <c>LayoutSnapshotService</c>/<c>LayoutSnapshotsViewModel</c> already work with. See
-    /// <see cref="LayoutSnapshot"/>'s remarks: it stays JSON-string-based purely so
-    /// <c>DesktopOrganizer.Core</c> never has to reference <c>DesktopOrganizer.UI</c>'s
-    /// <c>ChildWindowModel</c> — the on-disk schema itself has carried real objects since schema v2.
-    /// </summary>
-    private static LayoutSnapshot ToLayoutSnapshot(LayoutSnapshotStateDto dto) => new()
-    {
-        Id = dto.Id,
-        Name = dto.Name,
-        CreatedAt = dto.CreatedAt,
-        PanelJsonItems = (dto.Panels ?? [])
-            .Where(p => p is not null)
-            .Select(PanelStateMapper.FromDto)
-            .Select(model => JsonSerializer.Serialize(model, SnapshotPanelJsonOptions))
-            .ToList(),
-    };
-
-    /// <summary>The inverse of <see cref="ToLayoutSnapshot"/>, used by <see cref="PersistNow"/>.</summary>
-    private static LayoutSnapshotStateDto ToSnapshotDto(LayoutSnapshot snapshot)
-    {
-        var panels = new List<PanelStateDto>();
-
-        foreach (var json in snapshot.PanelJsonItems)
-        {
-            ChildWindowModel? model;
-            try
-            {
-                model = JsonSerializer.Deserialize<ChildWindowModel>(json, SnapshotPanelJsonOptions);
-            }
-            catch (JsonException)
-            {
-                // A single corrupt panel entry must not drop the whole snapshot from the save —
-                // mirrors the per-item isolation used elsewhere (WindowManager.CreateEachIsolated).
-                continue;
-            }
-
-            if (model is not null)
-            {
-                panels.Add(PanelStateMapper.ToDto(model));
-            }
-        }
-
-        return new LayoutSnapshotStateDto
-        {
-            Id = snapshot.Id,
-            Name = snapshot.Name,
-            CreatedAt = snapshot.CreatedAt,
-            Panels = panels,
-        };
     }
 
     private IWindowManager ResolveWindowManager()

@@ -10,6 +10,12 @@ namespace DesktopOrganizer.Tests.Unit.Models;
 [Trait(UnitTests, nameof(Core))]
 public class FileItemTests
 {
+    /// <summary>
+    /// Gets a shared set of (filePath, expectedFileName, expectedFileType) cases covering a normal
+    /// path, an extensionless path, a path with no directory, an empty path, and a <see langword="null"/>
+    /// path, reused by both the <see cref="FileItem.Name"/>/<see cref="FileItem.Type"/> and
+    /// <see cref="FileItem.ToString"/> theories below.
+    /// </summary>
     public static IEnumerable<object[]> FileItemTestData => new List<object[]>
     {
         new object[] { "Resources/File.txt", "File.txt", ".txt" },
@@ -22,6 +28,9 @@ public class FileItemTests
     /// <summary>
     /// Ensures that <see cref="FileItem.Name"/> and <see cref="FileItem.Type"/> return correct values.
     /// </summary>
+    /// <param name="filePath">The path passed to the <see cref="FileItem"/> constructor.</param>
+    /// <param name="expectedFileName">The expected value of <see cref="FileItem.Name"/>.</param>
+    /// <param name="expectedFileType">The expected value of <see cref="FileItem.Type"/>.</param>
     [Theory]
     [MemberData(nameof(FileItemTestData))]
     public void FileItem_Properties_ReturnCorrectValues(string? filePath, string expectedFileName, string expectedFileType)
@@ -37,6 +46,9 @@ public class FileItemTests
     /// <summary>
     /// Ensures that <see cref="FileItem.ToString"/> returns the file name.
     /// </summary>
+    /// <param name="filePath">The path passed to the <see cref="FileItem"/> constructor.</param>
+    /// <param name="expectedFileName">The expected value returned by <see cref="FileItem.ToString"/>.</param>
+    /// <param name="_">The expected file type from <see cref="FileItemTestData"/>, unused here.</param>
     [Theory]
     [MemberData(nameof(FileItemTestData))]
     public void ToString_ReturnsCorrectFileName(string? filePath, string expectedFileName, string _)
@@ -270,6 +282,7 @@ public class FileItemTests
             Assert.Equal(Path.GetFileName(newPath), item.Name);
             Assert.Equal(".lnk", item.Type);
             Assert.True(item.IsShortcut);
+
             // DisplayName hides the .lnk extension for shortcuts (Explorer parity) — Name still has it.
             Assert.Equal(Path.GetFileNameWithoutExtension(newPath), item.DisplayName);
             Assert.NotEqual(item.Name, item.DisplayName);

@@ -18,6 +18,10 @@ public class SurfaceComposerTests
 
     // --- ClampOpacity -------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that non-finite opacity input returns <see cref="SurfaceComposer.MinSurfaceOpacity"/>.
+    /// </summary>
+    /// <param name="value">The non-finite opacity value under test.</param>
     [Theory]
     [InlineData(double.NaN)]
     [InlineData(double.PositiveInfinity)]
@@ -27,6 +31,12 @@ public class SurfaceComposerTests
         Assert.Equal(SurfaceComposer.MinSurfaceOpacity, SurfaceComposer.ClampOpacity(value));
     }
 
+    /// <summary>
+    /// Verifies that finite opacity input is clamped to the [<see cref="SurfaceComposer.MinSurfaceOpacity"/>,
+    /// <see cref="SurfaceComposer.MaxSurfaceOpacity"/>] range.
+    /// </summary>
+    /// <param name="value">The opacity value under test.</param>
+    /// <param name="expected">The expected clamped opacity value.</param>
     [Theory]
     [InlineData(-5.0, SurfaceComposer.MinSurfaceOpacity)]
     [InlineData(0.0, SurfaceComposer.MinSurfaceOpacity)]
@@ -38,6 +48,10 @@ public class SurfaceComposerTests
         Assert.Equal(expected, SurfaceComposer.ClampOpacity(value));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.ClampOpacity"/> is monotonically non-decreasing across an
+    /// increasing sequence of inputs.
+    /// </summary>
     [Fact]
     public void ClampOpacity_IsMonotonicallyNonDecreasing()
     {
@@ -50,6 +64,11 @@ public class SurfaceComposerTests
 
     // --- AlphaFromOpacity -----------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.AlphaFromOpacity"/> produces the expected rounded byte alpha.
+    /// </summary>
+    /// <param name="opacity">The opacity value to convert.</param>
+    /// <param name="expected">The expected alpha channel byte.</param>
     [Theory]
     [InlineData(1.0, 255)]
     [InlineData(0.0, 89)] // clamps to MinSurfaceOpacity (0.35) -> round(0.35*255) = 89
@@ -59,6 +78,9 @@ public class SurfaceComposerTests
         Assert.Equal(expected, SurfaceComposer.AlphaFromOpacity(opacity));
     }
 
+    /// <summary>
+    /// Verifies that a NaN opacity value uses the <see cref="SurfaceComposer.MinSurfaceOpacity"/> floor.
+    /// </summary>
     [Fact]
     public void AlphaFromOpacity_NaN_UsesMinSurfaceOpacityFloor()
     {
@@ -67,6 +89,10 @@ public class SurfaceComposerTests
 
     // --- WithAlpha --------------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.WithAlpha"/> replaces only the alpha channel, leaving
+    /// the RGB channels unchanged.
+    /// </summary>
     [Fact]
     public void WithAlpha_ReplacesAlphaChannelOnly()
     {
@@ -80,6 +106,9 @@ public class SurfaceComposerTests
 
     // --- Mix ----------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.Mix"/> with a ratio of zero returns the first color unchanged.
+    /// </summary>
     [Fact]
     public void Mix_RatioZero_ReturnsFirstColor()
     {
@@ -88,6 +117,9 @@ public class SurfaceComposerTests
         Assert.Equal(NeutralBase, result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.Mix"/> with a ratio of one returns the second color's RGB.
+    /// </summary>
     [Fact]
     public void Mix_RatioOne_ReturnsSecondColorRgb()
     {
@@ -98,6 +130,10 @@ public class SurfaceComposerTests
         Assert.Equal(AccentA.B, result.B);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.Mix"/> clamps out-of-range ratios to the first or second color.
+    /// </summary>
+    /// <param name="ratio">The out-of-range mix ratio under test.</param>
     [Theory]
     [InlineData(-1.0)]
     [InlineData(2.0)]
@@ -110,6 +146,9 @@ public class SurfaceComposerTests
 
     // --- ComposeSurface: Solid ignores accent (DoD "accent is not a full-panel fill") -----------
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceStyle.Solid"/> produces the same composed color regardless of accent.
+    /// </summary>
     [Fact]
     public void ComposeSurface_Solid_DoesNotDependOnAccent()
     {
@@ -119,6 +158,10 @@ public class SurfaceComposerTests
         Assert.Equal(withAccentA, withAccentB);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceStyle.Solid"/>'s composed alpha matches
+    /// <see cref="SurfaceComposer.AlphaFromOpacity"/> for the requested opacity.
+    /// </summary>
     [Fact]
     public void ComposeSurface_Solid_AlphaMatchesSurfaceOpacity()
     {
@@ -129,6 +172,10 @@ public class SurfaceComposerTests
 
     // --- ComposeSurface: Ambient mixes accent, alpha == AlphaFromOpacity(o) ----------------------
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceStyle.Ambient"/>'s composed alpha equals
+    /// <see cref="SurfaceComposer.AlphaFromOpacity"/> for the requested opacity.
+    /// </summary>
     [Fact]
     public void ComposeSurface_Ambient_AlphaEqualsAlphaFromOpacity()
     {
@@ -137,6 +184,10 @@ public class SurfaceComposerTests
         Assert.Equal(SurfaceComposer.AlphaFromOpacity(0.8), result.A);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceStyle.Ambient"/> produces different composed colors for
+    /// different accents.
+    /// </summary>
     [Fact]
     public void ComposeSurface_Ambient_DependsOnAccent()
     {
@@ -148,6 +199,11 @@ public class SurfaceComposerTests
 
     // --- ComposeSurface: Glass -------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceStyle.Glass"/>'s composed alpha never exceeds
+    /// <see cref="PanelSurfaceStyle.Ambient"/>'s alpha at the same opacity.
+    /// </summary>
+    /// <param name="opacity">The surface opacity under test.</param>
     [Theory]
     [InlineData(0.35)]
     [InlineData(0.5)]
@@ -161,6 +217,11 @@ public class SurfaceComposerTests
         Assert.True(glass.A <= ambient.A, $"Glass alpha {glass.A} exceeded Ambient alpha {ambient.A} at opacity {opacity}");
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceStyle.Glass"/>'s composed alpha never falls below the alpha
+    /// corresponding to <see cref="SurfaceComposer.MinSurfaceOpacity"/>.
+    /// </summary>
+    /// <param name="opacity">The surface opacity under test.</param>
     [Theory]
     [InlineData(0.35)]
     [InlineData(0.5)]
@@ -175,6 +236,10 @@ public class SurfaceComposerTests
 
     // --- ComposeSurface: highContrast forces alpha=255 for every style ---------------------------
 
+    /// <summary>
+    /// Verifies that <c>highContrast:true</c> forces a fully opaque composed surface for every style.
+    /// </summary>
+    /// <param name="style">The surface style under test.</param>
     [Theory]
     [InlineData(PanelSurfaceStyle.Solid)]
     [InlineData(PanelSurfaceStyle.Ambient)]
@@ -188,6 +253,10 @@ public class SurfaceComposerTests
 
     // --- AccentTint ------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.AccentTint"/> with alpha zero keeps the RGB channels but
+    /// sets alpha to zero.
+    /// </summary>
     [Fact]
     public void AccentTint_AlphaZero_KeepsRgbChangesAlphaToZero()
     {
@@ -199,6 +268,9 @@ public class SurfaceComposerTests
         Assert.Equal(AccentA.B, result.B);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.AccentTint"/> with alpha one is fully opaque.
+    /// </summary>
     [Fact]
     public void AccentTint_AlphaOne_IsFullyOpaque()
     {
@@ -207,14 +279,19 @@ public class SurfaceComposerTests
         Assert.Equal(255, result.A);
     }
 
+    /// <summary>
+    /// Verifies that out-of-range or NaN alpha values do not throw when passed to
+    /// <see cref="SurfaceComposer.AccentTint"/>.
+    /// </summary>
+    /// <param name="alpha">The out-of-range or NaN alpha value under test.</param>
     [Theory]
     [InlineData(-1.0)]
     [InlineData(2.0)]
     [InlineData(double.NaN)]
     public void AccentTint_OutOfRangeOrNaNAlpha_DoesNotThrow(double alpha)
     {
-        var result = SurfaceComposer.AccentTint(AccentA, alpha);
+        var exception = Record.Exception(() => SurfaceComposer.AccentTint(AccentA, alpha));
 
-        Assert.True(result.A is >= 0 and <= 255);
+        Assert.Null(exception);
     }
 }

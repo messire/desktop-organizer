@@ -39,33 +39,14 @@ public class AmbientAccentContrastAuditTests
     // token exists anywhere in production code to reference instead.
     private static readonly Color HighlightTop = LoadColorChromeHighlightTop();
 
-    // --- Default opacity (0.8, ChildWindowModel's own default SurfaceOpacity) passes today ----------
-
-    [Theory]
-    [InlineData(PanelSurfaceStyle.Solid)]
-    [InlineData(PanelSurfaceStyle.Ambient)]
-    public void DefaultOpacity_SolidOrAmbient_PassesTextContrastOnBothWallpapers(PanelSurfaceStyle style)
-    {
-        foreach (var wallpaper in new[] { LightWallpaper, DarkWallpaper })
-        {
-            var surface = SurfaceComposer.ComposeSurface(NeutralSurfaceBase, AccentNeutral, style, 0.8);
-            var contrast = ContrastCalculator.ContrastAgainstComposited(TextPrimary, surface, wallpaper);
-
-            Assert.True(
-                contrast >= ContrastCalculator.MinimumTextContrast,
-                $"{style} at 0.8 opacity over {wallpaper} scored {contrast:F2}, below the {ContrastCalculator.MinimumTextContrast}:1 target.");
-        }
-    }
-
-    // --- KnownGap 1: PanelSurfaceStyle.Glass cannot reach the text target over a light wallpaper -----
-    // at ANY opacity — GlassOpacityFactor (0.60) caps its alpha well below what a light backdrop needs.
-    // Not fixed in this pass (see docs/PLANS/workspace-grid-07-visual.md's Contrast section): Glass is
-    // deliberately "more see-through" (ADR-025 R-8) and lowering its ceiling further would defeat that
-    // style's whole purpose; the surface tokens' theming stays as-is here, this is an accepted trade-off.
-
     // MINOR fix (fix-cycle 1): was a single [Fact] against Accent.Neutral only, with a comment claiming
     // "pinned range across all 7 accent presets" that nothing actually verified — now a real [Theory]
     // over Neutral + all 6 AccentPalette.Presets.
+
+    /// <summary>
+    /// Provides <see cref="AccentPalette.Neutral"/> plus every entry of <see cref="AccentPalette.Presets"/>
+    /// as theory data for the accent contrast sweeps below.
+    /// </summary>
     public static IEnumerable<object[]> AllAccentHexValues()
     {
         yield return new object[] { AccentPalette.Neutral };
@@ -96,6 +77,41 @@ public class AmbientAccentContrastAuditTests
         }
     }
 
+    // --- Default opacity (0.8, ChildWindowModel's own default SurfaceOpacity) passes today ----------
+
+    /// <summary>
+    /// Verifies that the default 0.8 opacity for <see cref="PanelSurfaceStyle.Solid"/> or
+    /// <see cref="PanelSurfaceStyle.Ambient"/> passes the minimum text contrast target on both a light and
+    /// a dark wallpaper.
+    /// </summary>
+    /// <param name="style">The surface style under test.</param>
+    [Theory]
+    [InlineData(PanelSurfaceStyle.Solid)]
+    [InlineData(PanelSurfaceStyle.Ambient)]
+    public void DefaultOpacity_SolidOrAmbient_PassesTextContrastOnBothWallpapers(PanelSurfaceStyle style)
+    {
+        foreach (var wallpaper in new[] { LightWallpaper, DarkWallpaper })
+        {
+            var surface = SurfaceComposer.ComposeSurface(NeutralSurfaceBase, AccentNeutral, style, 0.8);
+            var contrast = ContrastCalculator.ContrastAgainstComposited(TextPrimary, surface, wallpaper);
+
+            Assert.True(
+                contrast >= ContrastCalculator.MinimumTextContrast,
+                $"{style} at 0.8 opacity over {wallpaper} scored {contrast:F2}, below the {ContrastCalculator.MinimumTextContrast}:1 target.");
+        }
+    }
+
+    // --- KnownGap 1: PanelSurfaceStyle.Glass cannot reach the text target over a light wallpaper -----
+    // at ANY opacity — GlassOpacityFactor (0.60) caps its alpha well below what a light backdrop needs.
+    // Not fixed in this pass (see docs/PLANS/workspace-grid-07-visual.md's Contrast section): Glass is
+    // deliberately "more see-through" (ADR-025 R-8) and lowering its ceiling further would defeat that
+    // style's whole purpose; the surface tokens' theming stays as-is here, this is an accepted trade-off.
+
+    /// <summary>
+    /// Verifies the known, accepted gap: <see cref="PanelSurfaceStyle.Glass"/> cannot reach the minimum
+    /// text contrast target over a light wallpaper at any opacity, for every shipped accent.
+    /// </summary>
+    /// <param name="accentHex">The accent hex value under test.</param>
     [Theory]
     [MemberData(nameof(AllAccentHexValues))]
     public void KnownGap_Glass_AtMaximumOpacity_OnLightWallpaper_FailsTextContrast(string accentHex)
@@ -108,6 +124,10 @@ public class AmbientAccentContrastAuditTests
         Assert.InRange(contrast, 3.0, 3.6);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceStyle.Glass"/> still passes the minimum text contrast target
+    /// over a dark wallpaper, since the known gap above is specific to a light wallpaper.
+    /// </summary>
     [Fact]
     public void KnownGap_Glass_OnDarkWallpaper_StillPassesTextContrast()
     {
@@ -126,6 +146,11 @@ public class AmbientAccentContrastAuditTests
     // below the new floor; docs/PLANS/workspace-grid-07-visual.md flags this as an open question for the
     // orchestrator/product owner, not something a visual-polish pass should decide unilaterally).
 
+    /// <summary>
+    /// Verifies the known, accepted gap: <see cref="SurfaceComposer.MinSurfaceOpacity"/> (the opacity
+    /// slider's floor) is unreadable over a light wallpaper, for all three surface styles.
+    /// </summary>
+    /// <param name="style">The surface style under test.</param>
     [Theory]
     [InlineData(PanelSurfaceStyle.Solid)]
     [InlineData(PanelSurfaceStyle.Ambient)]
@@ -139,6 +164,11 @@ public class AmbientAccentContrastAuditTests
         Assert.True(contrast < 2.0, $"Expected the floor to be well below target (< 2.0:1); got {contrast:F2}.");
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.MinSurfaceOpacity"/> still passes the minimum text
+    /// contrast target over a dark wallpaper, for all three surface styles.
+    /// </summary>
+    /// <param name="style">The surface style under test.</param>
     [Theory]
     [InlineData(PanelSurfaceStyle.Solid)]
     [InlineData(PanelSurfaceStyle.Ambient)]
@@ -162,6 +192,10 @@ public class AmbientAccentContrastAuditTests
     // "known-fail below") MinimumIconContrast on both wallpapers, matching what
     // Converters/HoverOverlayBrushConverter.cs actually wires into Resources/Styles/Controls.xaml.
 
+    /// <summary>
+    /// Verifies that the header-button hover overlay meets the minimum icon contrast target over a light
+    /// wallpaper and measurably improves contrast relative to the idle state.
+    /// </summary>
     [Fact]
     public void HeaderButtonHoverOverlay_OnLightWallpaper_MeetsIconContrastTarget()
     {
@@ -178,6 +212,10 @@ public class AmbientAccentContrastAuditTests
         Assert.True(hoverContrast >= idleContrast, "Hover should measurably IMPROVE (or at least not reduce) contrast here.");
     }
 
+    /// <summary>
+    /// Verifies that the header-button hover overlay still meets the minimum icon contrast target over a
+    /// dark wallpaper.
+    /// </summary>
     [Fact]
     public void HeaderButtonHoverOverlay_OnDarkWallpaper_StillPassesIconContrast()
     {
@@ -193,6 +231,10 @@ public class AmbientAccentContrastAuditTests
 
     // --- High Contrast mode: SurfaceComposer's own highContrast branch is unaffected by any of the above ---
 
+    /// <summary>
+    /// Verifies that high-contrast mode forces a fully opaque neutral surface that always passes the
+    /// minimum text contrast target, regardless of style, opacity, or wallpaper.
+    /// </summary>
     [Fact]
     public void HighContrastMode_ForcesOpaqueNeutralSurface_AlwaysPassesTextContrast()
     {
@@ -243,6 +285,10 @@ public class AmbientAccentContrastAuditTests
     /// (Glass on light wallpaper, the min-opacity floor) are covered by the SAME drop-floor assertion —
     /// "must not get worse [beyond the measured floor]" is exactly what that bound enforces for them too.
     /// </summary>
+    /// <param name="accentHex">The accent hex value under test.</param>
+    /// <param name="style">The surface style under test.</param>
+    /// <param name="opacity">The surface opacity under test.</param>
+    /// <param name="wallpaper">The wallpaper color composited beneath the surface.</param>
     [Theory]
     [MemberData(nameof(HighlightAuditCombinations))]
     public void SurfaceHighlight_DoesNotDropTextContrastBelowTheMeasuredFloor_AndNeverFailsAPassingCombination(
@@ -271,6 +317,8 @@ public class AmbientAccentContrastAuditTests
                 $"{style}@{opacity} accent={accentHex} over {wallpaper}: PART_SurfaceHighlight pushed a PASSING combination ({baselineContrast:F3}) below the {ContrastCalculator.MinimumTextContrast}:1 threshold ({highlightedContrast:F3}).");
         }
     }
+
+    // --- helpers -------------------------------------------------------------------------------------
 
     /// <summary>
     /// ADR-030 T-C1 — loads the REAL <c>Color.Chrome.Highlight.Top</c> resource from the compiled

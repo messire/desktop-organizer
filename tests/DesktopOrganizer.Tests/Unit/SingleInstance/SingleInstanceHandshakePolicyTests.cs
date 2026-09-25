@@ -12,7 +12,11 @@ namespace DesktopOrganizer.Tests.Unit.SingleInstance;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class SingleInstanceHandshakePolicyTests
 {
-    // T-POL-01
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceHandshakePolicy.NextStep"/> alternates
+    /// <see cref="HandshakeStep.TryAcquire"/> and <see cref="HandshakeStep.TrySend"/> until the attempt
+    /// count is exhausted, then gives up (T-POL-01).
+    /// </summary>
     [Fact]
     public void NextStep_AlternatesTryAcquireAndTrySend_UntilGiveUp()
     {
@@ -57,7 +61,10 @@ public class SingleInstanceHandshakePolicyTests
             steps);
     }
 
-    // T-POL-02
+    /// <summary>
+    /// Verifies that the delays returned alongside each <see cref="HandshakeStep.TryAcquire"/> step
+    /// follow the configured backoff schedule in order (T-POL-02).
+    /// </summary>
     [Fact]
     public void NextStep_TryAcquireDelays_FollowBackoffSchedule_InOrder()
     {
@@ -100,7 +107,10 @@ public class SingleInstanceHandshakePolicyTests
         Assert.Equal(backoff, observedDelays);
     }
 
-    // T-POL-03
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceHandshakePolicy.NextStep"/> gives up once the time budget
+    /// is exhausted, even when attempts remain available (T-POL-03).
+    /// </summary>
     [Fact]
     public void NextStep_StopsWhenBudgetExhausted_EvenWithAttemptsRemaining()
     {
@@ -123,7 +133,10 @@ public class SingleInstanceHandshakePolicyTests
         Assert.Equal(HandshakeStep.GiveUp, afterBudgetExceeded);
     }
 
-    // T-POL-04
+    /// <summary>
+    /// Verifies that after a <see cref="ActivationSendResult.PrimaryShuttingDown"/> response, the next
+    /// step is <see cref="HandshakeStep.TryAcquire"/> (T-POL-04).
+    /// </summary>
     [Fact]
     public void NextStep_PrimaryShuttingDown_NextStepIsTryAcquire()
     {
@@ -134,7 +147,10 @@ public class SingleInstanceHandshakePolicyTests
         Assert.Equal(HandshakeStep.TryAcquire, step);
     }
 
-    // T-POL-05
+    /// <summary>
+    /// Verifies that after an <see cref="ActivationSendResult.Delivered"/> response, the policy gives
+    /// up immediately with a zero delay (T-POL-05).
+    /// </summary>
     [Fact]
     public void NextStep_Delivered_GivesUpImmediately()
     {
@@ -146,6 +162,10 @@ public class SingleInstanceHandshakePolicyTests
         Assert.Equal(TimeSpan.Zero, delay);
     }
 
+    /// <summary>
+    /// Verifies that after an <see cref="ActivationSendResult.OtherSession"/> response, the policy
+    /// gives up immediately.
+    /// </summary>
     [Fact]
     public void NextStep_OtherSession_GivesUpImmediately()
     {
@@ -156,6 +176,10 @@ public class SingleInstanceHandshakePolicyTests
         Assert.Equal(HandshakeStep.GiveUp, step);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceHandshakePolicy.Default"/> has the documented connect
+    /// timeout.
+    /// </summary>
     [Fact]
     public void Default_HasDocumentedSchedule()
     {
@@ -164,6 +188,10 @@ public class SingleInstanceHandshakePolicyTests
         Assert.Equal(TimeSpan.FromMilliseconds(300), policy.ConnectTimeout);
     }
 
+    /// <summary>
+    /// Verifies that the very first call to <see cref="SingleInstanceHandshakePolicy.NextStep"/>
+    /// returns <see cref="HandshakeStep.TryAcquire"/> with a zero delay.
+    /// </summary>
     [Fact]
     public void NextStep_VeryFirstCall_ReturnsTryAcquireWithZeroDelay()
     {
@@ -175,6 +203,10 @@ public class SingleInstanceHandshakePolicyTests
         Assert.Equal(TimeSpan.Zero, delay);
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="SingleInstanceHandshakePolicy"/> constructor throws
+    /// <see cref="ArgumentOutOfRangeException"/> for a negative connect timeout.
+    /// </summary>
     [Fact]
     public void Constructor_NegativeConnectTimeout_Throws()
     {
@@ -182,6 +214,10 @@ public class SingleInstanceHandshakePolicyTests
             new SingleInstanceHandshakePolicy(6, TimeSpan.FromMilliseconds(-1), TimeSpan.FromSeconds(1), []));
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="SingleInstanceHandshakePolicy"/> constructor throws
+    /// <see cref="ArgumentNullException"/> for a <see langword="null"/> backoff schedule.
+    /// </summary>
     [Fact]
     public void Constructor_NullBackoff_Throws()
     {

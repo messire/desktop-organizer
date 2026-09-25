@@ -64,6 +64,11 @@ public class ChildWindowSizingGridTests
     }
 
     // ── DoD D4-2 / F-2: changing IconSize must not move a GridAligned panel's bounds. ────────────────
+
+    /// <summary>
+    /// Verifies that changing <see cref="ChildWindowModel.IconSize"/> (or icon layout policy/view mode)
+    /// never moves a <see cref="PanelGeometryMode.GridAligned"/> panel's width.
+    /// </summary>
     [Fact]
     public void IconSizeChange_OnAGridAlignedPanel_LeavesTheWidthUntouched()
     {
@@ -86,6 +91,12 @@ public class ChildWindowSizingGridTests
     }
 
     // ── Control case (not vacuous): the very same property changes DO still re-snap a legacy panel. ──
+
+    /// <summary>
+    /// Control case: verifies that the same <see cref="ChildWindowModel.IconSize"/> change still
+    /// re-snaps the width of a <see cref="PanelGeometryMode.LegacyFreeform"/> panel, proving the
+    /// GridAligned test above is not vacuous.
+    /// </summary>
     [Fact]
     public void IconSizeChange_OnALegacyPanel_StillReSnapsTheWidth()
     {
@@ -106,6 +117,13 @@ public class ChildWindowSizingGridTests
     }
 
     // ── §3.5: the preset command applies the preset's span, writes it onto the model and persists. ───
+
+    /// <summary>
+    /// Verifies that applying a size preset to a <see cref="PanelGeometryMode.GridAligned"/> panel
+    /// resizes the window and the model to the preset's grid span, in one atomic write, and saves the
+    /// windows state exactly once.
+    /// </summary>
+    /// <param name="preset">The size preset to apply.</param>
     [Theory]
     [InlineData(PanelSizePreset.Small)]
     [InlineData(PanelSizePreset.Medium)]
@@ -142,6 +160,11 @@ public class ChildWindowSizingGridTests
     }
 
     // ── LegacyFreeform: the size changes, the MODE does not (see PanelSizePresetCalculator's remarks). ──
+
+    /// <summary>
+    /// Verifies that applying a size preset to a <see cref="PanelGeometryMode.LegacyFreeform"/> panel
+    /// resizes it without switching its geometry mode or assigning workspace grid spans.
+    /// </summary>
     [Fact]
     public void SizePreset_OnALegacyPanel_ResizesWithoutSwitchingGeometryMode()
     {
@@ -167,6 +190,11 @@ public class ChildWindowSizingGridTests
     }
 
     // ── ADR-026 gating: an explicit command is blocked while the layout is locked. ───────────────────
+
+    /// <summary>
+    /// ADR-026 gating: verifies that applying a size preset while the layout is locked is a no-op that
+    /// never resizes the panel or saves the windows state.
+    /// </summary>
     [Fact]
     public void SizePreset_WhenLayoutIsLocked_IsANoOp()
     {
@@ -186,6 +214,11 @@ public class ChildWindowSizingGridTests
     }
 
     // ── A rolled-up panel is skipped (see the handler's remarks). ────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that applying a size preset to a rolled-up panel is skipped without saving the windows
+    /// state.
+    /// </summary>
     [Fact]
     public void SizePreset_WhenRolledUp_IsANoOp()
     {
@@ -209,6 +242,12 @@ public class ChildWindowSizingGridTests
     // undo the preset's HEIGHT a moment later. The debounce itself is not pumped here (the STA worker
     // returns before its timer could tick); what is pinned is the state that makes MaybeAutoFit a no-op
     // when it does. ─────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// P04 fix-cycle 1 (UX P0): verifies that applying a size preset to a
+    /// <see cref="PanelSizingMode.AutoContent"/> panel switches it to <see cref="PanelSizingMode.Manual"/>
+    /// and keeps the preset's height, so the content sizer's debounced recompute cannot silently undo it.
+    /// </summary>
     [Fact]
     public void SizePreset_OnAnAutoContentPanel_SwitchesItToManual_AndKeepsThePresetHeight()
     {
@@ -231,6 +270,11 @@ public class ChildWindowSizingGridTests
     }
 
     // ── …and a panel that was already Manual is untouched (the assignment is idempotent, not a toggle). ──
+
+    /// <summary>
+    /// Verifies that applying a size preset to a panel already in <see cref="PanelSizingMode.Manual"/>
+    /// leaves the sizing mode alone — the assignment is idempotent, not a toggle.
+    /// </summary>
     [Fact]
     public void SizePreset_OnAManualPanel_LeavesTheSizingModeAlone()
     {
@@ -250,6 +294,11 @@ public class ChildWindowSizingGridTests
 
     // ── MV-21: the "Size" submenu is DISABLED while the panel is rolled up (the Click handler's early
     // return stays as defence in depth, but the user now sees the rule). ────────────────────────────────
+
+    /// <summary>
+    /// MV-21: verifies that the header context menu's "Size" submenu is disabled while the panel is
+    /// rolled up, and re-enabled once it expands.
+    /// </summary>
     [Fact]
     public void SizePresetMenu_IsDisabled_WhileThePanelIsRolledUp()
     {
@@ -273,6 +322,11 @@ public class ChildWindowSizingGridTests
     }
 
     // ── A neighbouring panel stops the preset one gap short instead of overlapping it. ───────────────
+
+    /// <summary>
+    /// Verifies that applying a size preset stops one workspace-grid gap short of a neighbouring
+    /// panel's bounds, instead of overlapping it.
+    /// </summary>
     [Fact]
     public void SizePreset_WithANeighbour_StopsOneGapShortOfIt()
     {

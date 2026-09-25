@@ -19,41 +19,12 @@ public class PageManagerServiceTests
     private readonly Mock<IConfirmationService> _confirmationMock = new();
     private readonly Mock<IPanelItemStorageService> _itemStorageMock = new();
 
-    private PageManagerService BuildSut(
-        IEnumerable<ChildWindowModel>? panels = null,
-        IReadOnlyList<string>? pageIds = null,
-        string currentPageId = "default")
-    {
-        _applicationStateServiceMock.SetupGet(s => s.PageIds).Returns(pageIds ?? ["default"]);
-        _applicationStateServiceMock.SetupGet(s => s.CurrentPageId).Returns(currentPageId);
-        _applicationStateServiceMock.Setup(s => s.SaveNow());
-
-        var panelList = (panels ?? Enumerable.Empty<ChildWindowModel>()).ToList();
-        _windowManagerMock.Setup(wm => wm.GetAllChildWindows()).Returns(panelList);
-        _windowManagerMock.Setup(wm => wm.ApplyPanelVisibility(It.IsAny<ChildWindowModel>()));
-        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>()));
-        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>()));
-        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()));
-        _windowManagerMock.Setup(wm => wm.SaveWindowsStateNow());
-        _windowManagerMock.Setup(wm => wm.SyncAllWindowsToModels());
-
-        // Default: no managed files anywhere, and the confirmation gate (CRITICAL C1, P08 fix cycle 1)
-        // is granted — matches the pre-existing (pre-fix) behavior for every test that doesn't care
-        // about the confirm gate itself. Tests that DO care override these explicitly.
-        _itemStorageMock.Setup(s => s.IsManaged(It.IsAny<string>())).Returns(false);
-        _confirmationMock
-            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
-            .Returns(true);
-
-        return new PageManagerService(
-            _windowManagerMock.Object,
-            _applicationStateServiceMock.Object,
-            _confirmationMock.Object,
-            _itemStorageMock.Object);
-    }
-
     // ── AddPage ──────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PageManagerService.AddPage"/> adds the new page id to
+    /// <see cref="PageManagerService.Pages"/>.
+    /// </summary>
     [Fact]
     public void AddPage_AddsToPagesList()
     {
@@ -67,6 +38,9 @@ public class PageManagerServiceTests
         Assert.Contains("work", sut.Pages);
     }
 
+    /// <summary>
+    /// Verifies that adding a page name that already exists does not create a duplicate entry.
+    /// </summary>
     [Fact]
     public void AddPage_DuplicateName_DoesNotAdd()
     {
@@ -81,6 +55,10 @@ public class PageManagerServiceTests
         Assert.Equal(1, sut.Pages.Count(p => p == "work"));
     }
 
+    /// <summary>
+    /// Verifies that the built-in <c>"default"</c> page is always present in
+    /// <see cref="PageManagerService.Pages"/>.
+    /// </summary>
     [Fact]
     public void AddPage_DefaultPageAlwaysPresent()
     {
@@ -90,6 +68,10 @@ public class PageManagerServiceTests
 
     // ── RemovePage ───────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PageManagerService.RemovePage"/> refuses to remove the built-in
+    /// <c>"default"</c> page and reports it did nothing.
+    /// </summary>
     [Fact]
     public void RemovePage_Default_IsIgnored()
     {
@@ -106,6 +88,10 @@ public class PageManagerServiceTests
         Assert.Contains("default", sut.Pages);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PageManagerService.RemovePage"/> returns <see langword="false"/> for a
+    /// page id that does not exist.
+    /// </summary>
     [Fact]
     public void RemovePage_UnknownPageId_ReturnsFalse()
     {
@@ -116,6 +102,10 @@ public class PageManagerServiceTests
         Assert.False(removed);
     }
 
+    /// <summary>
+    /// Verifies that removing a page closes every panel on it, releasing managed items since deleting a
+    /// page permanently destroys its panels.
+    /// </summary>
     [Fact]
     public void RemovePage_ClosesAllPanelsOnPage()
     {
@@ -134,6 +124,10 @@ public class PageManagerServiceTests
         _windowManagerMock.Verify(wm => wm.RemoveChildWindow(panelId, true, true), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that removing a page with several panels defers each panel's persistence write and
+    /// flushes the window state exactly once for the whole page, not once per removed panel.
+    /// </summary>
     [Fact]
     public void RemovePage_ClosesAllPanelsOnPage_FlushesStateOnceAfterTheLoop()
     {
@@ -151,6 +145,10 @@ public class PageManagerServiceTests
         _windowManagerMock.Verify(wm => wm.SaveWindowsStateNow(), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that removing a page with no panels on it never flushes the window state, since there is
+    /// nothing to flush.
+    /// </summary>
     [Fact]
     public void RemovePage_NoPanelsOnPage_DoesNotFlushState()
     {
@@ -163,6 +161,10 @@ public class PageManagerServiceTests
         _windowManagerMock.Verify(wm => wm.SaveWindowsStateNow(), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that a successful <see cref="PageManagerService.RemovePage"/> call removes the page id
+    /// from <see cref="PageManagerService.Pages"/> and reports success.
+    /// </summary>
     [Fact]
     public void RemovePage_RemovesPageFromList()
     {
@@ -180,6 +182,10 @@ public class PageManagerServiceTests
 
     // ── CRITICAL C1 (P08 fix cycle 1, 2026-09-22): confirmation gate mirrors RemovePanel's own ──────
 
+    /// <summary>
+    /// Verifies that removing a page whose panels reference at least one managed file asks for a warning
+    /// confirmation mentioning that files will be deleted from disk.
+    /// </summary>
     [Fact]
     public void RemovePage_HasManagedFiles_AsksForWarningConfirmation()
     {
@@ -198,6 +204,10 @@ public class PageManagerServiceTests
             Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that removing a page whose panels reference no managed files asks for a neutral
+    /// confirmation without the warning icon, and never asks for a warning-styled confirmation.
+    /// </summary>
     [Fact]
     public void RemovePage_NoManagedFiles_UsesNeutralConfirmationWithoutWarningIcon()
     {
@@ -218,6 +228,10 @@ public class PageManagerServiceTests
             Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that declining the removal confirmation leaves every panel and the page itself untouched
+    /// and reports that nothing happened.
+    /// </summary>
     [Fact]
     public void RemovePage_ConfirmationDeclined_DoesNotRemoveAnyPanelOrPage()
     {
@@ -236,6 +250,11 @@ public class PageManagerServiceTests
         Assert.Contains("work", sut.Pages);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PageManagerService.RemovePage"/> forces a
+    /// <see cref="IWindowManager.SyncAllWindowsToModels"/> before checking for managed files, so the
+    /// managed-files check observes the post-sync state rather than stale data.
+    /// </summary>
     [Fact]
     public void RemovePage_SyncsAllWindowsToModelsBeforeCheckingManagedFiles()
     {
@@ -269,6 +288,10 @@ public class PageManagerServiceTests
 
     // ── SwitchTo ─────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PageManagerService.SwitchTo"/> hides panels belonging to the previous
+    /// page and shows panels belonging to the newly selected page.
+    /// </summary>
     [Fact]
     public void SwitchTo_HidesPreviousPagePanels_ShowsNewPagePanels()
     {
@@ -286,6 +309,9 @@ public class PageManagerServiceTests
         Assert.True(workPanel.IsVisible);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PageManagerService.CurrentPage"/> reflects the page just switched to.
+    /// </summary>
     [Fact]
     public void CurrentPage_ChangesAfterSwitch()
     {
@@ -300,6 +326,10 @@ public class PageManagerServiceTests
         Assert.Equal("work", sut.CurrentPage);
     }
 
+    /// <summary>
+    /// Verifies that switching to a page id that does not exist leaves
+    /// <see cref="PageManagerService.CurrentPage"/> unchanged.
+    /// </summary>
     [Fact]
     public void SwitchTo_NonExistentPage_DoesNotChangeCurrentPage()
     {
@@ -313,6 +343,10 @@ public class PageManagerServiceTests
         Assert.Equal("default", sut.CurrentPage);
     }
 
+    /// <summary>
+    /// Verifies that switching to a different page raises <see cref="PageManagerService.PageChanged"/>
+    /// with the new page id.
+    /// </summary>
     [Fact]
     public void SwitchTo_RaisesPageChangedEvent()
     {
@@ -329,6 +363,10 @@ public class PageManagerServiceTests
         Assert.Equal("work", received);
     }
 
+    /// <summary>
+    /// Verifies that switching to the page that is already current does not raise
+    /// <see cref="PageManagerService.PageChanged"/>.
+    /// </summary>
     [Fact]
     public void SwitchTo_SamePage_DoesNotRaisePageChangedEvent()
     {
@@ -346,6 +384,10 @@ public class PageManagerServiceTests
 
     // ── Persistence ──────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the constructor loads the page list and current page from
+    /// <see cref="IApplicationStateService"/>.
+    /// </summary>
     [Fact]
     public void Constructor_LoadsPagesFromApplicationStateService()
     {
@@ -358,6 +400,10 @@ public class PageManagerServiceTests
         Assert.Equal("home", sut.CurrentPage);
     }
 
+    /// <summary>
+    /// Verifies that the constructor defends against an empty <c>IApplicationStateService.PageIds</c> by
+    /// falling back to the <c>"default"</c> page, mirroring the pre-ADR-024 blank-pages fallback.
+    /// </summary>
     [Fact]
     public void Constructor_EmptyPageIds_FallsBackToDefaultPage()
     {
@@ -370,6 +416,10 @@ public class PageManagerServiceTests
         Assert.Contains("default", sut.Pages);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PageManagerService.Save"/> delegates to
+    /// <see cref="IApplicationStateService.SaveNow"/>.
+    /// </summary>
     [Fact]
     public void Save_DelegatesToApplicationStateServiceSaveNow()
     {
@@ -381,5 +431,39 @@ public class PageManagerServiceTests
 
         // Assert
         _applicationStateServiceMock.Verify(s => s.SaveNow(), Times.Once);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private PageManagerService BuildSut(
+        IEnumerable<ChildWindowModel>? panels = null,
+        IReadOnlyList<string>? pageIds = null,
+        string currentPageId = "default")
+    {
+        _applicationStateServiceMock.SetupGet(s => s.PageIds).Returns(pageIds ?? ["default"]);
+        _applicationStateServiceMock.SetupGet(s => s.CurrentPageId).Returns(currentPageId);
+        _applicationStateServiceMock.Setup(s => s.SaveNow());
+
+        var panelList = (panels ?? Enumerable.Empty<ChildWindowModel>()).ToList();
+        _windowManagerMock.Setup(wm => wm.GetAllChildWindows()).Returns(panelList);
+        _windowManagerMock.Setup(wm => wm.ApplyPanelVisibility(It.IsAny<ChildWindowModel>()));
+        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>()));
+        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>()));
+        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()));
+        _windowManagerMock.Setup(wm => wm.SaveWindowsStateNow());
+        _windowManagerMock.Setup(wm => wm.SyncAllWindowsToModels());
+
+        // Default: no managed files anywhere, and the confirmation gate (CRITICAL C1, P08 fix cycle 1)
+        // is granted — matches the pre-existing (pre-fix) behavior for every test that doesn't care
+        // about the confirm gate itself. Tests that DO care override these explicitly.
+        _itemStorageMock.Setup(s => s.IsManaged(It.IsAny<string>())).Returns(false);
+        _confirmationMock
+            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
+            .Returns(true);
+
+        return new PageManagerService(
+            _windowManagerMock.Object,
+            _applicationStateServiceMock.Object,
+            _confirmationMock.Object,
+            _itemStorageMock.Object);
     }
 }

@@ -92,9 +92,11 @@ public sealed class ListReorderGestureController<TItem>
     /// <summary>
     /// Records the drag start point and resolves the drag candidate from the press. Mirrors the original
     /// <c>*_PreviewMouseLeftButtonDown</c> handlers: the start point is always recorded, even when
-    /// <paramref name="resolveDragCandidate"/> ultimately returns <see langword="null"/> — harmless,
+    /// <c>resolveDragCandidate</c> ultimately returns <see langword="null"/> — harmless,
     /// since <see cref="OnPreviewMouseMove"/> immediately no-ops while there is no candidate.
     /// </summary>
+    /// <param name="sender">Unused; present to match the WPF mouse-event handler signature.</param>
+    /// <param name="e">The mouse-button event; its cursor position becomes the recorded drag start point.</param>
     public void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         _candidate = null;
@@ -109,6 +111,8 @@ public sealed class ListReorderGestureController<TItem>
     /// a drag. Not wired by every host — a host that never had this problem in the original code
     /// (e.g. <c>SystemIconsPanelWindow</c>) simply never calls it.
     /// </summary>
+    /// <param name="sender">The event source; unused.</param>
+    /// <param name="e">The mouse-button event data; unused, present only to match the WPF handler signature.</param>
     public void OnPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (_isReordering) return;
@@ -119,6 +123,8 @@ public sealed class ListReorderGestureController<TItem>
     /// Promotes a remembered drag candidate into an actual <see cref="DragDrop.DoDragDrop"/> gesture once
     /// the mouse has moved past the system drag threshold, so a short click never starts a drag.
     /// </summary>
+    /// <param name="sender">Unused; present to match the WPF mouse-event handler signature.</param>
+    /// <param name="e">The mouse-move event; its current position is compared against the recorded drag start point.</param>
     public void OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed || _candidate is null || _isReordering) return;
@@ -144,11 +150,16 @@ public sealed class ListReorderGestureController<TItem>
 
     /// <summary>
     /// Accepts or rejects a drag-reorder hover. For a foreign data format this returns immediately
-    /// WITHOUT touching <see cref="DragEventArgs.Effects"/>/<see cref="DragEventArgs.Handled"/> at all —
+    /// WITHOUT touching <see cref="DragEventArgs.Effects"/>/<see cref="RoutedEventArgs.Handled"/> at all —
     /// required so an incoming <see cref="DataFormats.FileDrop"/> from the desktop/Explorer keeps
     /// bubbling to the window's own <c>OnDragEnter</c> (critical risk R1, see <c>ChildWindow</c>'s
     /// original remarks).
     /// </summary>
+    /// <param name="e">
+    /// The drag-over event. Left untouched (including <see cref="System.Windows.RoutedEventArgs.Handled"/>)
+    /// for a foreign data format; otherwise its <see cref="DragEventArgs.Effects"/> and
+    /// <see cref="System.Windows.RoutedEventArgs.Handled"/> are set to reflect the drop decision.
+    /// </param>
     public void OnDragOver(DragEventArgs e)
     {
         if (_resolveDropTarget is null || _showInsertionIndicator is null || _hideInsertionIndicator is null)
@@ -170,12 +181,17 @@ public sealed class ListReorderGestureController<TItem>
     }
 
     /// <summary>Hides the insertion indicator on drag-leave.</summary>
+    /// <param name="e">Unused; present to match the WPF drag-event handler signature.</param>
     public void OnDragLeave(DragEventArgs e) => _hideInsertionIndicator?.Invoke();
 
     /// <summary>
     /// Completes a drag-reorder drop. Mirrors <see cref="OnDragOver"/>'s accept/reject split exactly, for
     /// the same reason: a foreign-format drop must be left completely untouched.
     /// </summary>
+    /// <param name="e">
+    /// The drop event. Left untouched for a foreign data format; otherwise the reorder is applied and
+    /// <see cref="System.Windows.RoutedEventArgs.Handled"/> is set.
+    /// </param>
     public void OnDrop(DragEventArgs e)
     {
         if (_resolveDropTarget is null || _hideInsertionIndicator is null ||

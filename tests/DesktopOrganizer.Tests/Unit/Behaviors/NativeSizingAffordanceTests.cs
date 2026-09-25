@@ -11,6 +11,7 @@ namespace DesktopOrganizer.Tests.Unit.Behaviors;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class NativeSizingAffordanceTests
 {
+    /// <summary>Verifies that a freshly-constructed <see cref="NativeSizingAffordance"/> defaults to enabled, mirroring the resize overlay's XAML-authored default visibility.</summary>
     [Fact]
     public void IsEnabled_DefaultsToTrue_MirroringResizeOverlayXamlAuthoredVisibility()
     {
@@ -19,6 +20,7 @@ public class NativeSizingAffordanceTests
         Assert.True(affordance.IsEnabled);
     }
 
+    /// <summary>Verifies that calling <see cref="NativeSizingAffordance.SetEnabled(bool)"/> with <see langword="false"/> makes <see cref="NativeSizingAffordance.IsEnabled"/> false.</summary>
     [Fact]
     public void SetEnabled_False_MakesIsEnabledFalse()
     {
@@ -29,6 +31,7 @@ public class NativeSizingAffordanceTests
         Assert.False(affordance.IsEnabled);
     }
 
+    /// <summary>Verifies that calling <see cref="NativeSizingAffordance.SetEnabled(bool)"/> with <see langword="true"/> after a prior <see langword="false"/> call makes <see cref="NativeSizingAffordance.IsEnabled"/> true again.</summary>
     [Fact]
     public void SetEnabled_TrueAfterFalse_MakesIsEnabledTrueAgain()
     {
@@ -40,6 +43,7 @@ public class NativeSizingAffordanceTests
         Assert.True(affordance.IsEnabled);
     }
 
+    /// <summary>Verifies that calling <see cref="NativeSizingAffordance.SetEnabled(bool)"/> twice with the same value is idempotent.</summary>
     [Fact]
     public void SetEnabled_SameValueTwice_IsIdempotent()
     {
@@ -51,6 +55,7 @@ public class NativeSizingAffordanceTests
         Assert.False(affordance.IsEnabled);
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingAffordance"/> can be consumed entirely through the <see cref="IResizeAffordance"/> interface.</summary>
     [Fact]
     public void NativeSizingAffordance_ImplementsIResizeAffordance()
     {

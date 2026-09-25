@@ -17,7 +17,11 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class SystemIconsPanelManagerTests
 {
-    // ── helpers ──────────────────────────────────────────────────────────────
+    private const nint PanelHwnd = 0x1234;
+
+    private static readonly Guid PersistedGuid = new("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid SystemDefaultGuid = new("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid PanelCurrentGuid = new("33333333-3333-3333-3333-333333333333");
 
     private readonly Mock<IApplicationStateService> _stateServiceMock = new();
     private readonly Mock<IDesktopIntegrationService> _desktopMock = new();
@@ -27,104 +31,30 @@ public class SystemIconsPanelManagerTests
     // Tracks whether the factory delegate was invoked.
     private bool _factoryInvoked;
 
-    private SystemIconsPanelManager BuildSut(
-        SystemIconsPanelStateDto? initialState = null,
-        bool virtualDesktopSupported = true)
-    {
-        _virtualDesktopMock.SetupGet(v => v.IsSupported).Returns(virtualDesktopSupported);
-        _virtualDesktopMock.Setup(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>())).Returns(true);
-        _virtualDesktopMock.Setup(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>())).Returns(false);
-
-        // Anchor-resolution members (ADR-019 §3.2): default to "nothing available" so tests that
-        // don't care about EnforceAnchorDesktopOnce see it degrade to a complete no-op.
-        _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns((Guid?)null);
-        _virtualDesktopMock.Setup(v => v.TryGetDefaultDesktopId()).Returns((Guid?)null);
-        _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>())).Returns(false);
-
-        // SystemIconsPanel is read-only on IApplicationStateService — populated once by Load() and
-        // never written back by SystemIconsPanelManager.Save() (ADR-024 D-11/D-12: SaveNow() pulls the
-        // live Model straight from ISystemIconsPanelManager inside ApplicationStateService itself, so
-        // App.OnExit's single SaveNow() call always captures the current in-memory model, not a
-        // possibly-stale value pushed earlier in the session).
-        _stateServiceMock.SetupGet(s => s.SystemIconsPanel).Returns(initialState);
-        _stateServiceMock.Setup(s => s.SaveNow());
-
-        _monitorMock.SetupAdd(m => m.MonitorsChanged += It.IsAny<Action>());
-        _monitorMock.SetupRemove(m => m.MonitorsChanged -= It.IsAny<Action>());
-        _monitorMock.Setup(m => m.GetPrimaryMonitor())
-            .Returns(new MonitorInfo(
-                DeviceName: "\\\\.\\DISPLAY1",
-                Bounds: new System.Windows.Rect(0, 0, 1920, 1080),
-                WorkArea: new System.Windows.Rect(0, 0, 1920, 1040),
-                IsPrimary: true));
-
-        _factoryInvoked = false;
-
-        // The window factory is a Func<SystemIconsPanelWindow>; we never call it successfully
-        // (a real WPF window needs an STA thread + dispatcher, which this test project does not
-        // set up), so the manager's Apply() swallows the exception and _window stays null. We just
-        // track that the factory was invoked.
-        //
-        // Because of that, everything that depends on a live window is tested through the two
-        // extracted seams instead of through the timer: ShouldPollVirtualDesktop (pure policy,
-        // takes hasWindow as a parameter) and PollVirtualDesktopOnce (tick body, takes the HWND as
-        // a parameter). See the "poll policy" and "poll step" regions below.
-#pragma warning disable CA1416 // Platform check not needed in unit tests
-        SystemIconsPanelWindow FactoryDelegate()
-        {
-            _factoryInvoked = true;
-            // Throw immediately — no WPF dispatcher available in unit tests.
-            // The manager swallows window-creation exceptions gracefully.
-            throw new InvalidOperationException("Window creation not supported in unit tests.");
-        }
-#pragma warning restore CA1416
-
-        return new SystemIconsPanelManager(
-            _stateServiceMock.Object,
-            _desktopMock.Object,
-            _monitorMock.Object,
-            _virtualDesktopMock.Object,
-            FactoryDelegate);
-    }
-
     /// <summary>
-    /// Builds a <see cref="SystemIconsPanelStateDto"/> as <see cref="IApplicationStateService.SystemIconsPanel"/>
-    /// would already hold it after a real <c>Load()</c> (ADR-024 C6: the manager no longer parses raw
-    /// JSON itself — that happens once, in the store/service layer).
-    /// <para>
-    /// <paramref name="showOnAllVirtualDesktops"/> defaulting to <see langword="false"/> when omitted
-    /// mirrors a document written by a build from before the virtual desktop setting existed (the DTO
-    /// field itself always exists; only its JSON presence used to vary).
-    /// </para>
+    /// Gets the persisted/systemDefault/panelCurrent/expected combinations exercised by
+    /// <see cref="ResolveAnchorDesktopId_TruthTable"/>.
     /// </summary>
-    private static SystemIconsPanelStateDto BuildState(bool isEnabled, string iconSize = "Medium",
-        IEnumerable<(SystemIconKind Kind, bool Visible, int Order)>? items = null,
-        bool? showOnAllVirtualDesktops = null,
-        string? anchorVirtualDesktopId = null)
+    public static IEnumerable<object?[]> ResolveAnchorDesktopIdCases()
     {
-        return new SystemIconsPanelStateDto
-        {
-            IsEnabled = isEnabled,
-            ShowOnAllVirtualDesktops = showOnAllVirtualDesktops ?? false,
-            IconSize = iconSize,
-            AnchorVirtualDesktopId = anchorVirtualDesktopId,
-            Items = (items ?? DefaultItemTuples())
-                .Select(t => new SystemIconsPanelItemStateDto { Kind = t.Kind, IsVisible = t.Visible, Order = t.Order })
-                .ToList(),
-        };
+        // persisted, systemDefault, panelCurrent, expected
+        yield return new object?[] { null, null, null, null };
+        yield return new object?[] { PersistedGuid, null, null, PersistedGuid };
+        yield return new object?[] { null, SystemDefaultGuid, null, SystemDefaultGuid };
+        yield return new object?[] { null, null, PanelCurrentGuid, PanelCurrentGuid };
+        yield return new object?[] { PersistedGuid, SystemDefaultGuid, null, SystemDefaultGuid };
+        yield return new object?[] { PersistedGuid, null, PanelCurrentGuid, PersistedGuid };
+        yield return new object?[] { null, SystemDefaultGuid, PanelCurrentGuid, SystemDefaultGuid };
+        yield return new object?[] { PersistedGuid, SystemDefaultGuid, PanelCurrentGuid, SystemDefaultGuid };
     }
-
-    private static IEnumerable<(SystemIconKind Kind, bool Visible, int Order)> DefaultItemTuples() =>
-    [
-        (SystemIconKind.ThisPc,       true, 0),
-        (SystemIconKind.ControlPanel, true, 1),
-        (SystemIconKind.RecycleBin,   true, 2),
-        (SystemIconKind.Network,      true, 3),
-        (SystemIconKind.UserFolder,   true, 4),
-    ];
 
     // ── Load: empty settings → defaults ──────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> defaults
+    /// <see cref="DesktopOrganizer.UI.Models.SystemIconsPanelModel.IsEnabled"/> to <see langword="false"/>
+    /// when no state was ever persisted.
+    /// </summary>
     [Fact]
     public void Load_WithEmptySettings_UsesDefaults_IsEnabledFalse()
     {
@@ -138,6 +68,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.Model.IsEnabled);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> seeds all five well-known
+    /// <see cref="SystemIconKind"/> items when no state was ever persisted.
+    /// </summary>
     [Fact]
     public void Load_WithEmptySettings_UsesDefaults_AllFiveIconsPresent()
     {
@@ -157,6 +91,10 @@ public class SystemIconsPanelManagerTests
         Assert.Equal(allKinds.Length, sut.Model.Items.Count);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> defaults every icon item's visibility to
+    /// <see langword="true"/> when no state was ever persisted.
+    /// </summary>
     [Fact]
     public void Load_WithEmptySettings_UsesDefaults_AllIconsVisible()
     {
@@ -172,6 +110,10 @@ public class SystemIconsPanelManagerTests
 
     // ── Load: saved JSON restores model ──────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> restores
+    /// <see cref="DesktopOrganizer.UI.Models.SystemIconsPanelModel.IsEnabled"/> from persisted state.
+    /// </summary>
     [Fact]
     public void Load_WithSavedJson_RestoresIsEnabled()
     {
@@ -186,6 +128,10 @@ public class SystemIconsPanelManagerTests
         Assert.True(sut.Model.IsEnabled);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> restores each item's persisted
+    /// visibility flag.
+    /// </summary>
     [Fact]
     public void Load_WithSavedJson_RestoresItemVisibility()
     {
@@ -209,6 +155,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(cp.IsVisible);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> restores each item's persisted display
+    /// order.
+    /// </summary>
     [Fact]
     public void Load_WithSavedJson_RestoresItemOrder()
     {
@@ -241,6 +191,10 @@ public class SystemIconsPanelManagerTests
     // including ShowOnAllVirtualDesktops/AnchorVirtualDesktopId round-tripping) is covered by
     // SystemIconsPanelStateMapperTests instead.
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Save"/> asks
+    /// <see cref="IApplicationStateService.SaveNow"/> to flush the whole document to disk.
+    /// </summary>
     [Fact]
     public void Save_CallsApplicationStateServiceSaveNow()
     {
@@ -257,6 +211,10 @@ public class SystemIconsPanelManagerTests
 
     // ── Apply: disabled → factory not invoked ────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Apply"/> never invokes the window factory when
+    /// the panel is disabled.
+    /// </summary>
     [Fact]
     public void Apply_WhenDisabled_DoesNotInvokeWindowFactory()
     {
@@ -273,6 +231,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(_factoryInvoked);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Apply"/> invokes the window factory when the
+    /// panel is enabled.
+    /// </summary>
     [Fact]
     public void Apply_WhenEnabled_InvokesWindowFactory()
     {
@@ -295,6 +257,10 @@ public class SystemIconsPanelManagerTests
     // so a garbage-JSON scenario can no longer reach this manager at all. The one input shape left
     // for this layer to defend is "no state was ever persisted" (SystemIconsPanel == null).
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> does not throw when no state was ever
+    /// persisted (<c>IApplicationStateService.SystemIconsPanel == null</c>).
+    /// </summary>
     [Fact]
     public void Load_NullState_DoesNotThrow()
     {
@@ -306,6 +272,10 @@ public class SystemIconsPanelManagerTests
         Assert.Null(ex);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> falls back to the default model (disabled,
+    /// all five icon kinds) when no state was ever persisted.
+    /// </summary>
     [Fact]
     public void Load_NullState_UsesDefaultModel()
     {
@@ -322,6 +292,11 @@ public class SystemIconsPanelManagerTests
 
     // ── Block E: "Show on all virtual desktops" persistence ──────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> defaults
+    /// <c>ShowOnAllVirtualDesktops</c> to <see langword="false"/> (opt-in feature) when no state was
+    /// ever persisted.
+    /// </summary>
     [Fact]
     public void Load_WithEmptySettings_ShowOnAllVirtualDesktopsIsFalseByDefault()
     {
@@ -335,6 +310,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.Model.ShowOnAllVirtualDesktops);
     }
 
+    /// <summary>
+    /// Verifies that a document written before the "show on all virtual desktops" setting existed loads
+    /// without error and defaults the flag to <see langword="false"/> — no migration is needed.
+    /// </summary>
     [Fact]
     public void Load_LegacyStateWithoutVirtualDesktopFlag_DefaultsToFalse()
     {
@@ -352,6 +331,11 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.Model.ShowOnAllVirtualDesktops);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> restores a persisted
+    /// "show on all virtual desktops" flag in both states.
+    /// </summary>
+    /// <param name="stored">The persisted flag value under test.</param>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -375,6 +359,10 @@ public class SystemIconsPanelManagerTests
 
     // ── Block E: virtual desktop poll timer policy (risk E-R4) ───────────────
 
+    /// <summary>
+    /// Verifies that the virtual desktop poll timer never starts while the panel is on but the
+    /// "show on all virtual desktops" setting is off.
+    /// </summary>
     [Fact]
     public void Apply_WhenSettingOff_DoesNotStartVirtualDesktopTimer()
     {
@@ -389,6 +377,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.IsVirtualDesktopTimerRunning);
     }
 
+    /// <summary>
+    /// Verifies that the virtual desktop poll timer never starts when the panel itself is disabled, even
+    /// with the setting on, since there is no window to follow.
+    /// </summary>
     [Fact]
     public void Apply_WhenPanelDisabled_DoesNotStartVirtualDesktopTimer()
     {
@@ -403,6 +395,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.IsVirtualDesktopTimerRunning);
     }
 
+    /// <summary>
+    /// Verifies that the virtual desktop poll timer never starts when window creation failed, since
+    /// there is nothing to poll for.
+    /// </summary>
     [Fact]
     public void Apply_WhenWindowMissing_DoesNotStartVirtualDesktopTimer()
     {
@@ -418,6 +414,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.IsVirtualDesktopTimerRunning);
     }
 
+    /// <summary>
+    /// Verifies that the virtual desktop poll timer never starts when the virtual desktop COM object is
+    /// unavailable on the system.
+    /// </summary>
     [Fact]
     public void Apply_WhenVirtualDesktopsUnsupported_DoesNotStartVirtualDesktopTimer()
     {
@@ -434,6 +434,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.IsVirtualDesktopTimerRunning);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Dispose"/> leaves the virtual desktop poll timer
+    /// stopped.
+    /// </summary>
     [Fact]
     public void Dispose_LeavesVirtualDesktopTimerStopped()
     {
@@ -451,6 +455,10 @@ public class SystemIconsPanelManagerTests
 
     // ── Block E: silent degradation when the COM object is unavailable ───────
 
+    /// <summary>
+    /// Verifies that a full Load/Apply/Save/Dispose lifecycle stays silent (no exception) when the
+    /// virtual desktop COM object is unavailable, and that the setting is still persisted, just inert.
+    /// </summary>
     [Fact]
     public void UnsupportedVirtualDesktops_DoesNotBreakManagerLifecycle()
     {
@@ -472,6 +480,9 @@ public class SystemIconsPanelManagerTests
         Assert.True(sut.Model.ShowOnAllVirtualDesktops); // setting is still persisted, just inert
     }
 
+    /// <summary>
+    /// Verifies that no virtual desktop polling happens at all when the feature is unsupported.
+    /// </summary>
     [Fact]
     public void UnsupportedVirtualDesktops_NeverQueriesWindowPosition()
     {
@@ -494,13 +505,24 @@ public class SystemIconsPanelManagerTests
     // The timer policy lives in a pure static so it can be tested for every combination,
     // including the "a window exists" leg that a unit test cannot produce for real.
 
+    /// <summary>
+    /// Verifies every combination of <see cref="SystemIconsPanelManager.ShouldPollVirtualDesktop"/>'s
+    /// pure policy inputs, including the "a window exists" leg a unit test cannot exercise through a
+    /// real window.
+    /// </summary>
+    /// <param name="panelEnabled">Whether the system icons panel itself is enabled.</param>
+    /// <param name="showOnAll">Whether the "show on all virtual desktops" setting is on.</param>
+    /// <param name="hasWindow">Whether the panel currently has a live window.</param>
+    /// <param name="supported">Whether the virtual desktop COM object is available.</param>
+    /// <param name="expected">The expected poll decision for this combination.</param>
     [Theory]
+
     // panelEnabled, showOnAll, hasWindow, supported  =>  expected
-    [InlineData(true,  true,  true,  true,  true)]   // the one and only case that polls
-    [InlineData(false, true,  true,  true,  false)]  // panel off
-    [InlineData(true,  false, true,  true,  false)]  // setting off
-    [InlineData(true,  true,  false, true,  false)]  // no window to follow
-    [InlineData(true,  true,  true,  false, false)]  // no virtual desktop COM object
+    [InlineData(true,  true,  true,  true,  true)] // the one and only case that polls
+    [InlineData(false, true,  true,  true,  false)] // panel off
+    [InlineData(true,  false, true,  true,  false)] // setting off
+    [InlineData(true,  true,  false, true,  false)] // no window to follow
+    [InlineData(true,  true,  true,  false, false)] // no virtual desktop COM object
     [InlineData(false, false, true,  true,  false)]
     [InlineData(false, true,  false, true,  false)]
     [InlineData(false, true,  true,  false, false)]
@@ -526,11 +548,20 @@ public class SystemIconsPanelManagerTests
     // Same shape as the poll policy above: a pure static, so the "a window exists" leg a unit test
     // cannot produce for real is still covered.
 
+    /// <summary>
+    /// Verifies every combination of <see cref="SystemIconsPanelManager.ShouldReassertZOrder"/>'s pure
+    /// policy inputs, including the "a window exists" leg a unit test cannot exercise through a real
+    /// window.
+    /// </summary>
+    /// <param name="panelEnabled">Whether the system icons panel itself is enabled.</param>
+    /// <param name="hasWindow">Whether the panel currently has a live window.</param>
+    /// <param name="expected">The expected re-assert decision for this combination.</param>
     [Theory]
+
     // panelEnabled, hasWindow  =>  expected
-    [InlineData(true,  true,  true)]   // the one and only case that re-asserts the Z-order
-    [InlineData(false, true,  false)]  // panel off — the window is gone anyway
-    [InlineData(true,  false, false)]  // no window to push back
+    [InlineData(true,  true,  true)] // the one and only case that re-asserts the Z-order
+    [InlineData(false, true,  false)] // panel off — the window is gone anyway
+    [InlineData(true,  false, false)] // no window to push back
     [InlineData(false, false, false)]
     public void ShouldReassertZOrder_TruthTable(bool panelEnabled, bool hasWindow, bool expected)
     {
@@ -547,10 +578,12 @@ public class SystemIconsPanelManagerTests
     /// <see cref="SystemIconsPanelManager.ShouldReassertZOrder"/> does not take either input — that
     /// absence IS the invariant, and this test fails the moment someone adds them.
     /// </summary>
+    /// <param name="showOnAllVirtualDesktops">The "show on all virtual desktops" checkbox state under test.</param>
+    /// <param name="virtualDesktopsSupported">Whether the virtual desktop COM object is available.</param>
     [Theory]
-    [InlineData(false, true)]   // checkbox OFF, virtual desktops supported
-    [InlineData(false, false)]  // checkbox OFF, no virtual desktop manager
-    [InlineData(true,  false)]  // checkbox ON, but the shell cannot honour it
+    [InlineData(false, true)] // checkbox OFF, virtual desktops supported
+    [InlineData(false, false)] // checkbox OFF, no virtual desktop manager
+    [InlineData(true,  false)] // checkbox ON, but the shell cannot honour it
     public void ShouldReassertZOrder_IsIndependentOfTheVirtualDesktopFeature(
         bool showOnAllVirtualDesktops, bool virtualDesktopsSupported)
     {
@@ -567,21 +600,10 @@ public class SystemIconsPanelManagerTests
 
     // ── Poll step: PollVirtualDesktopOnce (the tick body) ────────────────────
 
-    private const nint PanelHwnd = 0x1234;
-
     /// <summary>
-    /// Feeds <see cref="IVirtualDesktopService.IsWindowOnCurrentDesktop"/> a scripted sequence of
-    /// answers; the last one repeats once the script runs out. One poll step asks twice: once as
-    /// the guard, once to verify the move actually had an effect.
+    /// Verifies that <see cref="SystemIconsPanelManager.PollVirtualDesktopOnce"/> is a true no-op for a
+    /// zero window handle.
     /// </summary>
-    private void ScriptOnCurrentDesktop(params bool[] answers)
-    {
-        var queue = new Queue<bool>(answers);
-        _virtualDesktopMock
-            .Setup(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>()))
-            .Returns(() => queue.Count > 0 ? queue.Dequeue() : answers[^1]);
-    }
-
     [Fact]
     public void PollVirtualDesktopOnce_WithZeroHandle_TouchesNothing()
     {
@@ -594,6 +616,10 @@ public class SystemIconsPanelManagerTests
         _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that when the panel is already reported on the current desktop, the poll step neither
+    /// tries to move nor embeds the window.
+    /// </summary>
     [Fact]
     public void PollVirtualDesktopOnce_WhenAlreadyOnCurrentDesktop_DoesNotMoveOrEmbed()
     {
@@ -607,6 +633,10 @@ public class SystemIconsPanelManagerTests
         _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that a rejected move-to-current-desktop attempt never embeds the window and does not
+    /// increment the ineffective-move counter.
+    /// </summary>
     [Fact]
     public void PollVirtualDesktopOnce_WhenMoveIsRejected_DoesNotEmbed()
     {
@@ -621,6 +651,10 @@ public class SystemIconsPanelManagerTests
         Assert.Equal(0, sut.IneffectiveMoveCount);
     }
 
+    /// <summary>
+    /// Verifies the ADR-019 V-R11 fix: an effective move resets the ineffective-move counter and never
+    /// re-embeds the window into WorkerW — that step no longer exists.
+    /// </summary>
     [Fact]
     public void PollVirtualDesktopOnce_AfterEffectiveMove_ResetsCounterAndNeverEmbeds()
     {
@@ -640,6 +674,11 @@ public class SystemIconsPanelManagerTests
         _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies the ADR-016 §E0.2 case: a move that reports success (<c>S_OK</c>) but has no visible
+    /// effect (the window is never subsequently reported on the current desktop) still counts as
+    /// ineffective and never embeds the window.
+    /// </summary>
     [Fact]
     public void PollVirtualDesktopOnce_WhenMoveIsSilentNoOp_NeverEmbeds()
     {
@@ -657,6 +696,10 @@ public class SystemIconsPanelManagerTests
         _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that three consecutive ineffective moves trip the circuit breaker: the manager stops
+    /// polling and sets <c>Model.VirtualDesktopFeatureIneffective</c>, rather than retrying forever.
+    /// </summary>
     [Fact]
     public void PollVirtualDesktopOnce_AfterThreeIneffectiveMoves_TripsCircuitBreaker()
     {
@@ -678,6 +721,10 @@ public class SystemIconsPanelManagerTests
         _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that the ineffective-move counter resets once the panel is found on the current desktop
+    /// again — the circuit breaker must not latch on non-consecutive failures.
+    /// </summary>
     [Fact]
     public void PollVirtualDesktopOnce_ResetsCounterWhenPanelIsBackOnCurrentDesktop()
     {
@@ -699,6 +746,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown by <see cref="IVirtualDesktopService"/> during a poll step is
+    /// caught and never propagates, since this runs on the UI thread from a <c>DispatcherTimer</c>.
+    /// </summary>
     [Fact]
     public void PollVirtualDesktopOnce_WhenServiceThrows_DoesNotPropagate()
     {
@@ -716,6 +767,10 @@ public class SystemIconsPanelManagerTests
 
     // ── Z-order step: SendPanelToBackOnce (the tick body) ────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.SendPanelToBackOnce"/> is a true no-op for a
+    /// zero window handle.
+    /// </summary>
     [Fact]
     public void SendPanelToBackOnce_WithZeroHandle_TouchesNothing()
     {
@@ -732,6 +787,7 @@ public class SystemIconsPanelManagerTests
     /// desktops" checkbox — the two features are unrelated (see
     /// <see cref="ShouldReassertZOrder_IsIndependentOfTheVirtualDesktopFeature"/>).
     /// </summary>
+    /// <param name="showOnAll">The "show on all virtual desktops" checkbox state under test.</param>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -761,6 +817,10 @@ public class SystemIconsPanelManagerTests
         _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown by <see cref="IDesktopIntegrationService.SendToBackOfZOrder"/>
+    /// during a Z-order tick is caught and never propagates.
+    /// </summary>
     [Fact]
     public void SendPanelToBackOnce_WhenServiceThrows_DoesNotPropagate()
     {
@@ -786,6 +846,9 @@ public class SystemIconsPanelManagerTests
     /// <c>_window</c> stays null — which means without this test the timer would never be created in
     /// any test at all and every "…LeavesZOrderTimerStopped" assertion below would be vacuous (M1).
     /// </summary>
+    /// <param name="panelEnabled">Whether the system icons panel itself is enabled.</param>
+    /// <param name="hasWindow">Whether the panel currently has a live window.</param>
+    /// <param name="expectedRunning">Whether the Z-order timer is expected to be running afterwards.</param>
     [Theory]
     [InlineData(true, true, true)]
     [InlineData(true, false, false)]
@@ -807,9 +870,11 @@ public class SystemIconsPanelManagerTests
     /// stopped when either input goes away, not merely "never started" (risk E-R4 — a timer left
     /// ticking against a closed panel calls <c>SendToBackOfZOrder</c> on a dead handle forever).
     /// </summary>
+    /// <param name="panelEnabled">Whether the system icons panel itself is enabled.</param>
+    /// <param name="hasWindow">Whether the panel currently has a live window.</param>
     [Theory]
-    [InlineData(false, true)]  // panel switched off
-    [InlineData(true, false)]  // window closed
+    [InlineData(false, true)] // panel switched off
+    [InlineData(true, false)] // window closed
     [InlineData(false, false)] // both
     public void UpdateZOrderTimerCore_StopsARunningTimer_WhenEitherInputGoesAway(
         bool panelEnabled, bool hasWindow)
@@ -880,6 +945,9 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.IsZOrderTimerRunning);
     }
 
+    /// <summary>
+    /// Verifies that the Z-order timer never starts when the panel is disabled.
+    /// </summary>
     [Fact]
     public void Apply_WhenPanelDisabled_DoesNotStartZOrderTimer()
     {
@@ -892,6 +960,10 @@ public class SystemIconsPanelManagerTests
         _desktopMock.Verify(d => d.SendToBackOfZOrder(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that the Z-order timer never starts when window creation failed, since there is nothing
+    /// to push back.
+    /// </summary>
     [Fact]
     public void Apply_WhenWindowMissing_DoesNotStartZOrderTimer()
     {
@@ -905,6 +977,11 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.IsZOrderTimerRunning);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Dispose"/> leaves the Z-order timer stopped,
+    /// regardless of the "show on all virtual desktops" setting.
+    /// </summary>
+    /// <param name="showOnAll">The "show on all virtual desktops" checkbox state under test.</param>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -939,6 +1016,10 @@ public class SystemIconsPanelManagerTests
 
     // ── ApplyVirtualDesktopSetting: toggling must not recreate the window ────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.ApplyVirtualDesktopSetting"/> never invokes the
+    /// window factory or starts the poll timer while the panel is disabled.
+    /// </summary>
     [Fact]
     public void ApplyVirtualDesktopSetting_WhenPanelDisabled_DoesNotCreateWindow()
     {
@@ -951,6 +1032,11 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.IsVirtualDesktopTimerRunning);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.ApplyVirtualDesktopSetting"/> clears
+    /// <c>Model.VirtualDesktopFeatureIneffective</c>, since re-applying the setting is an explicit user
+    /// action and therefore a retry point.
+    /// </summary>
     [Fact]
     public void ApplyVirtualDesktopSetting_ClearsTheIneffectiveLatch()
     {
@@ -964,6 +1050,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Apply"/> also clears
+    /// <c>Model.VirtualDesktopFeatureIneffective</c>.
+    /// </summary>
     [Fact]
     public void Apply_ClearsTheIneffectiveLatch()
     {
@@ -978,23 +1068,14 @@ public class SystemIconsPanelManagerTests
 
     // ── ResolveAnchorDesktopId: pure policy truth table (ADR-019 §3.2) ───────
 
-    private static readonly Guid PersistedGuid = new("11111111-1111-1111-1111-111111111111");
-    private static readonly Guid SystemDefaultGuid = new("22222222-2222-2222-2222-222222222222");
-    private static readonly Guid PanelCurrentGuid = new("33333333-3333-3333-3333-333333333333");
-
-    public static IEnumerable<object?[]> ResolveAnchorDesktopIdCases()
-    {
-        // persisted, systemDefault, panelCurrent, expected
-        yield return new object?[] { null, null, null, null };
-        yield return new object?[] { PersistedGuid, null, null, PersistedGuid };
-        yield return new object?[] { null, SystemDefaultGuid, null, SystemDefaultGuid };
-        yield return new object?[] { null, null, PanelCurrentGuid, PanelCurrentGuid };
-        yield return new object?[] { PersistedGuid, SystemDefaultGuid, null, SystemDefaultGuid };
-        yield return new object?[] { PersistedGuid, null, PanelCurrentGuid, PersistedGuid };
-        yield return new object?[] { null, SystemDefaultGuid, PanelCurrentGuid, SystemDefaultGuid };
-        yield return new object?[] { PersistedGuid, SystemDefaultGuid, PanelCurrentGuid, SystemDefaultGuid };
-    }
-
+    /// <summary>
+    /// Verifies every persisted/systemDefault/panelCurrent combination of
+    /// <see cref="SystemIconsPanelManager.ResolveAnchorDesktopId"/>'s pure priority policy.
+    /// </summary>
+    /// <param name="persisted">The persisted anchor id (R1).</param>
+    /// <param name="systemDefault">The shell's current default desktop id (R2).</param>
+    /// <param name="panelCurrent">The desktop the panel window is currently on (R3).</param>
+    /// <param name="expected">The expected resolved anchor id for this combination.</param>
     [Theory]
     [MemberData(nameof(ResolveAnchorDesktopIdCases))]
     public void ResolveAnchorDesktopId_TruthTable(
@@ -1007,6 +1088,10 @@ public class SystemIconsPanelManagerTests
 
     // ── EnforceAnchorDesktopOnce: OFF-mode anchor placement (ADR-019 §3.2/§3.3) ──
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.EnforceAnchorDesktopOnce"/> is a true no-op for
+    /// a zero window handle.
+    /// </summary>
     [Fact]
     public void EnforceAnchorDesktopOnce_WithZeroHandle_TouchesNothing()
     {
@@ -1072,6 +1157,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
     }
 
+    /// <summary>
+    /// Verifies that when the panel is not on its resolved anchor desktop, a successful move happens
+    /// exactly once and resets the ineffective-move counter.
+    /// </summary>
     [Fact]
     public void EnforceAnchorDesktopOnce_NotOnAnchor_SuccessfulMove_MovesOnceAndResetsCounter()
     {
@@ -1080,7 +1169,7 @@ public class SystemIconsPanelManagerTests
         sut.Model.AnchorVirtualDesktopId = PersistedGuid;
 
         _virtualDesktopMock.SetupSequence(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>()))
-            .Returns(PanelCurrentGuid)   // panelCurrent, read before the move
+            .Returns(PanelCurrentGuid) // panelCurrent, read before the move
             .Returns(PersistedGuid);     // afterMove, once the move succeeded
         _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(PanelHwnd, PersistedGuid)).Returns(true);
 
@@ -1139,6 +1228,10 @@ public class SystemIconsPanelManagerTests
         Assert.False(sut.Model.VirtualDesktopFeatureIneffective);
     }
 
+    /// <summary>
+    /// Verifies that repeated calls resolving to the same, already-applied anchor never call
+    /// <see cref="IApplicationStateService.SaveNow"/>.
+    /// </summary>
     [Fact]
     public void EnforceAnchorDesktopOnce_WhenAnchorUnchanged_DoesNotCallSave()
     {
@@ -1202,6 +1295,10 @@ public class SystemIconsPanelManagerTests
         _desktopMock.Verify(d => d.EmbedInDesktop(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown by <see cref="IVirtualDesktopService"/> is caught and never
+    /// propagates out of <see cref="SystemIconsPanelManager.EnforceAnchorDesktopOnce"/>.
+    /// </summary>
     [Fact]
     public void EnforceAnchorDesktopOnce_WhenServiceThrows_DoesNotPropagate()
     {
@@ -1222,6 +1319,10 @@ public class SystemIconsPanelManagerTests
     // IApplicationStateService.SaveNow()" region above) — covered by SystemIconsPanelStateMapperTests
     // instead. The Load() half stays covered here.
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> leaves the anchor id
+    /// <see langword="null"/> when the persisted state omits it.
+    /// </summary>
     [Fact]
     public void Load_WithoutAnchorKey_LeavesAnchorNull()
     {
@@ -1234,6 +1335,10 @@ public class SystemIconsPanelManagerTests
         Assert.Null(sut.Model.AnchorVirtualDesktopId);
     }
 
+    /// <summary>
+    /// Verifies that a garbage (non-GUID) persisted anchor value loads as a <see langword="null"/>
+    /// anchor while every other setting still loads normally.
+    /// </summary>
     [Fact]
     public void Load_WithGarbageAnchorValue_AnchorIsNull_ButOtherSettingsLoadNormally()
     {
@@ -1260,4 +1365,118 @@ public class SystemIconsPanelManagerTests
 
     // Whether Save() ends up omitting a null anchorVirtualDesktopId key on disk is StateJson's
     // DefaultIgnoreCondition.WhenWritingNull concern — see SchemaContractTests.
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds a <see cref="SystemIconsPanelStateDto"/> as <see cref="IApplicationStateService.SystemIconsPanel"/>
+    /// would already hold it after a real <c>Load()</c> (ADR-024 C6: the manager no longer parses raw
+    /// JSON itself — that happens once, in the store/service layer).
+    /// <para>
+    /// <paramref name="showOnAllVirtualDesktops"/> defaulting to <see langword="false"/> when omitted
+    /// mirrors a document written by a build from before the virtual desktop setting existed (the DTO
+    /// field itself always exists; only its JSON presence used to vary).
+    /// </para>
+    /// </summary>
+    private static SystemIconsPanelStateDto BuildState(
+        bool isEnabled,
+        string iconSize = "Medium",
+        IEnumerable<(SystemIconKind Kind, bool Visible, int Order)>? items = null,
+        bool? showOnAllVirtualDesktops = null,
+        string? anchorVirtualDesktopId = null)
+    {
+        return new SystemIconsPanelStateDto
+        {
+            IsEnabled = isEnabled,
+            ShowOnAllVirtualDesktops = showOnAllVirtualDesktops ?? false,
+            IconSize = iconSize,
+            AnchorVirtualDesktopId = anchorVirtualDesktopId,
+            Items = (items ?? DefaultItemTuples())
+                .Select(t => new SystemIconsPanelItemStateDto { Kind = t.Kind, IsVisible = t.Visible, Order = t.Order })
+                .ToList(),
+        };
+    }
+
+    private static IEnumerable<(SystemIconKind Kind, bool Visible, int Order)> DefaultItemTuples() =>
+    [
+        (SystemIconKind.ThisPc,       true, 0),
+        (SystemIconKind.ControlPanel, true, 1),
+        (SystemIconKind.RecycleBin,   true, 2),
+        (SystemIconKind.Network,      true, 3),
+        (SystemIconKind.UserFolder,   true, 4),
+    ];
+
+    /// <summary>
+    /// Feeds <see cref="IVirtualDesktopService.IsWindowOnCurrentDesktop"/> a scripted sequence of
+    /// answers; the last one repeats once the script runs out. One poll step asks twice: once as
+    /// the guard, once to verify the move actually had an effect.
+    /// </summary>
+    private void ScriptOnCurrentDesktop(params bool[] answers)
+    {
+        var queue = new Queue<bool>(answers);
+        _virtualDesktopMock
+            .Setup(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>()))
+            .Returns(() => queue.Count > 0 ? queue.Dequeue() : answers[^1]);
+    }
+
+    private SystemIconsPanelManager BuildSut(
+        SystemIconsPanelStateDto? initialState = null,
+        bool virtualDesktopSupported = true)
+    {
+        _virtualDesktopMock.SetupGet(v => v.IsSupported).Returns(virtualDesktopSupported);
+        _virtualDesktopMock.Setup(v => v.IsWindowOnCurrentDesktop(It.IsAny<IntPtr>())).Returns(true);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToCurrentDesktop(It.IsAny<IntPtr>())).Returns(false);
+
+        // Anchor-resolution members (ADR-019 §3.2): default to "nothing available" so tests that
+        // don't care about EnforceAnchorDesktopOnce see it degrade to a complete no-op.
+        _virtualDesktopMock.Setup(v => v.TryGetWindowDesktopId(It.IsAny<IntPtr>())).Returns((Guid?)null);
+        _virtualDesktopMock.Setup(v => v.TryGetDefaultDesktopId()).Returns((Guid?)null);
+        _virtualDesktopMock.Setup(v => v.TryMoveWindowToDesktop(It.IsAny<IntPtr>(), It.IsAny<Guid>())).Returns(false);
+
+        // SystemIconsPanel is read-only on IApplicationStateService — populated once by Load() and
+        // never written back by SystemIconsPanelManager.Save() (ADR-024 D-11/D-12: SaveNow() pulls the
+        // live Model straight from ISystemIconsPanelManager inside ApplicationStateService itself, so
+        // App.OnExit's single SaveNow() call always captures the current in-memory model, not a
+        // possibly-stale value pushed earlier in the session).
+        _stateServiceMock.SetupGet(s => s.SystemIconsPanel).Returns(initialState);
+        _stateServiceMock.Setup(s => s.SaveNow());
+
+        _monitorMock.SetupAdd(m => m.MonitorsChanged += It.IsAny<Action>());
+        _monitorMock.SetupRemove(m => m.MonitorsChanged -= It.IsAny<Action>());
+        _monitorMock.Setup(m => m.GetPrimaryMonitor())
+            .Returns(new MonitorInfo(
+                DeviceName: "\\\\.\\DISPLAY1",
+                Bounds: new System.Windows.Rect(0, 0, 1920, 1080),
+                WorkArea: new System.Windows.Rect(0, 0, 1920, 1040),
+                IsPrimary: true));
+
+        _factoryInvoked = false;
+
+        // The window factory is a Func<SystemIconsPanelWindow>; we never call it successfully
+        // (a real WPF window needs an STA thread + dispatcher, which this test project does not
+        // set up), so the manager's Apply() swallows the exception and _window stays null. We just
+        // track that the factory was invoked.
+        //
+        // Because of that, everything that depends on a live window is tested through the two
+        // extracted seams instead of through the timer: ShouldPollVirtualDesktop (pure policy,
+        // takes hasWindow as a parameter) and PollVirtualDesktopOnce (tick body, takes the HWND as
+        // a parameter). See the "poll policy" and "poll step" regions below.
+#pragma warning disable CA1416 // Platform check not needed in unit tests
+        SystemIconsPanelWindow FactoryDelegate()
+        {
+            _factoryInvoked = true;
+
+            // Throw immediately — no WPF dispatcher available in unit tests.
+            // The manager swallows window-creation exceptions gracefully.
+            throw new InvalidOperationException("Window creation not supported in unit tests.");
+        }
+#pragma warning restore CA1416
+
+        return new SystemIconsPanelManager(
+            _stateServiceMock.Object,
+            _desktopMock.Object,
+            _monitorMock.Object,
+            _virtualDesktopMock.Object,
+            FactoryDelegate);
+    }
 }

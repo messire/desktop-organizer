@@ -16,6 +16,9 @@ public class ResizeConstraintsFactorySizeGridStepTests
 
     // ── GridSize <= 1 ("no grid", the project-wide default) is a no-op for every mode — SizeGridStep
     // stays 0 and every existing (pre-amendment) call site's output is reproduced bit-for-bit. ──────────
+
+    /// <summary>Verifies that a <paramref name="gridSize"/> at or below 1 ("no grid") leaves <c>SizeGridStep</c> at zero and still lets the icon-grid snap apply.</summary>
+    /// <param name="gridSize">The <c>IAppSettings.GridSize</c> value under test.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -31,6 +34,8 @@ public class ResizeConstraintsFactorySizeGridStepTests
 
     // ── Omitting gridSize entirely defaults to 1 ("no grid") — every call site written before this
     // amendment keeps compiling and keeps producing SizeGridStep == 0. ──────────────────────────────────
+
+    /// <summary>Verifies that omitting the <c>gridSize</c> argument entirely defaults to "no grid" (<c>SizeGridStep == 0</c>).</summary>
     [Fact]
     public void OmittingGridSize_DefaultsToNoGrid()
     {
@@ -41,6 +46,9 @@ public class ResizeConstraintsFactorySizeGridStepTests
 
     // ── LegacyFreeform (no grid-aligned state): GridSize > 1 is unconditional — no commensurability
     // gate, because a LegacyFreeform panel is not on any grid to begin with. ────────────────────────────
+
+    /// <summary>Verifies that for a LegacyFreeform panel, any <paramref name="gridSize"/> above 1 sets <c>SizeGridStep</c> unconditionally, with no commensurability gate.</summary>
+    /// <param name="gridSize">The <c>IAppSettings.GridSize</c> value under test.</param>
     [Theory]
     [InlineData(48)]
     [InlineData(32)]
@@ -57,6 +65,8 @@ public class ResizeConstraintsFactorySizeGridStepTests
     // ── SizeGridStep overrides the icon-grid snap entirely (priority: GridSize > SnapResizeToIconGrid)
     // — both SnapCellWidth and SnapCellHeight are zeroed even though Grid mode + snapEnabled would
     // otherwise populate them. ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Verifies that <c>SizeGridStep</c> overrides the icon-grid snap cells entirely, zeroing <c>SnapCellWidth</c>/<c>SnapCellHeight</c> even in Grid mode with snap enabled.</summary>
     [Fact]
     public void GridModeWithIconSnapEnabled_SizeGridStepOverridesTheIconGridSnapCells()
     {
@@ -70,6 +80,9 @@ public class ResizeConstraintsFactorySizeGridStepTests
     }
 
     // ── GridAligned, GridSize commensurate with U (48 % 8 == 0): SizeGridStep is populated. ────────────
+
+    /// <summary>Verifies that for a grid-aligned panel, a <paramref name="gridSize"/> commensurate with the unit size populates <c>SizeGridStep</c>.</summary>
+    /// <param name="gridSize">The <c>IAppSettings.GridSize</c> value under test.</param>
     [Theory]
     [InlineData(48)]
     [InlineData(32)]
@@ -87,6 +100,9 @@ public class ResizeConstraintsFactorySizeGridStepTests
     // ── GridAligned, GridSize NOT commensurate with U (50 % 8 != 0, ADR-028 "две сетки намеренно
     // несоизмеримы"): SizeGridStep stays 0 — the panel is left on its ordinary workspace-grid (U-only)
     // quantisation, exactly the same guard WindowManager.NormalizeGridAlignedToGridSize already applies. ──
+
+    /// <summary>Verifies that for a grid-aligned panel, a <paramref name="gridSize"/> not commensurate with the unit size leaves <c>SizeGridStep</c> at zero.</summary>
+    /// <param name="gridSize">The <c>IAppSettings.GridSize</c> value under test.</param>
     [Theory]
     [InlineData(50)]
     [InlineData(33)]
@@ -102,6 +118,8 @@ public class ResizeConstraintsFactorySizeGridStepTests
 
     // ── A degenerate/hand-built GridAligned state with UnitSize <= 0 must never divide by zero — falls
     // back exactly like the pre-existing `isGridAligned` guard already does for MinWidth/MinHeight. ──────
+
+    /// <summary>Verifies that a degenerate/hand-built grid-aligned state with a non-positive unit size degrades to the legacy classification and still applies <c>GridSize</c> unconditionally, without dividing by zero.</summary>
     [Fact]
     public void GridAlignedWithDegenerateUnitSize_TreatsGestureAsLegacy_AndAppliesGridSizeUnconditionally()
     {

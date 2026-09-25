@@ -12,6 +12,7 @@ namespace DesktopOrganizer.Tests.Unit.Interaction.Native;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class NativeSizingSwitchTests
 {
+    /// <summary>Verifies that an environment variable value of <c>"1"</c> overrides both the command-line flag and the setting value.</summary>
     [Fact]
     public void IsEnabled_EnvironmentVariableOne_OverridesCommandLineAndSetting()
     {
@@ -23,6 +24,7 @@ public class NativeSizingSwitchTests
         Assert.True(result);
     }
 
+    /// <summary>Verifies that an environment variable value of <c>"0"</c> overrides both the command-line flag and the setting value.</summary>
     [Fact]
     public void IsEnabled_EnvironmentVariableZero_OverridesCommandLineAndSetting()
     {
@@ -34,6 +36,7 @@ public class NativeSizingSwitchTests
         Assert.False(result);
     }
 
+    /// <summary>Verifies that with no environment variable set, the command-line enable flag overrides the setting value.</summary>
     [Fact]
     public void IsEnabled_NoEnvironment_CommandLineEnableFlag_OverridesSetting()
     {
@@ -45,6 +48,7 @@ public class NativeSizingSwitchTests
         Assert.True(result);
     }
 
+    /// <summary>Verifies that with no environment variable set, the command-line disable flag overrides the setting value.</summary>
     [Fact]
     public void IsEnabled_NoEnvironment_CommandLineDisableFlag_OverridesSetting()
     {
@@ -56,6 +60,7 @@ public class NativeSizingSwitchTests
         Assert.False(result);
     }
 
+    /// <summary>Verifies that with neither an environment variable nor a command-line flag, <see cref="NativeSizingSwitch.IsEnabled"/> falls back to the setting value.</summary>
     [Fact]
     public void IsEnabled_NoEnvironmentNoCommandLine_FallsBackToSettingValue()
     {
@@ -63,6 +68,8 @@ public class NativeSizingSwitchTests
         Assert.False(NativeSizingSwitch.IsEnabled(Array.Empty<string>(), _ => null, settingValue: false));
     }
 
+    /// <summary>Verifies that an unrecognized <paramref name="garbageValue"/> for the environment variable is ignored, falling through to the command-line flag.</summary>
+    /// <param name="garbageValue">A value that is neither <c>"0"</c> nor <c>"1"</c>.</param>
     [Theory]
     [InlineData("yes")]
     [InlineData("true")]
@@ -78,6 +85,7 @@ public class NativeSizingSwitchTests
         Assert.True(result);
     }
 
+    /// <summary>Verifies that when both the enable and disable command-line flags are present, disable wins.</summary>
     [Fact]
     public void IsEnabled_BothCommandLineFlagsPresent_DisableWins()
     {
@@ -89,6 +97,7 @@ public class NativeSizingSwitchTests
         Assert.False(result);
     }
 
+    /// <summary>Verifies that the command-line flag is matched case-insensitively.</summary>
     [Fact]
     public void IsEnabled_CommandLineFlagIsCaseInsensitive()
     {
@@ -100,12 +109,14 @@ public class NativeSizingSwitchTests
         Assert.True(result);
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingSwitch.IsEnabled"/> throws <see cref="ArgumentNullException"/> for <see langword="null"/> command-line args.</summary>
     [Fact]
     public void IsEnabled_NullCommandLineArgs_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => NativeSizingSwitch.IsEnabled(null!, _ => null, false));
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingSwitch.IsEnabled"/> throws <see cref="ArgumentNullException"/> for a <see langword="null"/> environment lookup delegate.</summary>
     [Fact]
     public void IsEnabled_NullEnvironmentLookup_Throws()
     {

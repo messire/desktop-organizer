@@ -45,6 +45,16 @@
     <Grid x:Name="PanelRoot"
           theming:PanelTheme.Accent="{Binding Model.AccentColor, Converter={StaticResource AccentBrush}, ConverterParameter=indicator}"
           theming:PanelTheme.SurfaceStyle="{Binding Model.SurfaceStyle}">
+        <Grid.Resources>
+            <!--
+                Overlay scrollbar (docs/prompts/scrollbar-pack): implicit ScrollBar style scoped to this
+                panel's tree so the ListBox-internal ScrollViewer of ListViewTemplate/GridViewTemplate
+                (Templates.xaml, hosted by FileListHost below) picks up Controls.xaml's
+                Control.ScrollBar.Overlay instead of the system scrollbar. Scoped here — not app-wide in
+                Controls.xaml — so MainWindow.xaml's light Settings window (D-9) keeps its system bars.
+            -->
+            <Style TargetType="ScrollBar" BasedOn="{StaticResource Control.ScrollBar.Overlay}"/>
+        </Grid.Resources>
         <Grid.RowDefinitions>
             <!--
                 ContentRow MUST stay a literal, directly-addressable RowDefinition here (not inside

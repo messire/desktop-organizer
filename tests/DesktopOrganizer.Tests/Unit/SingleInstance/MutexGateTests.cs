@@ -12,6 +12,10 @@ namespace DesktopOrganizer.Tests.Unit.SingleInstance;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class MutexGateTests
 {
+    /// <summary>
+    /// Verifies that <see cref="MutexGate.TryAcquire"/> succeeds and marks the gate as owned when the
+    /// underlying named mutex is free.
+    /// </summary>
     [Fact]
     public void TryAcquire_FreeMutex_ReturnsTrueAndOwns()
     {
@@ -21,6 +25,10 @@ public class MutexGateTests
         Assert.True(gate.IsOwned);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MutexGate.TryAcquire"/> returns <see langword="false"/> and leaves the
+    /// gate unowned when the underlying named mutex is already held by another thread.
+    /// </summary>
     [Fact]
     public void TryAcquire_HeldByAnotherThread_ReturnsFalse()
     {
@@ -58,6 +66,11 @@ public class MutexGateTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MutexGate.TryAcquire"/> succeeds, marks the gate as owned, and sets
+    /// <see cref="MutexGate.WasAbandoned"/> when the underlying named mutex was abandoned by a thread
+    /// that exited without releasing it (the same condition a killed primary process leaves behind).
+    /// </summary>
     [Fact]
     public void TryAcquire_AbandonedByAnotherThread_ReturnsTrueAndOwns()
     {
@@ -115,6 +128,10 @@ public class MutexGateTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MutexGate.Release"/> does not throw and leaves the gate unowned when
+    /// called without a prior successful <see cref="MutexGate.TryAcquire"/>.
+    /// </summary>
     [Fact]
     public void Release_NeverAcquired_DoesNotThrow_AndStaysNotOwned()
     {
@@ -125,6 +142,10 @@ public class MutexGateTests
         Assert.False(gate.IsOwned);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="MutexGate.Release"/> twice does not throw and leaves the gate
+    /// unowned.
+    /// </summary>
     [Fact]
     public void Release_Twice_DoesNotThrow()
     {
@@ -137,6 +158,10 @@ public class MutexGateTests
         Assert.False(gate.IsOwned);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="MutexGate.Dispose"/> twice, without ever acquiring the gate,
+    /// does not throw.
+    /// </summary>
     [Fact]
     public void Dispose_TwiceAndWithoutAcquire_DoesNotThrow()
     {

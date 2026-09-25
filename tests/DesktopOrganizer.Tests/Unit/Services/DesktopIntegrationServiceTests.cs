@@ -1,3 +1,4 @@
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.Services.Tools;
 using Moq;
@@ -39,6 +40,9 @@ public class DesktopIntegrationServiceTests
     private readonly Mock<INativeApi> _nativeApiMock = new ();
     private readonly DesktopIntegrationService _service;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DesktopIntegrationServiceTests"/> class.
+    /// </summary>
     public DesktopIntegrationServiceTests()
     {
         _service = new DesktopIntegrationService(_nativeApiMock.Object);
@@ -47,8 +51,13 @@ public class DesktopIntegrationServiceTests
         // Default the Z-order write to success; the HWND_BOTTOM retry path has its own tests below.
         _nativeApiMock
             .Setup(api => api.SetWindowPos(
-                It.IsAny<IntPtr>(), It.IsAny<IntPtr>(),
-                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<uint>()))
+                It.IsAny<IntPtr>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<uint>()))
             .Returns(true);
     }
 
@@ -223,8 +232,13 @@ public class DesktopIntegrationServiceTests
         // Assert
         _nativeApiMock.Verify(
             api => api.SetWindowPos(
-                It.IsAny<IntPtr>(), It.IsAny<IntPtr>(),
-                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<uint>()),
+                It.IsAny<IntPtr>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<uint>()),
             Times.Never);
     }
 
@@ -406,8 +420,13 @@ public class DesktopIntegrationServiceTests
         _nativeApiMock.Setup(api => api.FindWindow("Progman", null)).Returns(IntPtr.Zero);
         _nativeApiMock
             .Setup(api => api.SetWindowPos(
-                It.IsAny<IntPtr>(), It.IsAny<IntPtr>(),
-                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<uint>()))
+                It.IsAny<IntPtr>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<uint>()))
             .Returns(false);
 
         // Act
@@ -416,11 +435,20 @@ public class DesktopIntegrationServiceTests
         // Assert
         _nativeApiMock.Verify(
             api => api.SetWindowPos(
-                It.IsAny<IntPtr>(), It.IsAny<IntPtr>(),
-                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<uint>()),
+                It.IsAny<IntPtr>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<uint>()),
             Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DesktopIntegrationService.SendToBackOfZOrder"/> is a true no-op for a zero
+    /// window handle: not even the anchor lookup runs.
+    /// </summary>
     [Fact]
     public void SendToBackOfZOrder_WithZeroHandle_TouchesNothing()
     {
@@ -430,8 +458,13 @@ public class DesktopIntegrationServiceTests
         // Assert — a true no-op: not even the anchor lookup runs.
         _nativeApiMock.Verify(
             api => api.SetWindowPos(
-                It.IsAny<IntPtr>(), It.IsAny<IntPtr>(),
-                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<uint>()),
+                It.IsAny<IntPtr>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<uint>()),
             Times.Never);
         _nativeApiMock.Verify(api => api.FindWindow(It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
         _nativeApiMock.Verify(api => api.GetWindow(It.IsAny<IntPtr>(), It.IsAny<int>()), Times.Never);
@@ -479,8 +512,13 @@ public class DesktopIntegrationServiceTests
         // Arrange
         _nativeApiMock
             .Setup(api => api.SetWindowPos(
-                It.IsAny<IntPtr>(), It.IsAny<IntPtr>(),
-                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<uint>()))
+                It.IsAny<IntPtr>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<uint>()))
             .Throws(new InvalidOperationException("USER32 went away"));
 
         // Act & Assert
@@ -492,6 +530,9 @@ public class DesktopIntegrationServiceTests
     /// The anchor lookup runs inside the same try/catch as the placement itself: a throwing
     /// <c>FindWindow</c>/<c>GetWindow</c> (e.g. Explorer dying mid-tick) must not escape either.
     /// </summary>
+    /// <param name="throwFromFindWindow">
+    /// When <see langword="true"/>, the throw is injected into <c>FindWindow</c>; otherwise into <c>GetWindow</c>.
+    /// </param>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

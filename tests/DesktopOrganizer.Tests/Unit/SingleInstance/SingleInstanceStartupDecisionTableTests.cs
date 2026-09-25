@@ -7,7 +7,11 @@ namespace DesktopOrganizer.Tests.Unit.SingleInstance;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class SingleInstanceStartupDecisionTableTests
 {
-    // T-DEC-01
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceStartupDecisionTable.Resolve"/> resolves to
+    /// <see cref="SingleInstanceStartupAction.RunAsPrimary"/> when the guard was acquired and the
+    /// server started (T-DEC-01).
+    /// </summary>
     [Fact]
     public void Resolve_Acquired_ServerStarted_RunsAsPrimary()
     {
@@ -17,7 +21,11 @@ public class SingleInstanceStartupDecisionTableTests
         Assert.Equal(SingleInstanceRole.Primary, decision.Role);
     }
 
-    // T-DEC-02: degraded primary (D-4) — pipe server failed to start, still primary.
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceStartupDecisionTable.Resolve"/> still resolves to
+    /// <see cref="SingleInstanceStartupAction.RunAsPrimary"/> (degraded) when the guard was acquired
+    /// but the pipe server failed to start (T-DEC-02, D-4).
+    /// </summary>
     [Fact]
     public void Resolve_Acquired_ServerNotStarted_StillRunsAsPrimary_Degraded()
     {
@@ -27,7 +35,11 @@ public class SingleInstanceStartupDecisionTableTests
         Assert.Equal(SingleInstanceRole.Primary, decision.Role);
     }
 
-    // T-DEC-03
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceStartupDecisionTable.Resolve"/> resolves to
+    /// <see cref="SingleInstanceStartupAction.ExitAfterActivation"/> when the guard was not acquired
+    /// and the send was delivered (T-DEC-03).
+    /// </summary>
     [Fact]
     public void Resolve_NotAcquired_Delivered_ExitsAfterActivation()
     {
@@ -37,7 +49,11 @@ public class SingleInstanceStartupDecisionTableTests
         Assert.Equal(SingleInstanceRole.Secondary, decision.Role);
     }
 
-    // T-DEC-04
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceStartupDecisionTable.Resolve"/> resolves to
+    /// <see cref="SingleInstanceStartupAction.ExitOtherSession"/> when the guard was not acquired and
+    /// the send result is <see cref="ActivationSendResult.OtherSession"/> (T-DEC-04).
+    /// </summary>
     [Fact]
     public void Resolve_NotAcquired_OtherSession_ExitsOtherSession()
     {
@@ -47,7 +63,12 @@ public class SingleInstanceStartupDecisionTableTests
         Assert.Equal(SingleInstanceRole.Secondary, decision.Role);
     }
 
-    // T-DEC-05: budget exhausted without delivery — various non-terminal-but-failed send results.
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceStartupDecisionTable.Resolve"/> resolves to
+    /// <see cref="SingleInstanceStartupAction.ExitActivationFailed"/> for every non-terminal-but-failed
+    /// send result once the attempt budget is exhausted (T-DEC-05).
+    /// </summary>
+    /// <param name="last">The last send result observed before the budget was exhausted.</param>
     [Theory]
     [InlineData(ActivationSendResult.NoListener)]
     [InlineData(ActivationSendResult.Timeout)]
@@ -62,7 +83,11 @@ public class SingleInstanceStartupDecisionTableTests
         Assert.Equal(SingleInstanceRole.Secondary, decision.Role);
     }
 
-    // T-DEC-06: no send was ever attempted (e.g. connect never even started) — still a failure.
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceStartupDecisionTable.Resolve"/> resolves to
+    /// <see cref="SingleInstanceStartupAction.ExitActivationFailed"/> when no send was ever attempted
+    /// (e.g. connect never even started) (T-DEC-06).
+    /// </summary>
     [Fact]
     public void Resolve_NotAcquired_NoSendEverAttempted_ExitsActivationFailed()
     {
@@ -72,6 +97,10 @@ public class SingleInstanceStartupDecisionTableTests
         Assert.Equal(SingleInstanceRole.Secondary, decision.Role);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceStartupDecisionTable.Resolve"/> propagates the given
+    /// attempt count, elapsed time, and last send result verbatim into the returned decision.
+    /// </summary>
     [Fact]
     public void Resolve_PropagatesAttemptsAndElapsedMs()
     {

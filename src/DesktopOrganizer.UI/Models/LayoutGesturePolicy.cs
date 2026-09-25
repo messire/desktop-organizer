@@ -13,11 +13,14 @@ public readonly record struct LayoutGestureAllowance(bool CanMove, bool CanResiz
 /// (D-1), and the Normal-mode preference <see cref="NormalModeLayoutGestures"/> (D-2). See the plan's
 /// §1 D-2 truth table (2×2×3 = 12 cases): <c>IsLayoutLocked</c> always wins; otherwise
 /// <see cref="LayoutInteractionMode.EditLayout"/> always allows both; otherwise the outcome is decided
-/// per-gesture by <paramref name="normalPolicy"/>&#8203;'s value.
+/// per-gesture by <c>normalPolicy</c>'s value.
 /// </summary>
 public static class LayoutGesturePolicy
 {
     /// <summary>Resolves the current <see cref="LayoutGestureAllowance"/> from the three policy inputs. Pure, deterministic, never throws for any combination of valid enum values.</summary>
+    /// <param name="mode">The current edit/normal interaction mode.</param>
+    /// <param name="isLayoutLocked">The current <c>IAppSettings.IsLayoutLocked</c> value — always wins when <see langword="true"/>.</param>
+    /// <param name="normalPolicy">The Normal-mode gesture preference, consulted only when not locked and not in <see cref="LayoutInteractionMode.EditLayout"/>.</param>
     public static LayoutGestureAllowance Resolve(
         LayoutInteractionMode mode, bool isLayoutLocked, NormalModeLayoutGestures normalPolicy)
     {

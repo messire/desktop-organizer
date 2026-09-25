@@ -11,6 +11,8 @@ namespace DesktopOrganizer.Tests.Unit.Interaction;
 public class PanelInteractionTrackerTests
 {
     // T-TRK-01: starts Idle.
+
+    /// <summary>Verifies that a freshly-constructed <see cref="PanelInteractionTracker"/> starts in <see cref="PanelInteractionState.Idle"/>.</summary>
     [Fact]
     public void InitialState_IsIdle()
     {
@@ -20,6 +22,8 @@ public class PanelInteractionTrackerTests
     }
 
     // T-TRK-02: TryEnter(Resizing) from Idle -> true.
+
+    /// <summary>Verifies that entering <see cref="PanelInteractionState.Resizing"/> from <see cref="PanelInteractionState.Idle"/> succeeds.</summary>
     [Fact]
     public void TryEnter_Resizing_FromIdle_Succeeds()
     {
@@ -32,6 +36,8 @@ public class PanelInteractionTrackerTests
     }
 
     // T-TRK-03: TryEnter(Dragging) while Resizing -> false, state unchanged.
+
+    /// <summary>Verifies that entering <see cref="PanelInteractionState.Dragging"/> while already <see cref="PanelInteractionState.Resizing"/> fails and leaves the state unchanged.</summary>
     [Fact]
     public void TryEnter_Dragging_WhileResizing_FailsAndStateUnchanged()
     {
@@ -45,6 +51,8 @@ public class PanelInteractionTrackerTests
     }
 
     // T-TRK-04: Exit of a state the tracker doesn't currently hold is a no-op.
+
+    /// <summary>Verifies that <see cref="PanelInteractionTracker.Exit"/> of a state the tracker does not currently hold is a no-op.</summary>
     [Fact]
     public void Exit_WrongState_IsNoOp()
     {
@@ -57,6 +65,8 @@ public class PanelInteractionTrackerTests
     }
 
     // T-TRK-05: double Exit is idempotent.
+
+    /// <summary>Verifies that calling <see cref="PanelInteractionTracker.Exit"/> twice for the same state is idempotent, leaving the tracker in <see cref="PanelInteractionState.Idle"/>.</summary>
     [Fact]
     public void Exit_CalledTwice_IsIdempotent()
     {
@@ -70,6 +80,9 @@ public class PanelInteractionTrackerTests
     }
 
     // T-TRK-06: ForceIdle from any state -> Idle, and raises StateChanged.
+
+    /// <summary>Verifies that <see cref="PanelInteractionTracker.ForceIdle"/> returns to <see cref="PanelInteractionState.Idle"/> from any <paramref name="from"/> state and raises <see cref="PanelInteractionTracker.StateChanged"/>.</summary>
+    /// <param name="from">The state the tracker starts in.</param>
     [Theory]
     [InlineData(PanelInteractionState.Dragging)]
     [InlineData(PanelInteractionState.Resizing)]
@@ -90,6 +103,8 @@ public class PanelInteractionTrackerTests
     }
 
     // T-TRK-07: StateChanged fires exactly once per real transition (not on no-ops).
+
+    /// <summary>Verifies that <see cref="PanelInteractionTracker.StateChanged"/> fires exactly once per real transition, and not for no-op calls.</summary>
     [Fact]
     public void StateChanged_RaisedExactlyOncePerTransition()
     {
@@ -108,6 +123,9 @@ public class PanelInteractionTrackerTests
     // T-TRK-08: Hover/Editing are not dead states — TryEnter succeeds for both from Idle — but no
     // Phase 1 production code path (PanelDragMoveBehavior/PanelResizeController/ResizeGestureSession)
     // ever calls TryEnter with either value; they are reserved for Phase 6 (ADR-021 Consequences/Negative).
+
+    /// <summary>Verifies that entering <see cref="PanelInteractionState.Hover"/> or <see cref="PanelInteractionState.Editing"/> from <see cref="PanelInteractionState.Idle"/> succeeds — neither is a dead state.</summary>
+    /// <param name="state">The state to enter.</param>
     [Theory]
     [InlineData(PanelInteractionState.Hover)]
     [InlineData(PanelInteractionState.Editing)]
@@ -122,6 +140,8 @@ public class PanelInteractionTrackerTests
     }
 
     // TryEnter(Idle) is never a valid target — returning to Idle always goes through Exit/ForceIdle.
+
+    /// <summary>Verifies that <see cref="PanelInteractionState.Idle"/> is never a valid <see cref="PanelInteractionTracker.TryEnter"/> target.</summary>
     [Fact]
     public void TryEnter_Idle_AlwaysFails()
     {
@@ -134,6 +154,8 @@ public class PanelInteractionTrackerTests
     }
 
     // Hover, like Idle, allows entering any other gesture state (matrix row "Hover").
+
+    /// <summary>Verifies that entering <see cref="PanelInteractionState.Resizing"/> from <see cref="PanelInteractionState.Hover"/> succeeds.</summary>
     [Fact]
     public void TryEnter_Resizing_FromHover_Succeeds()
     {
@@ -148,6 +170,10 @@ public class PanelInteractionTrackerTests
 
     // Editing/Dragging/Resizing refuse every TryEnter target except via Exit/ForceIdle (matrix: only
     // "back to Idle" is possible from these three rows).
+
+    /// <summary>Verifies that from an exclusive gesture state (Editing/Dragging/Resizing), every <see cref="PanelInteractionTracker.TryEnter"/> target fails, leaving the state unchanged.</summary>
+    /// <param name="from">The exclusive gesture state the tracker starts in.</param>
+    /// <param name="to">The target state that must be rejected.</param>
     [Theory]
     [InlineData(PanelInteractionState.Editing, PanelInteractionState.Dragging)]
     [InlineData(PanelInteractionState.Dragging, PanelInteractionState.Resizing)]

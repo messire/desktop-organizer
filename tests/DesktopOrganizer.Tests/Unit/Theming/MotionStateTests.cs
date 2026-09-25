@@ -12,6 +12,10 @@ namespace DesktopOrganizer.Tests.Unit.Theming;
 [Trait(UnitTests, "UI")]
 public class MotionStateTests
 {
+    /// <summary>
+    /// Verifies that <see cref="MotionState.AnimationsEnabled"/> round-trips through set/get, restoring
+    /// the original value afterward so this test never leaks state into other tests.
+    /// </summary>
     [Fact]
     public void AnimationsEnabled_IsSettableAndReadable_RoundTrips()
     {

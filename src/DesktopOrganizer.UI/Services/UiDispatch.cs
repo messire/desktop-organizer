@@ -33,7 +33,7 @@ namespace DesktopOrganizer.UI.Services;
 /// handles the common "already gone" case without paying for an exception, and the
 /// <see cref="OperationCanceledException"/> catch closes the unavoidable race where shutdown begins
 /// between that probe and the enqueue. Only the cancellation is swallowed — an exception thrown by
-/// <paramref name="action"/> itself still propagates, so this never masks a real UI-side bug.
+/// <c>action</c> itself still propagates, so this never masks a real UI-side bug.
 /// </para>
 /// </remarks>
 internal static class UiDispatch
@@ -111,7 +111,7 @@ internal static class UiDispatch
     /// <c>App</c>'s single-instance activation wiring used to call <see cref="TryInvoke"/> from the
     /// named-pipe accept thread. If an activation arrives while <c>App.OnExit</c> is on the UI thread
     /// inside <c>ISingleInstanceCoordinator.CompleteShutdown</c>'s bounded
-    /// <c>NamedPipeActivationServer.Stop().Join(2s)</c> — a plain <see cref="System.Threading.Thread.Join"/>
+    /// <c>NamedPipeActivationServer.Stop().Join(2s)</c> — a plain <see cref="System.Threading.Thread.Join()"/>
     /// that does NOT pump the dispatcher — the accept thread's blocking <c>Invoke</c> cannot be serviced
     /// until that join gives up, needlessly delaying application exit by up to its full 2-second budget.
     /// </description></item>

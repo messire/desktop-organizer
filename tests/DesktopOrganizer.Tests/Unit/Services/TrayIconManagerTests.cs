@@ -38,6 +38,9 @@ public class TrayIconManagerTests
     // place every test can read from.
     private ContextMenuStrip? _capturedMenu;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TrayIconManagerTests"/> class.
+    /// </summary>
     public TrayIconManagerTests()
     {
         _notifyIconAdapterMock
@@ -47,9 +50,11 @@ public class TrayIconManagerTests
         _sut = new TrayIconManager(_notifyIconAdapterMock.Object);
     }
 
-    private static ToolStripMenuItem FindItem(ContextMenuStrip menu, string header) =>
-        Assert.IsType<ToolStripMenuItem>(Assert.Single(menu.Items.Cast<ToolStripItem>(), i => i.Text == header));
-
+    /// <summary>
+    /// Verifies that <see cref="TrayIconManager.Initialize"/> sets the tray icon from an absolute,
+    /// working-directory-independent path and builds the context menu with "Edit layout" unchecked and
+    /// enabled, and "Lock layout" unchecked.
+    /// </summary>
     [Fact]
     public void Initialize_SetsIcon_AndBuildsMenuWithEditLayoutUncheckedEnabled_AndLockLayoutUnchecked()
     {
@@ -72,6 +77,13 @@ public class TrayIconManagerTests
         Assert.False(lockLayout.Checked);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="TrayIconManager.UpdateContextMenu"/> reflects the given
+    /// checked/enabled snapshot onto both the "Edit layout" and "Lock layout" menu items.
+    /// </summary>
+    /// <param name="isEditLayoutChecked">Whether "Edit layout" should render checked.</param>
+    /// <param name="canEnterEditLayout">Whether "Edit layout" should render enabled.</param>
+    /// <param name="isLockLayoutChecked">Whether "Lock layout" should render checked.</param>
     [Theory]
     [InlineData(false, true, false)]
     [InlineData(true, true, false)]
@@ -90,6 +102,10 @@ public class TrayIconManagerTests
         Assert.Equal(isLockLayoutChecked, lockLayout.Checked);
     }
 
+    /// <summary>
+    /// Verifies D-3: "Lock layout" stays enabled even when "Edit layout" is disabled — it is the only
+    /// way to unlock again.
+    /// </summary>
     [Fact]
     public void UpdateContextMenu_LockLayoutItem_AlwaysEnabled_RegardlessOfCanEnterEditLayout()
     {
@@ -102,6 +118,10 @@ public class TrayIconManagerTests
         Assert.True(lockLayout.Enabled);
     }
 
+    /// <summary>
+    /// Verifies that the "Settings" and "Exit" menu items remain present alongside the checkable layout
+    /// items after <see cref="TrayIconManager.UpdateContextMenu"/>.
+    /// </summary>
     [Fact]
     public void UpdateContextMenu_KeepsSettingsAndExitItems_Present()
     {
@@ -111,6 +131,10 @@ public class TrayIconManagerTests
         Assert.Contains(menu.Items.Cast<ToolStripItem>(), i => i.Text == "Exit");
     }
 
+    /// <summary>
+    /// Verifies that clicking the "Edit layout" menu item raises
+    /// <see cref="TrayIconManager.OnEditLayoutToggleRequested"/>.
+    /// </summary>
     [Fact]
     public void EditLayoutItem_Click_RaisesOnEditLayoutToggleRequested()
     {
@@ -123,6 +147,10 @@ public class TrayIconManagerTests
         Assert.True(raised);
     }
 
+    /// <summary>
+    /// Verifies that clicking the "Lock layout" menu item raises
+    /// <see cref="TrayIconManager.OnLockLayoutToggleRequested"/>.
+    /// </summary>
     [Fact]
     public void LockLayoutItem_Click_RaisesOnLockLayoutToggleRequested()
     {
@@ -135,6 +163,10 @@ public class TrayIconManagerTests
         Assert.True(raised);
     }
 
+    /// <summary>
+    /// Verifies that clicking the "Settings" menu item still raises
+    /// <see cref="TrayIconManager.OnShowMainWindowRequested"/>.
+    /// </summary>
     [Fact]
     public void SettingsItem_Click_StillRaisesOnShowMainWindowRequested()
     {
@@ -147,6 +179,10 @@ public class TrayIconManagerTests
         Assert.True(raised);
     }
 
+    /// <summary>
+    /// Verifies that clicking the "Exit" menu item still raises
+    /// <see cref="TrayIconManager.OnExitRequested"/>.
+    /// </summary>
     [Fact]
     public void ExitItem_Click_StillRaisesOnExitRequested()
     {
@@ -159,6 +195,10 @@ public class TrayIconManagerTests
         Assert.True(raised);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="TrayIconManager.Initialize"/> still wires the tray icon's double-click
+    /// to <see cref="TrayIconManager.OnToggleMainWindowVisibilityRequested"/>.
+    /// </summary>
     [Fact]
     public void Initialize_StillWires_DoubleClick_ToToggleMainWindowVisibilityRequested()
     {
@@ -171,6 +211,10 @@ public class TrayIconManagerTests
         Assert.True(raised);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="TrayIconManager.Dispose"/> forwards to
+    /// <see cref="IDisposable.Dispose"/>.
+    /// </summary>
     [Fact]
     public void Dispose_ForwardsToNotifyIconAdapter()
     {
@@ -214,7 +258,7 @@ public class TrayIconManagerTests
 
     /// <summary>
     /// MAJOR-1 regression pin: the single <see cref="ContextMenuStrip"/> that
-    /// <see cref="TrayIconManager.EnsureContextMenuBuilt"/> builds and hands off must actually be
+    /// <c>TrayIconManager.EnsureContextMenuBuilt</c> builds and hands off must actually be
     /// released on <see cref="TrayIconManager.Dispose"/> — otherwise fixing the "one strip per instance"
     /// leak (see the sibling test above) would just trade N leaked strips per instance for exactly one
     /// permanently-leaked strip per instance instead of zero.
@@ -231,6 +275,10 @@ public class TrayIconManagerTests
         Assert.True(menu.IsDisposed);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="TrayIconManager.Dispose"/> twice is idempotent and does not
+    /// throw.
+    /// </summary>
     [Fact]
     public void Dispose_CalledTwice_IsIdempotent_DoesNotThrow()
     {
@@ -241,6 +289,9 @@ public class TrayIconManagerTests
 
         Assert.Null(exception);
     }
+
+    private static ToolStripMenuItem FindItem(ContextMenuStrip menu, string header) =>
+        Assert.IsType<ToolStripMenuItem>(Assert.Single(menu.Items.Cast<ToolStripItem>(), i => i.Text == header));
 
     private ContextMenuStrip CaptureMenuFromUpdate(bool isEditLayoutChecked, bool canEnterEditLayout, bool isLockLayoutChecked)
     {

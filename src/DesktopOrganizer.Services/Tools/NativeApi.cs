@@ -239,6 +239,7 @@ internal partial class NativeApi: INativeApi
         try
         {
             var iidShellFolder = NativeMethods.IidIShellFolder;
+
             // childPidl is a pointer INTO the parent's PIDL allocation — do NOT free it with CoTaskMemFree.
             // The caller (SystemShellService) owns and frees the original pidl separately.
             var hr = NativeMethods.SHBindToParent(pidl, ref iidShellFolder, out var parentPtr, out var childPidl);
@@ -562,8 +563,18 @@ internal partial class NativeApi: INativeApi
         // WS_POPUP, never WS_VISIBLE). Top-level windows DO receive broadcasts, while WS_POPUP
         // without WS_VISIBLE keeps it off-screen and invisible to the user.
         var hwnd = NativeMethods.CreateWindowEx(
-            0, className, className, NativeMethods.WsPopup, 0, 0, 0, 0,
-            IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
+            0,
+            className,
+            className,
+            NativeMethods.WsPopup,
+            0,
+            0,
+            0,
+            0,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            hInstance,
+            IntPtr.Zero);
 
         if (hwnd != IntPtr.Zero) return new NativeMessageWindow(hwnd, atom, 0);
 
@@ -660,7 +671,7 @@ internal partial class NativeApi: INativeApi
         // Shell "Properties" dialog
         public const uint SeeMaskInvokeIdList = 0x0000000C;
         public const uint SeeMaskIdList = 0x00000004;
-        public const int  SwShow = 5;
+        public const int SwShow = 5;
 
         // SHGetFileInfo flags
         public const uint ShgfiIcon = 0x000000100;
@@ -709,6 +720,7 @@ internal partial class NativeApi: INativeApi
 
         public static Guid IidIShellFolder = new("000214E6-0000-0000-C000-000000000046");
         public static Guid IidIContextMenu = new("000214E4-0000-0000-C000-000000000046");
+
         // Shell
         [LibraryImport("Shell32.dll", EntryPoint = "SHGetFileInfoW", StringMarshalling = StringMarshalling.Utf16)]
         public static partial IntPtr ShGetFileInfo(string filePath, uint fileAttributes, ref ShellFileInfo fileInfo, uint fileInfoSize, uint flags);
@@ -785,7 +797,10 @@ internal partial class NativeApi: INativeApi
         public static extern bool ShellExecuteExW(ref ShellExecuteInfo lpExecInfo);
 
         [StructLayout(LayoutKind.Sequential)]
-        public struct POINT { public int X; public int Y; }
+        public struct POINT
+        {
+            public int X; public int Y;
+        }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct ShellExecuteInfo
@@ -793,14 +808,19 @@ internal partial class NativeApi: INativeApi
             public int cbSize;
             public uint fMask;
             public IntPtr hwnd;
-            [MarshalAs(UnmanagedType.LPWStr)] public string? lpVerb;
-            [MarshalAs(UnmanagedType.LPWStr)] public string? lpFile;
-            [MarshalAs(UnmanagedType.LPWStr)] public string? lpParameters;
-            [MarshalAs(UnmanagedType.LPWStr)] public string? lpDirectory;
+            [MarshalAs(UnmanagedType.LPWStr)]
+            public string? lpVerb;
+            [MarshalAs(UnmanagedType.LPWStr)]
+            public string? lpFile;
+            [MarshalAs(UnmanagedType.LPWStr)]
+            public string? lpParameters;
+            [MarshalAs(UnmanagedType.LPWStr)]
+            public string? lpDirectory;
             public int nShow;
             public IntPtr hInstApp;
             public IntPtr lpIDList;
-            [MarshalAs(UnmanagedType.LPWStr)] public string? lpClass;
+            [MarshalAs(UnmanagedType.LPWStr)]
+            public string? lpClass;
             public IntPtr hkeyClass;
             public uint dwHotKey;
             public IntPtr hIcon;
@@ -853,12 +873,16 @@ internal partial class NativeApi: INativeApi
         {
             public IntPtr hwnd;
             public uint wFunc;
-            [MarshalAs(UnmanagedType.LPWStr)] public string pFrom;
-            [MarshalAs(UnmanagedType.LPWStr)] public string? pTo;
+            [MarshalAs(UnmanagedType.LPWStr)]
+            public string pFrom;
+            [MarshalAs(UnmanagedType.LPWStr)]
+            public string? pTo;
             public ushort fFlags;
-            [MarshalAs(UnmanagedType.Bool)] public bool fAnyOperationsAborted;
+            [MarshalAs(UnmanagedType.Bool)]
+            public bool fAnyOperationsAborted;
             public IntPtr hNameMappings;
-            [MarshalAs(UnmanagedType.LPWStr)] public string? lpszProgressTitle;
+            [MarshalAs(UnmanagedType.LPWStr)]
+            public string? lpszProgressTitle;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -875,53 +899,133 @@ internal partial class NativeApi: INativeApi
             public IntPtr hIcon;
         }
 
+        /// <summary>
+        /// COM interop declaration of the shell's <c>IShellFolder</c> interface.
+        /// </summary>
+        /// <remarks>
+        /// Declaration order MUST match the native vtable; unused members exist only as vtable slots —
+        /// never remove or reorder. Only <c>GetUIObjectOf</c> is called (from <c>ShowShellContextMenu</c>).
+        /// </remarks>
         [ComImport]
         [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         [Guid("000214E6-0000-0000-C000-000000000046")]
         public interface IShellFolder
         {
+            /// <summary><c>IShellFolder.ParseDisplayName</c>: parses a display name into a PIDL relative to this folder.</summary>
+            /// <param name="hwnd">Owner window for any UI the parse operation may show.</param>
+            /// <param name="pbc">Optional bind context, or <see cref="IntPtr.Zero"/>.</param>
+            /// <param name="pszDisplayName">The display name to parse.</param>
+            /// <param name="pchEaten">Receives the number of characters of <paramref name="pszDisplayName"/> that were parsed.</param>
+            /// <param name="ppidl">Receives the resulting PIDL.</param>
+            /// <param name="pdwAttributes">Requested/returned <c>SFGAO_*</c> attribute flags.</param>
             [PreserveSig]
             int ParseDisplayName(IntPtr hwnd, IntPtr pbc, [MarshalAs(UnmanagedType.LPWStr)] string pszDisplayName, ref uint pchEaten, out IntPtr ppidl, ref uint pdwAttributes);
 
+            /// <summary><c>IShellFolder.EnumObjects</c>: creates an enumerator over the folder's contents.</summary>
+            /// <param name="hwnd">Owner window for any UI the enumeration may show.</param>
+            /// <param name="grfFlags">Combination of <c>SHCONTF_*</c> flags selecting which items to enumerate.</param>
+            /// <param name="ppenumIDList">Receives the resulting <c>IEnumIDList</c> COM pointer.</param>
             [PreserveSig]
             int EnumObjects(IntPtr hwnd, int grfFlags, out IntPtr ppenumIDList);
 
+            /// <summary><c>IShellFolder.BindToObject</c>: binds to a subfolder identified by a relative PIDL.</summary>
+            /// <param name="pidl">Relative PIDL of the subfolder to bind to.</param>
+            /// <param name="pbc">Optional bind context, or <see cref="IntPtr.Zero"/>.</param>
+            /// <param name="riid">Interface identifier requested on the resulting object.</param>
+            /// <param name="ppv">Receives the resulting COM interface pointer.</param>
             [PreserveSig]
             int BindToObject(IntPtr pidl, IntPtr pbc, ref Guid riid, out IntPtr ppv);
 
+            /// <summary><c>IShellFolder.BindToStorage</c>: binds to the storage object of an item identified by a relative PIDL.</summary>
+            /// <param name="pidl">Relative PIDL of the item to bind to.</param>
+            /// <param name="pbc">Optional bind context, or <see cref="IntPtr.Zero"/>.</param>
+            /// <param name="riid">Interface identifier requested on the resulting object.</param>
+            /// <param name="ppv">Receives the resulting COM interface pointer.</param>
             [PreserveSig]
             int BindToStorage(IntPtr pidl, IntPtr pbc, ref Guid riid, out IntPtr ppv);
 
+            /// <summary><c>IShellFolder.CompareIDs</c>: compares two items' relative PIDLs for sort order.</summary>
+            /// <param name="lParam">Comparison flags, low word identifies the sorting rule.</param>
+            /// <param name="pidl1">Relative PIDL of the first item.</param>
+            /// <param name="pidl2">Relative PIDL of the second item.</param>
             [PreserveSig]
             int CompareIDs(IntPtr lParam, IntPtr pidl1, IntPtr pidl2);
 
+            /// <summary><c>IShellFolder.CreateViewObject</c>: creates a shell view-related object for the folder (e.g. a context menu).</summary>
+            /// <param name="hwndOwner">Owner window for the resulting object's UI.</param>
+            /// <param name="riid">Interface identifier requested on the resulting object.</param>
+            /// <param name="ppv">Receives the resulting COM interface pointer.</param>
             [PreserveSig]
             int CreateViewObject(IntPtr hwndOwner, ref Guid riid, out IntPtr ppv);
 
+            /// <summary><c>IShellFolder.GetAttributesOf</c>: retrieves the <c>SFGAO_*</c> attributes of one or more items.</summary>
+            /// <param name="cidl">Number of PIDLs in <paramref name="apidl"/>.</param>
+            /// <param name="apidl">Relative PIDLs of the items to query.</param>
+            /// <param name="rgfInOut">Requested attribute mask on input; receives the actual attributes on output.</param>
             [PreserveSig]
             int GetAttributesOf(uint cidl, [In, MarshalAs(UnmanagedType.LPArray)] IntPtr[] apidl, ref uint rgfInOut);
 
+            /// <summary><c>IShellFolder.GetUIObjectOf</c>: retrieves a UI-related COM object for one or more items (e.g. <see cref="IContextMenu"/>).</summary>
+            /// <param name="hwndOwner">Owner window for the resulting object's UI.</param>
+            /// <param name="cidl">Number of PIDLs in <paramref name="apidl"/>.</param>
+            /// <param name="apidl">Relative PIDLs of the items to query.</param>
+            /// <param name="riid">Interface identifier requested on the resulting object.</param>
+            /// <param name="rgfReserved">Reserved; must be <see cref="IntPtr.Zero"/>.</param>
+            /// <param name="ppv">Receives the resulting COM interface pointer.</param>
             [PreserveSig]
             int GetUIObjectOf(IntPtr hwndOwner, uint cidl, [In, MarshalAs(UnmanagedType.LPArray)] IntPtr[] apidl, ref Guid riid, IntPtr rgfReserved, out IntPtr ppv);
 
+            /// <summary><c>IShellFolder.GetDisplayNameOf</c>: retrieves the display name of an item identified by a relative PIDL.</summary>
+            /// <param name="pidl">Relative PIDL of the item.</param>
+            /// <param name="uFlags">Combination of <c>SHGDN_*</c> flags controlling the name's form.</param>
+            /// <param name="pName">Pointer to a <c>STRRET</c> structure that receives the name.</param>
             [PreserveSig]
             int GetDisplayNameOf(IntPtr pidl, uint uFlags, IntPtr pName);
 
+            /// <summary><c>IShellFolder.SetNameOf</c>: renames an item identified by a relative PIDL.</summary>
+            /// <param name="hwnd">Owner window for any UI the rename may show.</param>
+            /// <param name="pidl">Relative PIDL of the item to rename.</param>
+            /// <param name="pszName">The new display name.</param>
+            /// <param name="uFlags">Combination of <c>SHGDN_*</c> flags controlling how <paramref name="pszName"/> is interpreted.</param>
+            /// <param name="ppidlOut">Receives the item's new relative PIDL.</param>
             [PreserveSig]
             int SetNameOf(IntPtr hwnd, IntPtr pidl, [MarshalAs(UnmanagedType.LPWStr)] string pszName, uint uFlags, out IntPtr ppidlOut);
         }
 
+        /// <summary>
+        /// COM interop declaration of the shell's <c>IContextMenu</c> interface — used to query and
+        /// invoke a shell item's native context menu.
+        /// </summary>
+        /// <remarks>
+        /// Declaration order MUST match the native vtable; unused members exist only as vtable slots —
+        /// never remove or reorder. <c>QueryContextMenu</c> and <c>InvokeCommand</c> are called (from
+        /// <c>ShowShellContextMenu</c>); <c>GetCommandString</c> is not.
+        /// </remarks>
         [ComImport]
         [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         [Guid("000214E4-0000-0000-C000-000000000046")]
         public interface IContextMenu
         {
+            /// <summary><c>IContextMenu.QueryContextMenu</c>: adds the item's context menu commands to an existing menu.</summary>
+            /// <param name="hMenu">Handle of the menu to add commands to.</param>
+            /// <param name="indexMenu">Zero-based position in <paramref name="hMenu"/> at which to insert the first new item.</param>
+            /// <param name="idCmdFirst">Lowest command identifier value that may be used.</param>
+            /// <param name="idCmdLast">Highest command identifier value that may be used.</param>
+            /// <param name="uFlags">Combination of <c>CMF_*</c> flags controlling which commands are added.</param>
             [PreserveSig]
             int QueryContextMenu(IntPtr hMenu, uint indexMenu, uint idCmdFirst, uint idCmdLast, uint uFlags);
 
+            /// <summary><c>IContextMenu.InvokeCommand</c>: carries out the command selected from the context menu.</summary>
+            /// <param name="pici">Structure identifying the command to invoke and its invocation context.</param>
             [PreserveSig]
             int InvokeCommand(ref CmInvokeCommandInfo pici);
 
+            /// <summary><c>IContextMenu.GetCommandString</c>: retrieves a string (e.g. help text or verb) associated with a command.</summary>
+            /// <param name="idCmd">Command identifier, always an offset from <c>idCmdFirst</c>.</param>
+            /// <param name="uType">Combination of <c>GCS_*</c> flags selecting which string to retrieve and its encoding.</param>
+            /// <param name="pReserved">Reserved; must be <see cref="IntPtr.Zero"/>.</param>
+            /// <param name="pszName">Buffer that receives the requested string.</param>
+            /// <param name="cchMax">Size, in characters, of the buffer pointed to by <paramref name="pszName"/>.</param>
             [PreserveSig]
             int GetCommandString(IntPtr idCmd, uint uType, IntPtr pReserved, IntPtr pszName, uint cchMax);
         }
@@ -1082,9 +1186,18 @@ internal partial class NativeApi: INativeApi
 
         [DllImport("User32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern IntPtr CreateWindowEx(
-            int dwExStyle, string lpClassName, string lpWindowName, int dwStyle,
-            int x, int y, int nWidth, int nHeight,
-            IntPtr hWndParent, IntPtr hMenu, IntPtr hInstance, IntPtr lpParam);
+            int dwExStyle,
+            string lpClassName,
+            string lpWindowName,
+            int dwStyle,
+            int x,
+            int y,
+            int nWidth,
+            int nHeight,
+            IntPtr hWndParent,
+            IntPtr hMenu,
+            IntPtr hInstance,
+            IntPtr lpParam);
 
         [LibraryImport("User32.dll", EntryPoint = "DestroyWindow", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

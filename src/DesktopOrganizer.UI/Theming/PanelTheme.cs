@@ -61,20 +61,40 @@ public static class PanelTheme
         typeof(PanelTheme),
         new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.Inherits));
 
+    /// <summary>Gets the value of the <see cref="AccentProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is read.</param>
     public static Brush GetAccent(DependencyObject d) => (Brush)d.GetValue(AccentProperty);
 
+    /// <summary>Sets the value of the <see cref="AccentProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is written.</param>
+    /// <param name="value">The new value to store on <paramref name="d"/>.</param>
     public static void SetAccent(DependencyObject d, Brush value) => d.SetValue(AccentProperty, value);
 
+    /// <summary>Gets the value of the <see cref="SurfaceStyleProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is read.</param>
     public static PanelSurfaceStyle GetSurfaceStyle(DependencyObject d) => (PanelSurfaceStyle)d.GetValue(SurfaceStyleProperty);
 
+    /// <summary>Sets the value of the <see cref="SurfaceStyleProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is written.</param>
+    /// <param name="value">The new value to store on <paramref name="d"/>.</param>
     public static void SetSurfaceStyle(DependencyObject d, PanelSurfaceStyle value) => d.SetValue(SurfaceStyleProperty, value);
 
+    /// <summary>Gets the value of the <see cref="VisualStateProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is read.</param>
     public static PanelVisualState GetVisualState(DependencyObject d) => (PanelVisualState)d.GetValue(VisualStateProperty);
 
+    /// <summary>Sets the value of the <see cref="VisualStateProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is written.</param>
+    /// <param name="value">The new value to store on <paramref name="d"/>.</param>
     public static void SetVisualState(DependencyObject d, PanelVisualState value) => d.SetValue(VisualStateProperty, value);
 
+    /// <summary>Gets the value of the <see cref="IsLayoutEditingProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is read.</param>
     public static bool GetIsLayoutEditing(DependencyObject d) => (bool)d.GetValue(IsLayoutEditingProperty);
 
+    /// <summary>Sets the value of the <see cref="IsLayoutEditingProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is written.</param>
+    /// <param name="value">The new value to store on <paramref name="d"/>.</param>
     public static void SetIsLayoutEditing(DependencyObject d, bool value) => d.SetValue(IsLayoutEditingProperty, value);
 
     private static Brush CreateDefaultAccentBrush()

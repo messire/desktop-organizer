@@ -16,18 +16,27 @@ public class ContrastCalculatorTests
 
     // --- RelativeLuminance --------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.RelativeLuminance"/> for black equals zero.
+    /// </summary>
     [Fact]
     public void RelativeLuminance_Black_IsZero()
     {
         Assert.Equal(0.0, ContrastCalculator.RelativeLuminance(Black), precision: 6);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.RelativeLuminance"/> for white equals one.
+    /// </summary>
     [Fact]
     public void RelativeLuminance_White_IsOne()
     {
         Assert.Equal(1.0, ContrastCalculator.RelativeLuminance(White), precision: 6);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.RelativeLuminance"/> increases monotonically with brightness.
+    /// </summary>
     [Fact]
     public void RelativeLuminance_IsMonotonicWithBrightness()
     {
@@ -41,12 +50,19 @@ public class ContrastCalculatorTests
 
     // --- ContrastRatio -------------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.ContrastRatio"/> between black and white equals the
+    /// WCAG canonical 21:1 ratio.
+    /// </summary>
     [Fact]
     public void ContrastRatio_BlackVsWhite_Is21To1()
     {
         Assert.Equal(21.0, ContrastCalculator.ContrastRatio(Black, White), precision: 2);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.ContrastRatio"/> between identical colors equals 1:1.
+    /// </summary>
     [Fact]
     public void ContrastRatio_IdenticalColour_IsOneToOne()
     {
@@ -55,6 +71,9 @@ public class ContrastCalculatorTests
         Assert.Equal(1.0, ContrastCalculator.ContrastRatio(grey, grey), precision: 6);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.ContrastRatio"/> is symmetric regardless of argument order.
+    /// </summary>
     [Fact]
     public void ContrastRatio_IsOrderIndependent()
     {
@@ -64,6 +83,10 @@ public class ContrastCalculatorTests
         Assert.Equal(ContrastCalculator.ContrastRatio(a, b), ContrastCalculator.ContrastRatio(b, a), precision: 9);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.ContrastRatio"/> never returns a value below 1.0 for any
+    /// pair of colors.
+    /// </summary>
     [Fact]
     public void ContrastRatio_NeverBelowOne()
     {
@@ -75,12 +98,20 @@ public class ContrastCalculatorTests
         };
 
         foreach (var a in colors)
-        foreach (var b in colors)
-            Assert.True(ContrastCalculator.ContrastRatio(a, b) >= 1.0);
+        {
+            foreach (var b in colors)
+            {
+                Assert.True(ContrastCalculator.ContrastRatio(a, b) >= 1.0);
+            }
+        }
     }
 
     // --- CompositeOverOpaque -------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.CompositeOverOpaque"/> with a fully opaque foreground
+    /// ignores the background entirely.
+    /// </summary>
     [Fact]
     public void CompositeOverOpaque_FullyOpaqueForeground_IgnoresBackground()
     {
@@ -95,6 +126,10 @@ public class ContrastCalculatorTests
         Assert.Equal(255, result.A);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.CompositeOverOpaque"/> with a fully transparent
+    /// foreground returns the background unchanged.
+    /// </summary>
     [Fact]
     public void CompositeOverOpaque_FullyTransparentForeground_ReturnsBackground()
     {
@@ -108,6 +143,10 @@ public class ContrastCalculatorTests
         Assert.Equal(background.B, result.B);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.CompositeOverOpaque"/> with 50% alpha averages the
+    /// foreground and background channels.
+    /// </summary>
     [Fact]
     public void CompositeOverOpaque_HalfAlpha_AveragesChannels()
     {
@@ -122,6 +161,10 @@ public class ContrastCalculatorTests
         Assert.Equal(0, result.B);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.CompositeOverOpaque"/> always returns a fully opaque
+    /// result, regardless of the input alpha.
+    /// </summary>
     [Fact]
     public void CompositeOverOpaque_ResultIsAlwaysOpaque()
     {
@@ -135,6 +178,10 @@ public class ContrastCalculatorTests
 
     // --- ContrastAgainstComposited --------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.ContrastAgainstComposited"/> for a fully opaque surface
+    /// equals the direct <see cref="ContrastCalculator.ContrastRatio"/>, since compositing has no effect.
+    /// </summary>
     [Fact]
     public void ContrastAgainstComposited_OpaqueSurface_SameAsDirectContrast()
     {
@@ -148,6 +195,10 @@ public class ContrastCalculatorTests
         Assert.Equal(direct, viaComposite, precision: 9);
     }
 
+    /// <summary>
+    /// Verifies that a low-opacity dark surface over a light wallpaper degrades contrast relative to the
+    /// same surface fully opaque.
+    /// </summary>
     [Fact]
     public void ContrastAgainstComposited_LowOpacitySurfaceOverLightWallpaper_DegradesContrast()
     {
@@ -164,12 +215,20 @@ public class ContrastCalculatorTests
 
     // --- Threshold constants -----------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.MinimumTextContrast"/> equals the WCAG AA body-text
+    /// threshold of 4.5:1.
+    /// </summary>
     [Fact]
     public void MinimumTextContrast_IsWcagAaBodyTextThreshold()
     {
         Assert.Equal(4.5, ContrastCalculator.MinimumTextContrast);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ContrastCalculator.MinimumIconContrast"/> equals the WCAG AA graphical
+    /// object threshold of 3.0:1.
+    /// </summary>
     [Fact]
     public void MinimumIconContrast_IsWcagAaGraphicalObjectThreshold()
     {

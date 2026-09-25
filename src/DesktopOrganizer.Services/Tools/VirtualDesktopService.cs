@@ -36,6 +36,22 @@ namespace DesktopOrganizer.Services.Tools;
 /// </remarks>
 internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesktopService, IDisposable
 {
+    /// <summary>Explorer's virtual desktop key. Undocumented, read-only.</summary>
+    private const string VirtualDesktopsKeyPath =
+        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops";
+
+    /// <summary>Per-session variant of the key; holds the live "current desktop" on Win11 22H2+.</summary>
+    private const string SessionVirtualDesktopsKeyFormat =
+        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo\{0}\VirtualDesktops";
+
+    /// <summary>REG_BINARY, N*16 bytes: the desktop GUIDs, in shell order.</summary>
+    private const string DesktopOrderValueName = "VirtualDesktopIDs";
+
+    /// <summary>REG_BINARY, 16 bytes: the GUID of the active desktop.</summary>
+    private const string CurrentDesktopValueName = "CurrentVirtualDesktop";
+
+    private const int GuidByteCount = 16;
+
     /// <summary>CLSID_VirtualDesktopManager.</summary>
     private static readonly Guid VirtualDesktopManagerClsid = new("AA509086-5CA9-4C25-8F95-589D3C07B48A");
 
@@ -55,14 +71,20 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
     private interface IVirtualDesktopManager
     {
         /// <summary>Indicates whether the provided top-level window is on the active virtual desktop.</summary>
+        /// <param name="topLevelWindow">Handle of the top-level window to query.</param>
+        /// <param name="onCurrentDesktop">Receives a non-zero value when the window is on the active virtual desktop.</param>
         [PreserveSig]
         int IsWindowOnCurrentVirtualDesktop(IntPtr topLevelWindow, out int onCurrentDesktop);
 
         /// <summary>Retrieves the identifier of the virtual desktop hosting the provided top-level window.</summary>
+        /// <param name="topLevelWindow">Handle of the top-level window to query.</param>
+        /// <param name="desktopId">Receives the identifier of the virtual desktop hosting the window.</param>
         [PreserveSig]
         int GetWindowDesktopId(IntPtr topLevelWindow, out Guid desktopId);
 
         /// <summary>Moves the provided top-level window to the specified virtual desktop.</summary>
+        /// <param name="topLevelWindow">Handle of the top-level window to move.</param>
+        /// <param name="desktopId">Identifier of the destination virtual desktop.</param>
         [PreserveSig]
         int MoveWindowToDesktop(IntPtr topLevelWindow, ref Guid desktopId);
     }
@@ -212,30 +234,6 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
     }
 
     /// <summary>
-    /// The id of the desktop the user is currently looking at, or <see langword="null"/> when it
-    /// cannot be established.
-    /// </summary>
-    /// <remarks>
-    /// The documented API exposes no "get current desktop id" call, so it is read from the
-    /// foreground window, which is by definition on the desktop the user is looking at. At logon /
-    /// autostart there may be no foreground window at all, and <c>Progman</c> — a plausible
-    /// foreground window on an empty desktop — is not tracked; both degrade to
-    /// <see langword="null"/>.
-    /// </remarks>
-    private Guid? TryGetCurrentDesktopId()
-    {
-        try
-        {
-            var foreground = nativeApi.GetForegroundWindow();
-            return foreground == IntPtr.Zero ? null : TryGetWindowDesktopId(foreground);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Drops the cached COM object. Safe to call more than once, and safe to call concurrently with
     /// an in-flight call.
     /// </summary>
@@ -271,47 +269,6 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
             System.Threading.Thread.CurrentThread.GetApartmentState() == System.Threading.ApartmentState.STA,
             "VirtualDesktopService must be called on an STA thread.");
 
-    /// <summary>
-    /// Activates the manager on first use and caches the result (including the failure case,
-    /// so a system without virtual desktop support is probed only once).
-    /// Must be called while holding <c>_gate</c>.
-    /// </summary>
-    private IVirtualDesktopManager? GetManagerLocked()
-    {
-        if (_initialized) return _manager;
-
-        _initialized = true;
-
-        object? instance = null;
-        try
-        {
-            var type = Type.GetTypeFromCLSID(VirtualDesktopManagerClsid);
-            if (type is null) return null;
-
-            instance = Activator.CreateInstance(type);
-            _manager = instance as IVirtualDesktopManager;
-
-            if (_manager is null && instance is not null)
-            {
-                // Activation succeeded but the object does not expose the interface: release the
-                // orphaned __ComObject instead of leaking it until the next GC.
-                ReleaseQuietly(instance);
-            }
-        }
-        catch
-        {
-            // No virtual desktop support on this SKU/build — stay unsupported, stay silent.
-            if (_manager is null && instance is not null)
-            {
-                ReleaseQuietly(instance);
-            }
-
-            _manager = null;
-        }
-
-        return _manager;
-    }
-
     private static void ReleaseQuietly(object comObject)
     {
         try
@@ -331,28 +288,13 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
     //
     // Explorer keeps the ordered list of virtual desktops in HKCU. There is no documented way to
     // enumerate desktops at all, so this is the only source for "which one is Desktop 1".
+    // (The key/value names this block reads are the registry constants at the top of the class.)
     //
     // Everything here is READ-ONLY and nothing here is trusted on its own: TryGetDefaultDesktopId
     // above validates the result against the documented IVirtualDesktopManager before using it, and
     // discards it entirely on any disagreement. That is what separates this from the rejected
     // undocumented-COM option (ADR-016 §E-B): no floating IID, no build-to-IID table, no mutation of
     // shell state, and a wrong assumption is *detected* rather than acted upon.
-
-    /// <summary>Explorer's virtual desktop key. Undocumented, read-only.</summary>
-    private const string VirtualDesktopsKeyPath =
-        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops";
-
-    /// <summary>Per-session variant of the key; holds the live "current desktop" on Win11 22H2+.</summary>
-    private const string SessionVirtualDesktopsKeyFormat =
-        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo\{0}\VirtualDesktops";
-
-    /// <summary>REG_BINARY, N*16 bytes: the desktop GUIDs, in shell order.</summary>
-    private const string DesktopOrderValueName = "VirtualDesktopIDs";
-
-    /// <summary>REG_BINARY, 16 bytes: the GUID of the active desktop.</summary>
-    private const string CurrentDesktopValueName = "CurrentVirtualDesktop";
-
-    private const int GuidByteCount = 16;
 
     /// <summary>
     /// Reads the ordered desktop list, or <see langword="null"/> when the value is missing, empty or
@@ -428,4 +370,69 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
     /// <summary>Converts a 16-byte payload to a GUID; any other length is rejected.</summary>
     private static Guid? ToGuid(byte[]? raw) =>
         raw is { Length: GuidByteCount } ? new Guid(raw) : null;
+
+    /// <summary>
+    /// The id of the desktop the user is currently looking at, or <see langword="null"/> when it
+    /// cannot be established.
+    /// </summary>
+    /// <remarks>
+    /// The documented API exposes no "get current desktop id" call, so it is read from the
+    /// foreground window, which is by definition on the desktop the user is looking at. At logon /
+    /// autostart there may be no foreground window at all, and <c>Progman</c> — a plausible
+    /// foreground window on an empty desktop — is not tracked; both degrade to
+    /// <see langword="null"/>.
+    /// </remarks>
+    private Guid? TryGetCurrentDesktopId()
+    {
+        try
+        {
+            var foreground = nativeApi.GetForegroundWindow();
+            return foreground == IntPtr.Zero ? null : TryGetWindowDesktopId(foreground);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Activates the manager on first use and caches the result (including the failure case,
+    /// so a system without virtual desktop support is probed only once).
+    /// Must be called while holding <c>_gate</c>.
+    /// </summary>
+    private IVirtualDesktopManager? GetManagerLocked()
+    {
+        if (_initialized) return _manager;
+
+        _initialized = true;
+
+        object? instance = null;
+        try
+        {
+            var type = Type.GetTypeFromCLSID(VirtualDesktopManagerClsid);
+            if (type is null) return null;
+
+            instance = Activator.CreateInstance(type);
+            _manager = instance as IVirtualDesktopManager;
+
+            if (_manager is null && instance is not null)
+            {
+                // Activation succeeded but the object does not expose the interface: release the
+                // orphaned __ComObject instead of leaking it until the next GC.
+                ReleaseQuietly(instance);
+            }
+        }
+        catch
+        {
+            // No virtual desktop support on this SKU/build — stay unsupported, stay silent.
+            if (_manager is null && instance is not null)
+            {
+                ReleaseQuietly(instance);
+            }
+
+            _manager = null;
+        }
+
+        return _manager;
+    }
 }

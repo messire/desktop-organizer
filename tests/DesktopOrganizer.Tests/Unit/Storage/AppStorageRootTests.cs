@@ -14,6 +14,10 @@ namespace DesktopOrganizer.Tests.Unit.Storage;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class AppStorageRootTests
 {
+    /// <summary>
+    /// Verifies that <see cref="AppStorageRoot.DebugFolderName"/> and <see cref="AppStorageRoot.ReleaseFolderName"/>
+    /// are distinct, with the debug name derived from (prefixed by) the release name.
+    /// </summary>
     [Fact]
     public void DebugAndReleaseFolderNames_AreDistinct()
     {
@@ -21,6 +25,10 @@ public class AppStorageRootTests
         Assert.StartsWith(AppStorageRoot.ReleaseFolderName, AppStorageRoot.DebugFolderName, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AppStorageRoot.ReleaseFolderName"/> equals the historical "DesktopOrganizer"
+    /// folder name, so the installed application keeps reading what earlier releases wrote.
+    /// </summary>
     [Fact]
     public void ReleaseFolderName_IsTheHistoricalRoot()
     {
@@ -28,6 +36,10 @@ public class AppStorageRootTests
         Assert.Equal("DesktopOrganizer", AppStorageRoot.ReleaseFolderName);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AppStorageRoot.FolderName"/> resolves to the debug or release folder name
+    /// matching the active build configuration.
+    /// </summary>
     [Fact]
     public void FolderName_MatchesThisBuildConfiguration()
     {
@@ -38,6 +50,10 @@ public class AppStorageRootTests
 #endif
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AppStorageRoot.Default"/> equals <see cref="AppStorageRoot.FolderName"/>
+    /// combined under <see cref="Environment.SpecialFolder.LocalApplicationData"/>.
+    /// </summary>
     [Fact]
     public void Default_IsFolderNameUnderLocalApplicationData()
     {
@@ -48,6 +64,10 @@ public class AppStorageRootTests
         Assert.Equal(expected, AppStorageRoot.Default);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="StateStorePaths"/>'s default constructor derives its storage root, state
+    /// directory, and lock file path from <see cref="AppStorageRoot.Default"/>.
+    /// </summary>
     [Fact]
     public void StateStorePaths_DefaultConstructor_UsesAppStorageRoot()
     {
@@ -58,6 +78,10 @@ public class AppStorageRootTests
         Assert.Equal(Path.Combine(AppStorageRoot.Default, ".storage-lock"), paths.LockFilePath);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService"/>'s default constructor derives its storage root
+    /// from <see cref="AppStorageRoot.Default"/> (safe to exercise directly since construction touches no files).
+    /// </summary>
     [Fact]
     public void PanelItemStorageService_DefaultConstructor_UsesAppStorageRoot()
     {
@@ -68,6 +92,11 @@ public class AppStorageRootTests
         Assert.Equal(Path.Combine(AppStorageRoot.Default, "PanelItems"), service.StorageRoot);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AutostartService.DebugValueName"/> and <see cref="AutostartService.InstallerValueName"/>
+    /// are distinct Run key value names, and that <see cref="AutostartService.ValueName"/> resolves to the
+    /// one matching the active build configuration.
+    /// </summary>
     [Fact]
     public void AutostartValueNames_DebugAndInstallerAreDistinct()
     {

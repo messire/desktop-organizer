@@ -27,6 +27,10 @@ public class PanelSizingGridSupportCommitTests
     // error a real WM_SIZING/WPF layout pass can introduce, must still persist the span it started with.
     // Pre-fix BoundsToSpans (Ceiling, 0.5 DIP tolerance) said 41 for +1 px at 150% (0.667 DIP > 0.5), so
     // the stored span claimed 320 DIP while PanelGeometryWriter wrote model.Size = (int)312.667 = 312. ──
+
+    /// <summary>Verifies that a single pixel of DIP→px→DIP round-trip noise does not change the span <see cref="PanelSizingGridSupport.PersistSpans"/> commits.</summary>
+    /// <param name="scale">The DPI scale factor for the round trip.</param>
+    /// <param name="pxError">The physical-pixel error injected on the far edges.</param>
     [Theory]
     [InlineData(1.25, +1)]
     [InlineData(1.25, -1)]
@@ -53,6 +57,8 @@ public class PanelSizingGridSupportCommitTests
     // ── The ratchet itself: feed each commit's own output back through the px round trip, five gestures
     // in a row. Pre-fix the span grew by one unit per gesture (40 -> 41 -> 42 …), i.e. a panel that never
     // moved on screen inflating by 8 DIP every time the user touched an edge. ───────────────────────────
+
+    /// <summary>Verifies that feeding five consecutive gestures' own committed output back through the px round trip does not ratchet the persisted span upward.</summary>
     [Fact]
     public void FiveConsecutiveCommits_DoNotRatchetTheSpan()
     {
@@ -72,6 +78,9 @@ public class PanelSizingGridSupportCommitTests
 
     // ── The span and the int-truncated model size PanelGeometryWriter derives from the same rectangle
     // must agree — the "три источника не расходятся" half of MAJOR-2. ───────────────────────────────────
+
+    /// <summary>Verifies that the committed bounds and the persisted span still agree once <see cref="PanelGeometryWriter"/>'s <c>(int)</c> size truncation is applied to them.</summary>
+    /// <param name="scale">The DPI scale factor for the round trip.</param>
     [Theory]
     [InlineData(1.25)]
     [InlineData(1.5)]
@@ -90,6 +99,8 @@ public class PanelSizingGridSupportCommitTests
 
     // ── A caller with no edge (RollUpBehavior pinning the expanded height) normalises the SIZE only,
     // anchored at the top-left, and never touches position/work area/anti-overlap. ──────────────────────
+
+    /// <summary>Verifies that a caller with no edge normalises only the size, anchored at the top-left, and leaves position/work-area/anti-overlap untouched.</summary>
     [Fact]
     public void WithoutAnEdge_OnlyTheSizeIsNormalised_TopLeftAnchored()
     {
@@ -107,6 +118,8 @@ public class PanelSizingGridSupportCommitTests
 
     // ── MAJOR-1 at the commit step: an oversized final rectangle is SHRUNK from the moving edge, not
     // translated — even if the live frames never saw the wall (Alt was held the whole way). ────────────
+
+    /// <summary>Verifies that an oversized final rectangle is shrunk from the moving edge at commit time, not translated, even if the live frames never saw the wall.</summary>
     [Fact]
     public void AnOversizedFinalRectangle_IsShrunkFromTheMovingEdge()
     {
@@ -121,6 +134,8 @@ public class PanelSizingGridSupportCommitTests
     }
 
     // ── Anti-overlap is re-applied at commit (symmetric with P03's drop-time hard wall). ──────────────
+
+    /// <summary>Verifies that an obstacle is still honoured when spans are persisted at commit, symmetric with the drop-time hard wall.</summary>
     [Fact]
     public void AnObstacleIsStillHonouredAtCommit()
     {
@@ -135,6 +150,8 @@ public class PanelSizingGridSupportCommitTests
     }
 
     // ── MINOR: a LegacyFreeform panel must not pay for a monitor enumeration on every IconSize tick. ──
+
+    /// <summary>Verifies that <see cref="PanelSizingGridSupport.IsGridAligned"/> short-circuits without resolving the grid state when the panel does not participate in the grid.</summary>
     [Fact]
     public void IsGridAligned_ShortCircuits_WithoutResolvingAnything_WhenThePanelDoesNotParticipate()
     {
@@ -145,6 +162,7 @@ public class PanelSizingGridSupportCommitTests
         Assert.Equal(0, host.ResolveCallCount);
     }
 
+    /// <summary>Verifies that <see cref="PanelSizingGridSupport.IsGridAligned"/> still resolves the grid state when the panel does participate in the grid.</summary>
     [Fact]
     public void IsGridAligned_StillResolves_WhenThePanelDoesParticipate()
     {
@@ -154,6 +172,7 @@ public class PanelSizingGridSupportCommitTests
         Assert.Equal(1, host.ResolveCallCount);
     }
 
+    /// <summary>Verifies that <see cref="PanelSizingGridSupport.PersistSpans"/> short-circuits, committing nothing and resolving nothing, when the panel does not participate in the grid.</summary>
     [Fact]
     public void PersistSpans_ShortCircuits_WhenThePanelDoesNotParticipate()
     {

@@ -24,7 +24,7 @@ using DrawingSize = System.Drawing.Size;
 /// <remarks>
 /// <para>
 /// <b>Single write path.</b> Every height this partial ever applies to a NOT-rolled-up panel goes
-/// through the same <see cref="PanelGeometryWriter"/> instance <c>ChildWindow.xaml.cs</c>'s constructor
+/// through the same <see cref="Behaviors.PanelGeometryWriter"/> instance <c>ChildWindow.xaml.cs</c>'s constructor
 /// already built (<c>_geometryWriter</c>) — never a direct <c>Height</c> assignment — so
 /// <c>OnRenderSizeChanged</c>'s own model-write guard (<see cref="Behaviors.PanelGeometryWriter.IsApplying"/>)
 /// already covers this partial for free, with no changes to that method required.
@@ -34,7 +34,7 @@ using DrawingSize = System.Drawing.Size;
 /// <see cref="PanelSizingMode.AutoContent"/> recompute apply to the panel's REMEMBERED expanded height
 /// (<c>_rollUpBehavior.ExpandedHeight</c> plus <see cref="Models.ChildWindowModel.Size"/>'s height
 /// component) while <see cref="Models.ChildWindowModel.IsRolledUp"/> is <see langword="true"/>, never to
-/// the live (collapsed) <see cref="Window.Height"/> — the same "expanded height survives while
+/// the live (collapsed) <see cref="FrameworkElement.Height"/> — the same "expanded height survives while
 /// collapsed" contract <c>RollUpBehavior</c> itself already implements for a plain roll-up/roll-down
 /// toggle. <c>RollUpBehavior.cs</c> itself is not modified — this partial only reads/writes its already-
 /// public <see cref="Behaviors.RollUpBehavior.ExpandedHeight"/> property.
@@ -77,12 +77,12 @@ public partial class ChildWindow
     }
 
     /// <summary>
-    /// Wires the subscriptions that need a live <see cref="ChildWindowModel"/>/<see cref="ChildWindowViewModel"/>
+    /// Wires the subscriptions that need a live <see cref="ChildWindowModel"/>/<see cref="ViewModels.ChildWindowViewModel"/>
     /// — called once from <c>Initialize</c>, AFTER <c>model.PropertyChanged += OnModelPropertyChanged</c>
     /// (the P04 resize-snap subscription): multiple subscribers on the same
     /// <see cref="INotifyPropertyChanged.PropertyChanged"/> event run in subscription order, so this
     /// partial's own <see cref="OnModelPropertyChangedForContentSizing"/> is guaranteed to observe
-    /// <see cref="Window.Width"/> AFTER any <c>IconSize</c>/<c>ViewMode</c>/<c>IconLayoutPolicy</c>-driven
+    /// <see cref="FrameworkElement.Width"/> AFTER any <c>IconSize</c>/<c>ViewMode</c>/<c>IconLayoutPolicy</c>-driven
     /// re-snap that same property change already triggered, instead of computing a fit height against a
     /// stale width. Deliberately does NOT force an immediate recompute on load — loading a panel must
     /// never mutate its saved bounds (ADR-029 Q2 amendment/ADR-028 "no jump on first launch"), the exact
@@ -248,9 +248,9 @@ public partial class ChildWindow
     /// <summary>
     /// Add/remove/drop/portal-refresh/content-filter trigger (ADR-029's "Добавление/удаление иконки" and
     /// "смена вкладки/набора" rows — a content-filter change also rebuilds
-    /// <see cref="ChildWindowViewModel.FileItems"/> via <c>ReplaceFileItems</c>, so it is covered here
-    /// too, for free). <see cref="ChildWindowViewModel.FileItems"/> is a stable instance for this
-    /// <see cref="ChildWindowViewModel"/>'s whole lifetime (see <see cref="AttachContentSizing"/>'s
+    /// <see cref="ViewModels.BaseViewModel.FileItems"/> via <c>ReplaceFileItems</c>, so it is covered here
+    /// too, for free). <see cref="ViewModels.BaseViewModel.FileItems"/> is a stable instance for this
+    /// <see cref="ViewModels.ChildWindowViewModel"/>'s whole lifetime (see <see cref="AttachContentSizing"/>'s
     /// remarks) — no re-subscription is ever needed after the first.
     /// </summary>
     private void OnFileItemsChangedForContentSizing(object? sender, NotifyCollectionChangedEventArgs e) => MaybeAutoFit();
@@ -277,7 +277,7 @@ public partial class ChildWindow
     /// MAJOR M-3 (P06 fix-cycle, adr/ADR-029-icon-layout-policy.md "Fix-цикл P06"): a resize/drag gesture
     /// may still be in progress when this 200ms debounce fires — e.g. the user paused mid-drag with the
     /// mouse button still down for more than 200ms. Applying a fit height then would fight the still-live
-    /// gesture (both writing <see cref="Window.Height"/> the same frame) and visibly jump. Recharge the
+    /// gesture (both writing <see cref="FrameworkElement.Height"/> the same frame) and visibly jump. Recharge the
     /// timer instead of firing, using the SAME shared <see cref="PanelInteractionTracker"/> every OTHER
     /// gesture in this window already reports through (ADR-021) — no new state needed.
     /// </summary>
@@ -331,8 +331,8 @@ public partial class ChildWindow
     /// <remarks>
     /// MINOR m-2 (P06 fix-cycle, adr/ADR-029-icon-layout-policy.md "Fix-цикл P06"): also defers while a
     /// roll-up/roll-down <see cref="Behaviors.RollUpBehavior.IsAnimating"/> animation (150ms) is in
-    /// flight — a plain <see cref="Window.Height"/> assignment made mid-animation is silently ignored by
-    /// WPF (the animation clock still owns <see cref="Window.HeightProperty"/> at a higher priority, see
+    /// flight — a plain <see cref="FrameworkElement.Height"/> assignment made mid-animation is silently ignored by
+    /// WPF (the animation clock still owns <see cref="FrameworkElement.HeightProperty"/> at a higher priority, see
     /// <see cref="Behaviors.RollUpBehavior.ApplyRollUp"/>'s own H3 remarks), but <see cref="ApplyFitHeight"/>
     /// would still go on to persist <see cref="ChildWindowModel.Size"/>/spans as though it had taken
     /// effect — drifting the model away from the height the panel actually ends up showing once the

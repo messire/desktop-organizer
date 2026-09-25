@@ -26,6 +26,9 @@ public static class InteractionVisualState
     /// are reserved states the real tracker never enters (T-TRK-08) and are treated the same as
     /// <see cref="PanelInteractionState.Idle"/> here — only the two boolean facts decide Hover vs. Editing vs. Idle.
     /// </summary>
+    /// <param name="gesture">The panel's current gesture state, from <see cref="PanelInteractionTracker.State"/>.</param>
+    /// <param name="isPointerOver">Whether the pointer is currently over the panel's root element.</param>
+    /// <param name="isTitleEditing">Whether the panel title is currently being edited.</param>
     public static PanelVisualState Resolve(PanelInteractionState gesture, bool isPointerOver, bool isTitleEditing)
     {
         if (gesture == PanelInteractionState.Dragging)
@@ -46,6 +49,7 @@ public static class InteractionVisualState
     /// (1.0 vs. 0.95) — the one channel that keeps them visually distinguishable, since geometry is
     /// actively changing under the user's cursor during a resize.
     /// </summary>
+    /// <param name="state">The resolved visual state to look up the border opacity for.</param>
     public static double BorderOpacityFor(PanelVisualState state) => state switch
     {
         PanelVisualState.Idle => 0.15,
@@ -57,6 +61,7 @@ public static class InteractionVisualState
     };
 
     /// <summary>Header/chrome (action buttons) opacity for <paramref name="state"/>: 0.45 (Idle, "actions muted") .. 1.0 (fully revealed).</summary>
+    /// <param name="state">The resolved visual state to look up the chrome opacity for.</param>
     public static double ChromeOpacityFor(PanelVisualState state) => state switch
     {
         PanelVisualState.Idle => 0.45,
@@ -75,6 +80,7 @@ public static class InteractionVisualState
     /// all while this value was unbound from any XAML element, but now gives Dragging/Resizing a second,
     /// independently-perceivable differentiator alongside <see cref="BorderOpacityFor"/>'s 0.95-vs-1.0.
     /// </summary>
+    /// <param name="state">The resolved visual state to look up the accent emphasis multiplier for.</param>
     public static double AccentEmphasisFor(PanelVisualState state) => state switch
     {
         PanelVisualState.Idle => 1.0,

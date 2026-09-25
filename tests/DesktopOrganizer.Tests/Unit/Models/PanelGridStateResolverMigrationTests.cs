@@ -28,6 +28,11 @@ public class PanelGridStateResolverMigrationTests
     // 56 DIP tall: derives span 8, which is BELOW MinHeightSpanExpanded (12) — the exact repro.
     private static readonly Rect TooShort = new(0d, 0d, 120d, 56d);
 
+    /// <summary>
+    /// Verifies that a panel shorter than the minimum height migrates its persisted span to the
+    /// minimum floor (<see cref="WorkspaceGridMetrics.MinHeightSpanExpanded"/>), not to the smaller
+    /// span its own too-short bounds would otherwise derive.
+    /// </summary>
     [Fact]
     public void AShorterThanMinimumPanel_MigratesToTheMinimumSpan_NotToTheDerivedOne()
     {
@@ -40,6 +45,11 @@ public class PanelGridStateResolverMigrationTests
         Assert.Equal(WorkspaceGridMetrics.MinHeightSpanExpanded, model.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies the fix for the MAJOR-3 idempotency bug: after the first resolve migrates the span to
+    /// the floor, a second resolve of the same model finds that migrated span already valid and
+    /// raises no further property-changed notifications.
+    /// </summary>
     [Fact]
     public void TheSecondResolve_FindsThePersistedSpanValid_AndWritesNothing()
     {
@@ -61,6 +71,12 @@ public class PanelGridStateResolverMigrationTests
 
     // ── The migrated span really does restore a legal panel: bounds -> span -> bounds is at/above the
     // floor, so roll-down and restore no longer replay the too-small height. ────────────────────────────
+
+    /// <summary>
+    /// Verifies that converting the migrated span back to DIP bounds yields a rectangle at or above
+    /// the minimum-span floor in both dimensions, so a subsequent roll-down/restore cycle never
+    /// replays the original too-small height.
+    /// </summary>
     [Fact]
     public void TheMigratedSpan_RestoresAPanelAtOrAboveTheFloor()
     {
@@ -77,6 +93,11 @@ public class PanelGridStateResolverMigrationTests
     }
 
     // ── Not vacuous: a panel ABOVE the floor still migrates to the span its own size implies. ──────────
+
+    /// <summary>
+    /// Verifies that the migration is not vacuous: a panel already above the minimum floor still
+    /// migrates to the span its own size derives, not just to the floor.
+    /// </summary>
     [Fact]
     public void AnOrdinarySizedPanel_StillMigratesToItsOwnDerivedSpan()
     {
@@ -90,6 +111,12 @@ public class PanelGridStateResolverMigrationTests
 
     // ── A ROLLED-UP panel migrates against the collapsed floor, so its (legitimately short) collapsed
     // height is not inflated to the expanded minimum. ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that a rolled-up panel migrates its height span against the collapsed floor
+    /// (<see cref="WorkspaceGridMetrics.CollapsedHeaderSpan"/>), so its legitimately short collapsed
+    /// height is not inflated to the expanded minimum.
+    /// </summary>
     [Fact]
     public void ARolledUpPanel_MigratesAgainstTheCollapsedFloor()
     {

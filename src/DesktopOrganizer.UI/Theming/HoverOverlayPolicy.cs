@@ -9,7 +9,7 @@ namespace DesktopOrganizer.UI.Theming;
 /// hover (<c>Color.Overlay.Hover</c>, <c>#1AFFFFFF</c>), regardless of what it sat on top of. That is
 /// correct only when the surface underneath is already light enough that lightening it further increases
 /// its distance from the mid-tone icon colour (<c>Color.Text.Secondary</c>); every
-/// <see cref="PanelSurfaceStyle"/>/accent combination this app actually ships is DARK (a mostly-opaque
+/// <see cref="Models.PanelSurfaceStyle"/>/accent combination this app actually ships is DARK (a mostly-opaque
 /// <c>#1E1E1E</c> neutral base with at most an 8% accent tint — see <see cref="SurfaceComposer.ComposeSurface"/>),
 /// so lightening it on hover instead pushed the surface TOWARD the icon's own mid-tone colour, silently
 /// REDUCING contrast below <see cref="ContrastCalculator.MinimumIconContrast"/> on a light wallpaper at
@@ -65,6 +65,7 @@ public static class HoverOverlayPolicy
     /// defensive like every other Ambient Accent pure-math helper) is treated as "dark" — the
     /// overwhelmingly common case for every token this app ships today.
     /// </summary>
+    /// <param name="ownSurfaceLuminance">The panel surface's own resting relative luminance, in <c>[0, 1]</c>.</param>
     public static Color For(double ownSurfaceLuminance)
     {
         if (double.IsNaN(ownSurfaceLuminance))

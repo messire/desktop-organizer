@@ -28,6 +28,7 @@ namespace DesktopOrganizer.UI.Converters;
 /// </remarks>
 public sealed class AccentMarkerGeometryConverter : IValueConverter
 {
+    /// <summary>Upper bound on the number of cached geometries before <see cref="Cache"/> is cleared and rebuilt from scratch.</summary>
     internal const int MaxCachedGeometries = 32;
 
     private static readonly object CacheLock = new();

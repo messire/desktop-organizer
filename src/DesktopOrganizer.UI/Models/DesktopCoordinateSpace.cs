@@ -66,16 +66,20 @@ public static class DesktopCoordinateSpace
     public static bool IsIdentity => Offset.X == 0d && Offset.Y == 0d;
 
     /// <summary>Converts a screen-DIP point (e.g. <c>MonitorInfo.WorkArea.TopLeft</c>) into <c>Window.Left</c>/<c>Top</c>'s space.</summary>
+    /// <param name="screenDip">The point, in screen-DIP coordinates.</param>
     public static Point ToWindowSpace(Point screenDip) => new(screenDip.X - Offset.X, screenDip.Y - Offset.Y);
 
     /// <summary>Rect overload of <see cref="ToWindowSpace(System.Windows.Point)"/> — size is unaffected by a pure translation.</summary>
+    /// <param name="screenDip">The rectangle, in screen-DIP coordinates.</param>
     public static Rect ToWindowSpace(Rect screenDip) =>
         screenDip.IsEmpty ? screenDip : new Rect(ToWindowSpace(screenDip.TopLeft), screenDip.Size);
 
     /// <summary>Converts a <c>Window.Left</c>/<c>Top</c>-space point back into screen DIP.</summary>
+    /// <param name="windowDip">The point, in <c>Window.Left</c>/<c>Top</c>'s coordinate space.</param>
     public static Point ToScreenSpace(Point windowDip) => new(windowDip.X + Offset.X, windowDip.Y + Offset.Y);
 
     /// <summary>Rect overload of <see cref="ToScreenSpace(System.Windows.Point)"/> — size is unaffected by a pure translation.</summary>
+    /// <param name="windowDip">The rectangle, in <c>Window.Left</c>/<c>Top</c>'s coordinate space.</param>
     public static Rect ToScreenSpace(Rect windowDip) =>
         windowDip.IsEmpty ? windowDip : new Rect(ToScreenSpace(windowDip.TopLeft), windowDip.Size);
 

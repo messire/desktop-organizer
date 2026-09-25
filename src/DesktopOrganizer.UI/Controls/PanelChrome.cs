@@ -34,7 +34,7 @@ namespace DesktopOrganizer.UI.Controls;
 /// cannot do (a <see cref="ResourceDictionary"/> has no code-behind class). <c>ChildWindow.xaml</c>
 /// therefore attaches those handlers directly to the element it supplies via <see cref="TitleEditor"/>
 /// (which it declares itself, in its own file) rather than to anything inside this control's template —
-/// <see cref="PART_Header"/> only lays the header out, it never handles a gesture itself.
+/// <see cref="PartHeader"/> only lays the header out, it never handles a gesture itself.
 /// </para>
 /// </remarks>
 public class PanelChrome : ContentControl
@@ -110,6 +110,7 @@ public class PanelChrome : ContentControl
     /// <summary>The thin, deliberately weaker-than-the-marker accent-colored inner stroke (plan D-2/D-6).</summary>
     public const string PartAccentStroke = "PART_AccentStroke";
 
+    /// <summary>Identifies the <see cref="Title"/> dependency property — the panel's display name, shown (or edited via <see cref="TitleEditor"/>) in the header.</summary>
     public static readonly DependencyProperty TitleProperty = DependencyProperty.Register(
         nameof(Title),
         typeof(string),
@@ -142,6 +143,7 @@ public class PanelChrome : ContentControl
         typeof(PanelChrome),
         new PropertyMetadata(string.Empty));
 
+    /// <summary>Identifies the <see cref="AccentBrush"/> dependency property — the panel's accent color, painted onto <see cref="PartAccentIndicator"/>/<see cref="PartAccentStroke"/>.</summary>
     public static readonly DependencyProperty AccentBrushProperty = DependencyProperty.Register(
         nameof(AccentBrush),
         typeof(Brush),
@@ -155,13 +157,20 @@ public class PanelChrome : ContentControl
         typeof(PanelChrome),
         new PropertyMetadata(Brushes.Transparent));
 
+    /// <summary>Identifies the <see cref="SurfaceStyle"/> dependency property — which of the ADR-025/ADR-030 surface treatments (<see cref="PanelSurfaceStyle"/>) this panel renders.</summary>
     public static readonly DependencyProperty SurfaceStyleProperty = DependencyProperty.Register(
         nameof(SurfaceStyle),
         typeof(PanelSurfaceStyle),
         typeof(PanelChrome),
         new PropertyMetadata(PanelSurfaceStyle.Ambient));
 
-    /// <summary>Drives the default style's opacity/border triggers (D-6) — see <see cref="Behaviors.PanelVisualStateBehavior"/>, the first real writer of <see cref="Theming.PanelTheme.VisualStateProperty"/>.</summary>
+    /// <summary>
+    /// Drives the default style's opacity/border values (D-6) — bound via
+    /// <see cref="System.Windows.Data.MultiBinding"/> into <c>EditAwareVisualStateToDoubleConverter</c>,
+    /// not via <see cref="Trigger"/>s — see
+    /// <see cref="Behaviors.PanelVisualStateBehavior"/>, the first real writer of
+    /// <see cref="Theming.PanelTheme.VisualStateProperty"/>.
+    /// </summary>
     public static readonly DependencyProperty VisualStateProperty = DependencyProperty.Register(
         nameof(VisualState),
         typeof(PanelVisualState),
@@ -174,7 +183,8 @@ public class PanelChrome : ContentControl
     /// <see cref="Theming.PanelTheme.VisualStateProperty"/>: <c>ChildWindow.xaml</c> binds this to the
     /// inherited attached property explicitly, keeping this lookless, reusable control free of any direct
     /// dependency on <see cref="Theming.PanelTheme"/> itself. Drives the default style's edit-mode
-    /// opacity/width triggers alongside <see cref="VisualState"/>.
+    /// opacity/width values, via the same <see cref="System.Windows.Data.MultiBinding"/> mechanism,
+    /// alongside <see cref="VisualState"/>.
     /// </summary>
     public static readonly DependencyProperty IsLayoutEditingProperty = DependencyProperty.Register(
         nameof(IsLayoutEditing),
@@ -215,72 +225,84 @@ public class PanelChrome : ContentControl
         DefaultStyleKeyProperty.OverrideMetadata(typeof(PanelChrome), new FrameworkPropertyMetadata(typeof(PanelChrome)));
     }
 
+    /// <summary>Gets or sets the panel's display name, shown (or edited via <see cref="TitleEditor"/>) in the header.</summary>
     public string Title
     {
         get => (string)GetValue(TitleProperty);
         set => SetValue(TitleProperty, value);
     }
 
+    /// <summary>Gets or sets the rename-capable title widget supplied by <c>ChildWindow.xaml</c> (see <see cref="TitleEditorProperty"/>).</summary>
     public object TitleEditor
     {
         get => GetValue(TitleEditorProperty);
         set => SetValue(TitleEditorProperty, value);
     }
 
+    /// <summary>Gets or sets the Sort/View/RollUp (and Overflow) button group shown in the header.</summary>
     public object HeaderActions
     {
         get => GetValue(HeaderActionsProperty);
         set => SetValue(HeaderActionsProperty, value);
     }
 
+    /// <summary>Gets or sets the optional Segoe MDL2 glyph shown before the title. No current consumer sets this — reserved for a future panel-kind indicator.</summary>
     public string SemanticIcon
     {
         get => (string)GetValue(SemanticIconProperty);
         set => SetValue(SemanticIconProperty, value);
     }
 
+    /// <summary>Gets or sets the panel's accent color, painted onto <see cref="PartAccentIndicator"/>/<see cref="PartAccentStroke"/>.</summary>
     public Brush AccentBrush
     {
         get => (Brush)GetValue(AccentBrushProperty);
         set => SetValue(AccentBrushProperty, value);
     }
 
+    /// <summary>Gets or sets the composed panel surface fill — the result of <c>PanelSurfaceBrushConverter</c> (<see cref="Theming.SurfaceComposer"/>).</summary>
     public Brush SurfaceBrush
     {
         get => (Brush)GetValue(SurfaceBrushProperty);
         set => SetValue(SurfaceBrushProperty, value);
     }
 
+    /// <summary>Gets or sets which of the ADR-025/ADR-030 surface treatments this panel renders.</summary>
     public PanelSurfaceStyle SurfaceStyle
     {
         get => (PanelSurfaceStyle)GetValue(SurfaceStyleProperty);
         set => SetValue(SurfaceStyleProperty, value);
     }
 
+    /// <summary>Gets or sets the resolved interaction visual state, driving the default style's opacity/border values via <see cref="System.Windows.Data.MultiBinding"/> (D-6).</summary>
     public PanelVisualState VisualState
     {
         get => (PanelVisualState)GetValue(VisualStateProperty);
         set => SetValue(VisualStateProperty, value);
     }
 
+    /// <summary>Gets or sets whether Edit Layout mode is active for this panel, driving the default style's edit-mode opacity/width values via <see cref="System.Windows.Data.MultiBinding"/>.</summary>
     public bool IsLayoutEditing
     {
         get => (bool)GetValue(IsLayoutEditingProperty);
         set => SetValue(IsLayoutEditingProperty, value);
     }
 
+    /// <summary>Gets or sets whether the panel is currently collapsed to its header — a rendering hint only; the actual animation is owned by <see cref="Behaviors.RollUpBehavior"/>.</summary>
     public bool IsRolledUp
     {
         get => (bool)GetValue(IsRolledUpProperty);
         set => SetValue(IsRolledUpProperty, value);
     }
 
+    /// <summary>Gets or sets the item count shown next to the title while <see cref="IsRolledUp"/> is <see langword="true"/>.</summary>
     public int ItemCount
     {
         get => (int)GetValue(ItemCountProperty);
         set => SetValue(ItemCountProperty, value);
     }
 
+    /// <summary>Gets or sets the header row height, in device-independent pixels.</summary>
     public double HeaderHeight
     {
         get => (double)GetValue(HeaderHeightProperty);

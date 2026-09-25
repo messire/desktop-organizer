@@ -5,9 +5,9 @@ namespace DesktopOrganizer.Services.SingleInstance;
 /// <summary>
 /// Pure state machine for the single-instance handshake schedule (ADR-023 D-6): alternates
 /// "try to acquire ownership" / "try to send the activation to whoever owns it", bounded by a total
-/// time budget. Contains no <see cref="Thread.Sleep"/> or clock reads — delays are returned to the
-/// caller via <paramref name="delay"/> in <see cref="NextStep"/>, and elapsed time is an explicit
-/// parameter, so the caller supplies real or fake time (unit tests never actually wait).
+/// time budget. Contains no <see cref="Thread.Sleep(int)"/> or clock reads — delays are returned to the
+/// caller via the <c>delay</c> output parameter of <see cref="NextStep"/>, and elapsed time is an
+/// explicit parameter, so the caller supplies real or fake time (unit tests never actually wait).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -43,6 +43,16 @@ namespace DesktopOrganizer.Services.SingleInstance;
 /// </remarks>
 public sealed class SingleInstanceHandshakePolicy
 {
+    private static readonly IReadOnlyList<TimeSpan> DefaultBackoff =
+    [
+        TimeSpan.Zero,
+        TimeSpan.FromMilliseconds(50),
+        TimeSpan.FromMilliseconds(100),
+        TimeSpan.FromMilliseconds(200),
+        TimeSpan.FromMilliseconds(400),
+        TimeSpan.FromMilliseconds(800),
+    ];
+
     private readonly int _maxAttempts;
     private readonly TimeSpan _connectTimeout;
     private readonly TimeSpan _budget;
@@ -61,6 +71,13 @@ public sealed class SingleInstanceHandshakePolicy
         GiveUp,
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SingleInstanceHandshakePolicy"/> class.
+    /// </summary>
+    /// <param name="maxAttempts">Maximum number of <see cref="HandshakeStep.TryAcquire"/> attempts before giving up.</param>
+    /// <param name="connectTimeout">Connect timeout applied to each individual <c>TrySend</c> call.</param>
+    /// <param name="budget">Total wall-clock budget for the whole handshake.</param>
+    /// <param name="backoff">Delay schedule applied between successive acquire attempts, indexed by completed-attempt count (the last entry is reused once exhausted).</param>
     public SingleInstanceHandshakePolicy(int maxAttempts, TimeSpan connectTimeout, TimeSpan budget, IReadOnlyList<TimeSpan> backoff)
     {
         ArgumentNullException.ThrowIfNull(backoff);
@@ -81,15 +98,7 @@ public sealed class SingleInstanceHandshakePolicy
         maxAttempts: 6,
         connectTimeout: TimeSpan.FromMilliseconds(300),
         budget: TimeSpan.FromMilliseconds(3000),
-        backoff:
-        [
-            TimeSpan.Zero,
-            TimeSpan.FromMilliseconds(50),
-            TimeSpan.FromMilliseconds(100),
-            TimeSpan.FromMilliseconds(200),
-            TimeSpan.FromMilliseconds(400),
-            TimeSpan.FromMilliseconds(800),
-        ]);
+        backoff: DefaultBackoff);
 
     /// <summary>Connect timeout the caller should apply to each individual <c>TrySend</c> call.</summary>
     public TimeSpan ConnectTimeout => _connectTimeout;

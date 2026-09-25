@@ -108,6 +108,11 @@ public class WorkspaceGridMetricsTests
     public void MinWidthSpanCollapsed_EqualsMinWidthSpanExpanded()
         => Assert.Equal(WorkspaceGridMetrics.MinWidthSpanExpanded, WorkspaceGridMetrics.MinWidthSpanCollapsed);
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.MinSpanExpanded"/> is composed exactly from
+    /// <see cref="WorkspaceGridMetrics.MinWidthSpanExpanded"/> and
+    /// <see cref="WorkspaceGridMetrics.MinHeightSpanExpanded"/>.
+    /// </summary>
     [Fact]
     public void MinSpanExpanded_ComposedFromWidthAndHeightConstants()
     {
@@ -116,6 +121,11 @@ public class WorkspaceGridMetricsTests
         Assert.Equal(WorkspaceGridMetrics.MinHeightSpanExpanded, span.HeightUnits);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.MinSpanCollapsed"/> is composed exactly from
+    /// <see cref="WorkspaceGridMetrics.MinWidthSpanCollapsed"/> and
+    /// <see cref="WorkspaceGridMetrics.CollapsedHeaderSpan"/>.
+    /// </summary>
     [Fact]
     public void MinSpanCollapsed_ComposedFromWidthAndHeaderConstants()
     {
@@ -125,6 +135,14 @@ public class WorkspaceGridMetricsTests
     }
 
     // ----- SpanForPreset / DefaultPresetSpans -----
+
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.SpanForPreset"/> reproduces the exact
+    /// width/height unit values from ADR-028's preset table, for every named preset.
+    /// </summary>
+    /// <param name="preset">The size preset to resolve.</param>
+    /// <param name="expectedWidth">The expected width span, in units, from the ADR-028 table.</param>
+    /// <param name="expectedHeight">The expected height span, in units, from the ADR-028 table.</param>
     [Theory]
     [InlineData(PanelSizePreset.Small, 20, 20)]
     [InlineData(PanelSizePreset.Medium, 32, 30)]
@@ -144,6 +162,7 @@ public class WorkspaceGridMetricsTests
     /// requirement: <see cref="PanelSizePreset.ExtraLarge"/> is the largest named shortcut, still
     /// consistent with the minimum floor).
     /// </summary>
+    /// <param name="preset">The size preset whose span must meet the minimum expanded span.</param>
     [Theory]
     [InlineData(PanelSizePreset.Small)]
     [InlineData(PanelSizePreset.Medium)]
@@ -153,6 +172,14 @@ public class WorkspaceGridMetricsTests
         => WorkspaceGridMetrics.ValidateSpan(WorkspaceGridMetrics.SpanForPreset(preset), WorkspaceGridMetrics.MinSpanExpanded); // does not throw
 
     // ----- ValidateGap -----
+
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.ValidateGap"/> accepts every valid
+    /// unit-size/gap combination (gap zero or a non-negative whole multiple of the unit size)
+    /// without throwing.
+    /// </summary>
+    /// <param name="unitSize">The grid unit size, in DIP.</param>
+    /// <param name="gap">The gap, in DIP, that must be accepted as valid for this unit size.</param>
     [Theory]
     [InlineData(8d, 8d)]
     [InlineData(8d, 0d)]
@@ -162,6 +189,12 @@ public class WorkspaceGridMetricsTests
     public void ValidateGap_ValidCombination_DoesNotThrow(double unitSize, double gap)
         => WorkspaceGridMetrics.ValidateGap(unitSize, gap);
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.ValidateGap"/> throws when the gap is not a
+    /// whole multiple of the unit size.
+    /// </summary>
+    /// <param name="unitSize">The grid unit size, in DIP.</param>
+    /// <param name="gap">A gap, in DIP, that is not a whole multiple of the unit size.</param>
     [Theory]
     [InlineData(8d, 3d)]
     [InlineData(8d, 12d)]
@@ -169,10 +202,18 @@ public class WorkspaceGridMetricsTests
     public void ValidateGap_GapNotWholeMultipleOfUnitSize_Throws(double unitSize, double gap)
         => Assert.Throws<ArgumentException>(() => WorkspaceGridMetrics.ValidateGap(unitSize, gap));
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.ValidateGap"/> throws for a negative gap.
+    /// </summary>
     [Fact]
     public void ValidateGap_NegativeGap_Throws()
         => Assert.Throws<ArgumentException>(() => WorkspaceGridMetrics.ValidateGap(8d, -8d));
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.ValidateGap"/> throws when the unit size is
+    /// zero, negative, or not finite.
+    /// </summary>
+    /// <param name="unitSize">A non-positive or non-finite unit size that must be rejected.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(-8d)]
@@ -181,6 +222,10 @@ public class WorkspaceGridMetricsTests
     public void ValidateGap_NonPositiveOrNonFiniteUnitSize_Throws(double unitSize)
         => Assert.Throws<ArgumentOutOfRangeException>(() => WorkspaceGridMetrics.ValidateGap(unitSize, 8d));
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.ValidateGap"/> throws when the gap is not finite.
+    /// </summary>
+    /// <param name="gap">A non-finite gap value that must be rejected.</param>
     [Theory]
     [InlineData(double.NaN)]
     [InlineData(double.PositiveInfinity)]
@@ -189,18 +234,37 @@ public class WorkspaceGridMetricsTests
         => Assert.Throws<ArgumentException>(() => WorkspaceGridMetrics.ValidateGap(8d, gap));
 
     // ----- ValidateSpan -----
+
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.ValidateSpan"/> accepts a span that exactly
+    /// meets the minimum, without throwing.
+    /// </summary>
     [Fact]
     public void ValidateSpan_MeetsMinimum_DoesNotThrow()
         => WorkspaceGridMetrics.ValidateSpan(new GridSpan(12, 12), new GridSpan(12, 12));
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.ValidateSpan"/> throws when the span's width
+    /// falls below the minimum width, even though the height meets its minimum.
+    /// </summary>
     [Fact]
     public void ValidateSpan_BelowMinimumWidth_Throws()
         => Assert.Throws<ArgumentException>(() => WorkspaceGridMetrics.ValidateSpan(new GridSpan(11, 20), new GridSpan(12, 12)));
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.ValidateSpan"/> throws when the span's height
+    /// falls below the minimum height, even though the width meets its minimum.
+    /// </summary>
     [Fact]
     public void ValidateSpan_BelowMinimumHeight_Throws()
         => Assert.Throws<ArgumentException>(() => WorkspaceGridMetrics.ValidateSpan(new GridSpan(20, 11), new GridSpan(12, 12)));
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridMetrics.ValidateSpan"/> throws when either dimension of
+    /// the span is zero or negative, regardless of the minimum.
+    /// </summary>
+    /// <param name="width">A width span component that is zero or negative.</param>
+    /// <param name="height">A height span component that is zero or negative.</param>
     [Theory]
     [InlineData(0, 20)]
     [InlineData(20, 0)]

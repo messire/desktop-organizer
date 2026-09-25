@@ -18,28 +18,41 @@ internal sealed class StateRestoreCommand : IStateRestoreCommand
     /// Initializes a new instance of the <see cref="StateRestoreCommand"/> class for production use,
     /// against the real per-user app-data storage root.
     /// </summary>
+    /// <param name="migrations">The full migration chain used to bring a restored candidate up to the current schema version.</param>
+    /// <param name="diagnostics">Lazily-resolved diagnostics sink.</param>
     public StateRestoreCommand(IEnumerable<ISettingsMigration> migrations, Func<IDiagnosticsLog> diagnostics)
         : this(new StateStorePaths(), new StateMigrationRunner(migrations), diagnostics)
     {
     }
 
     /// <summary>
-    /// Test-only overload with an explicit storage root and migration runner — mirrors
+    /// Initializes a new instance of the <see cref="StateRestoreCommand"/> class. Test-only overload
+    /// with an explicit storage root and migration runner — mirrors
     /// <see cref="JsonApplicationStateStore"/>'s own test constructor, letting tests point at a
     /// disposable temp folder and a minimal/fake migration chain.
     /// </summary>
+    /// <param name="paths">The storage root to use instead of the real per-user app-data folder.</param>
+    /// <param name="migrationRunner">The migration runner to use instead of building one from the production migration chain.</param>
+    /// <param name="diagnostics">Lazily-resolved diagnostics sink.</param>
     internal StateRestoreCommand(StateStorePaths paths, StateMigrationRunner migrationRunner, Func<IDiagnosticsLog> diagnostics)
         : this(paths, migrationRunner, diagnostics, testForceWriteFailureAt: null)
     {
     }
 
     /// <summary>
-    /// Test-only overload additionally exposing <see cref="AtomicJsonFileWriter"/>'s crash-injection
-    /// seam — mirrors <see cref="JsonApplicationStateStore"/>'s own equivalent constructor — so a test
-    /// can assert what <see cref="Restore"/> does when the write of the new primary file itself fails
-    /// (M-4: this must never leave the on-disk primary file missing or the old primary's content
-    /// lost).
+    /// Initializes a new instance of the <see cref="StateRestoreCommand"/> class. Test-only overload
+    /// additionally exposing <see cref="AtomicJsonFileWriter"/>'s crash-injection seam — mirrors
+    /// <see cref="JsonApplicationStateStore"/>'s own equivalent constructor — so a test can assert what
+    /// <see cref="Restore"/> does when the write of the new primary file itself fails (M-4: this must
+    /// never leave the on-disk primary file missing or the old primary's content lost).
     /// </summary>
+    /// <param name="paths">The storage root to use instead of the real per-user app-data folder.</param>
+    /// <param name="migrationRunner">The migration runner to use instead of building one from the production migration chain.</param>
+    /// <param name="diagnostics">Lazily-resolved diagnostics sink.</param>
+    /// <param name="testForceWriteFailureAt">
+    /// When non-<see langword="null"/>, forwarded to <see cref="AtomicJsonFileWriter"/> to inject a
+    /// write failure at the given <see cref="StateWriteStage"/>.
+    /// </param>
     internal StateRestoreCommand(
         StateStorePaths paths,
         StateMigrationRunner migrationRunner,
@@ -112,13 +125,27 @@ internal sealed class StateRestoreCommand : IStateRestoreCommand
 
         Diag("StateRecoveredFromBackup", new KeyValuePair<string, object?>("reason", "ManualRestoreCommand"));
 
+        var restoredMessage = quarantinedPrimaryPath is null
+            ? $"Restored from '{Path.GetFileName(candidatePath)}'. No previous primary file existed."
+            : $"Restored from '{Path.GetFileName(candidatePath)}'. The previous primary file was quarantined as '{Path.GetFileName(quarantinedPrimaryPath)}'.";
+
         return new StateRestoreResult(
             StateRestoreOutcome.Restored,
             candidatePath,
             quarantinedPrimaryPath,
-            quarantinedPrimaryPath is null
-                ? $"Restored from '{Path.GetFileName(candidatePath)}'. No previous primary file existed."
-                : $"Restored from '{Path.GetFileName(candidatePath)}'. The previous primary file was quarantined as '{Path.GetFileName(quarantinedPrimaryPath)}'.");
+            restoredMessage);
+    }
+
+    private static long SafeFileLength(string path)
+    {
+        try
+        {
+            return new FileInfo(path).Length;
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
     }
 
     /// <summary>
@@ -221,18 +248,6 @@ internal sealed class StateRestoreCommand : IStateRestoreCommand
         {
             Console.Error.WriteLine($"StateRestoreCommand: failed to quarantine the previous primary for history: {ex.GetType().Name}");
             return null;
-        }
-    }
-
-    private static long SafeFileLength(string path)
-    {
-        try
-        {
-            return new FileInfo(path).Length;
-        }
-        catch (Exception)
-        {
-            return 0;
         }
     }
 

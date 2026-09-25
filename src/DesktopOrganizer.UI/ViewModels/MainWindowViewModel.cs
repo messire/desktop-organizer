@@ -408,6 +408,16 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>
     /// Initializes a new instance of the <see cref="MainWindowViewModel"/> class.
     /// </summary>
+    /// <param name="windowManager">Creates/removes/persists panel windows.</param>
+    /// <param name="appSettings">Global application settings.</param>
+    /// <param name="autostart">Manages the "start with Windows" registration.</param>
+    /// <param name="pageManager">Manages named page layouts.</param>
+    /// <param name="layoutSnapshots">Backing ViewModel for the "Layout snapshots" settings section.</param>
+    /// <param name="systemIconsPanelManager">Manages the system-icons panel's lifecycle and persisted state.</param>
+    /// <param name="confirmation">Gates destructive actions (e.g. removing a panel/page) behind a user confirmation prompt.</param>
+    /// <param name="itemStorage">Provides app-managed item storage used when removing panels.</param>
+    /// <param name="desktopIcons">Toggles native desktop icon visibility.</param>
+    /// <param name="layoutEditMode">The application-global Edit Layout mode service.</param>
     public MainWindowViewModel(
         IWindowManager windowManager,
         IAppSettings appSettings,
@@ -420,27 +430,27 @@ public class MainWindowViewModel : INotifyPropertyChanged
         IDesktopIconsService desktopIcons,
         ILayoutEditModeService layoutEditMode)
     {
-        _windowManager              = windowManager;
-        _appSettings                = appSettings;
-        _autostart                  = autostart;
-        _pageManager                = pageManager;
-        _confirmation               = confirmation;
-        _itemStorage                = itemStorage;
-        _desktopIcons               = desktopIcons;
-        _layoutEditMode             = layoutEditMode;
-        LayoutSnapshots             = layoutSnapshots;
+        _windowManager = windowManager;
+        _appSettings = appSettings;
+        _autostart = autostart;
+        _pageManager = pageManager;
+        _confirmation = confirmation;
+        _itemStorage = itemStorage;
+        _desktopIcons = desktopIcons;
+        _layoutEditMode = layoutEditMode;
+        LayoutSnapshots = layoutSnapshots;
 
         SelectedPanelSettings = new SelectedPanelSettingsViewModel(windowManager);
-        GlobalDefaults        = new GlobalDefaultsViewModel(appSettings, windowManager);
-        SystemIconsSettings   = new SystemIconsSettingsViewModel(systemIconsPanelManager);
+        GlobalDefaults = new GlobalDefaultsViewModel(appSettings, windowManager);
+        SystemIconsSettings = new SystemIconsSettingsViewModel(systemIconsPanelManager);
 
         // Re-raise every sub-ViewModel's own PropertyChanged verbatim on this ViewModel — the property
         // names match exactly (see the forwarding properties above), so no name translation is needed.
         // Never unsubscribed: all three sub-ViewModels are owned for the lifetime of this (DI-singleton)
         // ViewModel.
         SelectedPanelSettings.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName!);
-        GlobalDefaults.PropertyChanged        += (_, e) => OnPropertyChanged(e.PropertyName!);
-        SystemIconsSettings.PropertyChanged   += (_, e) => OnPropertyChanged(e.PropertyName!);
+        GlobalDefaults.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName!);
+        SystemIconsSettings.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName!);
 
         // D-9 #3: ILayoutEditModeService is a DI singleton shared with every ChildWindow — this
         // ViewModel never mutates its own copy of the state, only reacts to whatever the tray icon,
@@ -450,16 +460,16 @@ public class MainWindowViewModel : INotifyPropertyChanged
 
         ToggleEditLayoutCommand = new RelayCommand(() => _layoutEditMode.Toggle(LayoutModeChangeSource.SettingsWindow));
 
-        AddPanelCommand    = new RelayCommand(AddPanel);
+        AddPanelCommand = new RelayCommand(AddPanel);
         AlignAllPanelsCommand = new RelayCommand(AlignAllPanels, () => !IsLayoutLocked);
         RemovePanelCommand = new RelayCommand(RemovePanel, CanRemovePanel);
-        SwitchPageCommand  = new RelayCommand<string>(SwitchPage);
-        AddPageCommand     = new RelayCommand(AddPage);
-        RemovePageCommand  = new RelayCommand<string>(RemovePage, CanRemovePage);
+        SwitchPageCommand = new RelayCommand<string>(SwitchPage);
+        AddPageCommand = new RelayCommand(AddPage);
+        RemovePageCommand = new RelayCommand<string>(RemovePage, CanRemovePage);
 
-        _windowManager.OnChildWindowAdded   += OnPanelAdded;
+        _windowManager.OnChildWindowAdded += OnPanelAdded;
         _windowManager.OnChildWindowRemoved += OnPanelRemoved;
-        _pageManager.PageChanged            += OnPageChanged;
+        _pageManager.PageChanged += OnPageChanged;
 
         SyncPages();
     }
@@ -484,6 +494,13 @@ public class MainWindowViewModel : INotifyPropertyChanged
         foreach (var page in _pageManager.Pages)
             Pages.Add(page);
     }
+
+    /// <summary>
+    /// Notifies about property changes.
+    /// </summary>
+    /// <param name="propertyName">Name of the property that was changed.</param>
+    protected virtual void OnPropertyChanged(string propertyName)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     private void AddPanel()
     {
@@ -544,6 +561,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
     private void AddPage()
     {
         var newId = $"Page {_pageManager.Pages.Count + 1}";
+
         // Ensure unique name
         var counter = _pageManager.Pages.Count + 1;
         while (_pageManager.Pages.Contains(newId))
@@ -650,11 +668,4 @@ public class MainWindowViewModel : INotifyPropertyChanged
         if (_selectedPanel?.Id == model.Id)
             SelectedPanel = null;
     }
-
-    /// <summary>
-    /// Notifies about property changes.
-    /// </summary>
-    /// <param name="propertyName">Name of the property that was changed.</param>
-    protected virtual void OnPropertyChanged(string propertyName)
-        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

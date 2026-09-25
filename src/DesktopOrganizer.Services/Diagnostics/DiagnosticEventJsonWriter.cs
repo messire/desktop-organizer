@@ -16,6 +16,8 @@ internal static class DiagnosticEventJsonWriter
     /// <summary>
     /// Serializes <paramref name="diagnosticEvent"/> to a single JSONL line.
     /// </summary>
+    /// <param name="diagnosticEvent">The event to serialize.</param>
+    /// <returns>A single-line, UTF-8 JSON representation of <paramref name="diagnosticEvent"/>, with no trailing newline.</returns>
     public static string ToJsonLine(in DiagnosticEvent diagnosticEvent)
     {
         using var stream = new MemoryStream();

@@ -28,12 +28,14 @@ public class RollUpTests
 
     private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
 
-    private static BoolToGlyphConverter CreateConverter() => new();
-
     // ------------------------------------------------------------------
     // BoolToGlyphConverter — glyph mode
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that converting <see langword="true"/> with a <see langword="null"/> parameter (default
+    /// glyph mode) returns the ChevronDown glyph.
+    /// </summary>
     [Fact]
     public void Convert_TrueWithNullParameter_ReturnsChevronDown()
     {
@@ -44,6 +46,10 @@ public class RollUpTests
         Assert.Equal(ChevronDownGlyph, result);
     }
 
+    /// <summary>
+    /// Verifies that converting <see langword="false"/> with a <see langword="null"/> parameter (default
+    /// glyph mode) returns the ChevronUp glyph.
+    /// </summary>
     [Fact]
     public void Convert_FalseWithNullParameter_ReturnsChevronUp()
     {
@@ -54,6 +60,10 @@ public class RollUpTests
         Assert.Equal(ChevronUpGlyph, result);
     }
 
+    /// <summary>
+    /// Verifies that converting <see langword="true"/> with an explicit "glyph" parameter returns the
+    /// ChevronDown glyph.
+    /// </summary>
     [Fact]
     public void Convert_TrueWithGlyphParameter_ReturnsChevronDown()
     {
@@ -68,6 +78,10 @@ public class RollUpTests
     // BoolToGlyphConverter — tooltip mode
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that converting <see langword="true"/> with the "tooltip" parameter returns the
+    /// "Expand panel" tooltip text.
+    /// </summary>
     [Fact]
     public void Convert_TrueWithTooltipParameter_ReturnsExpand()
     {
@@ -80,6 +94,10 @@ public class RollUpTests
         Assert.Equal("Expand panel", result);
     }
 
+    /// <summary>
+    /// Verifies that converting <see langword="false"/> with the "tooltip" parameter returns the
+    /// "Collapse panel" tooltip text.
+    /// </summary>
     [Fact]
     public void Convert_FalseWithTooltipParameter_ReturnsCollapse()
     {
@@ -94,6 +112,10 @@ public class RollUpTests
     // BoolToGlyphConverter — ConvertBack
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that <see cref="BoolToGlyphConverter.ConvertBack"/> always throws
+    /// <see cref="NotSupportedException"/> because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_AlwaysThrowsNotSupportedException()
     {
@@ -107,6 +129,10 @@ public class RollUpTests
     // ChildWindowModel.IsRolledUp — INPC
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// Verifies that setting <see cref="ChildWindowModel.IsRolledUp"/> to <see langword="true"/> raises
+    /// <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/> with the correct property name.
+    /// </summary>
     [Fact]
     public void IsRolledUp_SetTrue_RaisesPropertyChangedWithCorrectName()
     {
@@ -119,6 +145,10 @@ public class RollUpTests
         Assert.Contains(nameof(ChildWindowModel.IsRolledUp), raisedProperties);
     }
 
+    /// <summary>
+    /// Verifies that setting <see cref="ChildWindowModel.IsRolledUp"/> to the same value twice does not
+    /// raise <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/> on the second set.
+    /// </summary>
     [Fact]
     public void IsRolledUp_SetSameValueTwice_DoesNotRaisePropertyChangedSecondTime()
     {
@@ -133,4 +163,9 @@ public class RollUpTests
 
         Assert.Empty(raisedAfterSecondSet);
     }
+
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+    private static BoolToGlyphConverter CreateConverter() => new();
 }

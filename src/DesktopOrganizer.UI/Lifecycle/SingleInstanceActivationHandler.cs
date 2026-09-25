@@ -29,6 +29,7 @@ internal sealed class SingleInstanceActivationHandler(IWindowManager windowManag
     /// beyond, ADR-023 D-5) are ignored rather than guessed at — <see cref="IWindowManager"/> is never
     /// touched for a command this build doesn't recognize.
     /// </summary>
+    /// <param name="request">The activation request delivered by the Secondary process.</param>
     public void Handle(ActivationRequest request)
     {
         if (request.Command != ActivationCommand.ActivateSettings)

@@ -26,7 +26,7 @@ public enum RenameOutcome
     /// </summary>
     NameTaken,
 
-    /// <summary><paramref name="path"/> in <see cref="IFileItemRenameService.Rename"/> doesn't point at an existing file or folder. Nothing on disk was touched.</summary>
+    /// <summary><c>path</c> in <see cref="IFileItemRenameService.Rename"/> doesn't point at an existing file or folder. Nothing on disk was touched.</summary>
     NotFound,
 
     /// <summary>

@@ -31,27 +31,20 @@ public class MonitorServiceNativeApiTests
     private readonly Mock<INativeApi> _nativeApiMock = new();
     private readonly MonitorService _service;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MonitorServiceNativeApiTests"/> class.
+    /// </summary>
     public MonitorServiceNativeApiTests()
     {
         _service = new MonitorService(_nativeApiMock.Object);
     }
 
-    private NativeWindowProc CaptureWndProc(NativeMessageWindow? window = null)
-    {
-        NativeWindowProc? captured = null;
-        _nativeApiMock
-            .Setup(api => api.CreateMessageWindow(It.IsAny<string>(), It.IsAny<NativeWindowProc>()))
-            .Callback<string, NativeWindowProc>((_, proc) => captured = proc)
-            .Returns(window ?? new NativeMessageWindow(new IntPtr(1), 1, 0));
-
-        _service.Start();
-
-        Assert.NotNull(captured);
-        return captured!;
-    }
-
     // ── GetMonitors: DIP scaling ─────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.GetMonitors"/> scales the native physical-pixel bounds and
+    /// work area into DIPs using <see cref="INativeApi.GetSystemDpiScale"/>.
+    /// </summary>
     [Fact]
     public void GetMonitors_ScalesPhysicalPixelsToDip_UsingSystemDpiScale()
     {
@@ -76,6 +69,11 @@ public class MonitorServiceNativeApiTests
         Assert.Equal(new Rect(0, 20, 1920, 1060), m.WorkArea);
     }
 
+    /// <summary>
+    /// Verifies that a zero or negative reported DPI scale is treated as 1.0 (no scaling), instead of
+    /// producing a degenerate or inverted rectangle.
+    /// </summary>
+    /// <param name="invalidScale">The invalid DPI scale value under test.</param>
     [Theory]
     [InlineData(0.0)]
     [InlineData(-1.0)]
@@ -98,6 +96,10 @@ public class MonitorServiceNativeApiTests
         Assert.Equal(new Rect(0, 0, 1920, 1080), monitors[0].Bounds);
     }
 
+    /// <summary>
+    /// Verifies that when the native monitor enumeration throws, <see cref="MonitorService.GetMonitors"/>
+    /// degrades to an empty list and logs the failure to <see cref="Console.Error"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void GetMonitors_WhenNativeApiThrows_ReturnsEmptyListAndLogsToConsoleError()
     {
@@ -127,6 +129,10 @@ public class MonitorServiceNativeApiTests
 
     // ── GetPrimaryMonitor: primary flag, first-enumerated fallback, last-resort fallback ────────
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.GetPrimaryMonitor"/> returns the monitor the native API
+    /// flags as primary, even when it is not the first one enumerated.
+    /// </summary>
     [Fact]
     public void GetPrimaryMonitor_ReturnsMonitorFlaggedPrimary()
     {
@@ -144,6 +150,10 @@ public class MonitorServiceNativeApiTests
         Assert.Equal(@"\\.\DISPLAY2", primary.DeviceName);
     }
 
+    /// <summary>
+    /// Verifies that when no enumerated monitor is flagged primary, <see cref="MonitorService.GetPrimaryMonitor"/>
+    /// falls back to the first monitor enumerated.
+    /// </summary>
     [Fact]
     public void GetPrimaryMonitor_WhenNoneFlaggedPrimary_ReturnsFirstEnumerated()
     {
@@ -160,6 +170,10 @@ public class MonitorServiceNativeApiTests
         Assert.Equal(@"\\.\DISPLAY1", primary.DeviceName);
     }
 
+    /// <summary>
+    /// Verifies that when monitor enumeration yields nothing at all, <see cref="MonitorService.GetPrimaryMonitor"/>
+    /// synthesizes a last-resort fallback monitor sized from <see cref="INativeApi.GetPrimaryScreenSizePx"/>.
+    /// </summary>
     [Fact]
     public void GetPrimaryMonitor_WhenEnumerationYieldsNothing_ReturnsFallbackMonitor()
     {
@@ -178,6 +192,10 @@ public class MonitorServiceNativeApiTests
         Assert.Equal(primary.Bounds, primary.WorkArea);
     }
 
+    /// <summary>
+    /// Verifies that the last-resort fallback monitor defaults to 1920x1080 when the native API reports a
+    /// zero-sized primary screen.
+    /// </summary>
     [Fact]
     public void GetPrimaryMonitor_FallbackWithZeroPrimaryScreenSize_DefaultsTo1920x1080()
     {
@@ -195,6 +213,10 @@ public class MonitorServiceNativeApiTests
 
     // ── FindMonitorAt / FindByDeviceName: thin wrappers over GetMonitors ─────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.FindMonitorAt"/> returns the monitor whose bounds contain
+    /// the given point.
+    /// </summary>
     [Fact]
     public void FindMonitorAt_PointInsideAMonitor_ReturnsIt()
     {
@@ -212,6 +234,11 @@ public class MonitorServiceNativeApiTests
         Assert.Equal(@"\\.\DISPLAY1", result!.DeviceName);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.FindByDeviceName"/> returns <see langword="null"/> for a
+    /// <see langword="null"/> or empty device name without ever querying the native API.
+    /// </summary>
+    /// <param name="deviceName">The null or empty device name under test.</param>
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -225,6 +252,10 @@ public class MonitorServiceNativeApiTests
         _nativeApiMock.Verify(api => api.GetMonitorInfos(), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.FindByDeviceName"/> matches the device name
+    /// case-insensitively.
+    /// </summary>
     [Fact]
     public void FindByDeviceName_CaseInsensitiveMatch_ReturnsMonitor()
     {
@@ -244,6 +275,11 @@ public class MonitorServiceNativeApiTests
     // ── GetSystemDpiScale / GetWindowRectDip: Stage S additive members ───────────────────────────
     // (docs/PLANS/workspace-grid-03-04-integration.md §1.2)
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.GetSystemDpiScale"/> delegates directly to
+    /// <see cref="INativeApi.GetSystemDpiScale"/> without any additional transformation.
+    /// </summary>
+    /// <param name="scale">The DPI scale value the mocked native API is set up to return.</param>
     [Theory]
     [InlineData(1.0)]
     [InlineData(1.25)]
@@ -260,6 +296,10 @@ public class MonitorServiceNativeApiTests
         Assert.Equal(scale, result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.GetWindowRectDip"/> scales the native window rectangle
+    /// into DIPs using the same DPI coefficient as <see cref="MonitorService.GetMonitors"/>.
+    /// </summary>
     [Fact]
     public void GetWindowRectDip_ValidHandle_ScalesPhysicalPixelsToDip_UsingSameCoefficientAsGetMonitors()
     {
@@ -281,6 +321,10 @@ public class MonitorServiceNativeApiTests
         Assert.Equal(new Rect(50, 100, 200, 200), result!.Value);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.GetWindowRectDip"/> returns <see langword="null"/> without
+    /// consulting the DPI scale when the native <c>GetWindowRect</c> call itself reports failure.
+    /// </summary>
     [Fact]
     public void GetWindowRectDip_NativeApiReportsFailure_ReturnsNull()
     {
@@ -303,6 +347,10 @@ public class MonitorServiceNativeApiTests
 
     // ── Start/Dispose: hidden broadcast-window lifecycle ─────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.Start"/> creates the hidden broadcast message window used
+    /// to receive <c>WM_DISPLAYCHANGE</c>/<c>WM_SETTINGCHANGE</c>.
+    /// </summary>
     [Fact]
     public void Start_CreatesHiddenMessageWindow()
     {
@@ -320,6 +368,10 @@ public class MonitorServiceNativeApiTests
             Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="MonitorService.Start"/> a second time after a successful first
+    /// call is a no-op and does not create a second broadcast window.
+    /// </summary>
     [Fact]
     public void Start_CalledTwice_WhenFirstSucceeded_CreatesWindowOnlyOnce()
     {
@@ -336,6 +388,10 @@ public class MonitorServiceNativeApiTests
         _nativeApiMock.Verify(api => api.CreateMessageWindow(It.IsAny<string>(), It.IsAny<NativeWindowProc>()), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that a failed broadcast-window creation is logged to <see cref="Console.Error"/> and
+    /// degrades silently rather than throwing.
+    /// </summary>
     [Fact]
     public void Start_WhenCreateMessageWindowFails_LogsToConsoleErrorAndDoesNotThrow()
     {
@@ -363,6 +419,10 @@ public class MonitorServiceNativeApiTests
         }
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown by the native window-registration call is caught, logged to
+    /// <see cref="Console.Error"/>, and does not escape <see cref="MonitorService.Start"/>.
+    /// </summary>
     [Fact]
     public void Start_WhenNativeApiThrows_LogsToConsoleErrorAndDoesNotThrow()
     {
@@ -390,6 +450,10 @@ public class MonitorServiceNativeApiTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.Dispose"/> does nothing when
+    /// <see cref="MonitorService.Start"/> was never called.
+    /// </summary>
     [Fact]
     public void Dispose_WithoutStart_DoesNotCallDestroyMessageWindow()
     {
@@ -400,6 +464,10 @@ public class MonitorServiceNativeApiTests
         _nativeApiMock.Verify(api => api.DestroyMessageWindow(It.IsAny<NativeMessageWindow>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MonitorService.Dispose"/> destroys the broadcast window that was created
+    /// by a preceding <see cref="MonitorService.Start"/> call.
+    /// </summary>
     [Fact]
     public void Dispose_AfterSuccessfulStart_DestroysMessageWindow()
     {
@@ -415,6 +483,10 @@ public class MonitorServiceNativeApiTests
         _nativeApiMock.Verify(api => api.DestroyMessageWindow(window), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="MonitorService.Dispose"/> twice destroys the broadcast window
+    /// only once.
+    /// </summary>
     [Fact]
     public void Dispose_CalledTwice_DestroysOnlyOnce()
     {
@@ -452,6 +524,10 @@ public class MonitorServiceNativeApiTests
 
     // ── WndProc: WM_DISPLAYCHANGE / WM_SETTINGCHANGE -> MonitorsChanged ──────────────────────────
 
+    /// <summary>
+    /// Verifies that a <c>WM_DISPLAYCHANGE</c> message delivered to the captured <c>NativeWindowProc</c>
+    /// raises <see cref="MonitorService.MonitorsChanged"/>.
+    /// </summary>
     [Fact]
     public void WndProc_DisplayChangeMessage_RaisesMonitorsChanged()
     {
@@ -467,6 +543,10 @@ public class MonitorServiceNativeApiTests
         Assert.True(raised);
     }
 
+    /// <summary>
+    /// Verifies that a <c>WM_SETTINGCHANGE</c> message delivered to the captured <c>NativeWindowProc</c>
+    /// also raises <see cref="MonitorService.MonitorsChanged"/>.
+    /// </summary>
     [Fact]
     public void WndProc_SettingChangeMessage_RaisesMonitorsChanged()
     {
@@ -482,6 +562,10 @@ public class MonitorServiceNativeApiTests
         Assert.True(raised);
     }
 
+    /// <summary>
+    /// Verifies that a message unrelated to display/setting changes (e.g. <c>WM_CLOSE</c>) does not raise
+    /// <see cref="MonitorService.MonitorsChanged"/>.
+    /// </summary>
     [Fact]
     public void WndProc_UnrelatedMessage_DoesNotRaiseMonitorsChanged()
     {
@@ -497,6 +581,10 @@ public class MonitorServiceNativeApiTests
         Assert.False(raised);
     }
 
+    /// <summary>
+    /// Verifies that the captured <c>NativeWindowProc</c> always forwards the message to
+    /// <see cref="INativeApi.DefaultWindowProc"/> and returns exactly that call's result.
+    /// </summary>
     [Fact]
     public void WndProc_AlwaysForwardsToDefaultWindowProc_AndReturnsItsResult()
     {
@@ -515,6 +603,10 @@ public class MonitorServiceNativeApiTests
         Assert.Equal(expected, result);
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown by a <see cref="MonitorService.MonitorsChanged"/> subscriber is
+    /// caught and logged, and that the WndProc still forwards to <see cref="INativeApi.DefaultWindowProc"/>.
+    /// </summary>
     [Fact]
     public void WndProc_WhenSubscriberThrows_LogsAndStillCallsDefaultWindowProc()
     {
@@ -544,5 +636,20 @@ public class MonitorServiceNativeApiTests
         // Assert — a bug in a MonitorsChanged subscriber must never crash the WndProc.
         Assert.Equal(expected, result);
         Assert.Contains("MonitorService WndProc error: boom", consoleOutput.ToString());
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private NativeWindowProc CaptureWndProc(NativeMessageWindow? window = null)
+    {
+        NativeWindowProc? captured = null;
+        _nativeApiMock
+            .Setup(api => api.CreateMessageWindow(It.IsAny<string>(), It.IsAny<NativeWindowProc>()))
+            .Callback<string, NativeWindowProc>((_, proc) => captured = proc)
+            .Returns(window ?? new NativeMessageWindow(new IntPtr(1), 1, 0));
+
+        _service.Start();
+
+        Assert.NotNull(captured);
+        return captured!;
     }
 }

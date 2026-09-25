@@ -32,6 +32,8 @@ public class RollUpBehaviorGridAlignedTests
     private const double ExpandedSpanHeightDip = (ExpandedHeightSpanUnits * U) - G;
 
     // ── DoD D4-4: the collapsed height is the header height, expressed on the grid — never a whole cell. ──
+
+    /// <summary>Verifies that collapsing a <see cref="PanelGeometryMode.GridAligned"/> panel collapses it to the header height, expressed on the workspace grid rather than a whole cell.</summary>
     [Fact]
     public void ApplyRollUp_GridAligned_CollapsesToTheHeaderHeight_OnTheGrid()
     {
@@ -48,6 +50,8 @@ public class RollUpBehaviorGridAlignedTests
     }
 
     // ── P04-R2: roll-down restores the SPAN height, not the raw remembered DIP height. ───────────────
+
+    /// <summary>Verifies that rolling a <see cref="PanelGeometryMode.GridAligned"/> panel back down restores the persisted span height, not the raw remembered DIP height.</summary>
     [Fact]
     public void ApplyRollUp_GridAligned_RollDownRestoresTheSpanHeight_NotTheRememberedDipHeight()
     {
@@ -65,6 +69,8 @@ public class RollUpBehaviorGridAlignedTests
 
     // ── The poisoning guard (§3.6 remarks): the grid state is resolved against the panel's EXPANDED
     // bounds, so a lazy span migration can never capture the collapsed height. ───────────────────────
+
+    /// <summary>Verifies that roll-down resolves the grid state against the panel's expanded bounds, never against the collapsed height, so a lazy span migration cannot be poisoned by it.</summary>
     [Fact]
     public void ApplyRollUp_GridAligned_ResolvesTheGridStateAgainstTheExpandedHeight_NotTheCollapsedOne()
     {
@@ -84,6 +90,8 @@ public class RollUpBehaviorGridAlignedTests
 
     // ── P04-R1: collapsing pins the expanded size as a span first (through the host, i.e. through
     // PanelGeometryWriter), so a panel whose span was missing still rolls back down correctly. ───────
+
+    /// <summary>Verifies that collapsing pins the expanded size as a span before collapsing, through the host, so a panel whose span was missing still rolls back down correctly.</summary>
     [Fact]
     public void ToggleRollUp_GridAligned_PinsTheExpandedSpanBeforeCollapsing_ThenRestoresIt()
     {
@@ -110,6 +118,8 @@ public class RollUpBehaviorGridAlignedTests
 
     // ── LegacyFreeform (no grid host) keeps the pre-P04 pair exactly: title-bar height / remembered
     // ExpandedHeight, and no span is ever written. ───────────────────────────────────────────────────
+
+    /// <summary>Verifies that a <see cref="PanelGeometryMode.LegacyFreeform"/> panel keeps the pre-P04 title-bar-height/remembered-<c>ExpandedHeight</c> pair and never writes a span.</summary>
     [Fact]
     public void ApplyRollUp_LegacyPanel_KeepsTheRememberedDipHeights_AndWritesNoSpan()
     {

@@ -11,6 +11,8 @@ namespace DesktopOrganizer.Tests.Unit.Interaction.Native;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class NativeSizingCoordinateMapperTests
 {
+    /// <summary>Verifies that converting a pixel rect to DIP and back to pixels round-trips within one pixel, at a given <paramref name="scale"/>.</summary>
+    /// <param name="scale">The DPI scale factor applied to the round trip.</param>
     [Theory]
     [InlineData(1.0)]
     [InlineData(1.25)]
@@ -29,6 +31,7 @@ public class NativeSizingCoordinateMapperTests
         Assert.InRange(roundTripped.Bottom, original.Bottom - 1, original.Bottom + 1);
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingCoordinateMapper.ToDip"/> at scale 1.0 is the identity conversion.</summary>
     [Fact]
     public void ToDip_Scale1_IsIdentity()
     {
@@ -39,6 +42,7 @@ public class NativeSizingCoordinateMapperTests
         Assert.Equal(new Rect(100, 200, 300, 250), dip);
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingCoordinateMapper.ToDip"/> converts negative screen coordinates, as reported for a monitor left of the primary, correctly.</summary>
     [Fact]
     public void ToDip_NegativeScreenCoordinates_MonitorLeftOfPrimary_ConvertsCorrectly()
     {
@@ -50,6 +54,7 @@ public class NativeSizingCoordinateMapperTests
         Assert.Equal(new Rect(-1920, 0, 400, 300), dip);
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingCoordinateMapper.ToPx"/> converts negative DIP coordinates correctly.</summary>
     [Fact]
     public void ToPx_NegativeDipCoordinates_ConvertsCorrectly()
     {
@@ -60,6 +65,7 @@ public class NativeSizingCoordinateMapperTests
         Assert.Equal(new NativeRectPx(-1920, 0, -1520, 300), px);
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingCoordinateMapper.ToDip"/> at scale 1.25 produces fractional DIP values.</summary>
     [Fact]
     public void ToDip_Scale125_ProducesFractionalDipValues()
     {
@@ -71,6 +77,7 @@ public class NativeSizingCoordinateMapperTests
         Assert.Equal(80.0, dip.Height, precision: 6);
     }
 
+    /// <summary>Verifies that a half-pixel value rounds to nearest using <see cref="Math.Round(double)"/>'s default <see cref="MidpointRounding.ToEven"/> behavior.</summary>
     [Fact]
     public void ToPx_HalfPixelValue_RoundsToNearestUsingMathRoundDefault()
     {
@@ -83,6 +90,7 @@ public class NativeSizingCoordinateMapperTests
         Assert.Equal(12, px.Bottom);
     }
 
+    /// <summary>Verifies that an inverted <see cref="NativeRectPx"/> (right &lt; left, bottom &lt; top) reports negative width and height.</summary>
     [Fact]
     public void NativeRectPx_InvertedRect_WidthAndHeightAreNegative()
     {

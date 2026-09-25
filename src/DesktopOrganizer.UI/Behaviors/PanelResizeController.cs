@@ -75,7 +75,7 @@ public sealed class PanelResizeController : IPanelResizeController
     /// <summary>
     /// Initializes a new instance of the <see cref="PanelResizeController"/> class.
     /// </summary>
-    /// <param name="window">The owning panel window (its <see cref="Window.Width"/>/<see cref="Window.Height"/>/<see cref="Window.Left"/>/<see cref="Window.Top"/> are resized).</param>
+    /// <param name="window">The owning panel window (its <see cref="FrameworkElement.Width"/>/<see cref="FrameworkElement.Height"/>/<see cref="Window.Left"/>/<see cref="Window.Top"/> are resized).</param>
     /// <param name="appSettings">Snap-to-grid settings driving whether/how the resize quantises.</param>
     /// <param name="windowManager">Used to persist layout state once a resize completes.</param>
     /// <param name="getModel">Accessor for the current <see cref="ChildWindowModel"/> (may return <see langword="null"/> before <c>Initialize</c>).</param>
@@ -124,6 +124,13 @@ public sealed class PanelResizeController : IPanelResizeController
         _gridHost = window as IPanelSizingGridHost;
     }
 
+    /// <summary>
+    /// Handles the <c>Thumb.DragStarted</c> event for one of the panel's 8 resize handles: self-heals a
+    /// stale in-progress gesture (H4), resolves the grid state/constraints for this gesture, verifies
+    /// mouse-capture ownership, and — if accepted — begins a <see cref="ResizeGestureSession"/>.
+    /// </summary>
+    /// <param name="sender">The <see cref="Thumb"/> whose <c>Tag</c> identifies the resize edge.</param>
+    /// <param name="e">Unused; present to match the WPF <c>Thumb.DragStarted</c> handler signature.</param>
     public void OnResizeDragStarted(object sender, DragStartedEventArgs e)
     {
         // Tag is always one of the 8 known strings set on the 8 Thumb elements in ChildWindow.xaml;
@@ -214,6 +221,13 @@ public sealed class PanelResizeController : IPanelResizeController
         _activeThumb = thumb;
     }
 
+    /// <summary>
+    /// Handles the <c>Thumb.DragDelta</c> event: applies the incremental resize through
+    /// <see cref="ResizeGestureSession.TryUpdate"/>, writes the resulting bounds onto the window, and
+    /// ends the gesture instead of propagating an exception if the update fails.
+    /// </summary>
+    /// <param name="sender">The <see cref="Thumb"/> whose <c>Tag</c> identifies the resize edge.</param>
+    /// <param name="e">The drag-delta event; its horizontal/vertical change is applied to the gesture.</param>
     public void OnResizeDragDelta(object sender, DragDeltaEventArgs e)
     {
         if (sender is not Thumb { Tag: string direction } thumb || !ResizeEdgeParser.TryParse(direction, out var edge))
@@ -282,6 +296,9 @@ public sealed class PanelResizeController : IPanelResizeController
         }
     }
 
+    /// <summary>Ends the resize gesture as <see cref="ResizeEndReason.Completed"/> or <see cref="ResizeEndReason.Canceled"/> on <c>Thumb.DragCompleted</c>.</summary>
+    /// <param name="sender">Unused; present to match the WPF <c>Thumb.DragCompleted</c> handler signature.</param>
+    /// <param name="e">The drag-completed event; <see cref="DragCompletedEventArgs.Canceled"/> selects the end reason.</param>
     public void OnResizeDragCompleted(object sender, DragCompletedEventArgs e)
         => EndResize(e.Canceled ? ResizeEndReason.Canceled : ResizeEndReason.Completed);
 
@@ -292,6 +309,8 @@ public sealed class PanelResizeController : IPanelResizeController
     /// synchronous one <see cref="EndResize"/> itself triggers by releasing capture on a normal
     /// completion — <see cref="ResizeGestureSession.End"/>'s idempotency makes that a no-op.
     /// </summary>
+    /// <param name="sender">Unused; present to match the WPF mouse-event handler signature.</param>
+    /// <param name="e">The capture-lost event; its <see cref="System.Windows.RoutedEventArgs.OriginalSource"/> is checked against the active gesture's <see cref="Thumb"/>.</param>
     public void OnCaptureLost(object sender, System.Windows.Input.MouseEventArgs e)
     {
         // finalization MAJOR M-1: Thumb.OnMouseLeftButtonUp resets Thumb.IsDragging to false and calls
@@ -329,6 +348,7 @@ public sealed class PanelResizeController : IPanelResizeController
     /// (<see cref="Views.ChildWindow.OnClosing"/> uses <see cref="ResizeEndReason.Closing"/>). A no-op if
     /// no gesture is active (<see cref="ResizeGestureSession.End"/> is idempotent).
     /// </summary>
+    /// <param name="reason">Why the gesture is ending.</param>
     public void AbortResize(ResizeEndReason reason) => EndResize(reason);
 
     /// <summary>
@@ -427,7 +447,7 @@ public sealed class PanelResizeController : IPanelResizeController
     /// </summary>
     /// <param name="reason">Why the gesture is ending.</param>
     /// <param name="exceptionType">
-    /// The failing exception's <see cref="Type.Name"/> when <paramref name="reason"/> is
+    /// The failing exception's <c>Type.Name</c> when <paramref name="reason"/> is
     /// <see cref="ResizeEndReason.Failed"/> — <see langword="null"/> for every other reason. Never the
     /// exception's <c>Message</c> (privacy invariant, diagnostics-log-events.md).
     /// </param>

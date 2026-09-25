@@ -67,9 +67,10 @@ public sealed class JsonLinesDiagnosticsLog : IDiagnosticsLog
     private volatile bool _disposed;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="JsonLinesDiagnosticsLog"/> and starts its background
-    /// writer thread. No file-system access happens on the calling thread — directory creation,
-    /// retention cleanup, and opening the first log file all happen on the writer thread itself.
+    /// Initializes a new instance of the <see cref="JsonLinesDiagnosticsLog"/> class and starts its
+    /// background writer thread. No file-system access happens on the calling thread — directory
+    /// creation, retention cleanup, and opening the first log file all happen on the writer thread
+    /// itself.
     /// </summary>
     /// <param name="directory">The folder diagnostics log files are written to.</param>
     /// <param name="maxFiles">Maximum number of session log files retained (oldest deleted first).</param>
@@ -84,24 +85,46 @@ public sealed class JsonLinesDiagnosticsLog : IDiagnosticsLog
     }
 
     /// <summary>
-    /// Test-only overload that lets a caller pause the background writer thread immediately after it
-    /// starts — before it ever drains the queue — via <paramref name="testWriterStallGate"/>. Exists
-    /// solely so backpressure/drop behavior (see the type remarks) can be exercised deterministically
-    /// without racing real disk I/O timing; mirrors the <c>forceCrossVolume</c> test hook pattern used
-    /// by <c>PanelItemStorageService</c>.
+    /// Initializes a new instance of the <see cref="JsonLinesDiagnosticsLog"/> class. Test-only
+    /// overload that lets a caller pause the background writer thread immediately after it starts —
+    /// before it ever drains the queue — via <paramref name="testWriterStallGate"/>. Exists solely so
+    /// backpressure/drop behavior (see the type remarks) can be exercised deterministically without
+    /// racing real disk I/O timing; mirrors the <c>forceCrossVolume</c> test hook pattern used by
+    /// <c>PanelItemStorageService</c>.
     /// </summary>
+    /// <param name="directory">The folder diagnostics log files are written to.</param>
+    /// <param name="maxFiles">Maximum number of session log files retained (oldest deleted first).</param>
+    /// <param name="maxBytes">Size threshold at which the current session's file is rotated.</param>
+    /// <param name="queueCapacity">Bounded capacity of the producer→writer queue.</param>
+    /// <param name="testWriterStallGate">
+    /// When non-<see langword="null"/>, the writer thread waits on this gate right after starting, before
+    /// draining the queue for the first time.
+    /// </param>
     internal JsonLinesDiagnosticsLog(string directory, int maxFiles, long maxBytes, int queueCapacity, ManualResetEventSlim? testWriterStallGate)
         : this(directory, maxFiles, maxBytes, queueCapacity, testWriterStallGate, testForceReopenFailure: null)
     {
     }
 
     /// <summary>
-    /// Test-only overload that additionally lets a caller force every post-rotation file reopen (see
+    /// Initializes a new instance of the <see cref="JsonLinesDiagnosticsLog"/> class. Test-only
+    /// overload that additionally lets a caller force every post-rotation file reopen (see
     /// <see cref="RotateIfNeeded"/>) to fail, deterministically exercising the M-1 degraded-mode path
     /// (a rotation hiccup must never silently kill the writer thread) without needing to race real
-    /// file-system locking. Mirrors <see cref="_testWriterStallGate"/>'s pattern of a test-only hook
-    /// that no-ops (<see langword="null"/>) on the production path.
+    /// file-system locking. Mirrors <c>_testWriterStallGate</c>'s pattern of a test-only hook that
+    /// no-ops (<see langword="null"/>) on the production path.
     /// </summary>
+    /// <param name="directory">The folder diagnostics log files are written to.</param>
+    /// <param name="maxFiles">Maximum number of session log files retained (oldest deleted first).</param>
+    /// <param name="maxBytes">Size threshold at which the current session's file is rotated.</param>
+    /// <param name="queueCapacity">Bounded capacity of the producer→writer queue.</param>
+    /// <param name="testWriterStallGate">
+    /// When non-<see langword="null"/>, the writer thread waits on this gate right after starting, before
+    /// draining the queue for the first time.
+    /// </param>
+    /// <param name="testForceReopenFailure">
+    /// When non-<see langword="null"/>, invoked on every post-rotation file reopen; a <see langword="true"/>
+    /// result forces that reopen attempt to fail, exercising the degraded-mode path.
+    /// </param>
     internal JsonLinesDiagnosticsLog(string directory, int maxFiles, long maxBytes, int queueCapacity, ManualResetEventSlim? testWriterStallGate, Func<bool>? testForceReopenFailure)
     {
         ArgumentNullException.ThrowIfNull(directory);
@@ -124,15 +147,15 @@ public sealed class JsonLinesDiagnosticsLog : IDiagnosticsLog
         _writerThread.Start();
     }
 
+    /// <inheritdoc />
+    public bool IsEnabled => !_disposed;
+
     /// <summary>
     /// Test-only: current count of events dropped since the last flush (mirrors
     /// <c>PanelItemStorageService.ManifestDiskReadCount</c>'s pattern of exposing an internal counter
     /// for assertions instead of inferring it indirectly).
     /// </summary>
     internal long DroppedCount => Interlocked.Read(ref _droppedCount);
-
-    /// <inheritdoc />
-    public bool IsEnabled => !_disposed;
 
     /// <inheritdoc />
     public void Write(string category, string name, string? scope, params KeyValuePair<string, object?>[] payload)

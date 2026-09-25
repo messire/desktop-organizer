@@ -8,8 +8,9 @@ namespace DesktopOrganizer.Services.SingleInstance;
 
 /// <summary>
 /// <see cref="NamedPipeClientStream"/>-backed <see cref="IActivationClient"/> (ADR-023 D-4/D-5).
-/// Never blocks longer than the caller's <c>connectTimeout</c> and never throws — every failure mode
-/// maps to an <see cref="ActivationSendResult"/> instead.
+/// Bounded by the caller's <c>connectTimeout</c> twice over (once for connecting, once more for the
+/// write+read round trip) and never throws — every failure mode maps to an
+/// <see cref="ActivationSendResult"/> instead.
 /// </summary>
 /// <param name="pipeName">Machine-global activation pipe name (see <see cref="SingleInstanceNaming"/>).</param>
 /// <param name="nativeApi">

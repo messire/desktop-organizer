@@ -9,6 +9,9 @@ namespace DesktopOrganizer.Services.SingleInstance;
 /// </summary>
 public static class SingleInstanceStartupDecisionTable
 {
+    /// <summary>
+    /// Maps a completed handshake outcome to the decision the process entry point must act on.
+    /// </summary>
     /// <param name="acquired">
     /// Whether this process ended up owning the guard mutex. When <see langword="true"/> the process
     /// is primary regardless of <paramref name="serverStarted"/> — a failed pipe server means

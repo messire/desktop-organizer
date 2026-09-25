@@ -69,8 +69,8 @@ public static class PanelMetrics
     /// corner-anchoring <c>Horizontal</c>/<c>VerticalAlignment</c> to "overflow" the extra 2 DIP — never
     /// actually rendered/hit-tested at 8×8 on this WPF path. WPF applies an automatic per-element layout
     /// clip (<see cref="System.Windows.FrameworkElement"/>'s internal <c>NeedsClipBounds</c> mechanism —
-    /// entirely separate from <see cref="System.Windows.Controls.Panel.ClipToBounds"/>, and NOT bypassed
-    /// by alignment) to ANY child whose resolved <see cref="System.Windows.FrameworkElement.RenderSize"/>
+    /// entirely separate from <see cref="System.Windows.UIElement.ClipToBounds"/>, and NOT bypassed
+    /// by alignment) to ANY child whose resolved <see cref="System.Windows.UIElement.RenderSize"/>
     /// exceeds the arrange slot the <c>Grid</c> actually gave it — silently clipping fix-cycle 2's
     /// "overflow" straight back down to 6×6; alignment only ever controlled WHICH 6×6 corner of the 8×8
     /// desired size survived the clip, never whether the clip applied. Confirmed with a real, on-Windows
@@ -98,10 +98,10 @@ public static class PanelMetrics
     public const double ResizeEdgeThickness = 6d;
 
     /// <summary>
-    /// Width of the horizontal chrome reserved between a panel's <see cref="System.Windows.Window.Width"/>
+    /// Width of the horizontal chrome reserved between a panel's <see cref="System.Windows.FrameworkElement.Width"/>
     /// and the icon-grid content area (<c>PART_SurfaceLayer</c>'s inner <c>[pad|*|pad]</c> columns,
     /// <c>Resources/Styles/Panels.xaml</c>) — the single source of truth for the boundary between
-    /// ADR-028's workspace panel grid (a panel's whole <see cref="System.Windows.Window.Width"/>) and
+    /// ADR-028's workspace panel grid (a panel's whole <see cref="System.Windows.FrameworkElement.Width"/>) and
     /// ADR-015/018/029's internal icon layout (DIP relative to CONTENT origin, i.e.
     /// <c>Window.Width - ContentLeftInset</c>) — see adr/ADR-029-icon-layout-policy.md, Решение 2 ("F-3"
     /// fix, docs/PLANS/workspace-grid-00-baseline.md finding F-3). Before this constant existed,

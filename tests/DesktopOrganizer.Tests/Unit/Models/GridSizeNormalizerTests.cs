@@ -16,6 +16,10 @@ public class GridSizeNormalizerTests
 
     // ── GridSize <= 1 disables normalization entirely ───────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.Normalize"/> leaves the bounds completely unchanged
+    /// when <c>gridSize</c> is 1 (normalization disabled).
+    /// </summary>
     [Fact]
     public void Normalize_GridSizeOne_ReturnsBoundsUnchanged()
     {
@@ -26,6 +30,10 @@ public class GridSizeNormalizerTests
         Assert.Equal(bounds, result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.Normalize"/> leaves the bounds completely unchanged
+    /// when <c>gridSize</c> is 0 (normalization disabled).
+    /// </summary>
     [Fact]
     public void Normalize_GridSizeZero_ReturnsBoundsUnchanged()
     {
@@ -38,6 +46,11 @@ public class GridSizeNormalizerTests
 
     // ── The user's exact repro: (64,64) 64x64 @ GridSize=32 restored under GridSize=48 ──────────────
 
+    /// <summary>
+    /// Pins the user-reported repro: a panel placed at <c>(64, 64)</c>/<c>64x64</c> while
+    /// <c>GridSize=32</c> re-aligns its position to the nearest 48-multiple, and its size jumps straight
+    /// to the smallest 48-multiple at or above the 120 minimum-size floor.
+    /// </summary>
     [Fact]
     public void Normalize_UserRepro_PositionSnapsTo48_SizeGrowsToSmallestMultipleAboveMinSize()
     {
@@ -59,6 +72,10 @@ public class GridSizeNormalizerTests
 
     // ── Position rounding: (65,95) -> (48,96) ───────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.NormalizeCoordinate"/> rounds 65 down to the nearest
+    /// 48-multiple, 48.
+    /// </summary>
     [Fact]
     public void NormalizeCoordinate_65_RoundsDownTo48()
     {
@@ -66,6 +83,10 @@ public class GridSizeNormalizerTests
         Assert.Equal(48d, GridSizeNormalizer.NormalizeCoordinate(65, 48));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.NormalizeCoordinate"/> rounds 95 up to the nearest
+    /// 48-multiple, 96.
+    /// </summary>
     [Fact]
     public void NormalizeCoordinate_95_RoundsUpTo96()
     {
@@ -73,6 +94,10 @@ public class GridSizeNormalizerTests
         Assert.Equal(96d, GridSizeNormalizer.NormalizeCoordinate(95, 48));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.Normalize"/> snaps a position of <c>(65, 95)</c> to
+    /// <c>(48, 96)</c> when the size is already on-grid and above any floor, isolating the position math.
+    /// </summary>
     [Fact]
     public void Normalize_Position65x95_SnapsTo48x96()
     {
@@ -86,6 +111,10 @@ public class GridSizeNormalizerTests
 
     // ── Tie-break: exactly halfway between two grid lines resolves to the HIGHER one ────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.NormalizeCoordinate"/> resolves an exact halfway tie
+    /// (72 is exactly 1.5 × 48) by rounding up to 96, not down.
+    /// </summary>
     [Fact]
     public void NormalizeCoordinate_ExactHalfwayTie_72Over48_RoundsUpTo96()
     {
@@ -98,12 +127,20 @@ public class GridSizeNormalizerTests
 
     // ── GridSize=1 short-circuits the axis-level helpers too ────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.NormalizeCoordinate"/> returns the raw coordinate
+    /// unchanged when <c>gridSize</c> is 1.
+    /// </summary>
     [Fact]
     public void NormalizeCoordinate_GridSizeOne_ReturnsRawUnchanged()
     {
         Assert.Equal(103d, GridSizeNormalizer.NormalizeCoordinate(103, 1));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.NormalizeExtent"/> returns the raw extent unchanged
+    /// when <c>gridSize</c> is 1.
+    /// </summary>
     [Fact]
     public void NormalizeExtent_GridSizeOne_ReturnsRawUnchanged()
     {
@@ -112,6 +149,10 @@ public class GridSizeNormalizerTests
 
     // ── Negative coordinates (monitor left of/above the primary) ───────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.NormalizeCoordinate"/> applies the same rounding
+    /// formula to a negative coordinate, with no sign-sensitive special case, rounding -65 to -48.
+    /// </summary>
     [Fact]
     public void NormalizeCoordinate_Negative65_RoundsTowardZeroTo48Negative()
     {
@@ -121,6 +162,10 @@ public class GridSizeNormalizerTests
         Assert.Equal(-48d, GridSizeNormalizer.NormalizeCoordinate(-65, 48));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.Normalize"/> snaps a position on a monitor left of
+    /// or above the primary (negative coordinates) onto the corresponding negative grid line.
+    /// </summary>
     [Fact]
     public void Normalize_NegativePosition_SnapsToNegativeGridLine()
     {
@@ -134,6 +179,10 @@ public class GridSizeNormalizerTests
 
     // ── Work area clamp: panel would land beyond the right/bottom edge after rounding up ────────────
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.Normalize"/> clamps a position that would round past
+    /// the work area's right edge back to the largest grid multiple whose right edge still fits.
+    /// </summary>
     [Fact]
     public void Normalize_PositionWouldExceedWorkArea_ClampsBackInsideOnAGridMultiple()
     {
@@ -150,6 +199,10 @@ public class GridSizeNormalizerTests
         Assert.Equal(144d, result.Width); // size itself was already inside the work area -> untouched.
     }
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.Normalize"/> applies plain nearest-multiple rounding
+    /// with no clamp at all when no work area is supplied, even if the result ends up off-screen.
+    /// </summary>
     [Fact]
     public void Normalize_NoWorkArea_NeverClampsPosition_EvenIfItWouldEndUpOffscreen()
     {
@@ -160,6 +213,10 @@ public class GridSizeNormalizerTests
         Assert.Equal(1920d, result.X); // plain nearest-multiple rounding, no clamp applied.
     }
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.Normalize"/> shrinks a size larger than the work
+    /// area down to the largest grid multiple that still fits within it.
+    /// </summary>
     [Fact]
     public void Normalize_SizeLargerThanWorkArea_ShrinksToLargestFittingGridMultiple()
     {
@@ -174,6 +231,17 @@ public class GridSizeNormalizerTests
 
     // ── Idempotency: Normalize(Normalize(x)) == Normalize(x) ────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that applying <see cref="GridSizeNormalizer.Normalize"/> a second time to its own
+    /// output is a no-op, across a spread of positions, sizes, grid sizes, and minimum sizes.
+    /// </summary>
+    /// <param name="x">The bounds' x-coordinate.</param>
+    /// <param name="y">The bounds' y-coordinate.</param>
+    /// <param name="width">The bounds' width.</param>
+    /// <param name="height">The bounds' height.</param>
+    /// <param name="gridSize">The grid size passed to <c>Normalize</c>.</param>
+    /// <param name="minWidth">The minimum width floor passed to <c>Normalize</c>.</param>
+    /// <param name="minHeight">The minimum height floor passed to <c>Normalize</c>.</param>
     [Theory]
     [InlineData(64, 64, 64, 64, 48, 120, 120)]
     [InlineData(65, 95, 300, 300, 48, 0, 0)]
@@ -192,6 +260,10 @@ public class GridSizeNormalizerTests
         Assert.Equal(once, twice);
     }
 
+    /// <summary>
+    /// Verifies that applying <see cref="GridSizeNormalizer.Normalize"/> a second time to its own
+    /// output is a no-op even when no work area is supplied.
+    /// </summary>
     [Fact]
     public void Normalize_ApplyingTwice_NoWorkArea_ProducesTheSameResultAsOnce()
     {
@@ -206,6 +278,10 @@ public class GridSizeNormalizerTests
 
     // ── Already-on-grid bounds are left untouched ────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.Normalize"/> leaves bounds unchanged when every
+    /// component is already an exact multiple of the grid size.
+    /// </summary>
     [Fact]
     public void Normalize_AlreadyOnGrid_ReturnsBoundsUnchanged()
     {
@@ -247,6 +323,10 @@ public class GridSizeNormalizerTests
 
     // ── NormalizeExtent: below-floor candidate jumps straight to the floor's own ceiling multiple ────
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.NormalizeExtent"/> jumps a below-floor nearest
+    /// multiple straight to the smallest grid multiple at or above the minimum-extent floor.
+    /// </summary>
     [Fact]
     public void NormalizeExtent_NearestBelowFloor_JumpsToSmallestMultipleAtOrAboveFloor()
     {
@@ -254,12 +334,20 @@ public class GridSizeNormalizerTests
         Assert.Equal(144d, GridSizeNormalizer.NormalizeExtent(64, gridSize: 48, minExtent: 120));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.NormalizeExtent"/> uses the nearest grid multiple
+    /// directly when it already meets the minimum-extent floor.
+    /// </summary>
     [Fact]
     public void NormalizeExtent_NearestAlreadyMeetsFloor_UsesNearestDirectly()
     {
         Assert.Equal(144d, GridSizeNormalizer.NormalizeExtent(150, gridSize: 48, minExtent: 120));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="GridSizeNormalizer.NormalizeExtent"/> returns the minimum-extent floor
+    /// itself when that floor is already an exact grid multiple.
+    /// </summary>
     [Fact]
     public void NormalizeExtent_FloorItselfIsAnExactMultiple_ReturnsTheFloor()
     {

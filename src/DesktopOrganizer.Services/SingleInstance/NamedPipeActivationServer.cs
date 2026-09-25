@@ -17,7 +17,7 @@ namespace DesktopOrganizer.Services.SingleInstance;
 /// <item>the accept loop runs on its own background thread (<see cref="ThreadPriority"/> default,
 /// <c>IsBackground = true</c>), never on a thread-pool worker that could be starved;</item>
 /// <item>every accepted connection gets a hard 500ms budget for read+respond, then an unconditional
-/// <see cref="NamedPipeServerStream.Disconnect"/>/<see cref="NamedPipeServerStream.Dispose()"/>;</item>
+/// <see cref="NamedPipeServerStream.Disconnect"/>/<see cref="IDisposable.Dispose"/>;</item>
 /// <item>reads are bounded by <see cref="ActivationMessageCodec.MaxMessageBytes"/> — anything larger
 /// gets <see cref="ActivationResponseCode.Unsupported"/> and the connection is torn down;</item>
 /// <item>the only work done on the pipe thread on behalf of the caller is invoking the supplied

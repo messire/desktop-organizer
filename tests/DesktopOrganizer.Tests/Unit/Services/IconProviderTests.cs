@@ -30,6 +30,9 @@ public class IconProviderTests
     private readonly Mock<IDiagnosticsLog> _diagnosticsLogMock;
     private readonly List<(string Category, string Name, string? Scope, KeyValuePair<string, object?>[] Payload)> _diagnosticsWrites = [];
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IconProviderTests"/> class.
+    /// </summary>
     public IconProviderTests()
     {
         _iconHandlerMock = new Mock<IIconHandler>();
@@ -48,6 +51,10 @@ public class IconProviderTests
         _iconProvider = new IconProvider(_iconHandlerMock.Object, _iconFactoryMock.Object, _diagnosticsLogMock.Object);
     }
 
+    /// <summary>
+    /// Gets the file-path/icon-handle pairs exercised by
+    /// <see cref="GetIcon_BehavesCorrectly_ForVariousFilePaths"/>.
+    /// </summary>
     public static IEnumerable<object[]> GetIconTestData => new List<object[]>
     {
         new object[] { ValidFilePath, ValidIconHandle },
@@ -57,6 +64,8 @@ public class IconProviderTests
     /// <summary>
     /// Ensures that GetIcon behaves correctly for various file paths.
     /// </summary>
+    /// <param name="filePath">The file path passed to <see cref="IconProvider.GetIcon"/>.</param>
+    /// <param name="iconHandle">The icon handle the mocked icon handler is set up to return for that path.</param>
     [Theory]
     [MemberData(nameof(GetIconTestData))]
     public void GetIcon_BehavesCorrectly_ForVariousFilePaths(string filePath, IntPtr iconHandle)
@@ -380,6 +389,10 @@ public class IconProviderTests
 
     // ── UX P1 (P08 fix cycle 1, 2026-09-22): generic-by-extension fallback for a missing path ───────
 
+    /// <summary>
+    /// Verifies that a missing path with a recognized extension is still resolved through a shell lookup
+    /// (as a file) and serves the real icon when the shell manages to produce one.
+    /// </summary>
     [Fact]
     public void GetIcon_MissingPathWithExtension_AttemptsShellLookupAsFile_ReturnsRealIconWhenAvailable()
     {
@@ -393,6 +406,7 @@ public class IconProviderTests
         _iconHandlerMock
             .Setup(h => h.GetIconHandle(missingPath, ref shellFileInfo, FileAttributes, IconFlags))
             .Returns(ValidIconHandle);
+
         // It.IsAny<IntPtr>() (not ValidIconHandle): the mocked GetIconHandle above only configures its
         // own RETURN value, not the ref ShellFileInfo.IconHandle field TryCreateBitmapSource actually
         // reads (CreateBitmap(fileInfo.IconHandle)) — that field is never populated by this simple
@@ -408,6 +422,10 @@ public class IconProviderTests
         _iconHandlerMock.Verify(h => h.GetIconHandle(missingPath, ref shellFileInfo, FileAttributes, IconFlags), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that a missing path without an extension is resolved through a shell lookup as a
+    /// directory, using <see cref="FileAttribute.Directory"/> instead of the file attribute set.
+    /// </summary>
     [Fact]
     public void GetIcon_MissingPathWithoutExtension_AttemptsShellLookupAsDirectory()
     {
@@ -426,14 +444,18 @@ public class IconProviderTests
         _iconHandlerMock.Verify(h => h.GetIconHandle(missingPath, ref shellFileInfo, DirectoryAttributes, IconFlags), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that when the shell lookup for a missing path with an unrecognized extension also fails,
+    /// <see cref="IconProvider.GetIcon"/> falls back to its own placeholder bitmap.
+    /// </summary>
     [Fact]
     public void GetIcon_MissingPath_ShellLookupAlsoFails_FallsBackToOwnPlaceholder()
     {
         const string missingPath = @"C:\fake\does-not-exist.qqqzz";
         var placeholder = new DrawingImage();
         _iconFactoryMock.Setup(f => f.CreateBitmap()).Returns(placeholder);
-        // No handler setup at all -> loose mock returns IntPtr.Zero, same as a genuinely failed lookup.
 
+        // No handler setup at all -> loose mock returns IntPtr.Zero, same as a genuinely failed lookup.
         var result = _iconProvider.GetIcon(missingPath);
 
         Assert.Same(placeholder, result);
@@ -442,6 +464,10 @@ public class IconProviderTests
 
     // ── MINOR-1 (P08 fix cycle 2, 2026-09-22): missing-path fallback must never poison the cache ──────
 
+    /// <summary>
+    /// Verifies that a missing-path fallback result is never cached: once the file appears on disk, the
+    /// next call re-resolves and serves the real icon instead of the stale fallback.
+    /// </summary>
     [Fact]
     public void GetIcon_MissingPathFallbackThenFileAppears_ServesTheRealIconNotTheStaleFallback()
     {
@@ -484,6 +510,10 @@ public class IconProviderTests
         }
     }
 
+    /// <summary>
+    /// Verifies that repeated calls for a path that remains missing never get cached either: each call
+    /// re-resolves through the icon handler instead of serving a cached instance.
+    /// </summary>
     [Fact]
     public void GetIcon_MissingPathCalledTwice_StillNotCached_ReResolvesEachTime()
     {
@@ -509,6 +539,10 @@ public class IconProviderTests
 
     // ── M3 (P08 fix cycle 1, 2026-09-22): IIconProvider.IsPlaceholder ────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.IsPlaceholder"/> returns <see langword="true"/> for the icon
+    /// instance <see cref="IconProvider.GetIcon"/> itself hands back as its own placeholder.
+    /// </summary>
     [Fact]
     public void IsPlaceholder_PlaceholderInstance_ReturnsTrue()
     {
@@ -520,6 +554,10 @@ public class IconProviderTests
         Assert.True(_iconProvider.IsPlaceholder(icon));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.IsPlaceholder"/> returns <see langword="false"/> for a genuinely
+    /// resolved icon.
+    /// </summary>
     [Fact]
     public void IsPlaceholder_RealResolvedIcon_ReturnsFalse()
     {
@@ -529,12 +567,20 @@ public class IconProviderTests
         Assert.False(_iconProvider.IsPlaceholder(icon));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.IsPlaceholder"/> returns <see langword="false"/> for a
+    /// <see langword="null"/> icon rather than throwing.
+    /// </summary>
     [Fact]
     public void IsPlaceholder_NullIcon_ReturnsFalse()
     {
         Assert.False(_iconProvider.IsPlaceholder(null));
     }
 
+    /// <summary>
+    /// Verifies that checking a real, non-placeholder icon never forces the lazily-created placeholder
+    /// bitmap to be allocated just to answer the reference-equality question.
+    /// </summary>
     [Fact]
     public void IsPlaceholder_RealResolvedIcon_DoesNotAllocateAPlaceholderBitmap()
     {
@@ -549,6 +595,7 @@ public class IconProviderTests
         _iconFactoryMock.Verify(f => f.CreateBitmap(), Times.Never);
     }
 
+    // ── helpers ──────────────────────────────────────────────────────────────
     private static T GetPayloadValue<T>(KeyValuePair<string, object?>[] payload, string key)
         => (T)payload.Single(kv => kv.Key == key).Value!;
 

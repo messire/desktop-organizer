@@ -33,9 +33,12 @@ public static class RenameEditBehavior
             new PropertyMetadata(false, OnIsRenameEditorChanged));
 
     /// <summary>Gets the value of the <see cref="IsRenameEditorProperty"/> attached property.</summary>
+    /// <param name="obj">The <see cref="TextBox"/> to read the property from.</param>
     public static bool GetIsRenameEditor(DependencyObject obj) => (bool)obj.GetValue(IsRenameEditorProperty);
 
     /// <summary>Sets the value of the <see cref="IsRenameEditorProperty"/> attached property.</summary>
+    /// <param name="obj">The <see cref="TextBox"/> to wire up (or unwire) as an inline-rename editor.</param>
+    /// <param name="value"><see langword="true"/> to wire this <see cref="TextBox"/> up as a rename editor; <see langword="false"/> to remove the wiring.</param>
     public static void SetIsRenameEditor(DependencyObject obj, bool value) => obj.SetValue(IsRenameEditorProperty, value);
 
     private static void OnIsRenameEditorChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

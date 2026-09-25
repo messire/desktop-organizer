@@ -322,7 +322,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// 2026-09-22: this is a NEW instance per resolution, not the same live object <c>ChildWindow</c>
     /// holds — <c>DiConfig.cs</c> registers <see cref="IGestureDiagnostics"/> transient, not singleton),
     /// reused as a lightweight, already-privacy-audited sink rather than adding a second
-    /// <see cref="Services.Abstractions.IDiagnosticsLog"/> dependency.
+    /// <see cref="DesktopOrganizer.Services.Abstractions.IDiagnosticsLog"/> dependency.
     /// </param>
     public ChildWindowViewModel(
         IIconProvider iconProvider,
@@ -378,6 +378,186 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         if (item is not null) _fileLauncher.Open(item.Path);
     }
 
+    /// <summary>
+    /// Adds files dropped onto the panel from an external source (desktop, Explorer). Unlike
+    /// <see cref="BaseViewModel.AddFiles"/> — which is also used to mirror a live Folder Portal and
+    /// must keep pointing at the real files — this moves each dropped file or folder into
+    /// app-managed storage first (see <see cref="IPanelItemStorageService"/>), so the original is
+    /// removed from its source location immediately (the whole point of dragging it in: decluttering
+    /// the desktop) and the panel item survives independently of where it came from. A moved-in
+    /// folder keeps its structure but is no longer live-linked to its old location — for a folder the
+    /// user wants kept in sync, a Folder Portal (<see cref="SelectSourceFolderCommand"/>) is the right
+    /// tool. Whatever <see cref="IPanelItemStorageService"/> can't or won't move (very large folders,
+    /// locked files, etc.) falls back to referencing the original path in place — same as before this
+    /// fix, still trackable live via <see cref="FileItem.Refresh"/>.
+    /// </summary>
+    /// <param name="paths">Raw file-system paths from the drop (<c>DataFormats.FileDrop</c>).</param>
+    public void AddDroppedFiles(string[] paths)
+    {
+        var sources = paths.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
+        var resolved = new string[sources.Length];
+        var anyMoved = false;
+
+        for (var i = 0; i < sources.Length; i++)
+        {
+            var source = sources[i];
+            var result = Directory.Exists(source)
+                ? _itemStorage.MoveInDirectory(source) ?? source
+                : _itemStorage.MoveIn(source) ?? source;
+
+            resolved[i] = result;
+
+            if (!string.Equals(result, source, StringComparison.OrdinalIgnoreCase) && _itemStorage.IsManaged(result))
+                anyMoved = true;
+        }
+
+        AddFiles(resolved);
+
+        MaybeRaiseMoveHint(anyMoved);
+    }
+
+    /// <summary>
+    /// Initializes the ViewModel from a <see cref="ChildWindowModel"/>.
+    /// Starts a live folder watcher when the model has a non-empty <see cref="ChildWindowModel.SourceFolderPath"/>.
+    /// </summary>
+    /// <param name="model">The model to load state from.</param>
+    public void LoadFromModel(ChildWindowModel model)
+    {
+        Model = model; // subscribes to Model.PropertyChanged; unsubscribes any previous model first
+
+        var sourceFiles = GetSourceFiles(model);
+        var resolved = ResolveManagedReplacements(sourceFiles);
+
+        // ReplaceAll (not AddFiles): re-binding to a different model must replace the file set, not
+        // accumulate onto whatever was already loaded — otherwise a second LoadFromModel call leaves
+        // the panel showing the union of both models' files, and SyncToModel would persist that union
+        // back onto the new model's FilePaths.
+        ReplaceAll(resolved);
+        ApplyViewMode();
+
+        // CRITICAL C1 fix, part (b) (P08 fix cycle 1, 2026-09-22): when ResolveManagedReplacements
+        // actually remapped a stale path, write it onto Model.FilePaths immediately, in memory — not
+        // only whenever some unrelated future SyncToModel() call happens to run — and request a
+        // (debounced, not immediate — ADR-012 Decision 1 is unaffected) save so it's durable soon.
+        // Without this, any code that reads Model.FilePaths directly before that unrelated trigger
+        // fires (e.g. MainWindowViewModel.RemovePanel's/PageManagerService.RemovePage's "does this
+        // panel have anything to lose" check) still sees the stale, pre-remap path. A Folder Portal
+        // never persists FilePaths at all (SyncToModel skips it — see IsPortal), so this only applies
+        // to a non-portal remap; ReferenceEquals is enough to detect one, since
+        // ResolveManagedReplacements only ever clones+mutates when it actually changed something.
+        if (!ReferenceEquals(resolved, sourceFiles) && string.IsNullOrWhiteSpace(model.SourceFolderPath))
+        {
+            model.FilePaths = [.. resolved];
+            FilesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (!string.IsNullOrWhiteSpace(model.SourceFolderPath) && Directory.Exists(model.SourceFolderPath))
+        {
+            AttachWatcher(model.SourceFolderPath);
+            OnPropertyChanged(nameof(IsPortal));
+
+            // IsPortal flipping to true also forces EffectiveSortMode (and therefore IsSortedByName)
+            // to Name (see EffectiveSortMode's doc comment) — the "Manual"/"By name" context-menu
+            // checkmarks and the header sort button's highlight both bind to these projections, not
+            // Model.SortMode, so they need their own notification here too (CRITICAL-2).
+            NotifySortModeChanged();
+        }
+    }
+
+    /// <summary>
+    /// Re-validates <see cref="FileItem.Exists"/>/<see cref="FileItem.IsDirectory"/> for every item in
+    /// this panel against the current file-system state, and re-resolves the icon for any item that
+    /// just reappeared (see <see cref="BaseViewModel.RefreshItemsLiveness"/>). Runs on a thread-pool
+    /// timer; marshals to the UI thread before touching <see cref="FileItem"/> instances (they're bound
+    /// to the live UI) and must never throw — an exception escaping a <see cref="System.Threading.Timer"/>
+    /// callback is an UNHANDLED exception on a thread-pool thread, which terminates the whole process.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The <see langword="try"/>/<see langword="catch"/> around <see cref="BaseViewModel.RefreshItemsLiveness"/>
+    /// below is a SEPARATE concern from the marshalling itself: a bare <c>Dispatcher.Invoke</c> onto an
+    /// already-shut-down dispatcher rethrows <see cref="System.Threading.Tasks.TaskCanceledException"/> at
+    /// this thread-pool timer thread and kills the process (intermittent, order-dependent
+    /// "Test Run Aborted" with zero failing tests; in production, a tick landing during application
+    /// shutdown). <see cref="UiDispatch.TryBeginInvoke"/> is the fire-and-forget guarded marshal — see its
+    /// own remarks.
+    /// </para>
+    /// <para>
+    /// MAJOR M-1 fix (P08 fix cycle 2): this used to call the BLOCKING <see cref="UiDispatch.TryInvoke"/>,
+    /// which occupies the calling thread-pool thread until the UI thread services it — indefinitely, if
+    /// that dispatcher is busy or never pumps at all. Because this timer keeps firing every
+    /// <see cref="ExistenceCheckIntervalMs"/>, a busy/blocked UI thread used to accumulate one occupied
+    /// thread-pool thread per tick, which can starve the pool (see
+    /// <c>docs/Refactoring/Testing/sta-test-conventions.md</c>'s "second, unrelated flake"). Switching to
+    /// <see cref="UiDispatch.TryBeginInvoke"/> alone would still let an UNBOUNDED number of dispatched
+    /// operations pile up on a busy dispatcher's queue, so <see cref="_existenceRefreshPending"/> is an
+    /// explicit single-flight guard: a tick that finds a previous refresh still outstanding skips queuing
+    /// another one entirely, rather than adding to a backlog nobody is servicing yet.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">Unused; present to match the <see cref="System.Threading.TimerCallback"/> signature.</param>
+    internal void RefreshExistence(object? state)
+    {
+        if (_disposed) return;
+
+        // Single-flight guard (MAJOR M-1, see remarks): 0 -> 1 means "no refresh outstanding, this tick
+        // claims the slot"; any other tick finding it already 1 backs off instead of queuing a second
+        // Dispatcher operation on top of the still-unserviced first one.
+        if (System.Threading.Interlocked.CompareExchange(ref _existenceRefreshPending, 1, 0) != 0)
+            return;
+
+        var queued = UiDispatch.TryBeginInvoke(Application.Current?.Dispatcher, () =>
+        {
+            try
+            {
+                if (_disposed) return;
+
+                try
+                {
+                    RefreshItemsLiveness();
+                }
+                catch (Exception ex)
+                {
+                    // UX P2 fix (P08 fix cycle 1, 2026-09-22): Console.Error is never read by a WinExe
+                    // process (see the icon pipeline's own identical fix, IconHandler/IconProvider) — route
+                    // to the structured diagnostics log instead. Privacy invariant: exception TYPE NAME
+                    // only, never ex.Message, which may embed a file path.
+                    _diagnostics.ExistenceRefreshFailed(Model.Id, ex.GetType().Name);
+                }
+            }
+            finally
+            {
+                // Frees the slot for the NEXT tick only once this one has actually run — not merely been
+                // queued. Runs even if RefreshItemsLiveness() itself was skipped (_disposed) or failed.
+                System.Threading.Volatile.Write(ref _existenceRefreshPending, 0);
+            }
+        });
+
+        if (!queued)
+        {
+            // Dropped before it could even be queued (no Application yet, or its dispatcher is already
+            // shutting down/shut down) — nothing will ever run to clear the flag above, so clear it here
+            // instead of permanently wedging every future tick into "always pending".
+            System.Threading.Volatile.Write(ref _existenceRefreshPending, 0);
+        }
+    }
+
+    /// <summary>
+    /// Returns all file-system entries in <paramref name="folder"/>, or an empty array on error.
+    /// </summary>
+    private static string[] GetSafeEntries(string folder)
+    {
+        try
+        {
+            return Directory.GetFileSystemEntries(folder);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to read folder '{folder}': {ex.Message}");
+            return [];
+        }
+    }
+
     private void OpenContainingFolder(FileItem? item)
     {
         if (item is not null) _fileLauncher.OpenContainingFolder(item.Path);
@@ -397,9 +577,9 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         var outcome = _itemStorage.Restore(item.Path);
         if (outcome == RestoreOutcome.OriginalPathUnknown)
             _itemStorage.Release(item.Path); // legacy managed copy with no manifest entry — old behavior
+
         // NotManaged: Restore already no-op'd. Failed: logged inside the service; item stays removed from UI
         // even though the managed copy is orphaned in storage — acceptable, documented in the plan (risk table).
-
         FilesChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -484,44 +664,6 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
-    /// Adds files dropped onto the panel from an external source (desktop, Explorer). Unlike
-    /// <see cref="BaseViewModel.AddFiles"/> — which is also used to mirror a live Folder Portal and
-    /// must keep pointing at the real files — this moves each dropped file or folder into
-    /// app-managed storage first (see <see cref="IPanelItemStorageService"/>), so the original is
-    /// removed from its source location immediately (the whole point of dragging it in: decluttering
-    /// the desktop) and the panel item survives independently of where it came from. A moved-in
-    /// folder keeps its structure but is no longer live-linked to its old location — for a folder the
-    /// user wants kept in sync, a Folder Portal (<see cref="SelectSourceFolderCommand"/>) is the right
-    /// tool. Whatever <see cref="IPanelItemStorageService"/> can't or won't move (very large folders,
-    /// locked files, etc.) falls back to referencing the original path in place — same as before this
-    /// fix, still trackable live via <see cref="FileItem.Refresh"/>.
-    /// </summary>
-    /// <param name="paths">Raw file-system paths from the drop (<c>DataFormats.FileDrop</c>).</param>
-    public void AddDroppedFiles(string[] paths)
-    {
-        var sources = paths.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
-        var resolved = new string[sources.Length];
-        var anyMoved = false;
-
-        for (var i = 0; i < sources.Length; i++)
-        {
-            var source = sources[i];
-            var result = Directory.Exists(source)
-                ? _itemStorage.MoveInDirectory(source) ?? source
-                : _itemStorage.MoveIn(source) ?? source;
-
-            resolved[i] = result;
-
-            if (!string.Equals(result, source, StringComparison.OrdinalIgnoreCase) && _itemStorage.IsManaged(result))
-                anyMoved = true;
-        }
-
-        AddFiles(resolved);
-
-        MaybeRaiseMoveHint(anyMoved);
-    }
-
-    /// <summary>
     /// Shows the one-time Move-semantics hint the first time <paramref name="anyMoved"/> is
     /// <see langword="true"/> for a live drag-drop (<see cref="AddDroppedFiles"/>), then flips
     /// <see cref="IAppSettings.HasShownMoveHint"/> permanently so it never shows again — including
@@ -539,54 +681,6 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         _appSettings.Save();
 
         MoveHintRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    /// <summary>
-    /// Initializes the ViewModel from a <see cref="ChildWindowModel"/>.
-    /// Starts a live folder watcher when the model has a non-empty <see cref="ChildWindowModel.SourceFolderPath"/>.
-    /// </summary>
-    /// <param name="model">The model to load state from.</param>
-    public void LoadFromModel(ChildWindowModel model)
-    {
-        Model = model; // subscribes to Model.PropertyChanged; unsubscribes any previous model first
-
-        var sourceFiles = GetSourceFiles(model);
-        var resolved = ResolveManagedReplacements(sourceFiles);
-
-        // ReplaceAll (not AddFiles): re-binding to a different model must replace the file set, not
-        // accumulate onto whatever was already loaded — otherwise a second LoadFromModel call leaves
-        // the panel showing the union of both models' files, and SyncToModel would persist that union
-        // back onto the new model's FilePaths.
-        ReplaceAll(resolved);
-        ApplyViewMode();
-
-        // CRITICAL C1 fix, part (b) (P08 fix cycle 1, 2026-09-22): when ResolveManagedReplacements
-        // actually remapped a stale path, write it onto Model.FilePaths immediately, in memory — not
-        // only whenever some unrelated future SyncToModel() call happens to run — and request a
-        // (debounced, not immediate — ADR-012 Decision 1 is unaffected) save so it's durable soon.
-        // Without this, any code that reads Model.FilePaths directly before that unrelated trigger
-        // fires (e.g. MainWindowViewModel.RemovePanel's/PageManagerService.RemovePage's "does this
-        // panel have anything to lose" check) still sees the stale, pre-remap path. A Folder Portal
-        // never persists FilePaths at all (SyncToModel skips it — see IsPortal), so this only applies
-        // to a non-portal remap; ReferenceEquals is enough to detect one, since
-        // ResolveManagedReplacements only ever clones+mutates when it actually changed something.
-        if (!ReferenceEquals(resolved, sourceFiles) && string.IsNullOrWhiteSpace(model.SourceFolderPath))
-        {
-            model.FilePaths = [.. resolved];
-            FilesChanged?.Invoke(this, EventArgs.Empty);
-        }
-
-        if (!string.IsNullOrWhiteSpace(model.SourceFolderPath) && Directory.Exists(model.SourceFolderPath))
-        {
-            AttachWatcher(model.SourceFolderPath);
-            OnPropertyChanged(nameof(IsPortal));
-
-            // IsPortal flipping to true also forces EffectiveSortMode (and therefore IsSortedByName)
-            // to Name (see EffectiveSortMode's doc comment) — the "Manual"/"By name" context-menu
-            // checkmarks and the header sort button's highlight both bind to these projections, not
-            // Model.SortMode, so they need their own notification here too (CRITICAL-2).
-            NotifySortModeChanged();
-        }
     }
 
     /// <summary>
@@ -668,22 +762,6 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
-    /// Returns all file-system entries in <paramref name="folder"/>, or an empty array on error.
-    /// </summary>
-    private static string[] GetSafeEntries(string folder)
-    {
-        try
-        {
-            return Directory.GetFileSystemEntries(folder);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Failed to read folder '{folder}': {ex.Message}");
-            return [];
-        }
-    }
-
-    /// <summary>
     /// Handles incremental file-system change events from the folder watcher.
     /// All UI mutations are marshalled to the UI thread via <see cref="Application.Current"/> Dispatcher.
     /// </summary>
@@ -740,83 +818,6 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
-    /// Re-validates <see cref="FileItem.Exists"/>/<see cref="FileItem.IsDirectory"/> for every item in
-    /// this panel against the current file-system state, and re-resolves the icon for any item that
-    /// just reappeared (see <see cref="BaseViewModel.RefreshItemsLiveness"/>). Runs on a thread-pool
-    /// timer; marshals to the UI thread before touching <see cref="FileItem"/> instances (they're bound
-    /// to the live UI) and must never throw — an exception escaping a <see cref="System.Threading.Timer"/>
-    /// callback is an UNHANDLED exception on a thread-pool thread, which terminates the whole process.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The <see langword="try"/>/<see langword="catch"/> around <see cref="BaseViewModel.RefreshItemsLiveness"/>
-    /// below is a SEPARATE concern from the marshalling itself: a bare <c>Dispatcher.Invoke</c> onto an
-    /// already-shut-down dispatcher rethrows <see cref="System.Threading.Tasks.TaskCanceledException"/> at
-    /// this thread-pool timer thread and kills the process (intermittent, order-dependent
-    /// "Test Run Aborted" with zero failing tests; in production, a tick landing during application
-    /// shutdown). <see cref="UiDispatch.TryBeginInvoke"/> is the fire-and-forget guarded marshal — see its
-    /// own remarks.
-    /// </para>
-    /// <para>
-    /// MAJOR M-1 fix (P08 fix cycle 2): this used to call the BLOCKING <see cref="UiDispatch.TryInvoke"/>,
-    /// which occupies the calling thread-pool thread until the UI thread services it — indefinitely, if
-    /// that dispatcher is busy or never pumps at all. Because this timer keeps firing every
-    /// <see cref="ExistenceCheckIntervalMs"/>, a busy/blocked UI thread used to accumulate one occupied
-    /// thread-pool thread per tick, which can starve the pool (see
-    /// <c>docs/Refactoring/Testing/sta-test-conventions.md</c>'s "second, unrelated flake"). Switching to
-    /// <see cref="UiDispatch.TryBeginInvoke"/> alone would still let an UNBOUNDED number of dispatched
-    /// operations pile up on a busy dispatcher's queue, so <see cref="_existenceRefreshPending"/> is an
-    /// explicit single-flight guard: a tick that finds a previous refresh still outstanding skips queuing
-    /// another one entirely, rather than adding to a backlog nobody is servicing yet.
-    /// </para>
-    /// </remarks>
-    internal void RefreshExistence(object? state)
-    {
-        if (_disposed) return;
-
-        // Single-flight guard (MAJOR M-1, see remarks): 0 -> 1 means "no refresh outstanding, this tick
-        // claims the slot"; any other tick finding it already 1 backs off instead of queuing a second
-        // Dispatcher operation on top of the still-unserviced first one.
-        if (System.Threading.Interlocked.CompareExchange(ref _existenceRefreshPending, 1, 0) != 0)
-            return;
-
-        var queued = UiDispatch.TryBeginInvoke(Application.Current?.Dispatcher, () =>
-        {
-            try
-            {
-                if (_disposed) return;
-
-                try
-                {
-                    RefreshItemsLiveness();
-                }
-                catch (Exception ex)
-                {
-                    // UX P2 fix (P08 fix cycle 1, 2026-09-22): Console.Error is never read by a WinExe
-                    // process (see the icon pipeline's own identical fix, IconHandler/IconProvider) — route
-                    // to the structured diagnostics log instead. Privacy invariant: exception TYPE NAME
-                    // only, never ex.Message, which may embed a file path.
-                    _diagnostics.ExistenceRefreshFailed(Model.Id, ex.GetType().Name);
-                }
-            }
-            finally
-            {
-                // Frees the slot for the NEXT tick only once this one has actually run — not merely been
-                // queued. Runs even if RefreshItemsLiveness() itself was skipped (_disposed) or failed.
-                System.Threading.Volatile.Write(ref _existenceRefreshPending, 0);
-            }
-        });
-
-        if (!queued)
-        {
-            // Dropped before it could even be queued (no Application yet, or its dispatcher is already
-            // shutting down/shut down) — nothing will ever run to clear the flag above, so clear it here
-            // instead of permanently wedging every future tick into "always pending".
-            System.Threading.Volatile.Write(ref _existenceRefreshPending, 0);
-        }
-    }
-
-    /// <summary>
     /// Test seam only (MAJOR M-1 regression coverage, P08 fix cycle 2): observes whether a dispatched
     /// <see cref="RefreshExistence"/> tick is still waiting to be serviced by the UI thread. Never read by
     /// production code.
@@ -841,135 +842,6 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
         _existenceTimer.Dispose();
         DetachWatcher();
-    }
-
-    /// <summary>
-    /// A folder-portal panel mirrors its folder; otherwise it uses the saved file list.
-    /// </summary>
-    private static string[] GetSourceFiles(ChildWindowModel model)
-    {
-        if (string.IsNullOrWhiteSpace(model.SourceFolderPath) || !System.IO.Directory.Exists(model.SourceFolderPath))
-            return model.FilePaths.ToArray();
-
-        try
-        {
-            return System.IO.Directory.GetFileSystemEntries(model.SourceFolderPath);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Failed to read folder '{model.SourceFolderPath}': {ex.Message}");
-            return [];
-        }
-    }
-
-    /// <summary>
-    /// Read-time self-heal for stale <see cref="ChildWindowModel.FilePaths"/> entries (ADR-009
-    /// Amendment 2026-09-22, P08): any path that no longer exists but has a recorded managed copy
-    /// (see <see cref="IPanelItemStorageService.TryFindManagedPath"/>) is swapped for that managed
-    /// path before the panel's <see cref="FileItem"/>s are built — so both the icon and a future
-    /// launch resolve against the item's real, current location instead of a permanently-broken
-    /// placeholder (P00 baseline finding F-9/H2: 20 of 26 real-world items were affected this way).
-    /// Folder Portal listings (see <see cref="GetSourceFiles"/>) are already guaranteed to exist and
-    /// pass through unchanged — the loop below is a no-op for every already-existing path.
-    /// </summary>
-    /// <remarks>
-    /// Purely a read: no manifest or file-system mutation happens here. The self-heal only becomes
-    /// durable once this panel's next save round-trips the (now-corrected) <see cref="FileItem.Path"/>
-    /// values back into <see cref="ChildWindowModel.FilePaths"/> (see <c>ChildWindow.xaml.cs</c>'s
-    /// sync-back on <c>FilesChanged</c>) — a stale entry with no live managed copy is left exactly as
-    /// it was (still shown, still greyed out via <c>Exists == false</c>), never invented or dropped.
-    /// </remarks>
-    /// <param name="paths">The panel's raw source paths, as returned by <see cref="GetSourceFiles"/>.</param>
-    private string[] ResolveManagedReplacements(string[] paths)
-    {
-        string[]? resolved = null;
-
-        for (var i = 0; i < paths.Length; i++)
-        {
-            var path = paths[i];
-            if (string.IsNullOrWhiteSpace(path)) continue;
-            if (System.IO.File.Exists(path) || System.IO.Directory.Exists(path)) continue;
-            if (!_itemStorage.TryFindManagedPath(path, out var managedPath) || managedPath is null) continue;
-
-            resolved ??= (string[])paths.Clone();
-            resolved[i] = managedPath;
-        }
-
-        return resolved ?? paths;
-    }
-
-    /// <inheritdoc/>
-    protected override void OnSourceChanged() => ApplyFilterAndSort();
-
-    /// <summary>
-    /// Strips a legacy managed-storage GUID suffix from a managed item's on-disk name so it displays
-    /// under its original name (see <see cref="ManagedItemName.StripLegacyGuidSuffix"/> and ADR-013
-    /// Decision 3). Only applies to items actually inside <see cref="IPanelItemStorageService"/>
-    /// storage — a plain user file that happens to end in <c>_&lt;32 hex&gt;</c> is left untouched.
-    /// </summary>
-    /// <param name="path">The candidate item's file-system path.</param>
-    protected override string? ResolveDisplayName(string path) =>
-        _itemStorage.IsManaged(path) ? ManagedItemName.StripLegacyGuidSuffix(Path.GetFileName(path)) : null;
-
-    private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(ChildWindowModel.ViewMode))
-            ApplyViewMode();
-
-        if (e.PropertyName == nameof(ChildWindowModel.ContentFilter))
-        {
-            ApplyFilterAndSort();
-            FilesChanged?.Invoke(this, EventArgs.Empty);
-        }
-
-        if (e.PropertyName == nameof(ChildWindowModel.SortMode))
-        {
-            ApplyFilterAndSort();
-
-            // Menu-checked state (Templates.xaml binds "Manual"/"By name" IsChecked to
-            // EffectiveSortMode, not Model.SortMode) never got a change notification of its own — the
-            // menu stayed showing the stale checkmark until something unrelated happened to touch
-            // EffectiveSortMode next (CRITICAL-2, panel-item-sorting review). The header sort button's
-            // highlight (IsSortedByName) has the exact same dependency, so both go through the shared
-            // helper together.
-            NotifySortModeChanged();
-
-            // Suppressed while ReorderItem is mid-gesture: it raises FilesChanged itself, exactly
-            // once, after its own mutation (SortMode switch + MoveItem) is fully applied — see
-            // _suppressFilesChangedForSortModeSwitch and ReorderItem's remarks (MAJOR-3).
-            if (!_suppressFilesChangedForSortModeSwitch)
-                FilesChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    private void ApplyViewMode()
-        => CurrentViewTemplate = Model.ViewMode == PanelViewMode.Grid ? _gridTemplate : _listTemplate;
-
-    /// <summary>
-    /// Rebuilds <see cref="BaseViewModel.FileItems"/> from <see cref="BaseViewModel.AllItems"/>
-    /// according to the current <see cref="ChildWindowModel.ContentFilter"/>, then — when
-    /// <see cref="EffectiveSortMode"/> is <see cref="PanelSortMode.Name"/> — sorts the filtered
-    /// result with <see cref="PanelItemSortComparer.ByName"/> (ADR-014 Decisions 2/3). This is the
-    /// single point every rebuild path (<c>AddFiles</c>, <c>RemoveFile</c>, <c>RemoveFileByPath</c>,
-    /// <c>ReplaceAll</c>, a Folder Portal resync tick, post-rename <see cref="OnSourceChanged"/>) goes
-    /// through, so all of them automatically pick up sorting without individual changes.
-    /// <see cref="BaseViewModel.AllItems"/> itself is <b>never</b> mutated here — sorting is a
-    /// non-mutating projection (ADR-014 Decision 2), so switching back to
-    /// <see cref="PanelSortMode.Manual"/> restores the prior manual order exactly. Uses
-    /// <see cref="BaseViewModel.ReplaceFileItems"/> so the rebuild raises a single batched
-    /// <c>CollectionChanged</c> (<c>Reset</c>) notification instead of a <c>Clear()</c> + N
-    /// individual <c>Add()</c> calls — or, when the resulting projection is reference-identical to
-    /// what's already shown, no notification at all (ADR-014 Decision 8).
-    /// </summary>
-    private void ApplyFilterAndSort()
-    {
-        var predicate = BuildFilterPredicate(Model.ContentFilter);
-        var visible = AllItems.Where(predicate);
-
-        if (EffectiveSortMode == PanelSortMode.Name)
-            visible = visible.OrderBy(item => item, PanelItemSortComparer.ByName);
-
-        ReplaceFileItems(visible);
     }
 
     /// <summary>
@@ -1038,6 +910,54 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
             FilesChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <inheritdoc />
+    protected override void OnSourceChanged() => ApplyFilterAndSort();
+
+    /// <summary>
+    /// Strips a legacy managed-storage GUID suffix from a managed item's on-disk name so it displays
+    /// under its original name (see <see cref="ManagedItemName.StripLegacyGuidSuffix"/> and ADR-013
+    /// Decision 3). Only applies to items actually inside <see cref="IPanelItemStorageService"/>
+    /// storage — a plain user file that happens to end in <c>_&lt;32 hex&gt;</c> is left untouched.
+    /// </summary>
+    /// <param name="path">The candidate item's file-system path.</param>
+    protected override string? ResolveDisplayName(string path) =>
+        _itemStorage.IsManaged(path) ? ManagedItemName.StripLegacyGuidSuffix(Path.GetFileName(path)) : null;
+
+    /// <summary>
+    /// Claims the global cross-panel selection (<see cref="IPanelSelectionCoordinator.NotifySelected"/>)
+    /// whenever <see cref="BaseViewModel.SelectedFile"/> becomes non-null (ui-polishing-1 §2.4 Block
+    /// A2). Deliberately does <b>not</b> call <see cref="IPanelSelectionCoordinator.NotifySelected"/>
+    /// when the new value is <see langword="null"/> — a panel clearing its own selection isn't "this
+    /// panel claiming the selection", and treating it as one would give the coordinator a nonsensical
+    /// "owner" for an empty selection. Also skipped entirely while <see cref="_suppressCoordinatorEcho"/>
+    /// is set — i.e. while this exact clear is itself an echo of <see cref="OnSelectionClaimed"/>
+    /// reacting to some other panel's claim, not a fresh user selection.
+    /// </summary>
+    protected override void OnSelectedFileChanged()
+    {
+        if (_suppressCoordinatorEcho) return;
+        if (SelectedFile is not null) _selectionCoordinator.NotifySelected(this);
+    }
+
+    /// <summary>
+    /// A folder-portal panel mirrors its folder; otherwise it uses the saved file list.
+    /// </summary>
+    private static string[] GetSourceFiles(ChildWindowModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.SourceFolderPath) || !System.IO.Directory.Exists(model.SourceFolderPath))
+            return model.FilePaths.ToArray();
+
+        try
+        {
+            return System.IO.Directory.GetFileSystemEntries(model.SourceFolderPath);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to read folder '{model.SourceFolderPath}': {ex.Message}");
+            return [];
+        }
+    }
+
     private static Func<FileItem, bool> BuildFilterPredicate(PanelContentFilter filter) =>
         filter switch
         {
@@ -1049,6 +969,103 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
     private static DataTemplate GetTemplate(string templateName)
         => Application.Current.FindResource(templateName) as DataTemplate ?? new DataTemplate();
+
+    /// <summary>
+    /// Read-time self-heal for stale <see cref="ChildWindowModel.FilePaths"/> entries (ADR-009
+    /// Amendment 2026-09-22, P08): any path that no longer exists but has a recorded managed copy
+    /// (see <see cref="IPanelItemStorageService.TryFindManagedPath"/>) is swapped for that managed
+    /// path before the panel's <see cref="FileItem"/>s are built — so both the icon and a future
+    /// launch resolve against the item's real, current location instead of a permanently-broken
+    /// placeholder (P00 baseline finding F-9/H2: 20 of 26 real-world items were affected this way).
+    /// Folder Portal listings (see <see cref="GetSourceFiles"/>) are already guaranteed to exist and
+    /// pass through unchanged — the loop below is a no-op for every already-existing path.
+    /// </summary>
+    /// <remarks>
+    /// Purely a read: no manifest or file-system mutation happens here. The self-heal only becomes
+    /// durable once this panel's next save round-trips the (now-corrected) <see cref="FileItem.Path"/>
+    /// values back into <see cref="ChildWindowModel.FilePaths"/> (see <c>ChildWindow.xaml.cs</c>'s
+    /// sync-back on <c>FilesChanged</c>) — a stale entry with no live managed copy is left exactly as
+    /// it was (still shown, still greyed out via <c>Exists == false</c>), never invented or dropped.
+    /// </remarks>
+    /// <param name="paths">The panel's raw source paths, as returned by <see cref="GetSourceFiles"/>.</param>
+    private string[] ResolveManagedReplacements(string[] paths)
+    {
+        string[]? resolved = null;
+
+        for (var i = 0; i < paths.Length; i++)
+        {
+            var path = paths[i];
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            if (System.IO.File.Exists(path) || System.IO.Directory.Exists(path)) continue;
+            if (!_itemStorage.TryFindManagedPath(path, out var managedPath) || managedPath is null) continue;
+
+            resolved ??= (string[])paths.Clone();
+            resolved[i] = managedPath;
+        }
+
+        return resolved ?? paths;
+    }
+
+    private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ChildWindowModel.ViewMode))
+            ApplyViewMode();
+
+        if (e.PropertyName == nameof(ChildWindowModel.ContentFilter))
+        {
+            ApplyFilterAndSort();
+            FilesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (e.PropertyName == nameof(ChildWindowModel.SortMode))
+        {
+            ApplyFilterAndSort();
+
+            // Menu-checked state (Templates.xaml binds "Manual"/"By name" IsChecked to
+            // EffectiveSortMode, not Model.SortMode) never got a change notification of its own — the
+            // menu stayed showing the stale checkmark until something unrelated happened to touch
+            // EffectiveSortMode next (CRITICAL-2, panel-item-sorting review). The header sort button's
+            // highlight (IsSortedByName) has the exact same dependency, so both go through the shared
+            // helper together.
+            NotifySortModeChanged();
+
+            // Suppressed while ReorderItem is mid-gesture: it raises FilesChanged itself, exactly
+            // once, after its own mutation (SortMode switch + MoveItem) is fully applied — see
+            // _suppressFilesChangedForSortModeSwitch and ReorderItem's remarks (MAJOR-3).
+            if (!_suppressFilesChangedForSortModeSwitch)
+                FilesChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void ApplyViewMode()
+        => CurrentViewTemplate = Model.ViewMode == PanelViewMode.Grid ? _gridTemplate : _listTemplate;
+
+    /// <summary>
+    /// Rebuilds <see cref="BaseViewModel.FileItems"/> from <see cref="BaseViewModel.AllItems"/>
+    /// according to the current <see cref="ChildWindowModel.ContentFilter"/>, then — when
+    /// <see cref="EffectiveSortMode"/> is <see cref="PanelSortMode.Name"/> — sorts the filtered
+    /// result with <see cref="PanelItemSortComparer.ByName"/> (ADR-014 Decisions 2/3). This is the
+    /// single point every rebuild path (<c>AddFiles</c>, <c>RemoveFile</c>, <c>RemoveFileByPath</c>,
+    /// <c>ReplaceAll</c>, a Folder Portal resync tick, post-rename <see cref="OnSourceChanged"/>) goes
+    /// through, so all of them automatically pick up sorting without individual changes.
+    /// <see cref="BaseViewModel.AllItems"/> itself is <b>never</b> mutated here — sorting is a
+    /// non-mutating projection (ADR-014 Decision 2), so switching back to
+    /// <see cref="PanelSortMode.Manual"/> restores the prior manual order exactly. Uses
+    /// <see cref="BaseViewModel.ReplaceFileItems"/> so the rebuild raises a single batched
+    /// <c>CollectionChanged</c> (<c>Reset</c>) notification instead of a <c>Clear()</c> + N
+    /// individual <c>Add()</c> calls — or, when the resulting projection is reference-identical to
+    /// what's already shown, no notification at all (ADR-014 Decision 8).
+    /// </summary>
+    private void ApplyFilterAndSort()
+    {
+        var predicate = BuildFilterPredicate(Model.ContentFilter);
+        var visible = AllItems.Where(predicate);
+
+        if (EffectiveSortMode == PanelSortMode.Name)
+            visible = visible.OrderBy(item => item, PanelItemSortComparer.ByName);
+
+        ReplaceFileItems(visible);
+    }
 
     /// <summary>
     /// Toggles the panel's view mode between list and grid.
@@ -1085,22 +1102,6 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     {
         OnPropertyChanged(nameof(EffectiveSortMode));
         OnPropertyChanged(nameof(IsSortedByName));
-    }
-
-    /// <summary>
-    /// Claims the global cross-panel selection (<see cref="IPanelSelectionCoordinator.NotifySelected"/>)
-    /// whenever <see cref="BaseViewModel.SelectedFile"/> becomes non-null (ui-polishing-1 §2.4 Block
-    /// A2). Deliberately does <b>not</b> call <see cref="IPanelSelectionCoordinator.NotifySelected"/>
-    /// when the new value is <see langword="null"/> — a panel clearing its own selection isn't "this
-    /// panel claiming the selection", and treating it as one would give the coordinator a nonsensical
-    /// "owner" for an empty selection. Also skipped entirely while <see cref="_suppressCoordinatorEcho"/>
-    /// is set — i.e. while this exact clear is itself an echo of <see cref="OnSelectionClaimed"/>
-    /// reacting to some other panel's claim, not a fresh user selection.
-    /// </summary>
-    protected override void OnSelectedFileChanged()
-    {
-        if (_suppressCoordinatorEcho) return;
-        if (SelectedFile is not null) _selectionCoordinator.NotifySelected(this);
     }
 
     /// <summary>

@@ -29,8 +29,8 @@ namespace DesktopOrganizer.Tests.Unit.Interaction.Native;
 /// reached") — but it was previously ALSO presented as proof that the real native controller and the real
 /// legacy controller agree, which it never was: neither controller class is constructed or called
 /// anywhere in this file. Neither controller's own glue — px↔DIP conversion
-/// (<see cref="Interaction.Native.NativeSizingCoordinateMapper"/>), the <c>WM_SIZING</c> coordinate-space
-/// self-calibration (<see cref="Interaction.Native.NativeSizingOriginResolver"/>, the exact mechanism
+/// (<see cref="DesktopOrganizer.UI.Interaction.Native.NativeSizingCoordinateMapper"/>), the <c>WM_SIZING</c> coordinate-space
+/// self-calibration (<see cref="DesktopOrganizer.UI.Interaction.Native.NativeSizingOriginResolver"/>, the exact mechanism
 /// behind commit 646e04c's C-1 bug), or <c>Thumb</c>/<c>Window</c> event wiring — is exercised here at
 /// all, so a bug in any of THAT code (like C-1 itself) would never have shown up as a failure in this
 /// file. The real native-vs-legacy golden-equivalence suite, driven through the actual
@@ -52,6 +52,100 @@ public class ResizeGeometryCalculatorApplyEquivalenceTests
 
     // Same fixed "current window" bounds as the Phase 1 suites: rawRight = 400, rawBottom = 450.
     private static readonly Rect StartBounds = new(100, 200, 300, 250);
+
+    // ── T-EQ-01..08 x 2 modes: one case per ResizeEdge, in both List+free and Grid+snap constraint
+    // shapes — 16 combinations total, each driving the SAME total on-screen movement through both the
+    // legacy accumulate-chain path and the native single-proposed-extent path. ──────────────────────
+
+    /// <summary>Verifies that <see cref="ResizeGeometryCalculator.Apply"/> produces a bit-for-bit identical <see cref="Rect"/> whether <c>raw</c> arrived via an <see cref="ResizeGeometryCalculator.Accumulate"/> chain or via one absolute extent, for a given edge/delta/constraint-shape combination.</summary>
+    /// <param name="edge">The edge being resized.</param>
+    /// <param name="gridSnap">Whether to use the Grid+snap constraint shape instead of List+free.</param>
+    /// <param name="totalDx">The total horizontal drag delta.</param>
+    /// <param name="totalDy">The total vertical drag delta.</param>
+    [Theory]
+    [InlineData(ResizeEdge.Left, false, 40d, 0d)]
+    [InlineData(ResizeEdge.Top, false, 0d, 25d)]
+    [InlineData(ResizeEdge.Right, false, 40d, 0d)]
+    [InlineData(ResizeEdge.Bottom, false, 0d, 25d)]
+    [InlineData(ResizeEdge.TopLeft, false, 40d, 25d)]
+    [InlineData(ResizeEdge.TopRight, false, 40d, 25d)]
+    [InlineData(ResizeEdge.BottomLeft, false, 40d, 25d)]
+    [InlineData(ResizeEdge.BottomRight, false, 40d, 25d)]
+    [InlineData(ResizeEdge.Left, true, 84d, 0d)]
+    [InlineData(ResizeEdge.Top, true, 0d, 92d)]
+    [InlineData(ResizeEdge.Right, true, 84d, 0d)]
+    [InlineData(ResizeEdge.Bottom, true, 0d, 92d)]
+    [InlineData(ResizeEdge.TopLeft, true, 84d, 92d)]
+    [InlineData(ResizeEdge.TopRight, true, 84d, 92d)]
+    [InlineData(ResizeEdge.BottomLeft, true, 84d, 92d)]
+    [InlineData(ResizeEdge.BottomRight, true, 84d, 92d)]
+    public void AccumulateChain_And_SingleAbsoluteApply_ProduceBitForBitIdenticalRect(
+        ResizeEdge edge, bool gridSnap, double totalDx, double totalDy)
+        => AssertAccumulateChainMatchesSingleApply(edge, totalDx, totalDy, gridSnap ? GridSnapConstraints() : FreeConstraints());
+
+    // ── MINOR-2 (fix-cycle 2): the same 8-edge Grid+snap coverage as the "true" branch of the theory
+    // above, but against FixedGapGridSnapConstraints() instead — pins that Apply's path-independence
+    // invariant (and, by construction, ResizeConstraintsFactory.BuildConstraints' own FixedGap output)
+    // holds for the FixedGap constraint shape too, not just the LegacyStretch-equivalent one every other
+    // case in this file uses. Same magnitudes as the Grid+snap cases above (IconSize 48's cell/rowHeight
+    // don't depend on IconLayoutPolicy — only HorizontalChrome/MinWidth do). ─────────────────────────────
+
+    /// <summary>Verifies that <see cref="ResizeGeometryCalculator.Apply"/>'s path-independence invariant also holds for the <see cref="IconLayoutPolicy.FixedGap"/> constraint shape, not just LegacyStretch.</summary>
+    /// <param name="edge">The edge being resized.</param>
+    /// <param name="totalDx">The total horizontal drag delta.</param>
+    /// <param name="totalDy">The total vertical drag delta.</param>
+    [Theory]
+    [InlineData(ResizeEdge.Left, 84d, 0d)]
+    [InlineData(ResizeEdge.Top, 0d, 92d)]
+    [InlineData(ResizeEdge.Right, 84d, 0d)]
+    [InlineData(ResizeEdge.Bottom, 0d, 92d)]
+    [InlineData(ResizeEdge.TopLeft, 84d, 92d)]
+    [InlineData(ResizeEdge.TopRight, 84d, 92d)]
+    [InlineData(ResizeEdge.BottomLeft, 84d, 92d)]
+    [InlineData(ResizeEdge.BottomRight, 84d, 92d)]
+    public void AccumulateChain_And_SingleAbsoluteApply_ProduceBitForBitIdenticalRect_FixedGapGridSnap(
+        ResizeEdge edge, double totalDx, double totalDy)
+        => AssertAccumulateChainMatchesSingleApply(edge, totalDx, totalDy, FixedGapGridSnapConstraints());
+
+    // ── R-4 scenario: the min-size clamp is hit — both raw-extent shapes must still agree bit-for-bit
+    // once the Apply-side Math.Max floor kicks in. ──────────────────────────────────────────────────
+
+    /// <summary>Verifies that the accumulate-chain and single-absolute-extent raw shapes still agree bit-for-bit once the min-size clamp is hit.</summary>
+    /// <param name="edge">The edge being resized.</param>
+    /// <param name="totalDx">The total horizontal drag delta.</param>
+    /// <param name="totalDy">The total vertical drag delta.</param>
+    [Theory]
+    [InlineData(ResizeEdge.Left, 250d, 0d)]
+    [InlineData(ResizeEdge.Right, -250d, 0d)]
+    [InlineData(ResizeEdge.Top, 0d, 200d)]
+    [InlineData(ResizeEdge.Bottom, 0d, -200d)]
+    public void AccumulateChain_And_SingleAbsoluteApply_AgreeBitForBit_WhenMinSizeClampIsHit(ResizeEdge edge, double totalDx, double totalDy)
+    {
+        var constraints = FreeConstraints();
+
+        double[] dxSteps = [totalDx / 5, totalDx / 5, totalDx / 5, totalDx / 5, totalDx / 5];
+        double[] dySteps = [totalDy / 5, totalDy / 5, totalDy / 5, totalDy / 5, totalDy / 5];
+
+        var chainedRaw = new ResizeRawExtent(StartBounds.Width, StartBounds.Height);
+        for (var i = 0; i < dxSteps.Length; i++)
+            chainedRaw = ResizeGeometryCalculator.Accumulate(chainedRaw, edge, new Vector(dxSteps[i], dySteps[i]));
+        var chainedResult = ResizeGeometryCalculator.Apply(
+            StartBounds, edge, chainedRaw, StartBounds.Right, StartBounds.Bottom, constraints);
+
+        var absoluteRaw = new ResizeRawExtent(
+            edge.AffectsWidth() ? StartBounds.Width + (edge.AnchorsRight() ? -totalDx : totalDx) : StartBounds.Width,
+            edge.AffectsHeight() ? StartBounds.Height + (edge.AnchorsBottom() ? -totalDy : totalDy) : StartBounds.Height);
+        var absoluteResult = ResizeGeometryCalculator.Apply(
+            StartBounds, edge, absoluteRaw, StartBounds.Right, StartBounds.Bottom, constraints);
+
+        Assert.Equal(chainedResult, absoluteResult);
+
+        // Not vacuous: prove the clamp was actually reached on the dragged axis.
+        if (edge.AffectsWidth())
+            Assert.Equal(GridMetrics.MinPanelSize, chainedResult.Width);
+        else
+            Assert.Equal(GridMetrics.MinPanelSize, chainedResult.Height);
+    }
 
     private static ResizeConstraints FreeConstraints() => new(
         MinWidth: GridMetrics.MinPanelSize,
@@ -85,49 +179,6 @@ public class ResizeGeometryCalculatorApplyEquivalenceTests
             snapEnabled: true,
             ChildWindow.TitleBarHeight);
 
-    // ── T-EQ-01..08 x 2 modes: one case per ResizeEdge, in both List+free and Grid+snap constraint
-    // shapes — 16 combinations total, each driving the SAME total on-screen movement through both the
-    // legacy accumulate-chain path and the native single-proposed-extent path. ──────────────────────
-    [Theory]
-    [InlineData(ResizeEdge.Left, false, 40d, 0d)]
-    [InlineData(ResizeEdge.Top, false, 0d, 25d)]
-    [InlineData(ResizeEdge.Right, false, 40d, 0d)]
-    [InlineData(ResizeEdge.Bottom, false, 0d, 25d)]
-    [InlineData(ResizeEdge.TopLeft, false, 40d, 25d)]
-    [InlineData(ResizeEdge.TopRight, false, 40d, 25d)]
-    [InlineData(ResizeEdge.BottomLeft, false, 40d, 25d)]
-    [InlineData(ResizeEdge.BottomRight, false, 40d, 25d)]
-    [InlineData(ResizeEdge.Left, true, 84d, 0d)]
-    [InlineData(ResizeEdge.Top, true, 0d, 92d)]
-    [InlineData(ResizeEdge.Right, true, 84d, 0d)]
-    [InlineData(ResizeEdge.Bottom, true, 0d, 92d)]
-    [InlineData(ResizeEdge.TopLeft, true, 84d, 92d)]
-    [InlineData(ResizeEdge.TopRight, true, 84d, 92d)]
-    [InlineData(ResizeEdge.BottomLeft, true, 84d, 92d)]
-    [InlineData(ResizeEdge.BottomRight, true, 84d, 92d)]
-    public void AccumulateChain_And_SingleAbsoluteApply_ProduceBitForBitIdenticalRect(
-        ResizeEdge edge, bool gridSnap, double totalDx, double totalDy)
-        => AssertAccumulateChainMatchesSingleApply(edge, totalDx, totalDy, gridSnap ? GridSnapConstraints() : FreeConstraints());
-
-    // ── MINOR-2 (fix-cycle 2): the same 8-edge Grid+snap coverage as the "true" branch of the theory
-    // above, but against FixedGapGridSnapConstraints() instead — pins that Apply's path-independence
-    // invariant (and, by construction, ResizeConstraintsFactory.BuildConstraints' own FixedGap output)
-    // holds for the FixedGap constraint shape too, not just the LegacyStretch-equivalent one every other
-    // case in this file uses. Same magnitudes as the Grid+snap cases above (IconSize 48's cell/rowHeight
-    // don't depend on IconLayoutPolicy — only HorizontalChrome/MinWidth do). ─────────────────────────────
-    [Theory]
-    [InlineData(ResizeEdge.Left, 84d, 0d)]
-    [InlineData(ResizeEdge.Top, 0d, 92d)]
-    [InlineData(ResizeEdge.Right, 84d, 0d)]
-    [InlineData(ResizeEdge.Bottom, 0d, 92d)]
-    [InlineData(ResizeEdge.TopLeft, 84d, 92d)]
-    [InlineData(ResizeEdge.TopRight, 84d, 92d)]
-    [InlineData(ResizeEdge.BottomLeft, 84d, 92d)]
-    [InlineData(ResizeEdge.BottomRight, 84d, 92d)]
-    public void AccumulateChain_And_SingleAbsoluteApply_ProduceBitForBitIdenticalRect_FixedGapGridSnap(
-        ResizeEdge edge, double totalDx, double totalDy)
-        => AssertAccumulateChainMatchesSingleApply(edge, totalDx, totalDy, FixedGapGridSnapConstraints());
-
     private static void AssertAccumulateChainMatchesSingleApply(ResizeEdge edge, double totalDx, double totalDy, ResizeConstraints constraints)
     {
         // (a) N small per-frame deltas accumulated one at a time, then ONE Apply — the shape
@@ -159,40 +210,5 @@ public class ResizeGeometryCalculatorApplyEquivalenceTests
         // Bit-for-bit — no Assert.Equal(double, double, precision:) tolerance anywhere: this pins
         // Apply's own path-independence invariant.
         Assert.Equal(chainedResult, absoluteResult);
-    }
-
-    // ── R-4 scenario: the min-size clamp is hit — both raw-extent shapes must still agree bit-for-bit
-    // once the Apply-side Math.Max floor kicks in. ──────────────────────────────────────────────────
-    [Theory]
-    [InlineData(ResizeEdge.Left, 250d, 0d)]
-    [InlineData(ResizeEdge.Right, -250d, 0d)]
-    [InlineData(ResizeEdge.Top, 0d, 200d)]
-    [InlineData(ResizeEdge.Bottom, 0d, -200d)]
-    public void AccumulateChain_And_SingleAbsoluteApply_AgreeBitForBit_WhenMinSizeClampIsHit(ResizeEdge edge, double totalDx, double totalDy)
-    {
-        var constraints = FreeConstraints();
-
-        double[] dxSteps = [totalDx / 5, totalDx / 5, totalDx / 5, totalDx / 5, totalDx / 5];
-        double[] dySteps = [totalDy / 5, totalDy / 5, totalDy / 5, totalDy / 5, totalDy / 5];
-
-        var chainedRaw = new ResizeRawExtent(StartBounds.Width, StartBounds.Height);
-        for (var i = 0; i < dxSteps.Length; i++)
-            chainedRaw = ResizeGeometryCalculator.Accumulate(chainedRaw, edge, new Vector(dxSteps[i], dySteps[i]));
-        var chainedResult = ResizeGeometryCalculator.Apply(
-            StartBounds, edge, chainedRaw, StartBounds.Right, StartBounds.Bottom, constraints);
-
-        var absoluteRaw = new ResizeRawExtent(
-            edge.AffectsWidth() ? StartBounds.Width + (edge.AnchorsRight() ? -totalDx : totalDx) : StartBounds.Width,
-            edge.AffectsHeight() ? StartBounds.Height + (edge.AnchorsBottom() ? -totalDy : totalDy) : StartBounds.Height);
-        var absoluteResult = ResizeGeometryCalculator.Apply(
-            StartBounds, edge, absoluteRaw, StartBounds.Right, StartBounds.Bottom, constraints);
-
-        Assert.Equal(chainedResult, absoluteResult);
-
-        // Not vacuous: prove the clamp was actually reached on the dragged axis.
-        if (edge.AffectsWidth())
-            Assert.Equal(GridMetrics.MinPanelSize, chainedResult.Width);
-        else
-            Assert.Equal(GridMetrics.MinPanelSize, chainedResult.Height);
     }
 }

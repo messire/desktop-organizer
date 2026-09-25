@@ -32,6 +32,8 @@ public static class LayoutEditVisuals
     /// <see langword="false"/>; otherwise the greater of that value and <see cref="EditBorderFloor"/> — the
     /// border can only ever get MORE emphasized while editing, never less.
     /// </summary>
+    /// <param name="state">The resolved visual state.</param>
+    /// <param name="isLayoutEditing">Whether Edit Layout mode is currently active.</param>
     public static double BorderOpacityFor(PanelVisualState state, bool isLayoutEditing)
     {
         var baseline = InteractionVisualState.BorderOpacityFor(state);
@@ -46,6 +48,8 @@ public static class LayoutEditVisuals
     /// is explicitly editing layout would be counterproductive; every other state already renders
     /// &gt;= 0.70 in Phase 5 and is left untouched.
     /// </summary>
+    /// <param name="state">The resolved visual state.</param>
+    /// <param name="isLayoutEditing">Whether Edit Layout mode is currently active.</param>
     public static double ChromeOpacityFor(PanelVisualState state, bool isLayoutEditing)
     {
         var baseline = InteractionVisualState.ChromeOpacityFor(state);
@@ -60,6 +64,8 @@ public static class LayoutEditVisuals
     /// <paramref name="isLayoutEditing"/> is <see langword="false"/>; otherwise scaled by
     /// <see cref="AccentEmphasis"/> (1.35x) on top.
     /// </summary>
+    /// <param name="state">The resolved visual state.</param>
+    /// <param name="isLayoutEditing">Whether Edit Layout mode is currently active.</param>
     public static double AccentEmphasisFor(PanelVisualState state, bool isLayoutEditing)
     {
         var baseline = InteractionVisualState.AccentEmphasisFor(state);

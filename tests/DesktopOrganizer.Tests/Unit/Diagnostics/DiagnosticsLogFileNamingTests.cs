@@ -12,6 +12,10 @@ public class DiagnosticsLogFileNamingTests
 {
     // ── BuildFileName — shape ───────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.BuildFileName"/> produces the exact expected
+    /// <c>gestures-yyyyMMdd-HHmmss-pid.jsonl</c> shape for a fixed timestamp and process id.
+    /// </summary>
     [Fact]
     public void BuildFileName_ProducesExpectedShape()
     {
@@ -22,6 +26,10 @@ public class DiagnosticsLogFileNamingTests
         Assert.Equal("gestures-20260917-101500-12345.jsonl", fileName);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.BuildFileName"/> always starts with the
+    /// <c>gestures-</c> prefix and ends with the <c>.jsonl</c> extension.
+    /// </summary>
     [Fact]
     public void BuildFileName_StartsWithPrefixAndEndsWithExtension()
     {
@@ -31,6 +39,10 @@ public class DiagnosticsLogFileNamingTests
         Assert.EndsWith(".jsonl", fileName, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.BuildFileName"/> produces distinct file names
+    /// for two different process ids sharing the same timestamp.
+    /// </summary>
     [Fact]
     public void BuildFileName_DifferentProcessIds_ProduceDistinctNames_ForSameTimestamp()
     {
@@ -44,6 +56,11 @@ public class DiagnosticsLogFileNamingTests
 
     // ── BuildFileName — sortability ─────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that ordinal string sorting of file names produced by
+    /// <see cref="DiagnosticsLogFileNaming.BuildFileName"/> matches their chronological order, which
+    /// <c>SelectForDeletion</c> relies on instead of parsing timestamps back out.
+    /// </summary>
     [Fact]
     public void BuildFileName_OrdinalSort_MatchesChronologicalOrder()
     {
@@ -60,6 +77,10 @@ public class DiagnosticsLogFileNamingTests
         Assert.Equal([earlier, later, muchLater], ordinalSorted);
     }
 
+    /// <summary>
+    /// Verifies that ordinal sort order still holds for file names produced by
+    /// <see cref="DiagnosticsLogFileNaming.BuildFileName"/> across a year boundary.
+    /// </summary>
     [Fact]
     public void BuildFileName_CrossesYearBoundary_StillSortsChronologically()
     {
@@ -71,6 +92,10 @@ public class DiagnosticsLogFileNamingTests
 
     // ── SelectForDeletion — retention ───────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.SelectForDeletion"/> selects only the oldest
+    /// files beyond the keep count for deletion.
+    /// </summary>
     [Fact]
     public void SelectForDeletion_MoreFilesThanKeep_DeletesOldestOnly()
     {
@@ -89,6 +114,10 @@ public class DiagnosticsLogFileNamingTests
             toDelete);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.SelectForDeletion"/> returns an empty result
+    /// when there are fewer files than the keep count.
+    /// </summary>
     [Fact]
     public void SelectForDeletion_FewerFilesThanKeep_ReturnsEmpty()
     {
@@ -99,6 +128,10 @@ public class DiagnosticsLogFileNamingTests
         Assert.Empty(toDelete);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.SelectForDeletion"/> returns an empty result
+    /// when the file count exactly equals the keep count.
+    /// </summary>
     [Fact]
     public void SelectForDeletion_ExactlyKeepCount_ReturnsEmpty()
     {
@@ -109,6 +142,10 @@ public class DiagnosticsLogFileNamingTests
         Assert.Empty(toDelete);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.SelectForDeletion"/> returns an empty result
+    /// for an empty input file list.
+    /// </summary>
     [Fact]
     public void SelectForDeletion_EmptyInput_ReturnsEmpty()
     {
@@ -117,6 +154,10 @@ public class DiagnosticsLogFileNamingTests
         Assert.Empty(toDelete);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.SelectForDeletion"/> treats a negative keep
+    /// count as zero, deleting every file.
+    /// </summary>
     [Fact]
     public void SelectForDeletion_NegativeKeep_TreatedAsZero_DeletesEverything()
     {
@@ -127,6 +168,10 @@ public class DiagnosticsLogFileNamingTests
         Assert.Equal(files.OrderBy(f => f, StringComparer.Ordinal), toDelete);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.SelectForDeletion"/> with an explicit keep
+    /// count of zero deletes every file.
+    /// </summary>
     [Fact]
     public void SelectForDeletion_KeepZero_DeletesEverything()
     {
@@ -137,12 +182,20 @@ public class DiagnosticsLogFileNamingTests
         Assert.Equal(2, toDelete.Count);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.SelectForDeletion"/> throws
+    /// <see cref="ArgumentNullException"/> for a <see langword="null"/> file list.
+    /// </summary>
     [Fact]
     public void SelectForDeletion_NullInput_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => DiagnosticsLogFileNaming.SelectForDeletion(null!, keep: 1));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DiagnosticsLogFileNaming.SelectForDeletion"/> sorts by the file name
+    /// portion only, so full paths sort identically to bare file names.
+    /// </summary>
     [Fact]
     public void SelectForDeletion_UsesOnlyFileNamePortion_FullPathsSortTheSameAsBareNames()
     {

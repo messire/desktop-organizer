@@ -3,34 +3,81 @@ namespace DesktopOrganizer.Services.Abstractions;
 /// <summary>Role a process ends up in after the single-instance handshake (ADR-023).</summary>
 public enum SingleInstanceRole
 {
+    /// <summary>
+    /// The process holds the single-instance guard. It normally also serves activation requests from
+    /// other processes, but starts in a degraded mode — guard held, no activation server — when the
+    /// pipe server failed to start (<c>serverStarted == false</c>, see
+    /// <c>SingleInstanceStartupDecisionTable</c>).
+    /// </summary>
     Primary,
+
+    /// <summary>The process lost the handshake to an existing primary and relays activation to it instead.</summary>
     Secondary,
 }
 
 /// <summary>Что должна сделать точка входа процесса по итогам рукопожатия.</summary>
 public enum SingleInstanceStartupAction
 {
+    /// <summary>The process became Primary and must continue its normal startup.</summary>
     RunAsPrimary,
+
+    /// <summary>The process successfully activated the existing Primary and must exit immediately.</summary>
     ExitAfterActivation,
+
+    /// <summary>
+    /// The process could not activate the existing Primary and must exit. Covers a protocol/transport
+    /// failure (<see cref="ActivationSendResult.Timeout"/>, <see cref="ActivationSendResult.ProtocolError"/>,
+    /// <see cref="ActivationSendResult.Faulted"/>), the primary shutting down
+    /// (<see cref="ActivationSendResult.PrimaryShuttingDown"/>), or the retry budget being exhausted
+    /// while no listener was ever found (<see cref="ActivationSendResult.NoListener"/>).
+    /// </summary>
     ExitActivationFailed,
+
+    /// <summary>The process detected the existing Primary belongs to another Windows session (Fast User Switching) and must exit.</summary>
     ExitOtherSession,
 }
 
 /// <summary>Результат попытки отправить <see cref="ActivationRequest"/> текущему primary.</summary>
 public enum ActivationSendResult
 {
+    /// <summary>The request was delivered to and acknowledged by the primary process.</summary>
     Delivered,
+
+    /// <summary>The primary process is shutting down and refused the request.</summary>
     PrimaryShuttingDown,
+
+    /// <summary>The primary process belongs to a different Windows session (Fast User Switching).</summary>
     OtherSession,
+
+    /// <summary>
+    /// Could not connect within the timeout (no listener, or the single pipe instance is busy) —
+    /// transient, retried by the handshake policy.
+    /// </summary>
     NoListener,
+
+    /// <summary>
+    /// Connected, but the write or read that followed did not complete within the configured budget.
+    /// A connect-time timeout is reported as <see cref="NoListener"/> instead.
+    /// </summary>
     Timeout,
+
+    /// <summary>
+    /// The primary process responded with a message the protocol could not parse, or with a
+    /// correctly-parsed but unsupported response code.
+    /// </summary>
     ProtocolError,
+
+    /// <summary>
+    /// An unexpected exception occurred while sending the request, or the connection was dropped
+    /// before a full response line arrived.
+    /// </summary>
     Faulted,
 }
 
 /// <summary>v1: ровно одна команда. Расширение — новая версия протокола (ADR-023 D-5).</summary>
 public enum ActivationCommand
 {
+    /// <summary>Requests that the primary process bring its Settings window to the foreground.</summary>
     ActivateSettings,
 }
 
@@ -95,11 +142,11 @@ public interface ISingleInstanceCoordinator : IDisposable
     /// </summary>
     /// <remarks>
     /// Must be called by the host (see <c>App.OnExit</c>) <i>before</i> disposing the DI container that
-    /// owns <see cref="IDiagnosticsLog"/> — resolving that log from inside <see cref="Dispose"/> itself
-    /// is not safe, because <see cref="Dispose"/> can run automatically as part of that very same
+    /// owns <see cref="IDiagnosticsLog"/> — resolving that log from inside <see cref="IDisposable.Dispose"/> itself
+    /// is not safe, because <see cref="IDisposable.Dispose"/> can run automatically as part of that very same
     /// container's own disposal chain, by which point the container is already marked disposed and any
     /// further resolution throws <see cref="ObjectDisposedException"/> (C-2). Idempotent: a second call
-    /// is a no-op. Safe to skip entirely for a process that never became Primary — <see cref="Dispose"/>
+    /// is a no-op. Safe to skip entirely for a process that never became Primary — <see cref="IDisposable.Dispose"/>
     /// performs the equivalent (diagnostics-free) teardown on its own if this was never called.
     /// </remarks>
     void CompleteShutdown();

@@ -17,19 +17,13 @@ public class PanelContentSizerTests
     private const double NoScrollBar = 0d;
     private const double ScrollBarWidth = 17d; // a plausible SystemParameters.VerticalScrollBarWidth value.
 
-    // A window wide enough for exactly 3 FixedGap columns at IconSize=48 (cell=84, edgePadding=42,
-    // minGap=4): Extent(3, 84, 4, 42) = 84 + 3*84 + 2*4 = 344; ContentHorizontalChrome(FixedGap, 0) = 8
-    // (ContentLeftInset only, no scrollbar reserved when NoScrollBar is passed) -> windowWidth = 352.
-    private static double ThreeColumnWindowWidth(IconLayoutPolicy policy, double verticalScrollBarWidth)
-    {
-        var cell = GridMetrics.CellSize(IconSize);
-        var edgePadding = AdaptiveGridLayout.EdgePadding(cell, AdaptiveGridLayout.DefaultEdgePaddingRatio);
-        var contentWidth = AdaptiveGridLayout.Extent(3, cell, AdaptiveGridLayout.DefaultMinGap, edgePadding);
-        return contentWidth + GridMetrics.ContentHorizontalChrome(policy, verticalScrollBarWidth);
-    }
-
     // ----- ResolveColumnCapacity -----
 
+    /// <summary>
+    /// Verifies that a window sized for exactly three columns resolves a column capacity of 3, for
+    /// both icon layout policies.
+    /// </summary>
+    /// <param name="policy">The icon layout policy under test.</param>
     [Theory]
     [InlineData(IconLayoutPolicy.LegacyStretch)]
     [InlineData(IconLayoutPolicy.FixedGap)]
@@ -61,6 +55,10 @@ public class PanelContentSizerTests
         Assert.Equal(2, fixedGapCapacity);
     }
 
+    /// <summary>
+    /// Verifies that a degenerate (zero) window width still resolves to a column capacity of at
+    /// least one, never zero.
+    /// </summary>
     [Fact]
     public void ResolveColumnCapacity_NeverBelowOne_ForDegenerateWidth()
     {
@@ -71,6 +69,10 @@ public class PanelContentSizerTests
 
     // ----- ResolveDisplayRowCount -----
 
+    /// <summary>
+    /// Verifies that zero items still resolve to one displayed row (the drop-zone floor), contrasting
+    /// it explicitly with <see cref="AdaptiveGridLayout.RowCount"/>, which returns zero for zero items.
+    /// </summary>
     [Fact]
     public void ResolveDisplayRowCount_ZeroItems_ReturnsOne_TheDropZoneFloor()
     {
@@ -80,18 +82,28 @@ public class PanelContentSizerTests
         Assert.Equal(1, PanelContentSizer.ResolveDisplayRowCount(0, 3));
     }
 
+    /// <summary>
+    /// Verifies that a single item always resolves to one displayed row, regardless of column capacity.
+    /// </summary>
     [Fact]
     public void ResolveDisplayRowCount_OneItem_ReturnsOne_RegardlessOfCapacity()
     {
         Assert.Equal(1, PanelContentSizer.ResolveDisplayRowCount(1, 3));
     }
 
+    /// <summary>
+    /// Verifies that an item count exactly filling one row (equal to the column capacity) resolves
+    /// to one displayed row.
+    /// </summary>
     [Fact]
     public void ResolveDisplayRowCount_ExactlyOneFullRow_ReturnsOne()
     {
         Assert.Equal(1, PanelContentSizer.ResolveDisplayRowCount(3, 3));
     }
 
+    /// <summary>
+    /// Verifies that one item beyond the column capacity spills into a second displayed row.
+    /// </summary>
     [Fact]
     public void ResolveDisplayRowCount_OneMoreThanCapacity_ReturnsTwo()
     {
@@ -105,6 +117,7 @@ public class PanelContentSizerTests
     /// footprint — so the name label is never clipped (DoD: "1 иконка не даёт высокий прямоугольник" AND
     /// "подписи не отрезаются").
     /// </summary>
+    /// <param name="policy">The icon layout policy under test.</param>
     [Theory]
     [InlineData(IconLayoutPolicy.LegacyStretch)]
     [InlineData(IconLayoutPolicy.FixedGap)]
@@ -122,6 +135,7 @@ public class PanelContentSizerTests
     /// An EMPTY panel reserves the SAME single-row height as a one-item panel (the drop-zone floor is
     /// exactly one row, never zero and never more).
     /// </summary>
+    /// <param name="policy">The icon layout policy under test.</param>
     [Theory]
     [InlineData(IconLayoutPolicy.LegacyStretch)]
     [InlineData(IconLayoutPolicy.FixedGap)]
@@ -174,6 +188,7 @@ public class PanelContentSizerTests
         var fixedGapRaw = PanelContentSizer.ComputeRawContentHeight(itemCount, IconSize, windowWidth, IconLayoutPolicy.FixedGap, ScrollBarWidth);
 
         var rowHeight = GridMetrics.RowHeight(IconSize);
+
         // LegacyStretch: capacity 3 (unaffected by the scrollbar reservation) -> ceil(4/3) = 2 rows.
         // FixedGap: capacity 2 (reserves the scrollbar) -> ceil(4/2) = 2 rows. Same row count here by
         // coincidence of this particular itemCount — assert both independently via the same formula
@@ -191,7 +206,7 @@ public class PanelContentSizerTests
     /// <summary>
     /// DPI-independence: this type takes only DIP <see langword="double"/>s and never reads any global/
     /// static DPI or <c>SystemParameters</c> state itself (the caller passes
-    /// <paramref name="verticalScrollBarWidth"/> in explicitly — see the class remarks) — so calling it
+    /// <c>verticalScrollBarWidth</c> in explicitly — see the class remarks) — so calling it
     /// twice with identical DIP inputs always yields an identical result, independent of anything else
     /// running on the machine (including whatever the real display's DPI scale happens to be).
     /// </summary>
@@ -208,6 +223,10 @@ public class PanelContentSizerTests
 
     // ----- RoundForLegacyFreeform -----
 
+    /// <summary>
+    /// Verifies that a raw height is rounded up to the nearest whole DIP, and that an already-whole
+    /// value is returned unchanged.
+    /// </summary>
     [Fact]
     public void RoundForLegacyFreeform_RoundsUpToWholeDip()
     {
@@ -215,6 +234,10 @@ public class PanelContentSizerTests
         Assert.Equal(100d, PanelContentSizer.RoundForLegacyFreeform(100.0d));
     }
 
+    /// <summary>
+    /// Verifies that a negative raw height clamps to zero instead of throwing or returning a
+    /// negative result.
+    /// </summary>
     [Fact]
     public void RoundForLegacyFreeform_NegativeInput_ClampsToZero_NeverThrows()
     {
@@ -223,6 +246,10 @@ public class PanelContentSizerTests
 
     // ----- RoundHeightUnitsForGridAligned -----
 
+    /// <summary>
+    /// Verifies that rounding a mid-sized raw height to grid-aligned height units reproduces the same
+    /// value <see cref="WorkspaceLayoutPolicy.BoundsToSpans"/> would compute directly.
+    /// </summary>
     [Fact]
     public void RoundHeightUnitsForGridAligned_MatchesBoundsToSpans_ForAMidSizedHeight()
     {
@@ -236,6 +263,10 @@ public class PanelContentSizerTests
         Assert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// Verifies that a raw height far below the minimum still rounds up to
+    /// <see cref="WorkspaceGridMetrics.MinHeightSpanExpanded"/>, never below it.
+    /// </summary>
     [Fact]
     public void RoundHeightUnitsForGridAligned_NeverBelowMinHeightSpanExpanded()
     {
@@ -244,6 +275,11 @@ public class PanelContentSizerTests
         Assert.Equal(WorkspaceGridMetrics.MinHeightSpanExpanded, actual);
     }
 
+    /// <summary>
+    /// Verifies that rounding to height units, converting back to DIP bounds via
+    /// <see cref="WorkspaceLayoutPolicy.SpansToBounds"/>, and rounding again produces the same
+    /// height units — the rounding is idempotent across a bounds/spans round trip.
+    /// </summary>
     [Fact]
     public void RoundHeightUnitsForGridAligned_IsIdempotent_WhenRoundTrippedThroughSpansToBounds()
     {
@@ -261,6 +297,11 @@ public class PanelContentSizerTests
 
     // ----- FitHeight (full pipeline, both geometries, both policies) -----
 
+    /// <summary>
+    /// Verifies that in <see cref="PanelGeometryMode.LegacyFreeform"/> mode, the fit height equals the
+    /// ceiling of the raw content height, for both icon layout policies.
+    /// </summary>
+    /// <param name="policy">The icon layout policy under test.</param>
     [Theory]
     [InlineData(IconLayoutPolicy.LegacyStretch)]
     [InlineData(IconLayoutPolicy.FixedGap)]
@@ -274,6 +315,12 @@ public class PanelContentSizerTests
         Assert.Equal(Math.Ceiling(raw), fitHeight);
     }
 
+    /// <summary>
+    /// Verifies that in <see cref="PanelGeometryMode.GridAligned"/> mode, the fit height equals
+    /// <see cref="WorkspaceLayoutPolicy.SpansToBounds"/> applied to the rounded height units, for
+    /// both icon layout policies.
+    /// </summary>
+    /// <param name="policy">The icon layout policy under test.</param>
     [Theory]
     [InlineData(IconLayoutPolicy.LegacyStretch)]
     [InlineData(IconLayoutPolicy.FixedGap)]
@@ -297,6 +344,7 @@ public class PanelContentSizerTests
     /// (both DoD "0/1/2 ряда" and the "не отрезаются" requirement would be violated by a geometry-mode
     /// rounding rule that ever rounded DOWN).
     /// </summary>
+    /// <param name="itemCount">The item count used to compute both the LegacyFreeform and GridAligned fit heights.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -331,5 +379,17 @@ public class PanelContentSizerTests
 
         Assert.Equal(zeroItems, oneItem); // both the drop-zone floor.
         Assert.True(fourItems > oneItem, "A second row must add height relative to a single row.");
+    }
+
+    // ----- helpers -----
+    // A window wide enough for exactly 3 FixedGap columns at IconSize=48 (cell=84, edgePadding=42,
+    // minGap=4): Extent(3, 84, 4, 42) = 84 + 3*84 + 2*4 = 344; ContentHorizontalChrome(FixedGap, 0) = 8
+    // (ContentLeftInset only, no scrollbar reserved when NoScrollBar is passed) -> windowWidth = 352.
+    private static double ThreeColumnWindowWidth(IconLayoutPolicy policy, double verticalScrollBarWidth)
+    {
+        var cell = GridMetrics.CellSize(IconSize);
+        var edgePadding = AdaptiveGridLayout.EdgePadding(cell, AdaptiveGridLayout.DefaultEdgePaddingRatio);
+        var contentWidth = AdaptiveGridLayout.Extent(3, cell, AdaptiveGridLayout.DefaultMinGap, edgePadding);
+        return contentWidth + GridMetrics.ContentHorizontalChrome(policy, verticalScrollBarWidth);
     }
 }

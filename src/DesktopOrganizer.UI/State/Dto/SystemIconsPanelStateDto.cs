@@ -32,14 +32,29 @@ namespace DesktopOrganizer.UI.State.Dto;
 /// </remarks>
 public sealed class SystemIconsPanelStateDto
 {
+    /// <summary>Whether the system icons panel is switched on.</summary>
     public bool IsEnabled { get; set; }
 
+    /// <summary>Whether the panel should follow the user across virtual desktops.</summary>
     public bool ShowOnAllVirtualDesktops { get; set; }
 
+    /// <summary>
+    /// Enum member name of the panel's <see cref="Models.SystemIconSize"/> (e.g. <c>"Medium"</c>).
+    /// Parsed case-sensitively; an invalid or absent value degrades to the model's own default.
+    /// </summary>
     public string IconSize { get; set; } = "Medium";
 
+    /// <summary>
+    /// String representation of the <see cref="Guid"/> of the virtual desktop the panel anchors to
+    /// while <see cref="ShowOnAllVirtualDesktops"/> is <see langword="false"/>, or <see langword="null"/>
+    /// if unresolved. A malformed value silently resolves to "no anchor" on load
+    /// (<c>SystemIconsPanelStateMapper.ApplyTo</c>); when resolving the anchor, the system's own
+    /// "Desktop 1" (R2) always takes priority over this persisted value
+    /// (<c>SystemIconsPanelManager.ResolveAnchorDesktopId</c>).
+    /// </summary>
     public string? AnchorVirtualDesktopId { get; set; }
 
+    /// <summary>The panel's system-icon items, in display order.</summary>
     public List<SystemIconsPanelItemStateDto> Items { get; set; } = [];
 }
 
@@ -49,9 +64,12 @@ public sealed class SystemIconsPanelStateDto
 /// </summary>
 public sealed class SystemIconsPanelItemStateDto
 {
+    /// <summary>Which well-known system icon this entry represents.</summary>
     public SystemIconKind Kind { get; set; }
 
+    /// <summary>Whether this icon is currently shown.</summary>
     public bool IsVisible { get; set; }
 
+    /// <summary>The icon's display order, relative to its siblings.</summary>
     public int Order { get; set; }
 }

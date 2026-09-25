@@ -26,6 +26,8 @@ public static class PanelDefaults
     /// all), to make a <see cref="PanelGeometryMode.GridAligned"/> panel's spans self-consistent
     /// (MAJOR-1(b), see that method's remarks).
     /// </summary>
+    /// <param name="model">The newly created panel model to seed.</param>
+    /// <param name="settings">The global application settings providing the defaults.</param>
     public static void Apply(ChildWindowModel model, IAppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -125,6 +127,7 @@ public static class PanelDefaults
     /// MAJOR-1(a) guard already defends on the READ side; this closes the equivalent gap on this WRITE side.
     /// </para>
     /// </remarks>
+    /// <param name="model">The panel model whose <see cref="ChildWindowModel.WidthSpanUnits"/>/<see cref="ChildWindowModel.HeightSpanUnits"/> are reconciled with its <see cref="ChildWindowModel.Size"/>.</param>
     public static void ReconcileGridAlignedSpans(ChildWindowModel model)
     {
         ArgumentNullException.ThrowIfNull(model);

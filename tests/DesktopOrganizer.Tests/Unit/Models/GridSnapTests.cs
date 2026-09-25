@@ -42,18 +42,30 @@ public class GridSnapTests
 
     // ----- grid <= 1 disables snapping -----
 
+    /// <summary>
+    /// A grid size of 1 disables snapping entirely — <see cref="GridSnap.SnapAxis"/> returns the raw
+    /// coordinate unchanged.
+    /// </summary>
     [Fact]
     public void SnapAxis_GridOne_ReturnsRawUnchanged()
     {
         Assert.Equal(103d, GridSnap.SnapAxis(103, 1, 12));
     }
 
+    /// <summary>
+    /// A grid size of 0 disables snapping entirely — <see cref="GridSnap.SnapAxis"/> returns the raw
+    /// coordinate unchanged.
+    /// </summary>
     [Fact]
     public void SnapAxis_GridZero_ReturnsRawUnchanged()
     {
         Assert.Equal(103d, GridSnap.SnapAxis(103, 0, 12));
     }
 
+    /// <summary>
+    /// A negative grid size disables snapping entirely — <see cref="GridSnap.SnapAxis"/> returns the
+    /// raw coordinate unchanged.
+    /// </summary>
     [Fact]
     public void SnapAxis_GridNegative_ReturnsRawUnchanged()
     {

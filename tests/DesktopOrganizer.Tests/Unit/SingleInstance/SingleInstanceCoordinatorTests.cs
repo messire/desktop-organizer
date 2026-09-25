@@ -22,7 +22,10 @@ public class SingleInstanceCoordinatorTests
         budget: TimeSpan.FromSeconds(5),
         backoff: [TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero]);
 
-    // T-CO-01
+    /// <summary>
+    /// Verifies that when the guard mutex is free, the coordinator runs as primary, starts the server,
+    /// and sends nothing (T-CO-01).
+    /// </summary>
     [Fact]
     public void Start_MutexFree_RunsAsPrimary_StartsServer_SendsNothing()
     {
@@ -41,7 +44,10 @@ public class SingleInstanceCoordinatorTests
         Assert.Empty(client.SentRequests);
     }
 
-    // T-CO-02
+    /// <summary>
+    /// Verifies that when the guard mutex is busy and the primary answers <c>Ok</c>, the coordinator
+    /// exits after activation as a secondary without starting its own server (T-CO-02).
+    /// </summary>
     [Fact]
     public void Start_MutexBusy_PrimaryAnswersOk_ExitsAfterActivation()
     {
@@ -60,7 +66,10 @@ public class SingleInstanceCoordinatorTests
         Assert.Equal(0, server.StartCallCount);
     }
 
-    // T-CO-03
+    /// <summary>
+    /// Verifies that when the guard mutex frees up on the third attempt after two
+    /// <c>PrimaryShuttingDown</c> responses, the coordinator runs as primary (T-CO-03).
+    /// </summary>
     [Fact]
     public void Start_MutexFreesUpOnThirdAttempt_AfterTwoShuttingDownResponses_RunsAsPrimary()
     {
@@ -77,7 +86,10 @@ public class SingleInstanceCoordinatorTests
         Assert.Equal(1, server.StartCallCount);
     }
 
-    // T-CO-04
+    /// <summary>
+    /// Verifies that when the primary never responds and the attempt budget is exhausted, the
+    /// coordinator exits with <see cref="SingleInstanceStartupAction.ExitActivationFailed"/> (T-CO-04).
+    /// </summary>
     [Fact]
     public void Start_PrimaryNeverResponds_BudgetExhausted_ExitsActivationFailed()
     {
@@ -94,7 +106,11 @@ public class SingleInstanceCoordinatorTests
         Assert.Equal(0, server.StartCallCount);
     }
 
-    // T-CO-06
+    /// <summary>
+    /// Verifies that when the guard mutex is acquired but the pipe is busy (<c>ERROR_PIPE_BUSY</c>,
+    /// ADR-023 D-4), the coordinator releases the guard and falls back to running as secondary
+    /// (T-CO-06).
+    /// </summary>
     [Fact]
     public void Start_GuardAcquired_ButPipeBusy_ReleasesGuard_FallsBackToSecondary()
     {
@@ -118,33 +134,28 @@ public class SingleInstanceCoordinatorTests
     // server itself could not come up for reasons unrelated to another process's server — the process
     // legitimately holding the guard must stay Primary rather than release it and report a misleading
     // "already running" failure.
+
+    /// <summary>
+    /// Verifies that when the pipe server fails to start with <see cref="ActivationServerUnavailableReason.AclFailed"/>,
+    /// the coordinator stays primary and keeps the guard rather than falling back to secondary (M-2).
+    /// </summary>
     [Fact]
     public void Start_GuardAcquired_ServerAclFailed_StaysPrimary_KeepsGuard() =>
         AssertDegradedPrimary(ActivationServerUnavailableReason.AclFailed);
 
+    /// <summary>
+    /// Verifies that when the pipe server fails to start with <see cref="ActivationServerUnavailableReason.Faulted"/>,
+    /// the coordinator stays primary and keeps the guard rather than falling back to secondary (M-2).
+    /// </summary>
     [Fact]
     public void Start_GuardAcquired_ServerFaulted_StaysPrimary_KeepsGuard() =>
         AssertDegradedPrimary(ActivationServerUnavailableReason.Faulted);
 
-    private static void AssertDegradedPrimary(ActivationServerUnavailableReason reason)
-    {
-        var guard = new FakeMutexGate(true);
-        var server = new FakeActivationServer(startResult: false, failureReason: reason);
-        var client = new FakeActivationClient(); // must never be consulted — this process never falls back
-        var coordinator = CreateCoordinator(guard, server: server, client: client);
-
-        var decision = coordinator.Start();
-
-        Assert.Equal(SingleInstanceStartupAction.RunAsPrimary, decision.Action);
-        Assert.Equal(SingleInstanceRole.Primary, decision.Role);
-        Assert.Equal(1, decision.Attempts);
-        Assert.True(guard.IsOwned);
-        Assert.Equal(0, guard.ReleaseCallCount);
-        Assert.Equal(1, server.StartCallCount);
-        Assert.Empty(client.SentRequests);
-    }
-
-    // T-CO-07
+    /// <summary>
+    /// Verifies that calling <see cref="ISingleInstanceCoordinator.EnterShutdown"/> and the inherited
+    /// <c>Dispose</c> repeatedly, without ever calling <c>Start</c>, is idempotent and does not throw
+    /// (T-CO-07).
+    /// </summary>
     [Fact]
     public void Dispose_WithoutStart_IsIdempotent_AndDoesNotThrow()
     {
@@ -166,6 +177,10 @@ public class SingleInstanceCoordinatorTests
         Assert.False(guard.IsOwned);
     }
 
+    /// <summary>
+    /// Verifies that after acquiring the primary role, disposing the coordinator stops the server and
+    /// releases the guard.
+    /// </summary>
     [Fact]
     public void Dispose_AfterAcquiringPrimary_ReleasesGuardAndStopsServer_InOrder()
     {
@@ -183,6 +198,11 @@ public class SingleInstanceCoordinatorTests
         Assert.Equal(1, detection.DisposeCallCount);
     }
 
+    /// <summary>
+    /// Verifies that invoking the server's captured <c>onRequest</c> callback after
+    /// <see cref="ISingleInstanceCoordinator.TryBeginServing"/> raises
+    /// <see cref="ISingleInstanceCoordinator.ActivationRequested"/> with the request unchanged.
+    /// </summary>
     [Fact]
     public void TryBeginServing_ServerCallback_RaisesActivationRequested()
     {
@@ -200,6 +220,11 @@ public class SingleInstanceCoordinatorTests
         Assert.Equal(sample, received);
     }
 
+    /// <summary>
+    /// Verifies that the server's captured status provider reflects <see cref="ActivationResponseCode.Ok"/>
+    /// before <see cref="ISingleInstanceCoordinator.EnterShutdown"/> and <see cref="ActivationResponseCode.ShuttingDown"/>
+    /// after it.
+    /// </summary>
     [Fact]
     public void TryBeginServing_StatusProvider_ReflectsEnterShutdown()
     {
@@ -301,8 +326,8 @@ public class SingleInstanceCoordinatorTests
     }
 
     /// <summary>
-    /// C-2 regression: <see cref="ISingleInstanceCoordinator.Dispose"/> must never resolve
-    /// <see cref="IDiagnosticsLog"/> itself — only <see cref="ISingleInstanceCoordinator.CompleteShutdown"/>
+    /// C-2 regression: <see cref="ISingleInstanceCoordinator"/>'s inherited <c>Dispose</c> must never
+    /// resolve <see cref="IDiagnosticsLog"/> itself — only <see cref="ISingleInstanceCoordinator.CompleteShutdown"/>
     /// does, and the host is required to call that before disposing the DI container that owns the log
     /// (see <c>App.OnExit</c>). A coordinator disposed without ever calling <c>CompleteShutdown()</c> —
     /// exactly what happens when a real <c>ServiceProvider</c> disposes its registered singletons — must
@@ -374,6 +399,10 @@ public class SingleInstanceCoordinatorTests
         Assert.Equal(stopsAfterFirstShutdown, server.StopCallCount);
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="SingleInstanceCoordinator"/> constructor throws
+    /// <see cref="ArgumentNullException"/> for a <see langword="null"/> guard.
+    /// </summary>
     [Fact]
     public void Constructor_NullGuard_Throws()
     {
@@ -386,6 +415,24 @@ public class SingleInstanceCoordinatorTests
             () => 0,
             sessionId: 1,
             () => NullDiagnosticsLog.Instance));
+    }
+
+    private static void AssertDegradedPrimary(ActivationServerUnavailableReason reason)
+    {
+        var guard = new FakeMutexGate(true);
+        var server = new FakeActivationServer(startResult: false, failureReason: reason);
+        var client = new FakeActivationClient(); // must never be consulted — this process never falls back
+        var coordinator = CreateCoordinator(guard, server: server, client: client);
+
+        var decision = coordinator.Start();
+
+        Assert.Equal(SingleInstanceStartupAction.RunAsPrimary, decision.Action);
+        Assert.Equal(SingleInstanceRole.Primary, decision.Role);
+        Assert.Equal(1, decision.Attempts);
+        Assert.True(guard.IsOwned);
+        Assert.Equal(0, guard.ReleaseCallCount);
+        Assert.Equal(1, server.StartCallCount);
+        Assert.Empty(client.SentRequests);
     }
 
     private static SingleInstanceCoordinator CreateCoordinator(

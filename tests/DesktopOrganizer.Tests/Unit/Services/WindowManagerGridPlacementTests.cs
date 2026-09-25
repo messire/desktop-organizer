@@ -22,29 +22,13 @@ public class WindowManagerGridPlacementTests
     private const string Display1 = @"\\.\DISPLAY1";
     private const string Display2 = @"\\.\DISPLAY2";
 
-    private static MonitorInfo Primary(Rect? workArea = null) =>
-        new(Display1, new Rect(0, 0, 1920, 1080), workArea ?? new Rect(0, 40, 1920, 1040), true);
-
-    /// <summary>A monitor placed left of and above the primary — negative DIP coordinates (ADR-028).</summary>
-    private static MonitorInfo NegativeSecondary() =>
-        new(Display2, new Rect(-1366, -200, 1366, 768), new Rect(-1366, -160, 1366, 728), false);
-
-    private static ChildWindowModel GridPanel(int x, int y, int widthSpan = 31, int heightSpan = 31)
-    {
-        var size = WorkspaceLayoutPolicy.SpansToBounds(new GridSpan(widthSpan, heightSpan), U, G);
-        return new ChildWindowModel
-        {
-            GeometryMode = PanelGeometryMode.GridAligned,
-            MonitorDeviceId = Display1,
-            WidthSpanUnits = widthSpan,
-            HeightSpanUnits = heightSpan,
-            Position = new DrawingPoint(x, y),
-            Size = new DrawingSize((int)size.Width, (int)size.Height),
-        };
-    }
-
     // ── Инвариант В1: only GridAligned panels take this path ──────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.ResolveGridAlignedBounds"/> returns <see langword="null"/>
+    /// for a <see cref="PanelGeometryMode.LegacyFreeform"/> panel, leaving the model untouched, so the
+    /// caller's untouched-clamp path runs instead.
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_LegacyFreeformPanel_ReturnsNull_SoTheUntouchedClampPathRuns()
     {
@@ -62,6 +46,10 @@ public class WindowManagerGridPlacementTests
         Assert.Equal(new DrawingSize(300, 400), model.Size);
     }
 
+    /// <summary>
+    /// Verifies that a <see cref="PanelGeometryMode.GridAligned"/> panel with neither spans nor a size to
+    /// derive them from returns <see langword="null"/> instead of guessing.
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_GridAlignedWithoutSpansAndWithoutSize_ReturnsNull()
     {
@@ -70,6 +58,10 @@ public class WindowManagerGridPlacementTests
         Assert.Null(WindowManager.ResolveGridAlignedBounds(model, Primary()));
     }
 
+    /// <summary>
+    /// Verifies the pre-spans migration case (plan §0.1 outcome b): a document written before spans
+    /// existed derives spans from its saved size and places the panel using those derived spans.
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_GridAlignedWithoutSpansButWithSize_MigratesSpansAndPlaces()
     {
@@ -94,6 +86,10 @@ public class WindowManagerGridPlacementTests
 
     // ── D3-4: no jump on first launch ─────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that a panel already sitting exactly on the workspace grid resolves to precisely its
+    /// saved position and size — no jump on first launch (D3-4).
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_PanelAlreadyOnTheGrid_ReturnsExactlyItsSavedBounds()
     {
@@ -110,6 +106,11 @@ public class WindowManagerGridPlacementTests
         Assert.Equal(savedSize.Height, bounds.Value.Height);
     }
 
+    /// <summary>
+    /// Verifies R-9: re-resolving an unchanged configuration is idempotent — repeated calls must not
+    /// drift the panel's position by even a single DIP, since <c>WM_SETTINGCHANGE</c> raises
+    /// <c>MonitorsChanged</c> for something as ordinary as a theme change.
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_RepeatedResolution_IsIdempotent()
     {
@@ -127,6 +128,10 @@ public class WindowManagerGridPlacementTests
         Assert.Equal(first, second);
     }
 
+    /// <summary>
+    /// Verifies that a saved position that is off the workspace grid (e.g. from a pre-P03 lasso drop)
+    /// snaps to the grid within half a unit rather than jumping further.
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_OffGridSavedPosition_SnapsWithinHalfAUnit()
     {
@@ -171,6 +176,10 @@ public class WindowManagerGridPlacementTests
         Assert.Equal(Display1, model.MonitorDeviceId); // never relocated (D3-3)
     }
 
+    /// <summary>
+    /// Verifies that a work-area origin shift that is not a whole number of units re-quantises the
+    /// panel's position onto the new origin's grid, moving it by at most half a unit.
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_WorkAreaOriginShiftsOffGrid_PanelReQuantisesWithinHalfAUnit()
     {
@@ -183,6 +192,10 @@ public class WindowManagerGridPlacementTests
         Assert.Equal(0d, (bounds.Value.Y - 85d) % U, 9); // on the NEW origin's grid
     }
 
+    /// <summary>
+    /// Verifies that when the work area shrinks below the panel's saved size, only the position is
+    /// clamped back onto the grid — the panel's size is never shrunk.
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_WorkAreaShrinksBelowThePanel_ClampsPositionOnGrid_NeverTheSize()
     {
@@ -198,6 +211,10 @@ public class WindowManagerGridPlacementTests
         Assert.Equal(0d, (bounds.Value.Y - 40d) % U, 9);
     }
 
+    /// <summary>
+    /// Verifies that a monitor with negative DIP coordinates (ADR-028) still places the panel correctly
+    /// on that monitor's own workspace grid, within its work area bounds.
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_NegativeCoordinateMonitor_PlacesOnThatMonitorsGrid()
     {
@@ -215,6 +232,11 @@ public class WindowManagerGridPlacementTests
         Assert.True(bounds.Value.Right <= monitor.WorkArea.Right + 0.001);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.ResolveGridAlignedBounds"/> resolves against the monitor
+    /// it is explicitly given, never second-guessing it by consulting <c>model.MonitorDeviceId</c>
+    /// (the caller already applied the "stored monitor gone -&gt; primary" rule, per M4).
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_UsesTheMonitorItIsGiven_NotTheOneOnTheModel()
     {
@@ -232,6 +254,10 @@ public class WindowManagerGridPlacementTests
 
     // ── D3-5: drag -> persist -> restore round-trip ───────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies the full drag → persist → restore round trip (D3-5): the bounds a lasso drop resolves
+    /// to and then persists are restored exactly, byte for byte, on the next resolution.
+    /// </summary>
     [Fact]
     public void ResolveGridAlignedBounds_AfterADropAndPersist_RestoresTheSameBounds()
     {
@@ -256,5 +282,27 @@ public class WindowManagerGridPlacementTests
         Assert.NotNull(restored);
         Assert.Equal(dropped.X, restored!.Value.X);
         Assert.Equal(dropped.Y, restored.Value.Y);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static MonitorInfo Primary(Rect? workArea = null) =>
+        new(Display1, new Rect(0, 0, 1920, 1080), workArea ?? new Rect(0, 40, 1920, 1040), true);
+
+    /// <summary>A monitor placed left of and above the primary — negative DIP coordinates (ADR-028).</summary>
+    private static MonitorInfo NegativeSecondary() =>
+        new(Display2, new Rect(-1366, -200, 1366, 768), new Rect(-1366, -160, 1366, 728), false);
+
+    private static ChildWindowModel GridPanel(int x, int y, int widthSpan = 31, int heightSpan = 31)
+    {
+        var size = WorkspaceLayoutPolicy.SpansToBounds(new GridSpan(widthSpan, heightSpan), U, G);
+        return new ChildWindowModel
+        {
+            GeometryMode = PanelGeometryMode.GridAligned,
+            MonitorDeviceId = Display1,
+            WidthSpanUnits = widthSpan,
+            HeightSpanUnits = heightSpan,
+            Position = new DrawingPoint(x, y),
+            Size = new DrawingSize((int)size.Width, (int)size.Height),
+        };
     }
 }

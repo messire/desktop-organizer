@@ -128,6 +128,7 @@ public interface IWindowManager
     /// Applies the <see cref="Models.ChildWindowModel.IsVisible"/> flag of <paramref name="model"/>
     /// to the actual <see cref="Views.ChildWindow"/> (shows or hides it).
     /// </summary>
+    /// <param name="model">The panel model whose <see cref="Models.ChildWindowModel.IsVisible"/> flag is applied.</param>
     void ApplyPanelVisibility(Models.ChildWindowModel model);
 
     /// <summary>

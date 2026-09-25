@@ -48,6 +48,7 @@ public class DesktopGestureStateMachineTests
     /// A movement of exactly the threshold is not a drag: a plain right click must keep working and
     /// the desktop context menu must not be suppressed.
     /// </summary>
+    /// <param name="travel">The horizontal and vertical pixel distance moved between button-down and button-up.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(DesktopGestureStateMachine.DragThreshold)]
@@ -186,6 +187,8 @@ public class DesktopGestureStateMachineTests
     /// <summary>
     /// The double-click slop is inclusive: within it the second click still counts, beyond it it does not.
     /// </summary>
+    /// <param name="offset">The horizontal pixel offset of the second click from the first.</param>
+    /// <param name="expected">Whether the second click is expected to register as a double click.</param>
     [Theory]
     [InlineData(DesktopGestureStateMachine.DoubleClickSlop, true)]
     [InlineData(DesktopGestureStateMachine.DoubleClickSlop + 1, false)]
@@ -286,6 +289,7 @@ public class DesktopGestureStateMachineTests
     /// <summary>
     /// Messages the gestures do not care about change nothing and are never suppressed.
     /// </summary>
+    /// <param name="message">The unrelated Win32 window message identifier under test.</param>
     [Theory]
     [InlineData(0x0202)] // WM_LBUTTONUP
     [InlineData(0x0207)] // WM_MBUTTONDOWN
@@ -328,7 +332,7 @@ public class DesktopGestureStateMachineTests
 /// <summary>
 /// Deterministic stand-in for the OS: a controllable clock and scripted desktop hit-testing.
 /// </summary>
-file sealed class FakeGestureEnvironment : IDesktopGestureEnvironment
+internal sealed class FakeGestureEnvironment : IDesktopGestureEnvironment
 {
     /// <summary>Gets or sets the fake clock, advanced explicitly by the tests.</summary>
     public int TickCount { get; set; } = 10_000;

@@ -8,7 +8,7 @@ namespace DesktopOrganizer.UI.Models;
 /// the MOVING panel's edge/centre with the SAME edge/centre of the obstacle — e.g. <see cref="LeftEdge"/>
 /// lines up <c>moving.Left</c> with <c>obstacle.Left</c>, never with <c>obstacle.Right</c>. "Touching"
 /// alignment (e.g. <c>moving.Right</c> flush against <c>obstacle.Left</c>) is deliberately not a guide
-/// kind here — that is what <see cref="PanelCollision.ClampAgainstObstacles"/> already enforces as a hard
+/// kind here — that is what <see cref="PanelCollision.ClampAgainstObstacles(Rect, double, double, IReadOnlyList{Rect})"/> already enforces as a hard
 /// wall, not a soft magnet.
 /// </summary>
 public enum SnapGuideKind
@@ -61,14 +61,14 @@ public readonly record struct SnapGuideResult(Point Position, IReadOnlyList<Snap
 /// order, fixed by <c>Behaviors.PanelDragMoveBehavior.OnTitleBarMouseMove</c>: <see cref="GridSnap"/> runs
 /// first, this runs second (and ONLY while <c>ILayoutEditModeService.IsEditing</c> is
 /// <see langword="true"/> — the Normal-mode pipeline never calls this type at all), and
-/// <see cref="PanelCollision.ClampAgainstObstacles"/> always runs last (R-8 — the anti-overlap "hard
+/// <see cref="PanelCollision.ClampAgainstObstacles(Rect, double, double, IReadOnlyList{Rect})"/> always runs last (R-8 — the anti-overlap "hard
 /// wall" must never be pushed through by a guide correction).
 /// </summary>
 public static class SnapGuideCalculator
 {
     /// <summary>
     /// Magnetic pull distance, in DIU, for entering a guide's alignment zone. Deliberately a SEPARATE
-    /// constant from <see cref="IAppSettings.GridSnapDistance"/> — a different magnet (a neighbouring
+    /// constant from <see cref="Services.IAppSettings.GridSnapDistance"/> — a different magnet (a neighbouring
     /// panel's edge/centre, not the icon grid) with different semantics; conflating the two behind one
     /// user-facing slider would make that setting's meaning unclear (see the plan's Q-3). Not currently
     /// exposed as a user setting.
@@ -81,7 +81,7 @@ public static class SnapGuideCalculator
     /// Widens the "is this candidate within the magnet" comparison just enough that accumulated
     /// <see cref="double"/> rounding noise between two calls with an (almost) identical cursor position
     /// can never flip a candidate in or out of range purely from floating-point jitter — the actual
-    /// magnet radius users perceive is still governed by <paramref name="threshold"/> passed to
+    /// magnet radius users perceive is still governed by the <c>threshold</c> parameter passed to
     /// <see cref="Snap"/>, this only stabilises the boundary.
     /// </summary>
     private const double Eps = 0.5;
@@ -107,7 +107,7 @@ public static class SnapGuideCalculator
     /// nearly equidistant.
     /// </summary>
     /// <param name="moving">The panel's rectangle after <see cref="GridSnap"/> has already run (proposed position, real size).</param>
-    /// <param name="obstacles">The other live panels' current screen rectangles (same snapshot <see cref="PanelCollision.ClampAgainstObstacles"/> will use afterwards).</param>
+    /// <param name="obstacles">The other live panels' current screen rectangles (same snapshot <see cref="PanelCollision.ClampAgainstObstacles(Rect, double, double, IReadOnlyList{Rect})"/> will use afterwards).</param>
     /// <param name="workArea">
     /// The current monitor's work area. Used only as a soft guard: a guide correction that would push the
     /// moving panel's whole rectangle outside <paramref name="workArea"/> on that axis is discarded (that

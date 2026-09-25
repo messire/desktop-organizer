@@ -14,6 +14,9 @@ public class HexBrushConverterTests
     private static readonly HexBrushConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that a valid six-digit hex string produces a frozen <see cref="SolidColorBrush"/>.
+    /// </summary>
     [Fact]
     public void Convert_ValidHex_ReturnsFrozenBrush()
     {
@@ -23,6 +26,9 @@ public class HexBrushConverterTests
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that converting the same hex string twice returns the same cached brush instance.
+    /// </summary>
     [Fact]
     public void Convert_SameHexTwice_ReturnsSameInstance()
     {
@@ -32,6 +38,10 @@ public class HexBrushConverterTests
         Assert.Same(first, second);
     }
 
+    /// <summary>
+    /// Verifies that hex strings differing only by surrounding whitespace or case normalize to the same
+    /// cache key and return the same cached brush instance.
+    /// </summary>
     [Fact]
     public void Convert_KeyNormalization_WhitespaceAndCaseInsensitive_ReturnsSameInstance()
     {
@@ -41,6 +51,9 @@ public class HexBrushConverterTests
         Assert.Same(first, second);
     }
 
+    /// <summary>
+    /// Verifies that an invalid hex string returns <see cref="Brushes.Transparent"/>.
+    /// </summary>
     [Fact]
     public void Convert_InvalidHex_ReturnsTransparent()
     {
@@ -49,6 +62,9 @@ public class HexBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that a non-<see cref="string"/> value returns <see cref="Brushes.Transparent"/>.
+    /// </summary>
     [Fact]
     public void Convert_NonStringValue_ReturnsTransparent()
     {
@@ -57,6 +73,9 @@ public class HexBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that an empty string returns <see cref="Brushes.Transparent"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_EmptyString_ReturnsTransparent_DoesNotThrow()
     {
@@ -67,6 +86,10 @@ public class HexBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that an ICC profile reference string returns <see cref="Brushes.Transparent"/> instead of
+    /// propagating the exceptions that <see cref="System.Windows.Media.ColorConverter"/> can throw for it.
+    /// </summary>
     [Fact]
     public void Convert_IccProfileReference_ReturnsTransparent_DoesNotThrow()
     {
@@ -82,6 +105,10 @@ public class HexBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that converting many distinct hex values keeps returning frozen brushes without crashing,
+    /// exercising the bounded cache's eviction path.
+    /// </summary>
     [Fact]
     public void Convert_ManyDistinctHexValues_CacheStaysBounded()
     {
@@ -100,6 +127,10 @@ public class HexBrushConverterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="HexBrushConverter.TryParseColor"/> returns <see langword="true"/> and the
+    /// parsed <see cref="Color"/> for a valid hex string.
+    /// </summary>
     [Fact]
     public void TryParseColor_ValidHex_ReturnsTrueAndColor()
     {
@@ -109,6 +140,10 @@ public class HexBrushConverterTests
         Assert.Equal(Color.FromRgb(0x11, 0x22, 0x33), color);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="HexBrushConverter.TryParseColor"/> returns <see langword="false"/> for an
+    /// empty string instead of throwing.
+    /// </summary>
     [Fact]
     public void TryParseColor_EmptyString_ReturnsFalse_DoesNotThrow()
     {
@@ -117,6 +152,10 @@ public class HexBrushConverterTests
         Assert.False(ok);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="HexBrushConverter.TryParseColor"/> returns <see langword="false"/> for an
+    /// ICC profile reference string instead of throwing.
+    /// </summary>
     [Fact]
     public void TryParseColor_IccProfileReference_ReturnsFalse_DoesNotThrow()
     {
@@ -128,6 +167,9 @@ public class HexBrushConverterTests
         Assert.False(ok);
     }
 
+    /// <summary>
+    /// Verifies that converting a <see cref="SolidColorBrush"/> back returns the color's string representation.
+    /// </summary>
     [Fact]
     public void ConvertBack_SolidColorBrush_ReturnsColorString()
     {
@@ -138,6 +180,9 @@ public class HexBrushConverterTests
         Assert.Equal(Colors.Red.ToString(), result);
     }
 
+    /// <summary>
+    /// Verifies that converting back a value that is not a <see cref="Brush"/> returns <c>Binding.DoNothing</c>.
+    /// </summary>
     [Fact]
     public void ConvertBack_NonBrushValue_ReturnsDoNothing()
     {
@@ -156,6 +201,9 @@ public class ColorOpacityBrushConverterTests
     private static readonly ColorOpacityBrushConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that valid hex/opacity inputs produce a frozen <see cref="SolidColorBrush"/>.
+    /// </summary>
     [Fact]
     public void Convert_ValidInputs_ReturnsFrozenBrush()
     {
@@ -165,6 +213,9 @@ public class ColorOpacityBrushConverterTests
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that converting the same hex/opacity pair twice returns the same cached brush instance.
+    /// </summary>
     [Fact]
     public void Convert_SameHexAndOpacityTwice_ReturnsSameInstance()
     {
@@ -174,6 +225,9 @@ public class ColorOpacityBrushConverterTests
         Assert.Same(first, second);
     }
 
+    /// <summary>
+    /// Verifies that the same hex with different opacity values returns distinct cached brush instances.
+    /// </summary>
     [Fact]
     public void Convert_SameHexDifferentOpacity_ReturnsDifferentInstances()
     {
@@ -183,6 +237,10 @@ public class ColorOpacityBrushConverterTests
         Assert.NotSame(first, second);
     }
 
+    /// <summary>
+    /// Verifies that hex strings differing only by surrounding whitespace or case normalize to the same
+    /// cache key and return the same cached brush instance.
+    /// </summary>
     [Fact]
     public void Convert_KeyNormalization_WhitespaceAndCaseInsensitive_ReturnsSameInstance()
     {
@@ -192,6 +250,9 @@ public class ColorOpacityBrushConverterTests
         Assert.Same(first, second);
     }
 
+    /// <summary>
+    /// Verifies that fewer than two values returns <see cref="Brushes.Transparent"/>.
+    /// </summary>
     [Fact]
     public void Convert_ValuesLengthLessThanTwo_ReturnsTransparent()
     {
@@ -200,6 +261,9 @@ public class ColorOpacityBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that a first value that is not a <see cref="string"/> returns <see cref="Brushes.Transparent"/>.
+    /// </summary>
     [Fact]
     public void Convert_FirstValueNotString_ReturnsTransparent()
     {
@@ -208,6 +272,9 @@ public class ColorOpacityBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that an invalid hex value returns <see cref="Brushes.Transparent"/>.
+    /// </summary>
     [Fact]
     public void Convert_InvalidHex_ReturnsTransparent()
     {
@@ -216,6 +283,9 @@ public class ColorOpacityBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that an empty hex value returns <see cref="Brushes.Transparent"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_EmptyHex_ReturnsTransparent_DoesNotThrow()
     {
@@ -224,6 +294,9 @@ public class ColorOpacityBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that an ICC profile reference hex value returns <see cref="Brushes.Transparent"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_IccProfileReference_ReturnsTransparent_DoesNotThrow()
     {
@@ -236,6 +309,11 @@ public class ColorOpacityBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that boundary opacity values produce the expected alpha channel byte.
+    /// </summary>
+    /// <param name="opacity">The opacity value to convert.</param>
+    /// <param name="expectedAlpha">The expected alpha channel byte.</param>
     [Theory]
     [InlineData(0.0, 0)]
     [InlineData(0.5, 128)]
@@ -248,6 +326,10 @@ public class ColorOpacityBrushConverterTests
         Assert.Equal(expectedAlpha, brush.Color.A);
     }
 
+    /// <summary>
+    /// Verifies that out-of-range opacity values are clamped to the valid alpha range rather than overflowing.
+    /// </summary>
+    /// <param name="opacity">The out-of-range opacity value to convert.</param>
     [Theory]
     [InlineData(-1.0)]
     [InlineData(2.0)]
@@ -259,6 +341,9 @@ public class ColorOpacityBrushConverterTests
         Assert.True(brush.Color.A is 0 or 255);
     }
 
+    /// <summary>
+    /// Verifies that a non-<see cref="double"/> opacity value defaults to fully opaque instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonDoubleOpacity_DefaultsToFullyOpaque()
     {
@@ -268,6 +353,10 @@ public class ColorOpacityBrushConverterTests
         Assert.Equal(255, brush.Color.A);
     }
 
+    /// <summary>
+    /// Verifies that converting many distinct (hex, opacity) key pairs keeps returning frozen brushes without
+    /// crashing, exercising the bounded cache's eviction path under heavy churn.
+    /// </summary>
     [Fact]
     public void Convert_ManyDistinctKeys_CacheStaysBounded()
     {
@@ -286,6 +375,10 @@ public class ColorOpacityBrushConverterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ColorOpacityBrushConverter.ConvertBack"/> always throws
+    /// <see cref="NotSupportedException"/> because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_Always_ThrowsNotSupportedException()
     {

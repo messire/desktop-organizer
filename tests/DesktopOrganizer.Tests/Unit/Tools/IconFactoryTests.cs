@@ -33,7 +33,7 @@ public class IconFactoryTests
     public void CreateBitmap_WithIconHandle_ReturnsValidBitmap()
     {
         // Arrange
-        var iconHandle = User32.LoadIcon(IntPtr.Zero, User32.IDI_APPLICATION);
+        var iconHandle = User32.LoadIcon(IntPtr.Zero, User32.IdiApplication);
         Assert.NotEqual(IntPtr.Zero, iconHandle);
 
         // Act

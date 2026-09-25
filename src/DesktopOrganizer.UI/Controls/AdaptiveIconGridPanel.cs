@@ -32,7 +32,7 @@ namespace DesktopOrganizer.UI.Controls;
 /// <c>VisualTreeHelper.HitTest</c> + <c>FindAncestorOrSelf&lt;ListBoxItem&gt;</c> always resolves to a
 /// single, unambiguous container.</item>
 /// </list>
-/// No <see cref="IScrollInfo"/> is implemented (matches the <c>WrapPanel</c> it replaces — physical,
+/// No <see cref="System.Windows.Controls.Primitives.IScrollInfo"/> is implemented (matches the <c>WrapPanel</c> it replaces — physical,
 /// pixel-based scrolling via the <c>ListBox</c>'s own <see cref="ScrollViewer"/>, see
 /// <c>GridViewTemplate</c> in Templates.xaml) and no virtualization is introduced (not a regression —
 /// <c>WrapPanel</c> didn't virtualize either).
@@ -114,7 +114,7 @@ public sealed class AdaptiveIconGridPanel : Panel
     /// GAP (as opposed to row capacity) is unaffected by this property under either policy: vertical
     /// gaps are ALWAYS <see cref="MinGap"/> (ADR-018 D-3, untouched by ADR-029) —
     /// <see cref="ArrangeOverride"/>'s vertical <see cref="AdaptiveGridLayout.Offset"/> call never goes
-    /// through <see cref="AdaptiveGridLayout.RowGap"/> at all, policy-aware or not.
+    /// through <see cref="AdaptiveGridLayout.RowGap(int, int, double, double, double, double)"/> at all, policy-aware or not.
     /// <para>
     /// Deliberately left unset in <c>GridViewTemplate</c>'s <c>ItemsPanelTemplate</c> literal markup —
     /// same reasoning as <see cref="MinGapProperty"/>'s doc comment: the real value always arrives
@@ -176,32 +176,6 @@ public sealed class AdaptiveIconGridPanel : Panel
             FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsArrange),
         IsNaNOrNonNegativeDouble);
 
-    /// <summary>
-    /// Shared <see cref="ValidateValueCallback"/> for <see cref="MinGapProperty"/>,
-    /// <see cref="EdgePaddingRatioProperty"/>, and <see cref="VerticalEdgePaddingRatioProperty"/>: rejects
-    /// negative or <c>NaN</c> values so the "cells never overlap" invariant documented in this class's
-    /// remarks (<c>MinGap &gt;= 0</c>) is actually enforced rather than merely asserted in a comment.
-    /// </summary>
-    private static bool IsNonNegativeDouble(object value) => (double)value >= 0d && !double.IsNaN((double)value);
-
-    /// <summary>
-    /// <see cref="ValidateValueCallback"/> for <see cref="CapacityWidthProperty"/>: unlike
-    /// <see cref="IsNonNegativeDouble"/>, <see cref="double.NaN"/> is explicitly ALLOWED here — it is this
-    /// property's own "unbound" sentinel (see its doc comment), not an invalid input.
-    /// </summary>
-    private static bool IsNaNOrNonNegativeDouble(object value)
-    {
-        var d = (double)value;
-        return double.IsNaN(d) || d >= 0d;
-    }
-
-    /// <summary>
-    /// <see cref="ValidateValueCallback"/> for <see cref="LayoutPolicyProperty"/>: rejects any boxed
-    /// <see cref="int"/>/enum value outside the two defined <see cref="IconLayoutPolicy"/> members, the
-    /// same defense-in-depth already applied to the panel's <see langword="double"/> DPs above.
-    /// </summary>
-    private static bool IsDefinedIconLayoutPolicy(object value) => value is IconLayoutPolicy policy && Enum.IsDefined(policy);
-
     /// <summary>Gets or sets the minimum gap between adjacent cells (<c>pmin</c>/<c>pmin_v</c>).</summary>
     public double MinGap
     {
@@ -237,44 +211,6 @@ public sealed class AdaptiveIconGridPanel : Panel
         get => (double)GetValue(CapacityWidthProperty);
         set => SetValue(CapacityWidthProperty, value);
     }
-
-    /// <summary>
-    /// Resolves the width <see cref="AdaptiveGridLayout.RowCapacity"/> is computed against (fix-cycle 2
-    /// CRITICAL-1 — see <see cref="CapacityWidthProperty"/>'s doc comment for the double-subtraction bug
-    /// this replaces).
-    /// </summary>
-    /// <param name="rawWidth">
-    /// The width WPF actually handed this pass (<c>availableSize</c>/<c>finalSize</c>.Width) — the SAME
-    /// value <c>GridViewTemplate</c>'s <see cref="ScrollViewer"/> already narrows once its own Auto
-    /// vertical scrollbar becomes visible.
-    /// </param>
-    /// <param name="reservedScrollBar">
-    /// <see cref="GridMetrics.ReservedVerticalScrollBarWidth"/> for <see cref="LayoutPolicy"/> — <c>0</c>
-    /// for <see cref="IconLayoutPolicy.LegacyStretch"/>, the real scrollbar width for
-    /// <see cref="IconLayoutPolicy.FixedGap"/>.
-    /// </param>
-    /// <returns>
-    /// <list type="bullet">
-    /// <item><description><paramref name="reservedScrollBar"/> == <c>0</c> (<see cref="IconLayoutPolicy.LegacyStretch"/>):
-    /// always <paramref name="rawWidth"/>, unchanged — this policy's own accepted ADR-018 M-2 trade-off
-    /// (variant (c)) keeps fluctuating with the real, possibly scrollbar-narrowed viewport exactly as it
-    /// did before this fix.</description></item>
-    /// <item><description><paramref name="reservedScrollBar"/> &gt; <c>0</c> AND <see cref="CapacityWidth"/>
-    /// is bound (not <see cref="double.NaN"/>): <c>max(0, CapacityWidth - reservedScrollBar)</c> — the
-    /// reservation applied exactly once, against the STABLE outer width, independent of whether a
-    /// scrollbar happens to be visible on this particular pass.</description></item>
-    /// <item><description><paramref name="reservedScrollBar"/> &gt; <c>0</c> but <see cref="CapacityWidth"/>
-    /// is unbound (e.g. this panel constructed directly in a unit test, outside <c>GridViewTemplate</c>'s
-    /// <see cref="ScrollViewer"/>): no stable width exists to reserve against, so this degrades
-    /// gracefully to <paramref name="rawWidth"/> with NO reservation at all — the same formula
-    /// <see cref="IconLayoutPolicy.LegacyStretch"/> always uses — rather than risk double-subtracting a
-    /// second time from an already-narrowed width.</description></item>
-    /// </list>
-    /// </returns>
-    private double ResolveAvailableForCapacity(double rawWidth, double reservedScrollBar)
-        => reservedScrollBar > 0d && !double.IsNaN(CapacityWidth)
-            ? Math.Max(0d, CapacityWidth - reservedScrollBar)
-            : rawWidth;
 
     /// <summary>
     /// Measures every child at its natural (unconstrained) size to determine the uniform cell size,
@@ -418,4 +354,68 @@ public sealed class AdaptiveIconGridPanel : Panel
         var height = AdaptiveGridLayout.Extent(rowCount, rowHeight, minGap, mv);
         return new Size(finalSize.Width, Math.Max(finalSize.Height, height));
     }
+
+    /// <summary>
+    /// Shared <see cref="ValidateValueCallback"/> for <see cref="MinGapProperty"/>,
+    /// <see cref="EdgePaddingRatioProperty"/>, and <see cref="VerticalEdgePaddingRatioProperty"/>: rejects
+    /// negative or <c>NaN</c> values so the "cells never overlap" invariant documented in this class's
+    /// remarks (<c>MinGap &gt;= 0</c>) is actually enforced rather than merely asserted in a comment.
+    /// </summary>
+    private static bool IsNonNegativeDouble(object value) => (double)value >= 0d && !double.IsNaN((double)value);
+
+    /// <summary>
+    /// <see cref="ValidateValueCallback"/> for <see cref="CapacityWidthProperty"/>: unlike
+    /// <see cref="IsNonNegativeDouble"/>, <see cref="double.NaN"/> is explicitly ALLOWED here — it is this
+    /// property's own "unbound" sentinel (see its doc comment), not an invalid input.
+    /// </summary>
+    private static bool IsNaNOrNonNegativeDouble(object value)
+    {
+        var d = (double)value;
+        return double.IsNaN(d) || d >= 0d;
+    }
+
+    /// <summary>
+    /// <see cref="ValidateValueCallback"/> for <see cref="LayoutPolicyProperty"/>: rejects any boxed
+    /// <see cref="int"/>/enum value outside the two defined <see cref="IconLayoutPolicy"/> members, the
+    /// same defense-in-depth already applied to the panel's <see langword="double"/> DPs above.
+    /// </summary>
+    private static bool IsDefinedIconLayoutPolicy(object value) => value is IconLayoutPolicy policy && Enum.IsDefined(policy);
+
+    /// <summary>
+    /// Resolves the width <see cref="AdaptiveGridLayout.RowCapacity"/> is computed against (fix-cycle 2
+    /// CRITICAL-1 — see <see cref="CapacityWidthProperty"/>'s doc comment for the double-subtraction bug
+    /// this replaces).
+    /// </summary>
+    /// <param name="rawWidth">
+    /// The width WPF actually handed this pass (<c>availableSize</c>/<c>finalSize</c>.Width) — the SAME
+    /// value <c>GridViewTemplate</c>'s <see cref="ScrollViewer"/> already narrows once its own Auto
+    /// vertical scrollbar becomes visible.
+    /// </param>
+    /// <param name="reservedScrollBar">
+    /// <see cref="GridMetrics.ReservedVerticalScrollBarWidth"/> for <see cref="LayoutPolicy"/> — <c>0</c>
+    /// for <see cref="IconLayoutPolicy.LegacyStretch"/>, the real scrollbar width for
+    /// <see cref="IconLayoutPolicy.FixedGap"/>.
+    /// </param>
+    /// <returns>
+    /// <list type="bullet">
+    /// <item><description><paramref name="reservedScrollBar"/> == <c>0</c> (<see cref="IconLayoutPolicy.LegacyStretch"/>):
+    /// always <paramref name="rawWidth"/>, unchanged — this policy's own accepted ADR-018 M-2 trade-off
+    /// (variant (c)) keeps fluctuating with the real, possibly scrollbar-narrowed viewport exactly as it
+    /// did before this fix.</description></item>
+    /// <item><description><paramref name="reservedScrollBar"/> &gt; <c>0</c> AND <see cref="CapacityWidth"/>
+    /// is bound (not <see cref="double.NaN"/>): <c>max(0, CapacityWidth - reservedScrollBar)</c> — the
+    /// reservation applied exactly once, against the STABLE outer width, independent of whether a
+    /// scrollbar happens to be visible on this particular pass.</description></item>
+    /// <item><description><paramref name="reservedScrollBar"/> &gt; <c>0</c> but <see cref="CapacityWidth"/>
+    /// is unbound (e.g. this panel constructed directly in a unit test, outside <c>GridViewTemplate</c>'s
+    /// <see cref="ScrollViewer"/>): no stable width exists to reserve against, so this degrades
+    /// gracefully to <paramref name="rawWidth"/> with NO reservation at all — the same formula
+    /// <see cref="IconLayoutPolicy.LegacyStretch"/> always uses — rather than risk double-subtracting a
+    /// second time from an already-narrowed width.</description></item>
+    /// </list>
+    /// </returns>
+    private double ResolveAvailableForCapacity(double rawWidth, double reservedScrollBar)
+        => reservedScrollBar > 0d && !double.IsNaN(CapacityWidth)
+            ? Math.Max(0d, CapacityWidth - reservedScrollBar)
+            : rawWidth;
 }

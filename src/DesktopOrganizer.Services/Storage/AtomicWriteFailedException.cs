@@ -12,6 +12,12 @@ namespace DesktopOrganizer.Services.Storage;
 /// </summary>
 internal sealed class AtomicWriteFailedException : Exception
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AtomicWriteFailedException"/> class.
+    /// </summary>
+    /// <param name="stage">The write protocol stage reached when the failure occurred.</param>
+    /// <param name="message">A message describing the failure.</param>
+    /// <param name="innerException">The exception that caused the failure, if any.</param>
     public AtomicWriteFailedException(StateWriteStage stage, string message, Exception? innerException = null)
         : base(message, innerException)
     {

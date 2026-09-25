@@ -34,6 +34,7 @@ public class ResizeGestureSessionGridAlignedTests
     // case ADR-028 Amendment MAJOR-3 describes (the anchor is aligned as part of the same call).
     private static readonly Rect OffGridStart = new(101d, 203d, 317d, 243d);
 
+    /// <summary>Gets the eight <see cref="ResizeEdge"/> values, each paired with a raw drag delta.</summary>
     public static TheoryData<ResizeEdge, double, double> EightEdges => new()
     {
         { ResizeEdge.Left, -40d, 0d },
@@ -47,6 +48,11 @@ public class ResizeGestureSessionGridAlignedTests
     };
 
     // ── DoD D4-3, all 8 edges, already-on-grid: the edge OPPOSITE the dragged one never moves. ──────
+
+    /// <summary>Verifies that starting already on the grid, every edge keeps the opposite edge fixed and lands on whole spans.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void OnGrid_EveryEdge_KeepsTheOppositeEdgeFixed_AndLandsOnWholeSpans(ResizeEdge edge, double dx, double dy)
@@ -61,6 +67,11 @@ public class ResizeGestureSessionGridAlignedTests
 
     // ── DoD D4-3, all 8 edges, anchor edge starts OFF grid: it is ALIGNED (once), not copied verbatim
     // — ADR-028 Amendment MAJOR-3's second behaviour change. ─────────────────────────────────────────
+
+    /// <summary>Verifies that starting off the grid, every edge aligns its anchor once, on the first quantised frame, then holds it fixed for the rest of the gesture.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void OffGrid_EveryEdge_AlignsTheAnchorOnce_ThenHoldsIt(ResizeEdge edge, double dx, double dy)
@@ -84,6 +95,11 @@ public class ResizeGestureSessionGridAlignedTests
 
     // ── A non-zero (and negative) origin — a secondary monitor left of/above the primary — quantises
     // relative to THAT origin, not to absolute zero (the GridSnap bug ADR-028 replaces). ─────────────
+
+    /// <summary>Verifies that with a non-zero, negative monitor origin, every edge quantises relative to that origin rather than absolute zero.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void NegativeOrigin_EveryEdge_QuantisesRelativeToTheMonitorOrigin(ResizeEdge edge, double dx, double dy)
@@ -99,6 +115,11 @@ public class ResizeGestureSessionGridAlignedTests
 
     // ── The minimum span is a hard floor: dragging far past it stops exactly at SpansToBounds(MinSpan)
     // on the dragged axis, with the anchor still fixed. ──────────────────────────────────────────────
+
+    /// <summary>Verifies that shrinking far past the minimum span stops exactly at <c>SpansToBounds(MinSpan)</c> on the dragged axis, with the anchor still fixed.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
     [Theory]
     [InlineData(ResizeEdge.Right, -400d, 0d)]
     [InlineData(ResizeEdge.Left, 400d, 0d)]
@@ -118,6 +139,8 @@ public class ResizeGestureSessionGridAlignedTests
 
     // ── P04-G3: resize anti-overlap for GridAligned (closes ADR-017's open backlog item for this mode).
     // The panel grows toward a neighbour and stops exactly Gap DIP short of it, on a whole slot. ──────
+
+    /// <summary>Verifies that growing toward a neighbour stops exactly one gap short of it, on a whole grid slot — resize anti-overlap for a grid-aligned panel.</summary>
     [Fact]
     public void GrowingIntoANeighbour_StopsOneGapShortOfIt_OnAWholeSlot()
     {
@@ -134,6 +157,8 @@ public class ResizeGestureSessionGridAlignedTests
 
     // ── Without an obstacle snapshot the same gesture grows freely — proves the test above is not
     // measuring the min-span floor or the work area by accident. ─────────────────────────────────────
+
+    /// <summary>Verifies that without an obstacle snapshot, the same gesture grows freely past the neighbour's position, proving the gap test above measures anti-overlap and not some other floor.</summary>
     [Fact]
     public void WithoutObstacles_TheSameGestureGrowsPastTheNeighboursPosition()
     {
@@ -146,6 +171,11 @@ public class ResizeGestureSessionGridAlignedTests
 
     // ── DoD D4-5 (the half P04 owns): every gesture result survives the span round trip the persistence
     // layer performs — bounds -> span -> bounds is the identity, so a restart replays the same size. ──
+
+    /// <summary>Verifies that every gesture result survives the bounds → span → bounds round trip the persistence layer performs, and stays above the minimum span floor.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void EveryGestureResult_SurvivesTheSpanRoundTrip(ResizeEdge edge, double dx, double dy)
@@ -164,6 +194,11 @@ public class ResizeGestureSessionGridAlignedTests
 
     // ── LegacyFreeform: TryUpdate must return ResizeGeometryCalculator.Apply's output untouched — the
     // machine-checked half of "P04 does not change the legacy mode" (plan §5.4). ─────────────────────
+
+    /// <summary>Verifies that for a LegacyFreeform gesture, <see cref="ResizeGestureSession.TryUpdate"/> returns <see cref="ResizeGeometryCalculator.Apply"/>'s output untouched, bit-for-bit.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void LegacyGesture_IsBitForBitIdenticalToApplyAlone(ResizeEdge edge, double dx, double dy)
@@ -183,6 +218,8 @@ public class ResizeGestureSessionGridAlignedTests
 
     // ── An obstacle list passed for a LEGACY gesture is ignored outright (resize anti-overlap stays out
     // of scope for that mode — ADR-028 "Границы объёма"). ────────────────────────────────────────────
+
+    /// <summary>Verifies that an obstacle list passed for a LegacyFreeform gesture is ignored outright, since resize anti-overlap stays out of scope for that mode.</summary>
     [Fact]
     public void LegacyGesture_IgnoresObstaclesEntirely()
     {
@@ -198,6 +235,8 @@ public class ResizeGestureSessionGridAlignedTests
 
     // ── DoD D4-1: 30 consecutive begin/update/end cycles on every edge leave no stuck state — the
     // session is reusable, the tracker returns to Idle, and the geometry stays deterministic. ────────
+
+    /// <summary>Verifies that 30 consecutive begin/update/end cycles, across every edge and every end reason, leave no stuck state, return the tracker to idle each time, and stay geometrically deterministic.</summary>
     [Fact]
     public void ThirtyConsecutiveGestures_LeaveNoStuckState_AndStayDeterministic()
     {

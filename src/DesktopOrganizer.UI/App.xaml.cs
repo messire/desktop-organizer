@@ -212,7 +212,7 @@ public partial class App : Application
     /// Colors.HighContrast.xaml insertion between Colors.xaml and Spacing.xaml is new:
     ///
     ///     Colors -> [Colors.HighContrast, only if SystemParameters.HighContrast] -> Spacing -> Brushes
-    ///     -> Typography -> Icons -> Controls -> Panels -> Templates
+    ///     -> Typography -> Icons -> Controls -> Panels -> Templates.
     /// </summary>
     private void LoadResourceDictionaries()
     {
@@ -418,8 +418,8 @@ public partial class App : Application
         // it every time anything it depends on changes, not just once at startup, so the tray checkmarks
         // never go stale relative to a change made from another entry point (panel menu, settings
         // window, Escape).
+        // DO-006: isMainWindowVisible is a known dead flag, not wired to real main-window visibility — see docs/Refactoring/BACKLOG.md
         void RefreshTrayLayoutMenu() => TrayIconManager.UpdateContextMenu(
-            // DO-006: isMainWindowVisible is a known dead flag, not wired to real main-window visibility — see docs/Refactoring/BACKLOG.md
             isMainWindowVisible: false,
             isEditLayoutChecked: layoutEditMode.IsEditing,
             canEnterEditLayout: layoutEditMode.CanEnterEditLayout,

@@ -69,6 +69,30 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
         _hookHandle = IntPtr.Zero;
     }
 
+    /// <inheritdoc />
+    /// <remarks>Over the desktop means the background or the icon view — not an app or a panel.</remarks>
+    bool IDesktopGestureEnvironment.IsDesktopPoint(int x, int y)
+        => _nativeApi.GetWindowClassName(_nativeApi.WindowFromPoint(x, y))
+            is "SysListView32" or "SHELLDLL_DefView" or "WorkerW" or "Progman";
+
+    /// <inheritdoc />
+    /// <remarks>Empty means over the desktop but not on an icon.</remarks>
+    bool IDesktopGestureEnvironment.IsEmptyDesktopPoint(int x, int y)
+    {
+        var hwnd = _nativeApi.WindowFromPoint(x, y);
+        var cls = _nativeApi.GetWindowClassName(hwnd);
+
+        // Pure background layers are always "empty".
+        if (cls is "WorkerW" or "Progman") return true;
+        if (cls is not("SysListView32" or "SHELLDLL_DefView")) return false;
+
+        var listView = cls == "SysListView32"
+            ? hwnd
+            : _nativeApi.FindWindowEx(hwnd, IntPtr.Zero, "SysListView32", null);
+
+        return listView != IntPtr.Zero && _nativeApi.IsListViewPointEmpty(listView, x, y);
+    }
+
     /// <summary>
     /// The WH_MOUSE_LL callback. This runs on every mouse event of the whole OS, so it does the
     /// absolute minimum and — critically — must never let an exception escape into the hook chain:
@@ -129,29 +153,5 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
         {
             Console.Error.WriteLine($"Desktop gesture subscriber failed: {ex.Message}");
         }
-    }
-
-    /// <inheritdoc />
-    /// <remarks>Over the desktop means the background or the icon view — not an app or a panel.</remarks>
-    bool IDesktopGestureEnvironment.IsDesktopPoint(int x, int y)
-        => _nativeApi.GetWindowClassName(_nativeApi.WindowFromPoint(x, y))
-            is "SysListView32" or "SHELLDLL_DefView" or "WorkerW" or "Progman";
-
-    /// <inheritdoc />
-    /// <remarks>Empty means over the desktop but not on an icon.</remarks>
-    bool IDesktopGestureEnvironment.IsEmptyDesktopPoint(int x, int y)
-    {
-        var hwnd = _nativeApi.WindowFromPoint(x, y);
-        var cls = _nativeApi.GetWindowClassName(hwnd);
-
-        // Pure background layers are always "empty".
-        if (cls is "WorkerW" or "Progman") return true;
-        if (cls is not ("SysListView32" or "SHELLDLL_DefView")) return false;
-
-        var listView = cls == "SysListView32"
-            ? hwnd
-            : _nativeApi.FindWindowEx(hwnd, IntPtr.Zero, "SysListView32", null);
-
-        return listView != IntPtr.Zero && _nativeApi.IsListViewPointEmpty(listView, x, y);
     }
 }

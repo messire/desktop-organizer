@@ -42,6 +42,13 @@
         sidebar is not a themed panel with its own AccentColor (D-7).
     -->
     <Border Background="{StaticResource Brush.Sidebar.Background}" Padding="4,8">
+        <Border.Resources>
+            <!-- Overlay scrollbar (docs/prompts/scrollbar-pack): the same implicit ScrollBar style
+                 ChildWindow.xaml's PanelRoot scopes to the fence panels, here for IconsListBox's own
+                 ScrollViewer — so the sidebar's bar matches the panels' (ui-polishing-1 §5.3 "same
+                 appearance" DoD). -->
+            <Style TargetType="ScrollBar" BasedOn="{StaticResource Control.ScrollBar.Overlay}"/>
+        </Border.Resources>
         <!--
             Grid wraps ItemsControl + insertion indicator so the indicator
             can be positioned absolutely over the items list during drag-reorder.

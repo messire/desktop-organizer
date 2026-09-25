@@ -15,8 +15,10 @@ public class GlobalDefaultsViewModelTests
     private readonly Mock<IAppSettings> _appSettingsMock = new();
     private readonly Mock<IWindowManager> _windowManagerMock = new();
 
-    private GlobalDefaultsViewModel BuildSut() => new(_appSettingsMock.Object, _windowManagerMock.Object);
-
+    /// <summary>
+    /// Verifies that changing <see cref="GlobalDefaultsViewModel.GridSize"/> to a different value
+    /// normalizes every open panel onto the new grid and saves the setting.
+    /// </summary>
     [Fact]
     public void GridSize_ChangedToADifferentValue_NormalizesOpenPanelsAndSaves()
     {
@@ -30,6 +32,10 @@ public class GlobalDefaultsViewModelTests
         _windowManagerMock.Verify(w => w.NormalizePanelsToGrid(), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that re-assigning <see cref="GlobalDefaultsViewModel.GridSize"/> to its current value
+    /// never normalizes panels or saves settings.
+    /// </summary>
     [Fact]
     public void GridSize_SetToTheSameValue_NeverNormalizesOrSaves()
     {
@@ -42,6 +48,10 @@ public class GlobalDefaultsViewModelTests
         _windowManagerMock.Verify(w => w.NormalizePanelsToGrid(), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that setting <see cref="GlobalDefaultsViewModel.GridSize"/> multiple times, including a
+    /// same-value no-op, normalizes panels exactly once per actual value change.
+    /// </summary>
     [Fact]
     public void GridSize_ChangedMultipleTimes_NormalizesOncePerActualChange()
     {
@@ -54,4 +64,6 @@ public class GlobalDefaultsViewModelTests
 
         _windowManagerMock.Verify(w => w.NormalizePanelsToGrid(), Times.Exactly(2));
     }
+
+    private GlobalDefaultsViewModel BuildSut() => new(_appSettingsMock.Object, _windowManagerMock.Object);
 }

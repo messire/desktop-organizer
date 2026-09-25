@@ -233,6 +233,12 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
         private bool _cycleActive;
         private bool _cycleAccepted;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="PanelSizingAttachment"/> class.
+        /// </summary>
+        /// <param name="owner">The service that owns this attachment (used for shared sizing/DPI helpers).</param>
+        /// <param name="hwnd">The panel's window handle.</param>
+        /// <param name="client">The sizing policy this attachment forwards hook messages to.</param>
         internal PanelSizingAttachment(NativePanelSizingService owner, IntPtr hwnd, INativePanelSizingClient client)
         {
             _owner = owner;
@@ -319,6 +325,10 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
             }
         }
 
+        /// <summary>
+        /// Stores the hook registration token so it can be disposed alongside this attachment.
+        /// </summary>
+        /// <param name="registration">The hook registration to own and dispose together with this attachment.</param>
         internal void SetRegistration(IDisposable registration) => _registration = registration;
 
         private IntPtr OnNcHitTest(IntPtr hwnd, IntPtr lParam, ref bool handled)

@@ -10,7 +10,7 @@ namespace DesktopOrganizer.UI.Behaviors;
 /// <summary>
 /// Owns the panel roll-up/roll-down gesture (collapsing a <see cref="Views.ChildWindow"/> to its
 /// title bar and restoring it), extracted from <c>ChildWindow.xaml.cs</c>'s <c>ToggleRollUp</c>/
-/// <c>ApplyRollUp</c> (REFACTORING_PLAN.md §5.3). Mutates the owning window's <see cref="Window.Height"/>
+/// <c>ApplyRollUp</c> (REFACTORING_PLAN.md §5.3). Mutates the owning window's <see cref="FrameworkElement.Height"/>
 /// via a short <see cref="DoubleAnimation"/> and toggles the visibility of the content row/resize
 /// overlay — all UI elements are supplied by the owning window at construction, so this class carries
 /// no dependency on <c>ChildWindow</c> itself.
@@ -58,7 +58,7 @@ public sealed class RollUpBehavior
     /// <summary>
     /// Initializes a new instance of the <see cref="RollUpBehavior"/> class.
     /// </summary>
-    /// <param name="window">The owning panel window (its <see cref="Window.Height"/> is animated).</param>
+    /// <param name="window">The owning panel window (its <see cref="FrameworkElement.Height"/> is animated).</param>
     /// <param name="windowManager">Used to persist layout state after a roll-up toggle.</param>
     /// <param name="contentRow">The panel's content <see cref="RowDefinition"/>, collapsed to zero height while rolled up.</param>
     /// <param name="fileListHost">The file-list host element, hidden while rolled up.</param>
@@ -140,9 +140,10 @@ public sealed class RollUpBehavior
     }
 
     /// <summary>
-    /// Applies the collapsed/expanded visual state, animating <see cref="Window.Height"/> between the
+    /// Applies the collapsed/expanded visual state, animating <see cref="FrameworkElement.Height"/> between the
     /// title-bar height and <see cref="ExpandedHeight"/>.
     /// </summary>
+    /// <param name="collapsed"><see langword="true"/> to collapse the panel to its title bar; <see langword="false"/> to restore it.</param>
     public void ApplyRollUp(bool collapsed)
     {
         _contentRow.Height = collapsed ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
@@ -156,7 +157,7 @@ public sealed class RollUpBehavior
         var (collapsedHeight, expandedHeight) = ResolveRollUpHeights();
 
         double fromHeight = collapsed ? expandedHeight : collapsedHeight;
-        double toHeight   = collapsed ? collapsedHeight : expandedHeight;
+        double toHeight = collapsed ? collapsedHeight : expandedHeight;
 
         // M-6: claim a new generation for THIS animation before it starts (or before the reduced-motion
         // branch below applies the target height directly) — either way, any PREVIOUS animation's
@@ -181,9 +182,9 @@ public sealed class RollUpBehavior
 
         var animation = new DoubleAnimation
         {
-            From           = fromHeight,
-            To             = toHeight,
-            Duration       = TimeSpan.FromMilliseconds(150),
+            From = fromHeight,
+            To = toHeight,
+            Duration = TimeSpan.FromMilliseconds(150),
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
         };
 

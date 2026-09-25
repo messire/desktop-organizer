@@ -24,6 +24,7 @@ public class SelectedPanelSettingsViewModel : INotifyPropertyChanged
     /// <summary>
     /// Initializes a new instance of the <see cref="SelectedPanelSettingsViewModel"/> class.
     /// </summary>
+    /// <param name="windowManager">Used to persist layout state after an edited property is applied.</param>
     public SelectedPanelSettingsViewModel(IWindowManager windowManager)
     {
         _windowManager = windowManager;

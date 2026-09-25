@@ -32,7 +32,7 @@ public enum PanelSortMode
 
     /// <summary>
     /// Items are sorted alphabetically by <see cref="FileItem.DisplayName"/>,
-    /// folders before files (<see cref="DesktopOrganizer.Core.Models.PanelItemSortComparer.ByName"/>). A non-mutating
+    /// folders before files (<see cref="DesktopOrganizer.Core.PanelItemSortComparer.ByName"/>). A non-mutating
     /// projection: switching back to <see cref="Manual"/> restores the prior manual order exactly.
     /// </summary>
     Name = 1,

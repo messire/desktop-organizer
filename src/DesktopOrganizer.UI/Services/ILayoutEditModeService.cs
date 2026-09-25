@@ -79,9 +79,11 @@ public interface ILayoutEditModeService : INotifyPropertyChanged
     /// without changing <see cref="Mode"/> when <see cref="IsLayoutLocked"/> is <see langword="true"/>.
     /// A no-op (returns <see langword="true"/>, raises nothing) when already in <c>EditLayout</c>.
     /// </summary>
+    /// <param name="source">Where this transition originated, for diagnostics/subscribers.</param>
     bool TryEnterEditLayout(LayoutModeChangeSource source);
 
     /// <summary>Returns to <see cref="LayoutInteractionMode.Normal"/>. A no-op when already in <c>Normal</c>.</summary>
+    /// <param name="source">Where this transition originated, for diagnostics/subscribers.</param>
     void ExitEditLayout(LayoutModeChangeSource source);
 
     /// <summary>
@@ -90,6 +92,7 @@ public interface ILayoutEditModeService : INotifyPropertyChanged
     /// returns <see langword="false"/>, when <see cref="IsLayoutLocked"/> is <see langword="true"/>.
     /// Returns <see langword="true"/> when the mode actually changed.
     /// </summary>
+    /// <param name="source">Where this transition originated, for diagnostics/subscribers.</param>
     bool Toggle(LayoutModeChangeSource source);
 
     /// <summary>

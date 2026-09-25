@@ -35,8 +35,11 @@ public class NativeSizingCoordinateMapperGridAlignedTests
     // taskbar, say) — the case where grid edges land off the pixel grid.
     private static readonly Point Origin = new(0d, 37d);
 
+    /// <summary>Gets the DPI scales this suite pins the accepted per-edge rounding error at.</summary>
     public static TheoryData<double> DpiScales => [1.0, 1.1, 1.25, 1.5, 1.75];
 
+    /// <summary>Verifies that for grid-aligned rectangles, <see cref="NativeSizingCoordinateMapper.ToPx"/>'s independent per-edge rounding deviates from <c>round(extent * scale)</c> by at most one physical pixel.</summary>
+    /// <param name="scale">The DPI scale factor applied to the conversion.</param>
     [Theory]
     [MemberData(nameof(DpiScales))]
     public void ToPx_GridAlignedEdges_WidthAndHeightDeviateByAtMostOnePixel(double scale)
@@ -81,6 +84,7 @@ public class NativeSizingCoordinateMapperGridAlignedTests
     /// rectangle (<c>NativePanelResizeController.ProposeBounds</c>, D-4), so converting the same
     /// rectangle N times — or walking it one grid unit at a time — never drifts.
     /// </summary>
+    /// <param name="scale">The DPI scale factor applied to the conversion.</param>
     [Theory]
     [MemberData(nameof(DpiScales))]
     public void ToPx_IsDeterministicAndNonCumulative_AcrossManyFrames(double scale)
@@ -107,6 +111,7 @@ public class NativeSizingCoordinateMapperGridAlignedTests
     /// quantises to the SAME <see cref="GridSpan"/>, so a restart replays the exact same geometry
     /// (DoD D4-5).
     /// </summary>
+    /// <param name="scale">The DPI scale factor applied to the round trip.</param>
     [Theory]
     [MemberData(nameof(DpiScales))]
     public void RoundTripThroughPixels_PreservesTheGridSpan(double scale)

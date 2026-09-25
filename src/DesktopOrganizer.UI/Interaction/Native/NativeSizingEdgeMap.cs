@@ -40,6 +40,7 @@ public static class NativeSizingEdgeMap
     /// <see langword="null"/> for <see cref="NativeSizingEdge.None"/> (no <see cref="ResizeEdge"/>
     /// equivalent exists — <see cref="ResizeEdge"/> has no "none" member).
     /// </summary>
+    /// <param name="edge">The abstractions-layer edge to map.</param>
     public static ResizeEdge? ToResizeEdge(NativeSizingEdge edge) => edge switch
     {
         NativeSizingEdge.Left => ResizeEdge.Left,
@@ -54,6 +55,7 @@ public static class NativeSizingEdgeMap
     };
 
     /// <summary>Maps a <see cref="ResizeEdge"/> to the equivalent <see cref="NativeSizingEdge"/>.</summary>
+    /// <param name="edge">The UI-layer edge to map.</param>
     public static NativeSizingEdge FromResizeEdge(ResizeEdge edge) => edge switch
     {
         ResizeEdge.Left => NativeSizingEdge.Left,
@@ -73,6 +75,7 @@ public static class NativeSizingEdgeMap
     /// for <c>WM_SIZING</c>) returns <see cref="NativeSizingEdge.None"/> rather than throwing — this is a
     /// cross-check against the edge remembered from <c>WM_ENTERSIZEMOVE</c>, not a hard contract.
     /// </summary>
+    /// <param name="wParam">The raw <c>WM_SIZING</c> <c>wParam</c> value.</param>
     public static NativeSizingEdge FromWmsz(int wParam) => wParam switch
     {
         WmszLeft => NativeSizingEdge.Left,

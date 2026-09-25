@@ -6,7 +6,7 @@ namespace DesktopOrganizer.Services.Abstractions;
 public sealed class FolderChangeEventArgs : EventArgs
 {
     /// <summary>
-    /// Initializes a new instance of <see cref="FolderChangeEventArgs"/>.
+    /// Initializes a new instance of the <see cref="FolderChangeEventArgs"/> class.
     /// </summary>
     /// <param name="kind">The kind of change that occurred.</param>
     /// <param name="path">The full path of the affected file or directory.</param>

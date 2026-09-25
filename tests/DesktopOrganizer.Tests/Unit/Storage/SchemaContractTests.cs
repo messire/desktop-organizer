@@ -25,6 +25,11 @@ public class SchemaContractTests
 {
     private static readonly string GoldenDirectory = Path.Combine("Resources", "Storage", "golden");
 
+    /// <summary>
+    /// Verifies ADR-024 D-1's central risk (R-9): the payload key paths the real migration chain
+    /// produces from a fully-populated v1 fixture match, name-for-name and structure-for-structure, the
+    /// key paths <see cref="ApplicationStateDocumentDto"/>'s own JSON serialization produces.
+    /// </summary>
     [Fact]
     public void MigratedV1Document_KeyShape_MatchesApplicationStateDocumentDtoSerialization()
     {
@@ -42,6 +47,10 @@ public class SchemaContractTests
         Assert.Equal(dtoKeyPaths, migratedKeyPaths);
     }
 
+    /// <summary>
+    /// Verifies that migrating a fully-populated v1 fixture through <see cref="V1ToV2Migration"/> never
+    /// produces a top-level key reserved for the state envelope (<see cref="StateEnvelope.IsReservedKey"/>).
+    /// </summary>
     [Fact]
     public void V1ToV2Migration_NeverProducesAReservedEnvelopeKey()
     {
@@ -53,6 +62,10 @@ public class SchemaContractTests
         Assert.All(v2Payload.Select(kv => kv.Key), key => Assert.False(StateEnvelope.IsReservedKey(key)));
     }
 
+    /// <summary>
+    /// Verifies that migrating a fully-populated v2 fixture through <see cref="V2ToV3Migration"/> never
+    /// produces a reserved envelope key.
+    /// </summary>
     [Fact]
     public void V2ToV3Migration_NeverProducesAReservedEnvelopeKey()
     {
@@ -64,6 +77,10 @@ public class SchemaContractTests
         Assert.All(v3Payload.Select(kv => kv.Key), key => Assert.False(StateEnvelope.IsReservedKey(key)));
     }
 
+    /// <summary>
+    /// Verifies that migrating a fully-populated v3 fixture through <see cref="V3ToV4Migration"/> never
+    /// produces a reserved envelope key.
+    /// </summary>
     [Fact]
     public void V3ToV4Migration_NeverProducesAReservedEnvelopeKey()
     {
@@ -75,6 +92,10 @@ public class SchemaContractTests
         Assert.All(v4Payload.Select(kv => kv.Key), key => Assert.False(StateEnvelope.IsReservedKey(key)));
     }
 
+    /// <summary>
+    /// Verifies that migrating a fully-populated v4 fixture through <see cref="V4ToV5Migration"/> never
+    /// produces a reserved envelope key.
+    /// </summary>
     [Fact]
     public void V4ToV5Migration_NeverProducesAReservedEnvelopeKey()
     {

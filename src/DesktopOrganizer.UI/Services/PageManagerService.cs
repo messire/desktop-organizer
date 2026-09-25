@@ -26,7 +26,7 @@ public class PageManagerService : IPageManager
     public string CurrentPage => _currentPage;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="PageManagerService"/>.
+    /// Initializes a new instance of the <see cref="PageManagerService"/> class.
     /// Pages and the active page are read from the already-loaded in-memory application-state
     /// document (<see cref="IApplicationStateService.PageIds"/>/<see cref="IApplicationStateService.CurrentPageId"/>,
     /// ADR-024 C6) rather than parsed from settings directly — <c>ApplicationStateService.Load()</c>

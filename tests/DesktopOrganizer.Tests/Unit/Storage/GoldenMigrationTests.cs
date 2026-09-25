@@ -18,21 +18,10 @@ public class GoldenMigrationTests
 {
     private static readonly string GoldenDirectory = Path.Combine("Resources", "Storage", "golden");
 
-    private static StateMigrationRunner CreateRunner() => new(new ISettingsMigration[]
-    {
-        new V1ToV2Migration(),
-        new V2ToV3Migration(),
-        new V3ToV4Migration(),
-        new V4ToV5Migration(),
-    });
-
-    private static JsonObject LoadFixture(string fileName)
-    {
-        var path = Path.Combine(GoldenDirectory, fileName);
-        var text = File.ReadAllText(path);
-        return JsonNode.Parse(text)!.AsObject();
-    }
-
+    /// <summary>
+    /// Verifies that migrating the golden <c>v1-full.json</c> fixture through the full V1-&gt;V5 chain
+    /// applies exactly 4 migrations and matches the checked-in <c>expected-current-from-v1.json</c> fixture.
+    /// </summary>
     [Fact]
     public void V1Full_MigratesToCurrent_MatchesExpected()
     {
@@ -45,6 +34,10 @@ public class GoldenMigrationTests
         JsonAssert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// Verifies that migrating the golden <c>v2-full.json</c> fixture through the V2-&gt;V5 chain applies
+    /// exactly 3 migrations and matches the checked-in <c>expected-current-from-v2.json</c> fixture.
+    /// </summary>
     [Fact]
     public void V2Full_MigratesToCurrent_MatchesExpected()
     {
@@ -57,6 +50,10 @@ public class GoldenMigrationTests
         JsonAssert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// Verifies that migrating the golden <c>v3-full.json</c> fixture through the V3-&gt;V5 chain applies
+    /// exactly 2 migrations and matches the checked-in <c>expected-current-from-v3.json</c> fixture.
+    /// </summary>
     [Fact]
     public void V3Full_MigratesToCurrent_MatchesExpected()
     {
@@ -69,6 +66,10 @@ public class GoldenMigrationTests
         JsonAssert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// Verifies that migrating the golden <c>v4-full.json</c> fixture through the V4-&gt;V5 migration
+    /// applies exactly 1 migration and matches the checked-in <c>expected-current-from-v4.json</c> fixture.
+    /// </summary>
     [Fact]
     public void V4Full_MigratesToCurrent_MatchesExpected()
     {
@@ -81,6 +82,10 @@ public class GoldenMigrationTests
         JsonAssert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// Verifies that migrating the golden <c>v5-full.json</c> fixture (already at the current schema)
+    /// applies zero migrations and returns the document unchanged.
+    /// </summary>
     [Fact]
     public void V5Full_AlreadyAtCurrentSchema_IsIdentity()
     {
@@ -92,6 +97,11 @@ public class GoldenMigrationTests
         JsonAssert.Equal(input, actual);
     }
 
+    /// <summary>
+    /// Verifies that running the full migration chain against the already-current golden <c>v5-full.json</c>
+    /// fixture twice in a row (the shape a restore-then-restore-again cycle would produce) yields
+    /// byte-for-byte identical results both times (docs/fix-prompts/06-fit-content.md DoD).
+    /// </summary>
     [Fact]
     public void V5Full_MigratedTwice_IsByteForByteIdentical_TwoRestoreCyclesAgree()
     {
@@ -105,5 +115,20 @@ public class GoldenMigrationTests
         var (secondPass, _) = CreateRunner().MigrateToCurrent(firstPass, StateEnvelope.CurrentSchemaVersion);
 
         JsonAssert.Equal(firstPass, secondPass);
+    }
+
+    private static StateMigrationRunner CreateRunner() => new(new ISettingsMigration[]
+    {
+        new V1ToV2Migration(),
+        new V2ToV3Migration(),
+        new V3ToV4Migration(),
+        new V4ToV5Migration(),
+    });
+
+    private static JsonObject LoadFixture(string fileName)
+    {
+        var path = Path.Combine(GoldenDirectory, fileName);
+        var text = File.ReadAllText(path);
+        return JsonNode.Parse(text)!.AsObject();
     }
 }

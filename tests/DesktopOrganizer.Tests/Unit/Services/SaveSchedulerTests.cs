@@ -16,6 +16,10 @@ public class SaveSchedulerTests
 {
     private static readonly TimeSpan Window = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>
+    /// Verifies that a burst of quick <see cref="SaveScheduler.Request"/> calls within the debounce
+    /// window only (re)arms the timer and never triggers an actual save.
+    /// </summary>
     [Fact]
     public void Request_MultipleQuickCalls_DoNotSaveUntilTimerFires()
     {
@@ -34,6 +38,10 @@ public class SaveSchedulerTests
         Assert.Equal(3, timer.StartCount);
     }
 
+    /// <summary>
+    /// Verifies that a burst of quick <see cref="SaveScheduler.Request"/> calls collapses into exactly
+    /// one save once the debounce timer finally fires.
+    /// </summary>
     [Fact]
     public void Request_MultipleQuickCalls_ResultInExactlyOneSave_WhenTimerFinallyFires()
     {
@@ -53,6 +61,11 @@ public class SaveSchedulerTests
         Assert.Equal(1, saveCount);
     }
 
+    /// <summary>
+    /// Verifies that when the timer provider returns <see langword="null"/> (no UI dispatcher available),
+    /// <see cref="SaveScheduler.Request"/> degrades to an immediate synchronous save instead of silently
+    /// losing the request.
+    /// </summary>
     [Fact]
     public void Request_NoTimerAvailable_SavesImmediatelyAndSynchronously()
     {
@@ -68,6 +81,10 @@ public class SaveSchedulerTests
         Assert.Equal(1, saveCount);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SaveScheduler.Flush"/> cancels a pending debounce timer and performs the
+    /// save immediately.
+    /// </summary>
     [Fact]
     public void Flush_CancelsPendingTimer_AndSavesImmediately()
     {
@@ -86,6 +103,10 @@ public class SaveSchedulerTests
         Assert.Equal(1, timer.StopCount);
     }
 
+    /// <summary>
+    /// Verifies that a timer tick queued before <see cref="SaveScheduler.Flush"/> cancelled it does not
+    /// cause a second save once it "fires" afterwards.
+    /// </summary>
     [Fact]
     public void Flush_CancelsPendingTimer_SoALateTimerFireDoesNotDoubleSave()
     {
@@ -104,6 +125,10 @@ public class SaveSchedulerTests
         Assert.Equal(1, saveCount);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SaveScheduler.Flush"/> is safe to call and still performs a save even
+    /// when no request is pending (e.g. app exit with nothing debounced in flight).
+    /// </summary>
     [Fact]
     public void Flush_NoPendingRequest_StillSavesSynchronously()
     {
@@ -120,6 +145,10 @@ public class SaveSchedulerTests
         Assert.Equal(1, saveCount);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SaveScheduler.Flush"/> saves immediately without throwing when the timer
+    /// provider returns <see langword="null"/>.
+    /// </summary>
     [Fact]
     public void Flush_NoTimerAvailable_SavesImmediately_DoesNotThrow()
     {

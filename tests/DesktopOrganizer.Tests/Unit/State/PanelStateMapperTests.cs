@@ -16,34 +16,10 @@ namespace DesktopOrganizer.Tests.Unit.State;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class PanelStateMapperTests
 {
-    private static ChildWindowModel BuildFullyPopulatedModel() => new()
-    {
-        Id = Guid.NewGuid(),
-        Title = "My Panel",
-        AccentColor = "#101010",
-        SurfaceOpacity = 0.55,
-        SurfaceStyle = PanelSurfaceStyle.Glass,
-        TextColor = "#EEEEEE",
-        IconSize = 40,
-        ViewMode = PanelViewMode.Grid,
-        ContentFilter = PanelContentFilter.FoldersOnly,
-        SortMode = PanelSortMode.Name,
-        MonitorDeviceId = "\\\\.\\DISPLAY2",
-        Position = new Point(12, 34),
-        Size = new Size(320, 240),
-        IsVisible = false,
-        WindowState = WindowState.Maximized,
-        IsRolledUp = true,
-        PageId = "work",
-        SourceFolderPath = "D:\\Projects",
-        FilePaths = ["D:\\Projects\\a.txt", "D:\\Projects\\b.txt"],
-        GeometryMode = PanelGeometryMode.GridAligned,
-        WidthSpanUnits = 20,
-        HeightSpanUnits = 15,
-        SizingMode = PanelSizingMode.AutoContent,
-        IconLayoutPolicy = IconLayoutPolicy.FixedGap,
-    };
-
+    /// <summary>
+    /// Verifies that every persisted <see cref="ChildWindowModel"/> property survives a
+    /// <see cref="PanelStateMapper.ToDto"/> -&gt; <see cref="PanelStateMapper.FromDto"/> round trip unchanged.
+    /// </summary>
     [Fact]
     public void RoundTrip_PreservesEveryPersistedProperty()
     {
@@ -77,6 +53,10 @@ public class PanelStateMapperTests
         Assert.Equal(original.IconLayoutPolicy, roundTripped.IconLayoutPolicy);
     }
 
+    /// <summary>
+    /// Verifies that a <see cref="PanelGeometryMode.LegacyFreeform"/> panel with null span units keeps
+    /// both span units null across a round trip.
+    /// </summary>
     [Fact]
     public void RoundTrip_LegacyFreeformGeometryMode_NullSpanUnitsStayNull()
     {
@@ -94,6 +74,12 @@ public class PanelStateMapperTests
 
     // ── MAJOR-1(a) fix-cycle 1 (docs/PLANS/workspace-grid-migration.md §10.5): a GridAligned panel
     // without a valid span pair must never round-trip as GridAligned. ─────────────────────────────────
+
+    /// <summary>
+    /// Verifies that a panel switched back to <see cref="PanelGeometryMode.LegacyFreeform"/> without its
+    /// stale grid span units being cleared by the caller still writes null spans to the DTO, so a
+    /// GridAligned panel without a valid span pair never round-trips as GridAligned (MAJOR-1(a), fix-cycle 1).
+    /// </summary>
     [Fact]
     public void ToDto_LegacyFreeformWithStaleSpans_WritesNullSpans()
     {
@@ -111,6 +97,10 @@ public class PanelStateMapperTests
         Assert.Null(dto.Geometry.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that a DTO claiming <see cref="PanelGeometryMode.GridAligned"/> with null span units is
+    /// normalized to <see cref="PanelGeometryMode.LegacyFreeform"/> on load.
+    /// </summary>
     [Fact]
     public void FromDto_GridAlignedWithNullSpans_NormalizesToLegacyFreeform()
     {
@@ -126,6 +116,12 @@ public class PanelStateMapperTests
         Assert.Null(model.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that a DTO claiming <see cref="PanelGeometryMode.GridAligned"/> with a zero or negative
+    /// width or height span unit is normalized to <see cref="PanelGeometryMode.LegacyFreeform"/> on load.
+    /// </summary>
+    /// <param name="width">The width span units value under test.</param>
+    /// <param name="height">The height span units value under test.</param>
     [Theory]
     [InlineData(0, 10)]
     [InlineData(10, 0)]
@@ -145,6 +141,10 @@ public class PanelStateMapperTests
         Assert.Null(model.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that a DTO claiming <see cref="PanelGeometryMode.GridAligned"/> with a valid positive
+    /// span pair stays GridAligned on load, with the spans preserved.
+    /// </summary>
     [Fact]
     public void FromDto_GridAlignedWithValidSpans_StaysGridAligned()
     {
@@ -160,6 +160,10 @@ public class PanelStateMapperTests
         Assert.Equal(15, model.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that a geometry mode string not known to this build falls back to
+    /// <see cref="PanelGeometryMode.LegacyFreeform"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void FromDto_UnrecognisedGeometryModeString_FallsBackToLegacyFreeform()
     {
@@ -171,6 +175,10 @@ public class PanelStateMapperTests
         Assert.Equal(PanelGeometryMode.LegacyFreeform, model.GeometryMode);
     }
 
+    /// <summary>
+    /// Verifies that a sizing mode string not known to this build falls back to
+    /// <see cref="PanelSizingMode.Manual"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void FromDto_UnrecognisedSizingModeString_FallsBackToManual()
     {
@@ -182,6 +190,10 @@ public class PanelStateMapperTests
         Assert.Equal(PanelSizingMode.Manual, model.SizingMode);
     }
 
+    /// <summary>
+    /// Verifies that an icon layout policy string not known to this build falls back to
+    /// <see cref="IconLayoutPolicy.LegacyStretch"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void FromDto_UnrecognisedIconLayoutPolicyString_FallsBackToLegacyStretch()
     {
@@ -193,6 +205,9 @@ public class PanelStateMapperTests
         Assert.Equal(IconLayoutPolicy.LegacyStretch, model.IconLayoutPolicy);
     }
 
+    /// <summary>
+    /// Verifies that a null <see cref="ChildWindowModel.SourceFolderPath"/> stays null across a round trip.
+    /// </summary>
     [Fact]
     public void RoundTrip_NullSourceFolderPath_StaysNull()
     {
@@ -204,6 +219,9 @@ public class PanelStateMapperTests
         Assert.Null(roundTripped.SourceFolderPath);
     }
 
+    /// <summary>
+    /// Verifies that a null <see cref="ChildWindowModel.MonitorDeviceId"/> stays null across a round trip.
+    /// </summary>
     [Fact]
     public void RoundTrip_NullMonitorDeviceId_StaysNull()
     {
@@ -215,6 +233,9 @@ public class PanelStateMapperTests
         Assert.Null(roundTripped.MonitorDeviceId);
     }
 
+    /// <summary>
+    /// Verifies that an empty <see cref="ChildWindowModel.FilePaths"/> collection stays empty across a round trip.
+    /// </summary>
     [Fact]
     public void RoundTrip_EmptyFilePaths_StaysEmpty()
     {
@@ -226,6 +247,11 @@ public class PanelStateMapperTests
         Assert.Empty(roundTripped.FilePaths);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelStateMapper.ToDto"/> leaves the model's runtime-only
+    /// <see cref="ChildWindowModel.FileItems"/> collection completely untouched, since it is
+    /// <c>[JsonIgnore]</c> on the model and has no counterpart on the DTO.
+    /// </summary>
     [Fact]
     public void ToDto_DoesNotTouchFileItems()
     {
@@ -240,6 +266,10 @@ public class PanelStateMapperTests
         Assert.Single(original.FileItems);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelStateMapper.FromDto"/> never populates
+    /// <see cref="ChildWindowModel.FileItems"/>, since it is a runtime-only projection with no DTO source.
+    /// </summary>
     [Fact]
     public void FromDto_NeverPopulatesFileItems()
     {
@@ -249,4 +279,33 @@ public class PanelStateMapperTests
 
         Assert.Empty(model.FileItems);
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static ChildWindowModel BuildFullyPopulatedModel() => new()
+    {
+        Id = Guid.NewGuid(),
+        Title = "My Panel",
+        AccentColor = "#101010",
+        SurfaceOpacity = 0.55,
+        SurfaceStyle = PanelSurfaceStyle.Glass,
+        TextColor = "#EEEEEE",
+        IconSize = 40,
+        ViewMode = PanelViewMode.Grid,
+        ContentFilter = PanelContentFilter.FoldersOnly,
+        SortMode = PanelSortMode.Name,
+        MonitorDeviceId = "\\\\.\\DISPLAY2",
+        Position = new Point(12, 34),
+        Size = new Size(320, 240),
+        IsVisible = false,
+        WindowState = WindowState.Maximized,
+        IsRolledUp = true,
+        PageId = "work",
+        SourceFolderPath = "D:\\Projects",
+        FilePaths = ["D:\\Projects\\a.txt", "D:\\Projects\\b.txt"],
+        GeometryMode = PanelGeometryMode.GridAligned,
+        WidthSpanUnits = 20,
+        HeightSpanUnits = 15,
+        SizingMode = PanelSizingMode.AutoContent,
+        IconLayoutPolicy = IconLayoutPolicy.FixedGap,
+    };
 }

@@ -255,6 +255,48 @@ public sealed class ResizeGestureSession
     }
 
     /// <summary>
+    /// Ends the current gesture (if any) — idempotent and re-entrancy-safe (see the <c>_ending</c>
+    /// guard below): a second/nested call while the first is still unwinding (e.g. because releasing
+    /// capture synchronously re-raises a completion event into the same call stack) returns
+    /// <see cref="ResizeEndOutcome.WasActive"/> = <see langword="false"/> immediately instead of
+    /// recursing or double-releasing the tracker.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ResizeEndOutcome.ShouldPersist"/> is <see langword="true"/> whenever at least one
+    /// delta was actually applied, REGARDLESS of <paramref name="reason"/> — including
+    /// <see cref="ResizeEndReason.Canceled"/>: WPF does not roll back geometry already written to
+    /// <c>Window.Width</c>/<c>Height</c>/<c>Left</c>/<c>Top</c> when a <c>Thumb</c>'s <c>DragCompleted</c>
+    /// reports <c>Canceled == true</c> — the panel is already visibly at the new geometry, so persisting
+    /// anything else would desync the saved layout from what the user sees on screen (plan §1.3). The
+    /// one exception is <see cref="ResizeEndReason.Failed"/>: an exception mid-delta may have left the
+    /// geometry only partially applied, so it is never safe to persist.
+    /// </remarks>
+    /// <param name="reason">Why the gesture is ending.</param>
+    /// <returns>The outcome describing what the caller should do next.</returns>
+    public ResizeEndOutcome End(ResizeEndReason reason)
+    {
+        if (!_isActive || _ending)
+            return new ResizeEndOutcome(WasActive: false, ShouldPersist: false, _activeEdge, reason, _appliedDeltaCount);
+
+        _ending = true;
+        try
+        {
+            return new ResizeEndOutcome(
+                WasActive: true,
+                ShouldPersist: reason != ResizeEndReason.Failed && _appliedDeltaCount > 0,
+                _activeEdge,
+                reason,
+                _appliedDeltaCount);
+        }
+        finally
+        {
+            _isActive = false;
+            _tracker.Exit(PanelInteractionState.Resizing);
+            _ending = false;
+        }
+    }
+
+    /// <summary>
     /// The production <c>Alt</c> reader. <c>WM_SIZING</c> is pumped on the UI thread (inside
     /// <c>DefWindowProc</c>'s nested modal loop) and <c>Thumb.DragDelta</c> is a WPF input event, so
     /// <see cref="Keyboard.Modifiers"/> is valid on both resize paths — the same source
@@ -303,46 +345,4 @@ public sealed class ResizeGestureSession
     /// </summary>
     private Rect QuantiseToWorkspaceGrid(Rect applied, ResizeEdge edge)
         => PanelSizingGridSupport.QuantiseResize(applied, edge, _gridState, _obstacles);
-
-    /// <summary>
-    /// Ends the current gesture (if any) — idempotent and re-entrancy-safe (see the <c>_ending</c>
-    /// guard below): a second/nested call while the first is still unwinding (e.g. because releasing
-    /// capture synchronously re-raises a completion event into the same call stack) returns
-    /// <see cref="ResizeEndOutcome.WasActive"/> = <see langword="false"/> immediately instead of
-    /// recursing or double-releasing the tracker.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="ResizeEndOutcome.ShouldPersist"/> is <see langword="true"/> whenever at least one
-    /// delta was actually applied, REGARDLESS of <paramref name="reason"/> — including
-    /// <see cref="ResizeEndReason.Canceled"/>: WPF does not roll back geometry already written to
-    /// <c>Window.Width</c>/<c>Height</c>/<c>Left</c>/<c>Top</c> when a <c>Thumb</c>'s <c>DragCompleted</c>
-    /// reports <c>Canceled == true</c> — the panel is already visibly at the new geometry, so persisting
-    /// anything else would desync the saved layout from what the user sees on screen (plan §1.3). The
-    /// one exception is <see cref="ResizeEndReason.Failed"/>: an exception mid-delta may have left the
-    /// geometry only partially applied, so it is never safe to persist.
-    /// </remarks>
-    /// <param name="reason">Why the gesture is ending.</param>
-    /// <returns>The outcome describing what the caller should do next.</returns>
-    public ResizeEndOutcome End(ResizeEndReason reason)
-    {
-        if (!_isActive || _ending)
-            return new ResizeEndOutcome(WasActive: false, ShouldPersist: false, _activeEdge, reason, _appliedDeltaCount);
-
-        _ending = true;
-        try
-        {
-            return new ResizeEndOutcome(
-                WasActive: true,
-                ShouldPersist: reason != ResizeEndReason.Failed && _appliedDeltaCount > 0,
-                _activeEdge,
-                reason,
-                _appliedDeltaCount);
-        }
-        finally
-        {
-            _isActive = false;
-            _tracker.Exit(PanelInteractionState.Resizing);
-            _ending = false;
-        }
-    }
 }

@@ -35,44 +35,13 @@ public class StateRestoreCommandTests
         }
     }
 
-    private static (string Root, StateStorePaths Paths) BuildPaths()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"DOrgRestore_{Guid.NewGuid():N}");
-        return (root, new StateStorePaths(root));
-    }
-
-    private static void SafeDeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
-    }
-
-    private static StateRestoreCommand BuildCommand(
-        StateStorePaths paths,
-        FakeDiagnosticsLog? diagnostics = null,
-        Func<StateWriteStage, bool>? testForceWriteFailureAt = null) =>
-        new(
-            paths,
-            new StateMigrationRunner(Array.Empty<ISettingsMigration>()),
-            () => diagnostics is not null ? diagnostics : NullDiagnosticsLog.Instance,
-            testForceWriteFailureAt);
-
-    private static JsonObject FullDocument(int schemaVersion, string marker) =>
-        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, schemaVersion, DateTimeOffset.UtcNow, "test");
-
-    private static void SeedFile(StateStorePaths paths, string path, JsonObject fullDocument)
-    {
-        Directory.CreateDirectory(paths.StateDirectory);
-        File.WriteAllText(path, fullDocument.ToJsonString());
-    }
-
     // ── No candidate ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that with neither a <c>.bak</c> file nor any quarantine file present,
+    /// <see cref="StateRestoreCommand.Restore"/> returns <see cref="StateRestoreOutcome.NoCandidateFound"/>
+    /// and touches nothing on disk.
+    /// </summary>
     [Fact]
     public void Restore_NoBakAndNoQuarantine_ReturnsNoCandidateFound_TouchesNothing()
     {
@@ -96,6 +65,10 @@ public class StateRestoreCommandTests
 
     // ── Valid .bak ───────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that a valid <c>.bak</c> file with no existing primary restores as the new primary, and
+    /// nothing is quarantined since there was no bad primary to preserve.
+    /// </summary>
     [Fact]
     public void Restore_ValidBak_NoExistingPrimary_RestoresAsPrimary_NoQuarantine()
     {
@@ -122,6 +95,10 @@ public class StateRestoreCommandTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a valid <c>.bak</c> file with an existing corrupt primary quarantines (never
+    /// deletes) the old primary's raw bytes and restores the <c>.bak</c> content as the new primary.
+    /// </summary>
     [Fact]
     public void Restore_ValidBak_ExistingBadPrimary_QuarantinesOldPrimary_NeverDeletesIt()
     {
@@ -152,6 +129,10 @@ public class StateRestoreCommandTests
 
     // ── Falls back to newest quarantine file when there is no .bak ─────────────
 
+    /// <summary>
+    /// Verifies that with no <c>.bak</c> file present, <see cref="StateRestoreCommand.Restore"/> falls
+    /// back to the newest (by last-write time) quarantine file as the restore candidate.
+    /// </summary>
     [Fact]
     public void Restore_NoBak_PicksNewestQuarantineFile()
     {
@@ -182,6 +163,10 @@ public class StateRestoreCommandTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when both a <c>.bak</c> file and a quarantine file are present,
+    /// <see cref="StateRestoreCommand.Restore"/> prefers the <c>.bak</c> file as the restore candidate.
+    /// </summary>
     [Fact]
     public void Restore_BakPresent_PrefersBakOverQuarantineFiles()
     {
@@ -206,6 +191,10 @@ public class StateRestoreCommandTests
 
     // ── Invalid candidate: nothing changes ──────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that a <c>.bak</c> file containing invalid JSON returns
+    /// <see cref="StateRestoreOutcome.CandidateInvalid"/> and leaves the existing good primary completely untouched.
+    /// </summary>
     [Fact]
     public void Restore_BakIsNotValidJson_ReturnsCandidateInvalid_LeavesExistingPrimaryUntouched()
     {
@@ -233,6 +222,10 @@ public class StateRestoreCommandTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a <c>.bak</c> file with valid JSON but no <c>schemaVersion</c> field returns
+    /// <see cref="StateRestoreOutcome.CandidateInvalid"/>.
+    /// </summary>
     [Fact]
     public void Restore_BakMissingSchemaVersion_ReturnsCandidateInvalid()
     {
@@ -254,6 +247,10 @@ public class StateRestoreCommandTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a <c>.bak</c> file at a schema version newer than current returns
+    /// <see cref="StateRestoreOutcome.CandidateInvalid"/> rather than ever guessing at a downgrade.
+    /// </summary>
     [Fact]
     public void Restore_BakNewerThanCurrentSchema_ReturnsCandidateInvalid_NeverGuessesADowngrade()
     {
@@ -276,6 +273,9 @@ public class StateRestoreCommandTests
 
     // ── Diagnostics ──────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that a successful restore writes a "StateRecoveredFromBackup" diagnostic event.
+    /// </summary>
     [Fact]
     public void Restore_Success_WritesStateRecoveredFromBackupDiagnosticEvent()
     {
@@ -330,6 +330,10 @@ public class StateRestoreCommandTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a write failure during restore, on a store with no pre-existing primary, leaves the
+    /// primary file absent rather than creating a partial/truncated file (M-4).
+    /// </summary>
     [Fact]
     public void Restore_WriteFails_NoPreexistingPrimary_LeavesPrimaryAbsent_NeverCreatesPartialFile()
     {
@@ -351,6 +355,10 @@ public class StateRestoreCommandTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a failed restore writes a "StateRestoreFailed" diagnostic event and never the
+    /// "StateRecoveredFromBackup" event reserved for successful recoveries (MINOR-4).
+    /// </summary>
     [Fact]
     public void Restore_WriteFails_WritesStateRestoreFailedDiagnosticEvent_NeverStateRecoveredFromBackup()
     {
@@ -376,6 +384,11 @@ public class StateRestoreCommandTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a successful restore with an existing primary rotates the old primary into
+    /// <c>.bak</c> (exactly one generation back, via <see cref="AtomicJsonFileWriter"/>'s own semantics)
+    /// while also preserving that same old primary separately as a quarantine file for history.
+    /// </summary>
     [Fact]
     public void Restore_Success_ExistingPrimary_NewBakDescribesOnlyOneGenerationBack()
     {
@@ -409,5 +422,42 @@ public class StateRestoreCommandTests
         {
             SafeDeleteDirectory(root);
         }
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static (string Root, StateStorePaths Paths) BuildPaths()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"DOrgRestore_{Guid.NewGuid():N}");
+        return (root, new StateStorePaths(root));
+    }
+
+    private static void SafeDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private static StateRestoreCommand BuildCommand(
+        StateStorePaths paths,
+        FakeDiagnosticsLog? diagnostics = null,
+        Func<StateWriteStage, bool>? testForceWriteFailureAt = null) =>
+        new(
+            paths,
+            new StateMigrationRunner(Array.Empty<ISettingsMigration>()),
+            () => diagnostics is not null ? diagnostics : NullDiagnosticsLog.Instance,
+            testForceWriteFailureAt);
+
+    private static JsonObject FullDocument(int schemaVersion, string marker) =>
+        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, schemaVersion, DateTimeOffset.UtcNow, "test");
+
+    private static void SeedFile(StateStorePaths paths, string path, JsonObject fullDocument)
+    {
+        Directory.CreateDirectory(paths.StateDirectory);
+        File.WriteAllText(path, fullDocument.ToJsonString());
     }
 }

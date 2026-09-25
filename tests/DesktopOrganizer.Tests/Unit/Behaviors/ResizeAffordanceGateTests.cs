@@ -5,7 +5,7 @@ namespace DesktopOrganizer.Tests.Unit.Behaviors;
 /// <summary>
 /// Unit tests for <see cref="ResizeAffordanceGate"/> (docs/PLANS/phase-6-edit-layout-ux.md §1 D-5,
 /// §7.1 item 3) — the composite <see cref="IResizeAffordance"/> sitting between <see cref="RollUpBehavior"/>'s
-/// "not rolled up" input and <see cref="Views.ChildWindow"/>'s new "allowed by layout-edit policy" input.
+/// "not rolled up" input and <see cref="DesktopOrganizer.UI.Views.ChildWindow"/>'s new "allowed by layout-edit policy" input.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class ResizeAffordanceGateTests
@@ -22,6 +22,7 @@ public class ResizeAffordanceGateTests
     // 2x2 truth table: SetEnabled (not-collapsed) x SetAllowedByPolicy
     // ------------------------------------------------------------------
 
+    /// <summary>Verifies that when both "not collapsed" and "allowed by policy" are true, the inner affordance is never disabled.</summary>
     [Fact]
     public void BothTrue_InnerNeverDisabled()
     {
@@ -34,6 +35,7 @@ public class ResizeAffordanceGateTests
         Assert.DoesNotContain(false, inner.Calls);
     }
 
+    /// <summary>Verifies that with "not collapsed" true and "allowed by policy" false, the inner affordance is disabled.</summary>
     [Fact]
     public void NotCollapsedTrue_PolicyFalse_InnerDisabled()
     {
@@ -46,6 +48,7 @@ public class ResizeAffordanceGateTests
         Assert.Equal([false], inner.Calls);
     }
 
+    /// <summary>Verifies that with "not collapsed" false and "allowed by policy" true, the inner affordance is disabled.</summary>
     [Fact]
     public void NotCollapsedFalse_PolicyTrue_InnerDisabled()
     {
@@ -58,6 +61,7 @@ public class ResizeAffordanceGateTests
         Assert.Equal([false], inner.Calls);
     }
 
+    /// <summary>Verifies that with both inputs false, the inner affordance is disabled only once, even though both setters run.</summary>
     [Fact]
     public void BothFalse_InnerDisabledOnlyOnce()
     {
@@ -77,6 +81,7 @@ public class ResizeAffordanceGateTests
     // Idempotency: inner.SetEnabled invoked ONLY when the effective (AND) value actually changes.
     // ------------------------------------------------------------------
 
+    /// <summary>Verifies that constructing a <see cref="ResizeAffordanceGate"/> never calls the inner affordance.</summary>
     [Fact]
     public void Construction_NeverCallsInner()
     {
@@ -86,6 +91,7 @@ public class ResizeAffordanceGateTests
         Assert.Empty(inner.Calls);
     }
 
+    /// <summary>Verifies that re-asserting the default "not collapsed" value does not call the inner affordance.</summary>
     [Fact]
     public void SetEnabled_SameValueAsDefault_DoesNotCallInner()
     {
@@ -99,6 +105,7 @@ public class ResizeAffordanceGateTests
         Assert.Empty(inner.Calls);
     }
 
+    /// <summary>Verifies that re-asserting the default "allowed by policy" value does not call the inner affordance.</summary>
     [Fact]
     public void SetAllowedByPolicy_SameValueAsDefault_DoesNotCallInner()
     {
@@ -110,6 +117,7 @@ public class ResizeAffordanceGateTests
         Assert.Empty(inner.Calls);
     }
 
+    /// <summary>Verifies that repeated identical <c>SetEnabled(false)</c> calls only reach the inner affordance once, on the first real transition.</summary>
     [Fact]
     public void RepeatedIdenticalCalls_OnlyFirstTransitionReachesInner()
     {
@@ -123,6 +131,7 @@ public class ResizeAffordanceGateTests
         Assert.Equal([false], inner.Calls);
     }
 
+    /// <summary>Verifies that toggling both inputs back and forth propagates every real effective-value transition to the inner affordance, in order.</summary>
     [Fact]
     public void ToggleBackAndForth_InnerSeesEveryRealTransition()
     {
@@ -137,6 +146,7 @@ public class ResizeAffordanceGateTests
         Assert.Equal([false, true, false, true], inner.Calls);
     }
 
+    /// <summary>Verifies that once one input has driven the effective value to false, toggling the other input has no effective change and does not call the inner affordance again.</summary>
     [Fact]
     public void OneInputFalse_OtherInputTogglingHasNoEffectiveChange_InnerNotCalledAgain()
     {
@@ -158,6 +168,7 @@ public class ResizeAffordanceGateTests
     // Interface conformance / null-guard
     // ------------------------------------------------------------------
 
+    /// <summary>Verifies that <see cref="ResizeAffordanceGate"/> can be consumed entirely through the <see cref="IResizeAffordance"/> interface.</summary>
     [Fact]
     public void ResizeAffordanceGate_ImplementsIResizeAffordance()
     {
@@ -166,6 +177,7 @@ public class ResizeAffordanceGateTests
         gate.SetEnabled(false);
     }
 
+    /// <summary>Verifies that the <see cref="ResizeAffordanceGate"/> constructor throws <see cref="ArgumentNullException"/> for a <see langword="null"/> inner affordance.</summary>
     [Fact]
     public void Constructor_NullInner_Throws()
     {

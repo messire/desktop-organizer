@@ -21,6 +21,10 @@ public class LayeredChromeVisualsTests
         PanelVisualState.Resizing,
     };
 
+    /// <summary>
+    /// Provides the "glow", "accentStroke", and "neutralStroke" channel functions of
+    /// <see cref="LayeredChromeVisuals"/> as theory data for the channel-generic tests below.
+    /// </summary>
     public static IEnumerable<object[]> Channels()
     {
         yield return new object[] { "glow", (Func<PanelVisualState, bool, double>)LayeredChromeVisuals.GlowOpacityFor };
@@ -29,6 +33,8 @@ public class LayeredChromeVisualsTests
     }
 
     /// <summary>T-P1: each channel, with isLayoutEditing=false, strictly increases Idle -&gt; Hover -&gt; Editing -&gt; Dragging -&gt; Resizing.</summary>
+    /// <param name="name">The channel's display name, for assertion messages.</param>
+    /// <param name="channel">The channel function under test.</param>
     [Theory]
     [MemberData(nameof(Channels))]
     public void Channel_NotEditing_StrictlyIncreasesAcrossAllFiveStates(string name, Func<PanelVisualState, bool, double> channel)
@@ -43,6 +49,8 @@ public class LayeredChromeVisualsTests
     }
 
     /// <summary>T-P2: Idle/not-editing equals the channel's own Idle constant; Resizing/editing equals the channel's own Max constant; every value stays in [0, 1].</summary>
+    /// <param name="name">The channel's display name, for assertion messages.</param>
+    /// <param name="channel">The channel function under test.</param>
     [Theory]
     [MemberData(nameof(Channels))]
     public void Channel_IdleAndResizingExtremes_MatchTokensAndStayInUnitRange(string name, Func<PanelVisualState, bool, double> channel)
@@ -63,31 +71,57 @@ public class LayeredChromeVisualsTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LayeredChromeVisuals.GlowOpacityFor"/> for idle, not-editing equals
+    /// <see cref="PanelMetrics.GlowOpacityIdle"/>.
+    /// </summary>
     [Fact]
     public void GlowOpacityFor_IdleNotEditing_EqualsGlowOpacityIdle()
         => Assert.Equal(PanelMetrics.GlowOpacityIdle, LayeredChromeVisuals.GlowOpacityFor(PanelVisualState.Idle, false), precision: 10);
 
+    /// <summary>
+    /// Verifies that <see cref="LayeredChromeVisuals.GlowOpacityFor"/> for resizing, editing equals
+    /// <see cref="PanelMetrics.GlowOpacityMax"/>.
+    /// </summary>
     [Fact]
     public void GlowOpacityFor_ResizingEditing_EqualsGlowOpacityMax()
         => Assert.Equal(PanelMetrics.GlowOpacityMax, LayeredChromeVisuals.GlowOpacityFor(PanelVisualState.Resizing, true), precision: 10);
 
+    /// <summary>
+    /// Verifies that <see cref="LayeredChromeVisuals.AccentStrokeOpacityFor"/> for idle, not-editing equals
+    /// <see cref="PanelMetrics.AccentStrokeOpacityIdle"/>.
+    /// </summary>
     [Fact]
     public void AccentStrokeOpacityFor_IdleNotEditing_EqualsAccentStrokeOpacityIdle()
         => Assert.Equal(PanelMetrics.AccentStrokeOpacityIdle, LayeredChromeVisuals.AccentStrokeOpacityFor(PanelVisualState.Idle, false), precision: 10);
 
+    /// <summary>
+    /// Verifies that <see cref="LayeredChromeVisuals.AccentStrokeOpacityFor"/> for resizing, editing equals
+    /// <see cref="PanelMetrics.AccentStrokeOpacityMax"/>.
+    /// </summary>
     [Fact]
     public void AccentStrokeOpacityFor_ResizingEditing_EqualsAccentStrokeOpacityMax()
         => Assert.Equal(PanelMetrics.AccentStrokeOpacityMax, LayeredChromeVisuals.AccentStrokeOpacityFor(PanelVisualState.Resizing, true), precision: 10);
 
+    /// <summary>
+    /// Verifies that <see cref="LayeredChromeVisuals.NeutralStrokeOpacityFor"/> for idle, not-editing
+    /// equals <see cref="PanelMetrics.NeutralStrokeOpacityIdle"/>.
+    /// </summary>
     [Fact]
     public void NeutralStrokeOpacityFor_IdleNotEditing_EqualsNeutralStrokeOpacityIdle()
         => Assert.Equal(PanelMetrics.NeutralStrokeOpacityIdle, LayeredChromeVisuals.NeutralStrokeOpacityFor(PanelVisualState.Idle, false), precision: 10);
 
+    /// <summary>
+    /// Verifies that <see cref="LayeredChromeVisuals.NeutralStrokeOpacityFor"/> for resizing, editing
+    /// equals <see cref="PanelMetrics.NeutralStrokeOpacityMax"/>.
+    /// </summary>
     [Fact]
     public void NeutralStrokeOpacityFor_ResizingEditing_EqualsNeutralStrokeOpacityMax()
         => Assert.Equal(PanelMetrics.NeutralStrokeOpacityMax, LayeredChromeVisuals.NeutralStrokeOpacityFor(PanelVisualState.Resizing, true), precision: 10);
 
     /// <summary>T-P3: for every state, the editing value is never weaker than the non-editing value — cross-checked against the affine formula directly, not a hand-copied expectation.</summary>
+    /// <param name="name">The channel's display name, for assertion messages.</param>
+    /// <param name="channel">The channel function under test.</param>
     [Theory]
     [MemberData(nameof(Channels))]
     public void Channel_Editing_IsNeverWeakerThanNotEditing_ForEveryState(string name, Func<PanelVisualState, bool, double> channel)
@@ -101,6 +135,8 @@ public class LayeredChromeVisualsTests
     }
 
     /// <summary>T-P5: iterates the real PanelVisualState enum (not a hand-copied list) so a future added state fails this test if any channel does not handle it.</summary>
+    /// <param name="name">The channel's display name, for assertion messages.</param>
+    /// <param name="channel">The channel function under test.</param>
     [Theory]
     [MemberData(nameof(Channels))]
     public void Channel_HandlesEveryDeclaredPanelVisualState(string name, Func<PanelVisualState, bool, double> channel)

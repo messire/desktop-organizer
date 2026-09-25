@@ -35,6 +35,10 @@ public class UiDispatchTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// Verifies that <see cref="UiDispatch.TryInvoke"/> runs the callback synchronously on the target
+    /// dispatcher's own thread when that dispatcher is alive.
+    /// </summary>
     [Fact]
     public void TryInvoke_OnALiveDispatcher_RunsTheCallbackOnThatDispatchersThread()
     {
@@ -47,6 +51,10 @@ public class UiDispatchTests
         Assert.Equal(host.ThreadId, ranOn);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="UiDispatch.TryInvoke"/> drops the callback and reports failure, rather
+    /// than throwing, when no dispatcher is available (<c>Application.Current</c> is null).
+    /// </summary>
     [Fact]
     public void TryInvoke_WithNoDispatcherAtAll_DropsTheCallbackInsteadOfThrowing()
     {
@@ -75,6 +83,11 @@ public class UiDispatchTests
         Assert.ThrowsAny<OperationCanceledException>(() => host.Dispatcher.Invoke(() => { }));
     }
 
+    /// <summary>
+    /// Verifies the regression fix: <see cref="UiDispatch.TryInvoke"/> drops the callback and reports
+    /// failure, instead of rethrowing the dispatcher's own shutdown cancellation, when the target
+    /// dispatcher has already shut down.
+    /// </summary>
     [Fact]
     public void TryInvoke_OnAShutDownDispatcher_DropsTheCallbackInsteadOfThrowing()
     {
@@ -88,6 +101,11 @@ public class UiDispatchTests
         Assert.False(ran);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="UiDispatch.TryInvoke"/>'s shutdown-race guard only swallows the
+    /// dispatcher's own cancellation: a genuine exception thrown by the marshalled callback itself still
+    /// propagates to the caller.
+    /// </summary>
     [Fact]
     public void TryInvoke_WhenTheCallbackItselfThrows_StillPropagates()
     {
@@ -109,7 +127,7 @@ public class UiDispatchTests
     /// unrelated shutdown race the catch exists for.
     /// </summary>
     /// <remarks>
-    /// <see cref="Assert.ThrowsAny{T}"/>, not <see cref="Assert.Throws{T}"/>: WPF's own
+    /// <see cref="Assert.ThrowsAny{T}(System.Action)"/>, not <see cref="Assert.Throws{T}(System.Action)"/>: WPF's own
     /// <c>DispatcherOperation.Wait</c> re-surfaces ANY <see cref="OperationCanceledException"/> escaping
     /// the invoked delegate as a <see cref="TaskCanceledException"/> — the exact same normalization the
     /// shutdown-race path relies on (see <see cref="ShutDownDispatcher_RawInvoke_Throws"/>) — so WPF itself
@@ -130,6 +148,10 @@ public class UiDispatchTests
 
     // ── TryBeginInvoke — the fire-and-forget marshal (P08 fix cycle 2, C-1/M-1/M-3) ─────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="UiDispatch.TryBeginInvoke"/> eventually runs the callback on the target
+    /// dispatcher's own thread once its queue drains.
+    /// </summary>
     [Fact]
     public void TryBeginInvoke_OnALiveDispatcher_EventuallyRunsTheCallbackOnThatDispatchersThread()
     {
@@ -148,6 +170,10 @@ public class UiDispatchTests
         Assert.Equal(host.ThreadId, ranOn);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="UiDispatch.TryBeginInvoke"/> drops the callback and reports failure,
+    /// rather than throwing, when no dispatcher is available.
+    /// </summary>
     [Fact]
     public void TryBeginInvoke_WithNoDispatcherAtAll_DropsTheCallbackInsteadOfThrowing()
     {
@@ -164,7 +190,7 @@ public class UiDispatchTests
     /// per <c>docs/Refactoring/Testing/sta-test-conventions.md</c>'s comparison table, an unguarded
     /// <c>BeginInvoke</c> on a shut-down dispatcher already degrades to a dropped, <c>Aborted</c>
     /// operation instead of throwing — so <see cref="UiDispatch.TryBeginInvoke"/>'s job here is purely the
-    /// cheap early-exit (no exception to guard against either way), unlike <see cref="TryInvoke"/>.
+    /// cheap early-exit (no exception to guard against either way), unlike <see cref="UiDispatch.TryInvoke"/>.
     /// </summary>
     [Fact]
     public void TryBeginInvoke_OnAShutDownDispatcher_DropsTheCallbackInsteadOfThrowing()
@@ -187,9 +213,9 @@ public class UiDispatchTests
     /// NEXT action needs (<c>ChildWindowViewModel.OnFolderChanged</c> / <c>FolderWatcher</c>'s debounce
     /// lock), or that a bounded shutdown <c>Thread.Join</c> is waiting on (<c>App</c>'s activation wiring /
     /// <c>NamedPipeActivationServer.Stop()</c>) — see <see cref="UiDispatch.TryBeginInvoke"/>'s own remarks
-    /// for both call sites. A blocking <see cref="TryInvoke"/> in the same setup would not return until the
-    /// busy operation below is released — proving this test would actually fail against the pre-fix
-    /// (<see cref="TryInvoke"/>-based) wiring.
+    /// for both call sites. A blocking <see cref="UiDispatch.TryInvoke"/> in the same setup would not
+    /// return until the busy operation below is released — proving this test would actually fail
+    /// against the pre-fix (<see cref="UiDispatch.TryInvoke"/>-based) wiring.
     /// </summary>
     [Fact]
     public void TryBeginInvoke_ReturnsImmediately_EvenWhileTheDispatcherIsBusyWithAnEarlierOperation()
@@ -224,6 +250,8 @@ public class UiDispatchTests
             releaseBusyOperation.Set();
         }
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
     /// A private STA thread running a real <see cref="Dispatcher.Run"/> message pump, so

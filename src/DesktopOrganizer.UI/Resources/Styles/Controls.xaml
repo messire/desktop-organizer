@@ -2,7 +2,8 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
                     xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
-                    xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming">
+                    xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
     <!--
         Ambient Accent Visual System — minimal control chrome over Typography.xaml/Icons.xaml (D-1).
         Deliberately thin in this commit: PanelHeaderButtonStyle/PanelHeaderToggleButtonStyle/
@@ -324,6 +325,192 @@
             <DataTrigger Binding="{Binding}" Value="default">
                 <Setter Property="Visibility" Value="Collapsed"/>
             </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!--
+        Overlay scrollbar (docs/prompts/scrollbar-pack, spec 04): the three styles below replace ONLY the
+        visual template of the stock WPF ScrollBar -> Track -> Thumb/RepeatButton chain. The scrolling
+        mechanics are untouched: PART_Track is a real Track (page-scroll semantics via the two
+        RepeatButtons' ScrollBar.Page*Command, drag via Thumb), the ScrollViewer <-> ScrollBar binding is
+        the ScrollViewer's own default template's, and nothing here computes an offset by hand. No
+        DropShadowEffect/BlurEffect/ShaderEffect, no animation, no code-behind — hover/pressed are
+        ControlTemplate.Triggers over the frozen Brush.ScrollBar.* tokens (Brushes.xaml). All geometry
+        comes from Spacing.xaml's ScrollBar.* tokens.
+
+        Applied as an IMPLICIT style (x:Key = {x:Type ScrollBar}, BasedOn this one) from
+        ChildWindow.xaml's PanelRoot and SystemIconsPanelWindow.xaml's root Border, which is how it reaches
+        the ScrollBar the ListBox's default ControlTemplate's ScrollViewer creates for ListViewTemplate/
+        GridViewTemplate (Templates.xaml) and the sidebar's IconsListBox: ScrollBar is a Control, and WPF
+        looks an implicit Control style up across template boundaries, so a Window-scoped style is found
+        from inside the ListBox's and ScrollViewer's own templates. Deliberately NOT declared as an
+        app-wide implicit style here — MainWindow.xaml (the light, system-styled Settings window, D-9) and
+        its ComboBox/ContextMenu drop-downs must keep the system scrollbar.
+
+        Orientation: the vertical template is the deliverable; the Orientation="Horizontal" trigger swaps in
+        a mirrored template so a horizontal bar can never fall through to a vertical Track (every panel
+        ListBox sets HorizontalScrollBarVisibility="Disabled", so it is unreachable today, but the implicit
+        style would otherwise be a latent bug for the first template that enables it).
+    -->
+
+    <!-- Track "page up/down" buttons: functional (Track needs them for page scrolling semantics), but
+         no chrome at all — a Transparent-brush Border is still hit-testable, so clicking the empty track
+         above/below the thumb pages exactly as the stock bar does, with no glyph/arrow anywhere. -->
+    <Style x:Key="Control.ScrollBar.TrackButton" TargetType="RepeatButton">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="{TemplateBinding Background}"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+        Thumb = capsule. The Thumb element itself fills the whole track width (the Track arranges it that
+        way) and stays the hit/drag target; the visible pill is the inner Border, inset by
+        Thumb.Padding — the ScrollBar templates below pass ScrollBar.ThumbInset.Vertical/Horizontal so
+        the pill is ScrollBar.ThumbThickness (8) wide inside the ScrollBar.Width (14) track.
+        Radius.ScrollBarThumb (4) = half the pill width -> true capsule ends. Hover/dragging only lighten
+        the fill (Brush.ScrollBar.ThumbHover/ThumbPressed step alpha up, same hue); IsDragging is declared
+        AFTER IsMouseOver so it wins the same-tier tie-break while both hold.
+    -->
+    <Style x:Key="Control.ScrollBar.Thumb" TargetType="Thumb">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Background" Value="{StaticResource Brush.ScrollBar.Thumb}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.ScrollBar.ThumbBorder}"/>
+        <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Grid Background="Transparent">
+                        <Border x:Name="Pill"
+                                Margin="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{StaticResource Radius.ScrollBarThumb}"
+                                SnapsToDevicePixels="True"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Pill" Property="Background" Value="{StaticResource Brush.ScrollBar.ThumbHover}"/>
+                        </Trigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Pill" Property="Background" Value="{StaticResource Brush.ScrollBar.ThumbPressed}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--
+        The ScrollBar itself. Width/MinWidth = ScrollBar.Width (14) is the whole footprint the
+        ScrollViewer's Auto column reserves — no arrows, no track border, no extra padding.
+        Track.IsEnabled="{TemplateBinding IsMouseOver}" is copied from the stock Aero template: it stops
+        the page RepeatButtons auto-repeating once the pointer leaves the bar (a disabled Track still
+        renders its Thumb normally — the Thumb style above has no IsEnabled trigger, on purpose; the
+        DISABLED look is the ScrollBar-level Opacity trigger at the bottom, keyed off the ScrollBar's own
+        IsEnabled, which the ScrollViewer sets when there is nothing to scroll).
+
+        ControlTemplate.Resources publishes 2 x ScrollBar.ThumbMinLength (72) under
+        SystemParameters.VerticalScrollBarButtonHeightKey (HorizontalScrollBarButtonWidthKey for the
+        mirrored template): WPF's Track derives its minimum thumb length as floor(0.5 x that resource)
+        — see Spacing.xaml's remarks — so this is what makes the Track's arrange/drag math agree with the
+        Thumb's MinHeight/MinWidth (ScrollBar.ThumbMinLength = 36) instead of arranging a shorter slot
+        under a taller pill.
+    -->
+    <Style x:Key="Control.ScrollBar.Overlay" TargetType="ScrollBar">
+        <Setter Property="OverridesDefaultStyle" Value="True"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Background" Value="{StaticResource Brush.ScrollBar.Track}"/>
+        <Setter Property="BorderThickness" Value="{StaticResource Thickness.None}"/>
+        <Setter Property="Width" Value="{StaticResource ScrollBar.Width}"/>
+        <Setter Property="MinWidth" Value="{StaticResource ScrollBar.Width}"/>
+        <Setter Property="Height" Value="Auto"/>
+        <Setter Property="MinHeight" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <ControlTemplate.Resources>
+                        <!-- A plain literal, not a StaticResource alias of a Spacing.xaml token: a StaticResource entry keyed by
+                             x:Static is rejected inside compiled (BAML) template resources ("Missing key value on
+                             StaticResourceHolder"). MUST equal 2 x ScrollBar.ThumbMinLength (Spacing.xaml) — pinned by
+                             OverlayScrollBarStyleTests via the real Track arrange (thumb == ThumbMinLength AND the two
+                             RepeatButtons + Thumb tile the full track), which fails the moment the two drift apart. -->
+                        <sys:Double x:Key="{x:Static SystemParameters.VerticalScrollBarButtonHeightKey}">72</sys:Double>
+                    </ControlTemplate.Resources>
+                    <Border Background="{TemplateBinding Background}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            SnapsToDevicePixels="True">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True" IsEnabled="{TemplateBinding IsMouseOver}">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Style="{StaticResource Control.ScrollBar.TrackButton}" Command="{x:Static ScrollBar.PageUpCommand}"/>
+                            </Track.DecreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Style="{StaticResource Control.ScrollBar.Thumb}"
+                                       Padding="{StaticResource ScrollBar.ThumbInset.Vertical}"
+                                       MinHeight="{StaticResource ScrollBar.ThumbMinLength}"/>
+                            </Track.Thumb>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Style="{StaticResource Control.ScrollBar.TrackButton}" Command="{x:Static ScrollBar.PageDownCommand}"/>
+                            </Track.IncreaseRepeatButton>
+                        </Track>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto"/>
+                <Setter Property="MinWidth" Value="0"/>
+                <Setter Property="Height" Value="{StaticResource ScrollBar.Width}"/>
+                <Setter Property="MinHeight" Value="{StaticResource ScrollBar.Width}"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ScrollBar">
+                            <ControlTemplate.Resources>
+                                <!-- A plain literal, not a StaticResource alias of a Spacing.xaml token: a StaticResource entry keyed by
+                                     x:Static is rejected inside compiled (BAML) template resources ("Missing key value on
+                                     StaticResourceHolder"). MUST equal 2 x ScrollBar.ThumbMinLength (Spacing.xaml) — pinned by
+                                     OverlayScrollBarStyleTests via the real Track arrange (thumb == ThumbMinLength AND the two
+                                     RepeatButtons + Thumb tile the full track), which fails the moment the two drift apart. -->
+                                <sys:Double x:Key="{x:Static SystemParameters.HorizontalScrollBarButtonWidthKey}">72</sys:Double>
+                            </ControlTemplate.Resources>
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    SnapsToDevicePixels="True">
+                                <Track x:Name="PART_Track" IsDirectionReversed="False" IsEnabled="{TemplateBinding IsMouseOver}">
+                                    <Track.DecreaseRepeatButton>
+                                        <RepeatButton Style="{StaticResource Control.ScrollBar.TrackButton}" Command="{x:Static ScrollBar.PageLeftCommand}"/>
+                                    </Track.DecreaseRepeatButton>
+                                    <Track.Thumb>
+                                        <Thumb Style="{StaticResource Control.ScrollBar.Thumb}"
+                                               Padding="{StaticResource ScrollBar.ThumbInset.Horizontal}"
+                                               MinWidth="{StaticResource ScrollBar.ThumbMinLength}"/>
+                                    </Track.Thumb>
+                                    <Track.IncreaseRepeatButton>
+                                        <RepeatButton Style="{StaticResource Control.ScrollBar.TrackButton}" Command="{x:Static ScrollBar.PageRightCommand}"/>
+                                    </Track.IncreaseRepeatButton>
+                                </Track>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="{StaticResource ScrollBar.DisabledOpacity}"/>
+            </Trigger>
         </Style.Triggers>
     </Style>
 </ResourceDictionary>

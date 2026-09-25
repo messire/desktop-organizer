@@ -64,22 +64,6 @@ internal sealed class MonitorService(INativeApi nativeApi) : IMonitorService
         _wndProc = null;
     }
 
-    private IntPtr WndProcImpl(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam)
-    {
-        // Minimal work in the WndProc; never throw out of it.
-        try
-        {
-            if (msg is WmDisplayChange or WmSettingChange)
-                MonitorsChanged?.Invoke();
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"MonitorService WndProc error: {ex.Message}");
-        }
-
-        return nativeApi.DefaultWindowProc(hWnd, msg, wParam, lParam);
-    }
-
     /// <inheritdoc />
     public IReadOnlyList<MonitorInfo> GetMonitors()
     {
@@ -135,6 +119,22 @@ internal sealed class MonitorService(INativeApi nativeApi) : IMonitorService
     {
         var safeScale = scale > 0 ? scale : 1.0;
         return new Rect(r.Left / safeScale, r.Top / safeScale, r.Width / safeScale, r.Height / safeScale);
+    }
+
+    private IntPtr WndProcImpl(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam)
+    {
+        // Minimal work in the WndProc; never throw out of it.
+        try
+        {
+            if (msg is WmDisplayChange or WmSettingChange)
+                MonitorsChanged?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"MonitorService WndProc error: {ex.Message}");
+        }
+
+        return nativeApi.DefaultWindowProc(hWnd, msg, wParam, lParam);
     }
 
     private MonitorInfo FallbackMonitor()

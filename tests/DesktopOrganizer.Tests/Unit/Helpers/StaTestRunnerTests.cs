@@ -73,6 +73,10 @@ public class StaTestRunnerTests
         Assert.True(shutDown, "A non-owner STA worker must not leak its dispatcher.");
     }
 
+    /// <summary>
+    /// Verifies that <see cref="StaTestRunner.Run(Action)"/> re-throws the test body's exception on the
+    /// calling (xUnit) thread with its original type and message preserved.
+    /// </summary>
     [Fact]
     public void Run_RethrowsTheTestBodysExceptionOnTheCallingThread()
     {
@@ -95,9 +99,9 @@ public class StaTestRunnerTests
     /// </summary>
     /// <remarks>
     /// Deliberately does NOT rely on <see cref="Application.Current"/>'s ambient dispatcher actually
-    /// pumping: whether the process-wide owner pumps at all depends on whether <see cref="Run"/> is what
-    /// made it, and some fixtures in this suite construct <see cref="Application"/> WITHOUT going
-    /// through <see cref="Run"/> at all (see "a live but non-pumping owner" in
+    /// pumping: whether the process-wide owner pumps at all depends on whether <c>StaTestRunner.Run</c>
+    /// is what made it, and some fixtures in this suite construct <see cref="Application"/> WITHOUT
+    /// going through <c>StaTestRunner.Run</c> at all (see "a live but non-pumping owner" in
     /// <c>docs/Refactoring/Testing/sta-test-conventions.md</c>) — depending on unrelated test ordering
     /// across the whole assembly to decide which one got there first would make this test's own outcome
     /// order-dependent, exactly the flake class this file exists to prevent. Instead this test drives

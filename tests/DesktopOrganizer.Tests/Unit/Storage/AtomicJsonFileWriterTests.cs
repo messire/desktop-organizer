@@ -25,32 +25,12 @@ public class AtomicJsonFileWriterTests
     // would make those two calls structurally unequal by construction, regardless of what Write() did.
     private static readonly DateTimeOffset FixedWrittenAtUtc = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
-    private static (StateStorePaths Paths, string Root) BuildPaths()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"DOrgState_{Guid.NewGuid():N}");
-        return (new StateStorePaths(root), root);
-    }
-
-    private static void SafeDeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup; a still-locked handle from a test failure shouldn't mask the real
-            // assertion failure.
-        }
-    }
-
-    private static JsonObject Envelope(string marker) =>
-        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, StateEnvelope.CurrentSchemaVersion, FixedWrittenAtUtc, "test");
-
-    private static string[] TempFiles(StateStorePaths paths) =>
-        Directory.Exists(paths.StateDirectory) ? Directory.GetFiles(paths.StateDirectory, paths.TempFileSearchPattern) : Array.Empty<string>();
-
     // ── Happy path ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that the very first <see cref="AtomicJsonFileWriter.Write"/> call creates the primary
+    /// file with the expected content and creates no backup file or leftover temp files.
+    /// </summary>
     [Fact]
     public void Write_FirstWrite_CreatesPrimaryAndNoBackup()
     {
@@ -72,6 +52,10 @@ public class AtomicJsonFileWriterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a second <see cref="AtomicJsonFileWriter.Write"/> call writes the new content to the
+    /// primary file and moves the previous content into the backup file.
+    /// </summary>
     [Fact]
     public void Write_SecondWrite_CreatesBackupWithPreviousContent()
     {
@@ -95,6 +79,13 @@ public class AtomicJsonFileWriterTests
     }
 
     // ── Crash injection: primary never existed before this write ───────────────
+
+    /// <summary>
+    /// Verifies that a simulated crash at any stage before the atomic replace, on a store with no
+    /// pre-existing primary file, throws <see cref="AtomicWriteFailedException"/> and leaves the primary
+    /// file absent with no leftover temp files.
+    /// </summary>
+    /// <param name="stage">The write stage at which the crash is injected.</param>
     [Theory]
     [InlineData(StateWriteStage.AfterTempWrite)]
     [InlineData(StateWriteStage.AfterFlush)]
@@ -119,6 +110,11 @@ public class AtomicJsonFileWriterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a simulated crash right after the atomic replace, on a store with no pre-existing
+    /// primary file, still throws <see cref="AtomicWriteFailedException"/> but leaves a valid primary
+    /// file in place, since the OS-level replace had already completed and cannot be rolled back.
+    /// </summary>
     [Fact]
     public void Write_CrashAfterReplace_NoPreexistingPrimary_PrimaryStillLandsAndIsValid()
     {
@@ -144,6 +140,13 @@ public class AtomicJsonFileWriterTests
     }
 
     // ── Crash injection: primary already existed (recovery/backup semantics) ───
+
+    /// <summary>
+    /// Verifies that a simulated crash at any stage before the atomic replace, on a store that already
+    /// has a primary file, throws <see cref="AtomicWriteFailedException"/> and leaves the old primary
+    /// file untouched with no backup file or leftover temp files created.
+    /// </summary>
+    /// <param name="stage">The write stage at which the crash is injected.</param>
     [Theory]
     [InlineData(StateWriteStage.AfterTempWrite)]
     [InlineData(StateWriteStage.AfterFlush)]
@@ -171,6 +174,11 @@ public class AtomicJsonFileWriterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a simulated crash right after the atomic replace, on a store that already has a
+    /// primary file, still throws <see cref="AtomicWriteFailedException"/> but leaves the new content in
+    /// the primary file with the old content moved into the backup file.
+    /// </summary>
     [Fact]
     public void Write_CrashAfterReplace_PreexistingPrimary_NewContentLandsAndOldBecomesBackup()
     {
@@ -196,6 +204,7 @@ public class AtomicJsonFileWriterTests
     }
 
     // ── Retry on a transient IOException ────────────────────────────────────
+
     /// <summary>
     /// Simulates an AV/indexer sharing violation right as <see cref="AtomicJsonFileWriter.Write"/>
     /// attempts <see cref="File.Replace(string, string, string)"/>, and releases it deterministically
@@ -239,6 +248,12 @@ public class AtomicJsonFileWriterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a persistent (never released) file lock on the primary file exhausts the writer's
+    /// retry budget and throws <see cref="AtomicWriteFailedException"/> with an <see cref="IOException"/>
+    /// inner exception at the <see cref="StateWriteStage.BeforeReplace"/> stage, leaving the old primary
+    /// file untouched with no orphaned temp files.
+    /// </summary>
     [Fact]
     public void Write_PersistentIOException_FailsAfterRetriesExhausted_LeavesOldPrimaryAndNoOrphanTemp()
     {
@@ -266,6 +281,7 @@ public class AtomicJsonFileWriterTests
     }
 
     // ── Retry on a transient UnauthorizedAccessException (M-3) ─────────────
+
     /// <summary>
     /// AV/Controlled-Folder-Access/ACL denial surfaces as <see cref="UnauthorizedAccessException"/> on
     /// Windows, not <see cref="IOException"/> — a read-only destination file reproduces exactly that
@@ -308,6 +324,13 @@ public class AtomicJsonFileWriterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a persistent (never cleared) read-only attribute on the primary file exhausts the
+    /// writer's retry budget and throws <see cref="AtomicWriteFailedException"/> with an
+    /// <see cref="UnauthorizedAccessException"/> inner exception at the <see cref="StateWriteStage.BeforeReplace"/>
+    /// stage (not the misleading <c>AfterTempWrite</c> a prior implementation reported), leaving the old
+    /// primary file untouched with no orphaned temp files.
+    /// </summary>
     [Fact]
     public void Write_PersistentUnauthorizedAccessException_FailsAfterRetriesExhausted_LeavesOldPrimaryAndNoOrphanTemp()
     {
@@ -338,18 +361,13 @@ public class AtomicJsonFileWriterTests
         }
     }
 
-    private static void TryClearReadOnly(string path)
-    {
-        try
-        {
-            if (File.Exists(path)) File.SetAttributes(path, FileAttributes.Normal);
-        }
-        catch (IOException)
-        {
-        }
-    }
-
     // ── Orphaned temp file sweeping ──────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="AtomicJsonFileWriter.SweepOrphanedTempFiles"/> deletes leftover temp
+    /// files matching the writer's temp-file pattern while leaving the primary file and unrelated files
+    /// in the state directory alone.
+    /// </summary>
     [Fact]
     public void SweepOrphanedTempFiles_DeletesOrphanedTempFiles_LeavesPrimaryAndUnrelatedFilesAlone()
     {
@@ -379,6 +397,10 @@ public class AtomicJsonFileWriterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AtomicJsonFileWriter.SweepOrphanedTempFiles"/> is a no-op and does not
+    /// throw when the state directory does not exist yet (a brand-new store).
+    /// </summary>
     [Fact]
     public void SweepOrphanedTempFiles_NoStateDirectoryYet_DoesNotThrow()
     {
@@ -396,6 +418,11 @@ public class AtomicJsonFileWriterTests
     }
 
     // ── Quarantine retention ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="AtomicJsonFileWriter.EnforceQuarantineRetention"/> keeps only the five
+    /// most recently written quarantine files and deletes the older ones.
+    /// </summary>
     [Fact]
     public void EnforceQuarantineRetention_KeepsFiveMostRecent_DeletesOlder()
     {
@@ -432,6 +459,10 @@ public class AtomicJsonFileWriterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AtomicJsonFileWriter.EnforceQuarantineRetention"/> deletes nothing when
+    /// five or fewer quarantine files exist.
+    /// </summary>
     [Fact]
     public void EnforceQuarantineRetention_FiveOrFewer_DeletesNothing()
     {
@@ -452,6 +483,43 @@ public class AtomicJsonFileWriterTests
         finally
         {
             SafeDeleteDirectory(root);
+        }
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static (StateStorePaths Paths, string Root) BuildPaths()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"DOrgState_{Guid.NewGuid():N}");
+        return (new StateStorePaths(root), root);
+    }
+
+    private static void SafeDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a still-locked handle from a test failure shouldn't mask the real
+            // assertion failure.
+        }
+    }
+
+    private static JsonObject Envelope(string marker) =>
+        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, StateEnvelope.CurrentSchemaVersion, FixedWrittenAtUtc, "test");
+
+    private static string[] TempFiles(StateStorePaths paths) =>
+        Directory.Exists(paths.StateDirectory) ? Directory.GetFiles(paths.StateDirectory, paths.TempFileSearchPattern) : Array.Empty<string>();
+
+    private static void TryClearReadOnly(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.SetAttributes(path, FileAttributes.Normal);
+        }
+        catch (IOException)
+        {
         }
     }
 }

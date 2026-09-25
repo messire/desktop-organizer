@@ -50,8 +50,8 @@ public static class GridMetrics
 
     /// <summary>
     /// Total horizontal chrome, as a WINDOW-width value, that sits between
-    /// <see cref="System.Windows.Window.Width"/> and the icon grid's own content width — i.e. what every
-    /// caller of this constant (<see cref="MinPanelWidth"/>,
+    /// <see cref="System.Windows.FrameworkElement.Width"/> and the icon grid's own content width — i.e. what every
+    /// caller of this constant (<c>MinPanelWidth</c>,
     /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
     /// <c>ResizeConstraintsFactory.BuildConstraints</c>'s <c>HorizontalChrome</c>) adds back after
     /// quantising CONTENT width, or subtracts before quantising it, to convert between the two.
@@ -69,7 +69,7 @@ public static class GridMetrics
     /// <see cref="PanelMetrics.ContentLeftInset"/> (8 DIP), accounting for a DIFFERENT, OUTER layer of
     /// chrome ADR-015 never knew about: <c>PanelChrome</c>'s fixed 8-DIP accent-indicator column
     /// (<c>Resources/Styles/Panels.xaml</c>, <c>PART_AccentIndicator</c>'s <c>ColumnDefinition</c>,
-    /// ADR-025 MAJOR-1), which sits between <see cref="System.Windows.Window.Width"/> and the
+    /// ADR-025 MAJOR-1), which sits between <see cref="System.Windows.FrameworkElement.Width"/> and the
     /// <c>*</c>-column <c>PART_ContentHost</c> that actually hosts <c>FileListHost</c> /
     /// <c>AdaptiveIconGridPanel</c>. Before this fix, every ANALYTICAL snap-time computation of "how
     /// many columns fit" assumed the FULL window width was available to the icon grid, while
@@ -113,11 +113,13 @@ public static class GridMetrics
     /// <c>ResizeConstraintsFactory.BuildConstraints</c>) are the ones that read the real system metric.
     /// </para>
     /// </summary>
+    /// <param name="policy">Which of the two ADR-029 gap-distribution policies is in effect.</param>
+    /// <param name="verticalScrollBarWidth">The real system vertical scrollbar width, read by the caller.</param>
     public static double ReservedVerticalScrollBarWidth(IconLayoutPolicy policy, double verticalScrollBarWidth)
         => policy == IconLayoutPolicy.FixedGap ? verticalScrollBarWidth : 0d;
 
     /// <summary>
-    /// Total horizontal chrome, as a WINDOW-width value, between <see cref="System.Windows.Window.Width"/>
+    /// Total horizontal chrome, as a WINDOW-width value, between <see cref="System.Windows.FrameworkElement.Width"/>
     /// and the CONTENT width actually available to lay out icon-grid columns in — i.e. the
     /// policy-aware generalisation of <see cref="FileListHPadding"/> that also accounts for M-2's
     /// <see cref="ReservedVerticalScrollBarWidth"/> reservation
@@ -132,6 +134,8 @@ public static class GridMetrics
     /// <see cref="Controls.AdaptiveIconGridPanel"/> actually reserves), this time specific to
     /// <see cref="IconLayoutPolicy.FixedGap"/> panels.
     /// </summary>
+    /// <param name="policy">Which of the two ADR-029 gap-distribution policies is in effect.</param>
+    /// <param name="verticalScrollBarWidth">The real system vertical scrollbar width, read by the caller.</param>
     public static double ContentHorizontalChrome(IconLayoutPolicy policy, double verticalScrollBarWidth)
         => FileListHPadding + ReservedVerticalScrollBarWidth(policy, verticalScrollBarWidth);
 
@@ -140,7 +144,8 @@ public static class GridMetrics
     /// Formula: icon + 25 % padding on each side = <c>iconSize * 1.5</c>.
     /// Example: <c>BoxSize(48) == 72</c>.
     /// </summary>
-    public static double BoxSize(double iconSize) => iconSize + (iconSize / 4d) * 2d;
+    /// <param name="iconSize">The panel's current icon size.</param>
+    public static double BoxSize(double iconSize) => iconSize + ((iconSize / 4d) * 2d);
 
     /// <summary>
     /// Full column footprint: <see cref="BoxSize"/> + two item margins.
@@ -152,7 +157,8 @@ public static class GridMetrics
     /// through <see cref="AdaptiveGridLayout.SnapExtent"/> instead of a plain modulo against this value.
     /// Example: <c>CellSize(48) == 84</c> (72 box + 6 + 6 margins).
     /// </summary>
-    public static double CellSize(double iconSize) => BoxSize(iconSize) + ItemMargin * 2d;
+    /// <param name="iconSize">The panel's current icon size.</param>
+    public static double CellSize(double iconSize) => BoxSize(iconSize) + (ItemMargin * 2d);
 
     /// <summary>
     /// Full row footprint: icon slot height + <see cref="LabelHeight"/> + two item margins. This is
@@ -163,7 +169,8 @@ public static class GridMetrics
     /// <see cref="CellSize"/> for the vertical axis would clip or overlap the name label.
     /// Example: <c>RowHeight(48) == 92</c> (48 icon + 32 label + 6 + 6 margins).
     /// </summary>
-    public static double RowHeight(double iconSize) => iconSize + LabelHeight + ItemMargin * 2d;
+    /// <param name="iconSize">The panel's current icon size.</param>
+    public static double RowHeight(double iconSize) => iconSize + LabelHeight + (ItemMargin * 2d);
 
     /// <summary>
     /// Hard floor for a panel's overall WINDOW width/height in pixels — the single source of truth
@@ -173,11 +180,11 @@ public static class GridMetrics
     /// beside it in the XAML, which must be kept in sync by hand), <c>ChildWindow.xaml.cs</c>'s own
     /// flat <c>MinPanelSize</c> constant (used directly as the height floor in BOTH view modes, as
     /// the flat width floor in List mode — which has no columns at all — AND as the clamp floor for
-    /// <see cref="MinPanelWidth"/>'s icon-grid-derived Grid-mode width minimum below; genuinely
+    /// <see cref="MinPanelWidth(double)"/>'s icon-grid-derived Grid-mode width minimum below; genuinely
     /// axis-agnostic, hence the name), and <c>App.xaml.cs</c>'s minimum size for a panel drawn via
     /// the desktop lasso gesture. Keeping three independent copies in sync by hand is exactly what
     /// let the icon-grid-derived Grid-mode minimum silently drift below this hard floor at small
-    /// <c>IconSize</c> values in the first place — see <see cref="MinPanelWidth"/>'s remarks.
+    /// <c>IconSize</c> values in the first place — see <see cref="MinPanelWidth(double)"/>'s remarks.
     /// </summary>
     public const double MinPanelSize = 120d;
 
@@ -210,12 +217,13 @@ public static class GridMetrics
     /// Clamped up to <see cref="MinPanelSize"/> because the unclamped icon-grid minimum (72/84/96/108px
     /// for <c>IconSize ∈ {16,20,24,28}</c>, the low end of the slider) is smaller than that hard
     /// <c>Window.MinWidth</c> floor. Without this clamp, <c>ChildWindow.Resize_DragDelta</c> could
-    /// compute a <see cref="System.Windows.Window.Width"/> below what WPF will actually coerce the
+    /// compute a <see cref="System.Windows.FrameworkElement.Width"/> below what WPF will actually coerce the
     /// window to, desynchronizing the code's own <see cref="System.Windows.Window.Left"/> math (set
     /// from the uncoerced value) from the window's real, coerced <c>Width</c> — visibly jumping the
     /// panel's right edge when dragging the LEFT resize handle inward (finalization MAJOR M-1).
     /// </para>
     /// </summary>
+    /// <param name="iconSize">The panel's current icon size.</param>
     public static double MinPanelWidth(double iconSize)
         => MinPanelWidth(iconSize, IconLayoutPolicy.LegacyStretch, verticalScrollBarWidth: 0d);
 

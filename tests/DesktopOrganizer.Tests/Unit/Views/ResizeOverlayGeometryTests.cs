@@ -29,8 +29,8 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 /// Grid cell sized to <c>PanelMetrics.ResizeEdgeThickness</c> (6), relying on <c>HorizontalAlignment</c>/
 /// <c>VerticalAlignment</c> to "overflow" the extra 2 DIP. WPF's automatic layout-clip
 /// (<see cref="FrameworkElement"/>'s internal <c>NeedsClipBounds</c> mechanism — entirely separate from
-/// <see cref="Panel.ClipToBounds"/>, and NOT bypassed by alignment) clips any child whose resolved
-/// <see cref="FrameworkElement.RenderSize"/> exceeds the arrange slot the Grid actually gave it, regardless
+/// <see cref="UIElement.ClipToBounds"/>, and NOT bypassed by alignment) clips any child whose resolved
+/// <see cref="UIElement.RenderSize"/> exceeds the arrange slot the Grid actually gave it, regardless
 /// of alignment — so the "overflow" was silently clipped straight back down to 6x6 on this WPF path, while
 /// the native path (which has no such clip) genuinely used 8x8. This class is a real STA regression pin
 /// (not a description) for the actual measured/arranged geometry, exercised through a REAL
@@ -46,7 +46,7 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 /// every OTHER <c>ChildWindow</c> harness in this project) crashes the ENTIRE `dotnet test` HOST PROCESS
 /// later in the run: some unrelated, pre-existing test's own leaked (never-disposed)
 /// <see cref="ChildWindowViewModel"/> existence-check <see cref="System.Threading.Timer"/> throws an
-/// unhandled exception trying to <see cref="Dispatcher.Invoke(Delegate)"/> back onto
+/// unhandled exception trying to <see cref="Dispatcher.Invoke(Delegate, object[])"/> back onto
 /// <see cref="Application.Current"/>'s own <see cref="Dispatcher"/> once this class' real, shown
 /// <see cref="ChildWindow"/> makes that dispatcher's owning thread reachable through
 /// <see cref="Application.Windows"/>-driven <see cref="Window.Close"/>/<c>ShutdownMode</c> machinery in a
@@ -61,8 +61,8 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 /// <see cref="PresentationSource"/> at all" pattern <c>Unit.Resources.ResourceDictionaryMergeTests</c>'
 /// own List-mode label tests already use successfully (a <see cref="Grid"/> does not care whether it
 /// happens to be reachable from a shown <see cref="Window"/> — <c>Measure</c>/<c>Arrange</c> are pure
-/// layout math, not <c>HWND</c>-dependent). A bare <see cref="ChildWindow.Measure(Size)"/>/
-/// <see cref="ChildWindow.Arrange(Rect)"/> pair on the WHOLE, unshown <see cref="Window"/> itself was tried
+/// layout math, not <c>HWND</c>-dependent). A bare <see cref="UIElement.Measure(Size)"/>/
+/// <see cref="UIElement.Arrange(Rect)"/> pair on the WHOLE, unshown <see cref="Window"/> itself was tried
 /// first and did NOT work (confirmed empirically — every descendant's <c>ActualWidth</c>/<c>ActualHeight</c>
 /// stayed 0); a <see cref="Window"/>'s OWN top-level <c>MeasureOverride</c>/<c>ArrangeOverride</c>
 /// participation appears to require a live <see cref="PresentationSource"/>/layout manager in a way a
@@ -73,6 +73,11 @@ public class ResizeOverlayGeometryTests
 {
     private const double WindowExtent = 200d;
 
+    /// <summary>
+    /// P09 regression pin: verifies that after measuring/arranging a 200x200 <c>ResizeOverlay</c>, each
+    /// corner <see cref="Thumb"/> is a genuine, unclipped 8x8 DIP square sitting exactly at its
+    /// geometric corner of the panel.
+    /// </summary>
     [Fact]
     public void ResizeOverlay_AfterMeasureArrange200x200_CornerThumbsAre8x8Unclipped_AndAtTheirGeometricCorner()
     {
@@ -97,6 +102,11 @@ public class ResizeOverlayGeometryTests
         AssertTopLeft(snapshot.Corners["BottomRight"], new Point(WindowExtent - corner8, WindowExtent - corner8));
     }
 
+    /// <summary>
+    /// Verifies that after measuring/arranging a 200x200 <c>ResizeOverlay</c>, each straight-edge
+    /// <see cref="Thumb"/> stays unclipped at <see cref="PanelMetrics.ResizeEdgeThickness"/> and abuts
+    /// the adjacent corner Thumbs with no gap.
+    /// </summary>
     [Fact]
     public void ResizeOverlay_AfterMeasureArrange200x200_StraightEdgeThumbsStayResizeEdgeThicknessAndUnclipped()
     {

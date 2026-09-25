@@ -34,6 +34,31 @@ using Size = System.Drawing.Size;
 /// </remarks>
 public partial class ChildWindow : Window
 {
+    /// <summary>
+    /// The panel's fixed title-bar/header height, in DIP. Internal (rather than private) so
+    /// <c>WindowManager.CollectOtherPanelBounds</c> can use it as the target/final height of a
+    /// rolled-up panel, instead of reading a mid-animation <c>ActualHeight</c> (finalization MAJOR
+    /// M-2) — see the constant's use there for details. Sourced from
+    /// <see cref="PanelMetrics.HeaderHeight"/> (D-11, docs/PLANS/phase-5-ambient-accent-ui.md §1
+    /// D-11) rather than repeating its own literal — <c>PanelMetrics.cs</c> is the single source of
+    /// truth for this value, also consumed directly by <c>ChildWindow.xaml</c>'s
+    /// <c>PanelChrome</c>/<c>PanelRoot</c> row heights and by <see cref="RollUpBehavior"/>'s
+    /// collapsed target height (via the <c>titleBarHeight</c> parameter passed below, unchanged from
+    /// before).
+    /// </summary>
+    internal const double TitleBarHeight = PanelMetrics.HeaderHeight;
+
+    /// <summary>
+    /// Custom <see cref="DataObject"/> format used to identify an in-panel drag-to-reorder gesture
+    /// (ADR-014 Decision 5, Block C), as opposed to an incoming <see cref="DataFormats.FileDrop"/>
+    /// from the desktop/Explorer. The payload is the dragged item's <see cref="FileItem.Path"/> (a
+    /// string), not the <see cref="FileItem"/> instance itself — a string survives crossing the OLE
+    /// data-object boundary safely, and resolving it back to a <see cref="FileItem"/> by looking it
+    /// up in the target panel's own <see cref="BaseViewModel.FileItems"/> doubles as a free
+    /// guard against a drag started from a different panel (path not found there ⇒ rejected).
+    /// </summary>
+    private const string PanelItemReorderFormat = "DesktopOrganizer.PanelItemReorder";
+
     private readonly ChildWindowViewModel _viewModel;
     private readonly IWindowManager _windowManager;
     private readonly IDesktopIntegrationService _desktopIntegration;
@@ -47,8 +72,6 @@ public partial class ChildWindow : Window
     // used by MainWindowViewModel for the same purpose — MessageBox.Show has its own top-level HWND, so
     // it receives input/activation normally regardless of this panel's own WS_EX_NOACTIVATE style.
     private readonly IConfirmationService _confirmation;
-
-    private ChildWindowModel? _model;
 
     private readonly PanelDragMoveBehavior _dragMoveBehavior;
 
@@ -94,30 +117,23 @@ public partial class ChildWindow : Window
     // behaviours (docs/PLANS/phase-1-resize-stabilization.md §3.5).
     private readonly PanelInteractionTracker _interactionTracker = new();
 
-    // Internal (rather than private) so WindowManager.CollectOtherPanelBounds can use it as the
-    // target/final height of a rolled-up panel, instead of reading a mid-animation ActualHeight
-    // (finalization MAJOR M-2) — see the constant's use there for details. Sourced from
-    // PanelMetrics.HeaderHeight (D-11, docs/PLANS/phase-5-ambient-accent-ui.md §1 D-11) rather than
-    // repeating its own literal — PanelMetrics.cs is the single source of truth for this value, also
-    // consumed directly by ChildWindow.xaml's PanelChrome/PanelRoot row heights and by
-    // RollUpBehavior's collapsed target height (via the titleBarHeight parameter passed below,
-    // unchanged from before).
-    internal const double TitleBarHeight = PanelMetrics.HeaderHeight;
-
-    /// <summary>
-    /// Custom <see cref="DataObject"/> format used to identify an in-panel drag-to-reorder gesture
-    /// (ADR-014 Decision 5, Block C), as opposed to an incoming <see cref="DataFormats.FileDrop"/>
-    /// from the desktop/Explorer. The payload is the dragged item's <see cref="FileItem.Path"/> (a
-    /// string), not the <see cref="FileItem"/> instance itself — a string survives crossing the OLE
-    /// data-object boundary safely, and resolving it back to a <see cref="FileItem"/> by looking it
-    /// up in the target panel's own <see cref="ChildWindowViewModel.FileItems"/> doubles as a free
-    /// guard against a drag started from a different panel (path not found there ⇒ rejected).
-    /// </summary>
-    private const string PanelItemReorderFormat = "DesktopOrganizer.PanelItemReorder";
+    private ChildWindowModel? _model;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChildWindow"/> class.
     /// </summary>
+    /// <param name="viewModel">The panel's ViewModel, bound as this window's <see cref="FrameworkElement.DataContext"/>.</param>
+    /// <param name="windowManager">Creates/removes/persists panel windows; used to save layout state after gestures.</param>
+    /// <param name="desktopIntegration">Embeds/positions this window on the desktop layer (WorkerW).</param>
+    /// <param name="appSettings">Global application settings driving snap-to-grid and other panel behavior.</param>
+    /// <param name="diagnostics">Log-only observer of the resize/drag gesture lifecycle.</param>
+    /// <param name="nativeSizingService">
+    /// Installs the window-message hook (<c>WM_NCHITTEST</c>/<c>WM_ENTERSIZEMOVE</c>/<c>WM_SIZING</c>/
+    /// <c>WM_EXITSIZEMOVE</c>, among others) that drives native panel sizing when it is enabled.
+    /// </param>
+    /// <param name="layoutEditMode">The application-global Edit Layout mode service.</param>
+    /// <param name="monitorService">Provides monitor topology for placement/anti-overlap/grid resolution.</param>
+    /// <param name="confirmation">Gates destructive "apply to all panels" actions behind a user confirmation prompt.</param>
     public ChildWindow(
         ChildWindowViewModel viewModel,
         IWindowManager windowManager,
@@ -307,14 +323,15 @@ public partial class ChildWindow : Window
     /// <summary>
     /// Initializes the window state from a <see cref="ChildWindowModel"/>.
     /// </summary>
+    /// <param name="model">The panel model to bind this window's geometry/behaviors to.</param>
     public void Initialize(ChildWindowModel model)
     {
         _model = model;
 
         Left = model.Position.X;
-        Top  = model.Position.Y;
+        Top = model.Position.Y;
 
-        if (model.Size.Width  > 0) Width  = model.Size.Width;
+        if (model.Size.Width > 0) Width = model.Size.Width;
         if (model.Size.Height > 0) Height = model.Size.Height;
 
         WindowState = model.WindowState;
@@ -440,10 +457,40 @@ public partial class ChildWindow : Window
         _windowManager.SaveWindowsState();
     }
 
+    /// <inheritdoc/>
+    protected override void OnLocationChanged(EventArgs e)
+    {
+        // Stage S guard (docs/PLANS/workspace-grid-03-04-integration.md §1.5): a PanelGeometryWriter.Apply
+        // call already wrote model.Position directly — this handler firing synchronously as a side
+        // effect of that same Left/Top assignment must not write it a second, redundant time.
+        if (_model is null || _geometryWriter.IsApplying) return;
+        _model.Position = new Point((int)Left, (int)Top);
+    }
+
+    /// <inheritdoc/>
+    protected override void OnStateChanged(EventArgs e)
+    {
+        if (_model is null) return;
+        _model.WindowState = WindowState;
+    }
+
+    /// <inheritdoc/>
+    protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
+    {
+        // While rolled up, keep the persisted size at the expanded dimensions for restore. Stage S guard
+        // (docs/PLANS/workspace-grid-03-04-integration.md §1.5): a PanelGeometryWriter.Apply call already
+        // wrote model.Size directly — skip the redundant write this handler would otherwise perform as a
+        // synchronous side effect of that same Width/Height assignment (baseline risk 17).
+        if (_model is null || _model.IsRolledUp || _geometryWriter.IsApplying) return;
+        _model.Size = new Size((int)Width, (int)Height);
+    }
+
     /// <summary>
-    /// Shows the non-modal, auto-dismissing rename-error hint popup for <paramref name="outcome"/>, the
+    /// Shows the non-modal, auto-dismissing rename-error hint popup for the failure reason, the
     /// moment <see cref="ChildWindowViewModel.RenameError"/> is set to a non-null value.
     /// </summary>
+    /// <param name="sender">Unused; present to match the <see cref="INotifyPropertyChanged.PropertyChanged"/> handler signature.</param>
+    /// <param name="e">The property-changed event; only <see cref="ChildWindowViewModel.RenameError"/> is acted on.</param>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName != nameof(ChildWindowViewModel.RenameError)) return;
@@ -484,34 +531,6 @@ public partial class ChildWindow : Window
             _layoutEditMode.ExitEditLayout(LayoutModeChangeSource.Keyboard);
             e.Handled = true;
         }
-    }
-
-    /// <inheritdoc/>
-    protected override void OnLocationChanged(EventArgs e)
-    {
-        // Stage S guard (docs/PLANS/workspace-grid-03-04-integration.md §1.5): a PanelGeometryWriter.Apply
-        // call already wrote model.Position directly — this handler firing synchronously as a side
-        // effect of that same Left/Top assignment must not write it a second, redundant time.
-        if (_model is null || _geometryWriter.IsApplying) return;
-        _model.Position = new Point((int)Left, (int)Top);
-    }
-
-    /// <inheritdoc/>
-    protected override void OnStateChanged(EventArgs e)
-    {
-        if (_model is null) return;
-        _model.WindowState = WindowState;
-    }
-
-    /// <inheritdoc/>
-    protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)
-    {
-        // While rolled up, keep the persisted size at the expanded dimensions for restore. Stage S guard
-        // (docs/PLANS/workspace-grid-03-04-integration.md §1.5): a PanelGeometryWriter.Apply call already
-        // wrote model.Size directly — skip the redundant write this handler would otherwise perform as a
-        // synchronous side effect of that same Width/Height assignment (baseline risk 17).
-        if (_model is null || _model.IsRolledUp || _geometryWriter.IsApplying) return;
-        _model.Size = new Size((int)Width, (int)Height);
     }
 
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -782,7 +801,7 @@ public partial class ChildWindow : Window
     /// (ADR-014 Block C3, via <see cref="_reorderController"/>). Resolves the dragged item's path (the
     /// <see cref="DataObject"/> payload — see <see cref="PanelItemReorderFormat"/>) back to a live
     /// <see cref="FileItem"/> by looking it up in this panel's own currently-visible
-    /// <see cref="ChildWindowViewModel.FileItems"/>.
+    /// <see cref="BaseViewModel.FileItems"/>.
     /// </summary>
     private FileItem? TryResolveReorderItem(DragEventArgs e)
     {
@@ -800,7 +819,7 @@ public partial class ChildWindow : Window
     /// <c>DataTemplate</c>s in <c>Templates.xaml</c> — walking up from the hit-tested visual to the
     /// nearest <see cref="ListBoxItem"/> ancestor doesn't depend on the <c>ItemsPanel</c> type
     /// (<c>StackPanel</c> vs <c>WrapPanel</c> vs <see cref="DesktopOrganizer.UI.Controls.AdaptiveIconGridPanel"/>)
-    /// and survives virtualization, unlike walking <see cref="ListBox.Items"/>/children directly.
+    /// and survives virtualization, unlike walking <see cref="ItemsControl.Items"/>/children directly.
     /// </summary>
     private int ComputeDropInsertionIndex(DragEventArgs e)
     {
@@ -970,7 +989,7 @@ public partial class ChildWindow : Window
         AbortGesturesAndApplyLayoutGate();
 
     /// <summary>
-    /// <see cref="ILayoutEditModeService.PropertyChanged"/> subscriber — catches the one live-gate input
+    /// <see cref="INotifyPropertyChanged.PropertyChanged"/> subscriber on <see cref="ILayoutEditModeService"/> — catches the one live-gate input
     /// <see cref="OnLayoutModeChanged"/> does NOT: <see cref="ILayoutEditModeService.IsLayoutLocked"/>
     /// toggled while <see cref="ILayoutEditModeService.Mode"/> stays <see cref="LayoutInteractionMode.Normal"/>
     /// throughout (locking while already editing instead forces an internal exit back to <c>Normal</c>,

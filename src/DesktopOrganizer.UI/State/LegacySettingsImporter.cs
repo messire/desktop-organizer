@@ -31,6 +31,7 @@ internal sealed class LegacySettingsImporter : ILegacyStateImporter
     /// <summary>
     /// Initializes a new instance of the <see cref="LegacySettingsImporter"/> class.
     /// </summary>
+    /// <param name="appSettings">The legacy settings wrapper this importer reads its five structural keys from.</param>
     public LegacySettingsImporter(IAppSettings appSettings)
     {
         _appSettings = appSettings;
@@ -156,10 +157,11 @@ internal sealed class LegacySettingsImporter : ILegacyStateImporter
 
     /// <summary>
     /// Parses the legacy <c>Pages</c> key into the list of page ids used by v1's
-    /// <c>pages.Ids</c>. <paramref name="hasData"/> is <see langword="true"/> unless the raw value is
+    /// <c>pages.Ids</c>. The returned <c>HasData</c> is <see langword="true"/> unless the raw value is
     /// blank or parses to exactly the application's own default, a single <c>"default"</c> entry — a
     /// corrupt-but-non-blank value counts as data and degrades to <c>["default"]</c> below.
     /// </summary>
+    /// <param name="raw">The legacy <c>Pages</c> setting's raw string value.</param>
     private static (JsonArray Ids, bool HasData) ParsePagesOrDefault(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))

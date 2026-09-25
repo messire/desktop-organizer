@@ -15,34 +15,15 @@ namespace DesktopOrganizer.Tests.Unit.ViewModels;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class SystemIconsPanelViewModelTests
 {
-    // ── helpers ──────────────────────────────────────────────────────────────
-
     private readonly Mock<ISystemShellService> _shellMock = new();
     private readonly Mock<IPanelSelectionCoordinator> _selectionCoordinatorMock = new();
 
-    private SystemIconsPanelModel BuildModel(params (SystemIconKind kind, bool visible, int order)[] items)
-    {
-        var model = new SystemIconsPanelModel();
-        model.Items.Clear();
-
-        foreach (var (kind, visible, order) in items)
-        {
-            model.Items.Add(new SystemIconItemModel
-            {
-                Kind = kind,
-                IsVisible = visible,
-                Order = order,
-            });
-        }
-
-        return model;
-    }
-
-    private SystemIconsPanelViewModel BuildSut(SystemIconsPanelModel model, IPanelSelectionCoordinator? selectionCoordinator = null)
-        => new(model, _shellMock.Object, selectionCoordinator ?? _selectionCoordinatorMock.Object);
-
     // ── VisibleItems: only visible icons are exposed ──────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.VisibleItems"/> contains only the icons whose
+    /// model item is visible.
+    /// </summary>
     [Fact]
     public void VisibleItems_OnlyContainsVisibleIcons()
     {
@@ -68,6 +49,10 @@ public class SystemIconsPanelViewModelTests
         Assert.DoesNotContain(SystemIconKind.Network,      visibleKinds);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.VisibleItems"/> is empty when every icon is
+    /// hidden.
+    /// </summary>
     [Fact]
     public void VisibleItems_IsEmpty_WhenAllIconsAreHidden()
     {
@@ -87,6 +72,10 @@ public class SystemIconsPanelViewModelTests
 
     // ── VisibleItems: sorted by Order ────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.VisibleItems"/> is sorted by ascending
+    /// <see cref="SystemIconItemModel.Order"/> regardless of the model's insertion order.
+    /// </summary>
     [Fact]
     public void VisibleItems_AreSortedByOrder()
     {
@@ -115,6 +104,10 @@ public class SystemIconsPanelViewModelTests
     // NOTE: Reorder() is not yet implemented in SystemIconsPanelViewModel.
     // These tests are RED by design — they drive the implementation.
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.Reorder"/> updates the target item's
+    /// <see cref="SystemIconItemModel.Order"/> in the underlying model.
+    /// </summary>
     [Fact]
     public void Reorder_ChangesOrderPropertyInModel()
     {
@@ -136,6 +129,10 @@ public class SystemIconsPanelViewModelTests
         Assert.Equal(0, networkItem.Order);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.Reorder"/> adjusts every other item's
+    /// <see cref="SystemIconItemModel.Order"/> so all order values stay unique.
+    /// </summary>
     [Fact]
     public void Reorder_AdjustsOtherItemsToKeepOrdersUnique()
     {
@@ -159,6 +156,10 @@ public class SystemIconsPanelViewModelTests
     // NOTE: RefreshRecycleBin() is not yet implemented in SystemIconsPanelViewModel.
     // These tests are RED by design — they drive the implementation.
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.RefreshRecycleBin"/> sets the Recycle Bin
+    /// model item's icon from <see cref="ISystemShellService.GetSystemIcon"/> when the bin is empty.
+    /// </summary>
     [Fact]
     public void RefreshRecycleBin_UpdatesRecycleBinItemIcon()
     {
@@ -184,6 +185,10 @@ public class SystemIconsPanelViewModelTests
         Assert.Equal(emptyIcon, binItem.Icon);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.RefreshRecycleBin"/> sets a non-null icon on
+    /// the Recycle Bin model item when the bin is not empty.
+    /// </summary>
     [Fact]
     public void RefreshRecycleBin_WhenBinIsNotEmpty_SetsNonNullIcon()
     {
@@ -209,6 +214,10 @@ public class SystemIconsPanelViewModelTests
         Assert.NotNull(binItem.Icon);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.RefreshRecycleBin"/> does not throw when
+    /// <see cref="ISystemShellService.GetRecycleBinState"/> throws.
+    /// </summary>
     [Fact]
     public void RefreshRecycleBin_DoesNotThrow_WhenShellServiceFails()
     {
@@ -245,6 +254,11 @@ public class SystemIconsPanelViewModelTests
     // RefreshRecycleBin_UpdatesRecycleBinItemIcon and
     // RefreshRecycleBin_DoesNotThrow_WhenShellServiceFails.
 
+    /// <summary>
+    /// Verifies that the constructor subscribes to <see cref="ISystemShellService.RecycleBinChanged"/>
+    /// for the view model's lifetime, and that <see cref="SystemIconsPanelViewModel.Dispose"/>
+    /// unsubscribes again.
+    /// </summary>
     [Fact]
     public void Constructor_SubscribesToRecycleBinChanged_AndDisposeUnsubscribes()
     {
@@ -267,6 +281,11 @@ public class SystemIconsPanelViewModelTests
             Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that the shell's <see cref="ISystemShellService.RecycleBinChanged"/> handler never
+    /// throws back into the shell's own polling thread, whether it refreshes inline or marshals to a
+    /// dispatcher.
+    /// </summary>
     [Fact]
     public void OnRecycleBinChanged_WhenEventFired_DoesNotThrowOnTheShellsPollingThread()
     {
@@ -291,6 +310,9 @@ public class SystemIconsPanelViewModelTests
 
     // ── Dispose: does not throw ───────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.Dispose"/> does not throw.
+    /// </summary>
     [Fact]
     public void Dispose_DoesNotThrow()
     {
@@ -305,6 +327,9 @@ public class SystemIconsPanelViewModelTests
 
     // ── ui-polishing-1 §5.4/§5.6: SelectedItem ────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.SelectedItem"/> can be set and read back.
+    /// </summary>
     [Fact]
     public void SelectedItem_CanBeSetAndRead()
     {
@@ -317,6 +342,10 @@ public class SystemIconsPanelViewModelTests
         Assert.Same(item, sut.SelectedItem);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.SelectedItem"/> can be cleared back to
+    /// <c>null</c>.
+    /// </summary>
     [Fact]
     public void SelectedItem_CanBeClearedBackToNull()
     {
@@ -329,6 +358,10 @@ public class SystemIconsPanelViewModelTests
         Assert.Null(sut.SelectedItem);
     }
 
+    /// <summary>
+    /// ui-polishing-1 §5.4: verifies that <see cref="SystemIconsPanelViewModel.SelectedItem"/> is
+    /// cleared when the selected item's <see cref="SystemIconItemModel.IsVisible"/> flips to <c>false</c>.
+    /// </summary>
     [Fact]
     public void SelectedItem_ClearedWhenItemIsHidden()
     {
@@ -344,6 +377,10 @@ public class SystemIconsPanelViewModelTests
         Assert.Null(sut.SelectedItem);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.SelectedItem"/> is cleared when the selected
+    /// item is removed from the model's item collection.
+    /// </summary>
     [Fact]
     public void SelectedItem_ClearedWhenItemIsRemovedFromModel()
     {
@@ -359,6 +396,11 @@ public class SystemIconsPanelViewModelTests
         Assert.Null(sut.SelectedItem);
     }
 
+    /// <summary>
+    /// ui-polishing-1 §5.4: verifies that <see cref="SystemIconsPanelViewModel.SelectedItem"/> survives
+    /// a <see cref="SystemIconsPanelViewModel.Reorder"/> call untouched, since the same item instance
+    /// simply moves to a different position.
+    /// </summary>
     [Fact]
     public void SelectedItem_PreservedAcrossReorder()
     {
@@ -377,6 +419,10 @@ public class SystemIconsPanelViewModelTests
         Assert.Same(item, sut.SelectedItem);
     }
 
+    /// <summary>
+    /// Verifies that setting <see cref="SystemIconsPanelViewModel.SelectedItem"/> to a non-null item
+    /// notifies <see cref="IPanelSelectionCoordinator"/> of the claim.
+    /// </summary>
     [Fact]
     public void SelectedItem_SetToNonNull_NotifiesCoordinator()
     {
@@ -389,6 +435,10 @@ public class SystemIconsPanelViewModelTests
         _selectionCoordinatorMock.Verify(c => c.NotifySelected(sut), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that clearing <see cref="SystemIconsPanelViewModel.SelectedItem"/> to <c>null</c> does
+    /// not notify <see cref="IPanelSelectionCoordinator"/>.
+    /// </summary>
     [Fact]
     public void SelectedItem_SetToNull_DoesNotNotifyCoordinator()
     {
@@ -402,6 +452,10 @@ public class SystemIconsPanelViewModelTests
         _selectionCoordinatorMock.Verify(c => c.NotifySelected(It.IsAny<object>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelSelectionCoordinator.SelectionClaimed"/> fires for a
+    /// different owner, <see cref="SystemIconsPanelViewModel.SelectedItem"/> is cleared.
+    /// </summary>
     [Fact]
     public void SelectionClaimed_FromAnotherOwner_ClearsSelectedItem()
     {
@@ -414,6 +468,10 @@ public class SystemIconsPanelViewModelTests
         Assert.Null(sut.SelectedItem);
     }
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelSelectionCoordinator.SelectionClaimed"/> fires for this same
+    /// view model as owner, <see cref="SystemIconsPanelViewModel.SelectedItem"/> is left untouched.
+    /// </summary>
     [Fact]
     public void SelectionClaimed_FromSelf_DoesNotClearSelectedItem()
     {
@@ -427,6 +485,11 @@ public class SystemIconsPanelViewModelTests
         Assert.Same(item, sut.SelectedItem);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelViewModel.Dispose"/> unsubscribes from
+    /// <see cref="IPanelSelectionCoordinator.SelectionClaimed"/>, so a later claim from another owner
+    /// does not touch the disposed instance or throw.
+    /// </summary>
     [Fact]
     public void Dispose_UnsubscribesFromSelectionClaimed()
     {
@@ -441,6 +504,11 @@ public class SystemIconsPanelViewModelTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Integration-style: verifies that two <see cref="SystemIconsPanelViewModel"/> instances sharing a
+    /// real <see cref="PanelSelectionCoordinator"/> clear each other's selection whenever one selects
+    /// an item.
+    /// </summary>
     [Fact]
     public void SharingCoordinatorWithAnotherSidebarInstance_SelectingInOneClearsTheOther()
     {
@@ -462,4 +530,26 @@ public class SystemIconsPanelViewModelTests
         Assert.Null(sut1.SelectedItem);
         Assert.Same(item2, sut2.SelectedItem);
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private SystemIconsPanelModel BuildModel(params (SystemIconKind kind, bool visible, int order)[] items)
+    {
+        var model = new SystemIconsPanelModel();
+        model.Items.Clear();
+
+        foreach (var (kind, visible, order) in items)
+        {
+            model.Items.Add(new SystemIconItemModel
+            {
+                Kind = kind,
+                IsVisible = visible,
+                Order = order,
+            });
+        }
+
+        return model;
+    }
+
+    private SystemIconsPanelViewModel BuildSut(SystemIconsPanelModel model, IPanelSelectionCoordinator? selectionCoordinator = null)
+        => new(model, _shellMock.Object, selectionCoordinator ?? _selectionCoordinatorMock.Object);
 }

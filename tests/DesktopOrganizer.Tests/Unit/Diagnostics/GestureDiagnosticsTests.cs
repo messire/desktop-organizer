@@ -21,6 +21,11 @@ public class GestureDiagnosticsTests
     private readonly List<RecordedWrite> _writes = [];
     private long _clock;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GestureDiagnosticsTests"/> class, wiring the mocked
+    /// <see cref="IDiagnosticsLog"/> to record every <c>Write</c> call into <see cref="_writes"/> for
+    /// later assertion.
+    /// </summary>
     public GestureDiagnosticsTests()
     {
         _logMock.SetupGet(l => l.IsEnabled).Returns(true);
@@ -34,13 +39,12 @@ public class GestureDiagnosticsTests
                 (category, name, scope, payload) => _writes.Add(new RecordedWrite(category, name, scope, payload)));
     }
 
-    private GestureDiagnostics BuildEnabled() =>
-        new(_logMock.Object, IntervalMs, () => _clock);
-
-    private static Rect MakeRect(double x, double y, double width, double height) => new(x, y, width, height);
-
     // ── Delta throttling: first delta always emitted ────────────────────────
 
+    /// <summary>
+    /// Verifies that the very first <c>ResizeDelta</c> of a gesture is always emitted, even when it
+    /// arrives well inside the throttle window.
+    /// </summary>
     [Fact]
     public void ResizeDelta_FirstDeltaOfGesture_IsAlwaysEmitted()
     {
@@ -54,6 +58,10 @@ public class GestureDiagnosticsTests
         Assert.Single(_writes, w => w.Name == "ResizeDelta");
     }
 
+    /// <summary>
+    /// Verifies that the very first <c>DragDelta</c> of a gesture is always emitted, even when it
+    /// arrives well inside the throttle window.
+    /// </summary>
     [Fact]
     public void DragDelta_FirstDeltaOfGesture_IsAlwaysEmitted()
     {
@@ -69,6 +77,10 @@ public class GestureDiagnosticsTests
 
     // ── Delta throttling: suppressed within the window ──────────────────────
 
+    /// <summary>
+    /// Verifies that a second <c>ResizeDelta</c> arriving within the throttle window after the first is
+    /// suppressed (not emitted).
+    /// </summary>
     [Fact]
     public void ResizeDelta_WithinThrottleWindow_IsSuppressed()
     {
@@ -84,6 +96,10 @@ public class GestureDiagnosticsTests
         Assert.Equal(1, _writes.Count(w => w.Name == "ResizeDelta"));
     }
 
+    /// <summary>
+    /// Verifies that a second <c>DragDelta</c> arriving within the throttle window after the first is
+    /// suppressed (not emitted).
+    /// </summary>
     [Fact]
     public void DragDelta_WithinThrottleWindow_IsSuppressed()
     {
@@ -101,6 +117,10 @@ public class GestureDiagnosticsTests
 
     // ── Delta throttling: emission resumes once the interval elapses ────────
 
+    /// <summary>
+    /// Verifies that <c>ResizeDelta</c> emission resumes once the throttle interval has fully elapsed
+    /// since the last emitted delta.
+    /// </summary>
     [Fact]
     public void ResizeDelta_AfterIntervalElapses_EmitsAgain()
     {
@@ -118,6 +138,10 @@ public class GestureDiagnosticsTests
         Assert.Equal(2, _writes.Count(w => w.Name == "ResizeDelta"));
     }
 
+    /// <summary>
+    /// Verifies that <c>DragDelta</c> emission resumes once the throttle interval has fully elapsed
+    /// since the last emitted delta.
+    /// </summary>
     [Fact]
     public void DragDelta_AfterIntervalElapses_EmitsAgain()
     {
@@ -137,6 +161,10 @@ public class GestureDiagnosticsTests
 
     // ── Completed payload carries the last (possibly throttled) delta ───────
 
+    /// <summary>
+    /// Verifies that the <c>ResizeCompleted</c> payload's <c>lastRawWidth</c>/<c>lastRawHeight</c>
+    /// reflect the most recent delta even when that delta itself was throttled and never emitted.
+    /// </summary>
     [Fact]
     public void ResizeCompleted_Payload_CarriesLastRawSizeEvenWhenThrottled()
     {
@@ -157,6 +185,10 @@ public class GestureDiagnosticsTests
         Assert.Equal(100.0, GetPayloadValue<double>(completed, "lastRawHeight"));
     }
 
+    /// <summary>
+    /// Verifies that the <c>DragCompleted</c> payload's <c>lastAppliedX</c> reflects the most recent
+    /// delta even when that delta itself was throttled and never emitted.
+    /// </summary>
     [Fact]
     public void DragCompleted_Payload_CarriesLastAppliedRectEvenWhenThrottled()
     {
@@ -178,6 +210,10 @@ public class GestureDiagnosticsTests
 
     // ── deltaCount / emittedCount / durationMs ───────────────────────────────
 
+    /// <summary>
+    /// Verifies that the <c>ResizeCompleted</c> payload's <c>deltaCount</c>, <c>emittedCount</c>, and
+    /// <c>durationMs</c> correctly reflect a gesture with a mix of emitted and throttled deltas.
+    /// </summary>
     [Fact]
     public void ResizeCompleted_Payload_HasCorrectDeltaCountEmittedCountAndDurationMs()
     {
@@ -203,6 +239,10 @@ public class GestureDiagnosticsTests
         Assert.Equal(500L, GetPayloadValue<long>(completed, "durationMs"));
     }
 
+    /// <summary>
+    /// Verifies that the <c>DragCompleted</c> payload's <c>deltaCount</c>, <c>emittedCount</c>, and
+    /// <c>durationMs</c> correctly reflect a gesture with a mix of emitted and throttled deltas.
+    /// </summary>
     [Fact]
     public void DragCompleted_Payload_HasCorrectDeltaCountEmittedCountAndDurationMs()
     {
@@ -228,6 +268,10 @@ public class GestureDiagnosticsTests
         Assert.Equal(300L, GetPayloadValue<long>(completed, "durationMs"));
     }
 
+    /// <summary>
+    /// Verifies that starting a second resize gesture on the same <see cref="GestureDiagnostics"/>
+    /// instance resets the delta/emitted counters rather than carrying over the first gesture's counts.
+    /// </summary>
     [Fact]
     public void ResizeStarted_ResetsCountersForANewGesture()
     {
@@ -253,6 +297,11 @@ public class GestureDiagnosticsTests
 
     // ── durationMs sentinel when Completed is observed without a matching Started (MINOR-6) ────
 
+    /// <summary>
+    /// Verifies that <c>ResizeCompleted</c> reports the <c>-1</c> sentinel <c>durationMs</c> when no
+    /// matching <c>ResizeStarted</c> was observed first, rather than leaking a large uptime-like value
+    /// (MINOR-6).
+    /// </summary>
     [Fact]
     public void ResizeCompleted_WithoutPrecedingResizeStarted_ReportsSentinelDurationMs()
     {
@@ -266,6 +315,11 @@ public class GestureDiagnosticsTests
         Assert.Equal(-1L, GetPayloadValue<long>(completed, "durationMs"));
     }
 
+    /// <summary>
+    /// Verifies that <c>DragCompleted</c> reports the <c>-1</c> sentinel <c>durationMs</c> when no
+    /// matching <c>DragStarted</c> was observed first, rather than leaking a large uptime-like value
+    /// (MINOR-6).
+    /// </summary>
     [Fact]
     public void DragCompleted_WithoutPrecedingDragStarted_ReportsSentinelDurationMs()
     {
@@ -281,12 +335,20 @@ public class GestureDiagnosticsTests
 
     // ── Constructor validation (MINOR-5) ─────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the <see cref="GestureDiagnostics"/> constructor throws
+    /// <see cref="ArgumentNullException"/> for a <see langword="null"/> log (MINOR-5).
+    /// </summary>
     [Fact]
     public void Constructor_NullLog_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new GestureDiagnostics(null!));
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="GestureDiagnostics"/> constructor throws
+    /// <see cref="ArgumentOutOfRangeException"/> for a negative delta sample interval (MINOR-5).
+    /// </summary>
     [Fact]
     public void Constructor_NegativeDeltaSampleIntervalMs_Throws()
     {
@@ -295,6 +357,11 @@ public class GestureDiagnosticsTests
 
     // ── Zero cost when disabled ──────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that with logging disabled, every <see cref="GestureDiagnostics"/> method only ever
+    /// checks <see cref="IDiagnosticsLog.IsEnabled"/> and never calls <c>Write</c>, <c>Flush</c>, or
+    /// <c>Dispose</c> on the sink.
+    /// </summary>
     [Fact]
     public void AllMethods_WhenDisabled_NeverCallWriteOrFlushOrDispose()
     {
@@ -327,6 +394,10 @@ public class GestureDiagnosticsTests
 
     // ── Payload shape / privacy invariants ──────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the <c>ResizeStarted</c> payload contains exactly the expected set of keys, no
+    /// more and no fewer.
+    /// </summary>
     [Fact]
     public void ResizeStarted_Payload_HasExactlyTheExpectedKeys()
     {
@@ -345,6 +416,10 @@ public class GestureDiagnosticsTests
             write.Payload.Select(p => p.Key).ToHashSet());
     }
 
+    /// <summary>
+    /// Verifies that the <c>ResizeCompleted</c> payload contains exactly the expected set of keys, no
+    /// more and no fewer.
+    /// </summary>
     [Fact]
     public void ResizeCompleted_Payload_HasExactlyTheExpectedKeys()
     {
@@ -365,6 +440,10 @@ public class GestureDiagnosticsTests
             write.Payload.Select(p => p.Key).ToHashSet());
     }
 
+    /// <summary>
+    /// Verifies that an ordinary (non-failed) <c>ResizeCompleted</c> payload carries the <c>endReason</c>
+    /// verbatim and a <see langword="null"/> <c>exceptionType</c>.
+    /// </summary>
     [Fact]
     public void ResizeCompleted_Payload_CarriesEndReasonAndNullExceptionTypeForOrdinaryCompletion()
     {
@@ -382,8 +461,8 @@ public class GestureDiagnosticsTests
     /// <summary>
     /// C8 privacy invariant: when a gesture ends with <c>Failed</c>, <c>exceptionType</c> carries only
     /// the exception's type name — never anything resembling its <c>Message</c> (which may contain a
-    /// file path). This mirrors <see cref="PanelResizeController"/>'s own contract (it only ever passes
-    /// <c>ex.GetType().Name</c>), verified here at the diagnostics boundary.
+    /// file path). This mirrors <see cref="DesktopOrganizer.UI.Behaviors.PanelResizeController"/>'s own
+    /// contract (it only ever passes <c>ex.GetType().Name</c>), verified here at the diagnostics boundary.
     /// </summary>
     [Fact]
     public void ResizeCompleted_Payload_Failed_CarriesOnlyExceptionTypeName_NeverMessageLikeText()
@@ -405,7 +484,8 @@ public class GestureDiagnosticsTests
     /// <summary>
     /// P03 fix-cycle 1 final verification (MINOR): "Align to workspace grid" refusals used to go to
     /// <c>Console.Error</c>, which nobody reads in a WinExe process — same defect class as
-    /// <see cref="ExistenceRefreshFailed"/>. Panel-scoped, payload carries only the reason code.
+    /// <see cref="GestureDiagnostics.ExistenceRefreshFailed"/>. Panel-scoped, payload carries only the
+    /// reason code.
     /// </summary>
     [Fact]
     public void AlignToWorkspaceGridRefused_WritesPanelScopedEventWithReasonOnly()
@@ -422,6 +502,10 @@ public class GestureDiagnosticsTests
         Assert.Single(write.Payload);
     }
 
+    /// <summary>
+    /// Verifies that a panel-scoped event's <c>Scope</c> is always an opaque eight-character prefix,
+    /// never the panel id's full GUID.
+    /// </summary>
     [Fact]
     public void Scope_IsAlwaysAnEightCharacterPrefix_NeverTheFullGuid()
     {
@@ -437,6 +521,10 @@ public class GestureDiagnosticsTests
         Assert.NotEqual(panelId.ToString(), write.Scope);
     }
 
+    /// <summary>
+    /// Verifies that session-level events (<c>SessionStarted</c>/<c>SessionExiting</c>) always have a
+    /// <see langword="null"/> <c>Scope</c>, since they are not associated with a specific panel.
+    /// </summary>
     [Fact]
     public void SessionLevelEvents_HaveNullScope()
     {
@@ -500,6 +588,10 @@ public class GestureDiagnosticsTests
     // The raw wire-level WM_ENTERSIZEMOVE/WM_EXITSIZEMOVE signals — distinct from, and independent of,
     // ResizeStarted/ResizeCompleted above (docs/PLANS/phase-2-native-panel-sizing.md §1.7).
 
+    /// <summary>
+    /// Verifies that the <c>SizeMoveEntered</c> payload contains exactly the expected set of keys, no
+    /// more and no fewer.
+    /// </summary>
     [Fact]
     public void SizeMoveEntered_Payload_HasExactlyTheExpectedKeys()
     {
@@ -514,6 +606,10 @@ public class GestureDiagnosticsTests
             write.Payload.Select(p => p.Key).ToHashSet());
     }
 
+    /// <summary>
+    /// Verifies that the <c>SizeMoveEntered</c> payload carries the raw <c>hwnd</c> and <c>edge</c>
+    /// values verbatim.
+    /// </summary>
     [Fact]
     public void SizeMoveEntered_Payload_CarriesHwndAndEdgeVerbatim()
     {
@@ -527,6 +623,10 @@ public class GestureDiagnosticsTests
         Assert.Equal("BottomRight", GetPayloadValue<string>(write, "edge"));
     }
 
+    /// <summary>
+    /// Verifies that the <c>SizeMoveExited</c> payload contains exactly the expected set of keys, no
+    /// more and no fewer.
+    /// </summary>
     [Fact]
     public void SizeMoveExited_Payload_HasExactlyTheExpectedKeys()
     {
@@ -541,6 +641,9 @@ public class GestureDiagnosticsTests
             write.Payload.Select(p => p.Key).ToHashSet());
     }
 
+    /// <summary>
+    /// Verifies that the <c>SizeMoveExited</c> payload carries the final bounds verbatim.
+    /// </summary>
     [Fact]
     public void SizeMoveExited_Payload_CarriesFinalBoundsVerbatim()
     {
@@ -556,6 +659,10 @@ public class GestureDiagnosticsTests
         Assert.Equal(400.0, GetPayloadValue<double>(write, "finalHeight"));
     }
 
+    /// <summary>
+    /// Verifies that <c>SizeMoveEntered</c>/<c>SizeMoveExited</c> events' <c>Scope</c> is always an
+    /// opaque eight-character prefix, never the panel id's full GUID.
+    /// </summary>
     [Fact]
     public void SizeMoveEnteredAndExited_Scope_IsAlwaysAnEightCharacterPrefix_NeverTheFullGuid()
     {
@@ -574,6 +681,10 @@ public class GestureDiagnosticsTests
         }
     }
 
+    /// <summary>
+    /// Verifies that with logging disabled, <c>SizeMoveEntered</c>/<c>SizeMoveExited</c> never call
+    /// <c>Write</c> on the sink.
+    /// </summary>
     [Fact]
     public void SizeMoveEnteredAndExited_WhenDisabled_NeverCallWrite()
     {
@@ -592,6 +703,7 @@ public class GestureDiagnosticsTests
     /// set of <see cref="NativeSizingEdge"/> names — never free text — and <c>hwnd</c> is a plain
     /// integer, never a formatted pointer string that could look path-like.
     /// </summary>
+    /// <param name="edge">The <see cref="NativeSizingEdge"/> value round-tripped through the payload.</param>
     [Theory]
     [InlineData(NativeSizingEdge.Left)]
     [InlineData(NativeSizingEdge.Top)]
@@ -615,11 +727,17 @@ public class GestureDiagnosticsTests
         Assert.DoesNotContain(':', value);
     }
 
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static Rect MakeRect(double x, double y, double width, double height) => new(x, y, width, height);
+
     private static T GetPayloadValue<T>(RecordedWrite write, string key)
     {
         var match = write.Payload.Single(p => p.Key == key);
         return Assert.IsType<T>(match.Value);
     }
+
+    private GestureDiagnostics BuildEnabled() =>
+        new(_logMock.Object, IntervalMs, () => _clock);
 
     private sealed record RecordedWrite(string Category, string Name, string? Scope, KeyValuePair<string, object?>[] Payload);
 }

@@ -10,7 +10,7 @@ namespace DesktopOrganizer.Tests.Unit.Models;
 /// (<see cref="PanelMetrics.ContentLeftInset"/>) is subtracted from the snapped window width — before
 /// this fix, <see cref="GridMetrics.FileListHPadding"/> was an independent <c>0</c> literal that let
 /// every snap-time formula assume the FULL window width was available to the icon grid, while
-/// <see cref="Controls.AdaptiveIconGridPanel"/> itself (driven by real WPF <c>*</c>-column layout, not
+/// <see cref="DesktopOrganizer.UI.Controls.AdaptiveIconGridPanel"/> itself (driven by real WPF <c>*</c>-column layout, not
 /// this constant) only ever received <c>Window.Width - 8</c>, silently losing one column at every snap
 /// point. All assertions here operate purely in DIP (no physical-pixel/DPI-scale term anywhere in the
 /// formulas involved), so the guarantee holds identically at any DPI — see
@@ -22,23 +22,6 @@ namespace DesktopOrganizer.Tests.Unit.Models;
 public class ContentLeftInsetRowCapacityRegressionTests
 {
     /// <summary>
-    /// The exact window-width formula <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s
-    /// <c>SnapWidthToGrid</c> use for a panel that snaps to exactly <paramref name="columns"/> columns —
-    /// content <see cref="AdaptiveGridLayout.Extent"/> plus the chrome
-    /// <see cref="GridMetrics.FileListHPadding"/> now accounts for (F-3 fix).
-    /// </summary>
-    private static double SnappedWindowWidth(int columns, double cell, double edgePadding)
-        => AdaptiveGridLayout.Extent(columns, cell, AdaptiveGridLayout.DefaultMinGap, edgePadding) + GridMetrics.FileListHPadding;
-
-    /// <summary>
-    /// The content width <see cref="Controls.AdaptiveIconGridPanel"/> ACTUALLY receives as
-    /// <c>availableSize.Width</c>/<c>finalSize.Width</c> once real WPF <c>*</c>-column layout
-    /// (<c>Resources/Styles/Panels.xaml</c>'s <c>PART_ContentHost</c>) has taken
-    /// <see cref="PanelMetrics.ContentLeftInset"/> off the window width.
-    /// </summary>
-    private static double ActualContentWidth(double snappedWindowWidth) => snappedWindowWidth - PanelMetrics.ContentLeftInset;
-
-    /// <summary>
     /// The core F-3 regression: for a representative spread of <c>IconSize</c> values — the full tick
     /// range (16-96 in steps of 4) PLUS real fractional values persisted on a live user's machine before
     /// any tick-snap fix (P00 finding F-11, docs/PLANS/workspace-grid-00-baseline.md) — a panel snapped
@@ -49,6 +32,7 @@ public class ContentLeftInsetRowCapacityRegressionTests
     /// for any <c>IconSize</c> where <c>cell + minGap &gt; 8</c> (see
     /// docs/PLANS/workspace-grid-00-baseline.md's sverка in the "Сверка срезов" note).
     /// </summary>
+    /// <param name="iconSize">The icon size used to derive the cell size and edge padding under test.</param>
     [Theory]
     [InlineData(16d)]
     [InlineData(20d)]
@@ -104,6 +88,8 @@ public class ContentLeftInsetRowCapacityRegressionTests
     /// snapshot), so it keeps tracking reality if <see cref="PanelMetrics.ContentLeftInset"/> itself ever
     /// changes.
     /// </summary>
+    /// <param name="iconSize">The icon size used to derive the cell size and edge padding under test.</param>
+    /// <param name="k">The column count the panel is (analytically) snapped to.</param>
     [Theory]
     [InlineData(48d, 2)]
     [InlineData(48d, 3)]
@@ -151,6 +137,7 @@ public class ContentLeftInsetRowCapacityRegressionTests
     /// <see cref="AdaptiveGridLayout"/>/<see cref="PanelMetrics"/> never operate in physical pixels — this
     /// holds identically regardless of the monitor's actual DPI scale factor.
     /// </summary>
+    /// <param name="iconSize">The icon size used to derive the cell size and edge padding under test.</param>
     [Theory]
     [InlineData(16d)]
     [InlineData(32.010182570303485d)]
@@ -174,4 +161,21 @@ public class ContentLeftInsetRowCapacityRegressionTests
                 $"IconSize={iconSize}, k={k}: expected RowCapacity {k} with a sub-pixel shortfall inside M-1 tolerance, got {rowCapacity}.");
         }
     }
+
+    /// <summary>
+    /// The exact window-width formula <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s
+    /// <c>SnapWidthToGrid</c> use for a panel that snaps to exactly <paramref name="columns"/> columns —
+    /// content <see cref="AdaptiveGridLayout.Extent"/> plus the chrome
+    /// <see cref="GridMetrics.FileListHPadding"/> now accounts for (F-3 fix).
+    /// </summary>
+    private static double SnappedWindowWidth(int columns, double cell, double edgePadding)
+        => AdaptiveGridLayout.Extent(columns, cell, AdaptiveGridLayout.DefaultMinGap, edgePadding) + GridMetrics.FileListHPadding;
+
+    /// <summary>
+    /// The content width <see cref="DesktopOrganizer.UI.Controls.AdaptiveIconGridPanel"/> ACTUALLY receives as
+    /// <c>availableSize.Width</c>/<c>finalSize.Width</c> once real WPF <c>*</c>-column layout
+    /// (<c>Resources/Styles/Panels.xaml</c>'s <c>PART_ContentHost</c>) has taken
+    /// <see cref="PanelMetrics.ContentLeftInset"/> off the window width.
+    /// </summary>
+    private static double ActualContentWidth(double snappedWindowWidth) => snappedWindowWidth - PanelMetrics.ContentLeftInset;
 }

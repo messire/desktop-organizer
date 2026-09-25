@@ -30,6 +30,7 @@ public enum NormalModeLayoutGestures
 public static class NormalModeLayoutGesturesParser
 {
     /// <summary>Parses <paramref name="value"/> case-insensitively; unrecognised/empty input falls back to <see cref="NormalModeLayoutGestures.MoveOnly"/> — never throws.</summary>
+    /// <param name="value">The candidate string to parse, e.g. from persisted settings.</param>
     public static NormalModeLayoutGestures ParseOrMoveOnly(string? value) =>
         Enum.TryParse<NormalModeLayoutGestures>(value, ignoreCase: true, out var parsed) ? parsed : NormalModeLayoutGestures.MoveOnly;
 }

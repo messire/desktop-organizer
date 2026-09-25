@@ -19,30 +19,13 @@ public class LayoutSnapshotServiceTests
     private readonly Mock<IApplicationStateService> _applicationStateServiceMock = new();
     private readonly Mock<IPanelItemStorageService> _itemStorageMock = new();
 
-    private LayoutSnapshotService BuildSut(
-        IEnumerable<ChildWindowModel>? panels = null,
-        IReadOnlyList<LayoutSnapshot>? initialSnapshots = null)
-    {
-        var panelList = (panels ?? Enumerable.Empty<ChildWindowModel>()).ToList();
-        _windowManagerMock.Setup(wm => wm.GetAllChildWindows()).Returns(panelList);
-        _windowManagerMock.Setup(wm => wm.SyncAllWindowsToModels());
-        _windowManagerMock.Setup(wm => wm.SaveWindowsStateNow());
-        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()));
-        _windowManagerMock.Setup(wm => wm.CreateChildWindow(It.IsAny<ChildWindowModel>()));
-
-        _applicationStateServiceMock.SetupGet(s => s.Snapshots).Returns(initialSnapshots ?? []);
-        _applicationStateServiceMock.Setup(s => s.SaveNow());
-
-        // Default: nothing is managed, no manifest candidates — matches the pre-existing (pre-MAJOR-1-fix)
-        // behavior for every test that doesn't itself save/restore a panel with a stale FilePaths entry.
-        _itemStorageMock.Setup(s => s.IsManaged(It.IsAny<string>())).Returns(false);
-        _itemStorageMock.Setup(s => s.FindManagedCandidates(It.IsAny<string>())).Returns([]);
-
-        return new LayoutSnapshotService(_windowManagerMock.Object, _applicationStateServiceMock.Object, _itemStorageMock.Object);
-    }
-
     // ── Capture — M3 regression: models must be synced before serializing ──────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutSnapshotService.Capture"/> forces a
+    /// <see cref="IWindowManager.SyncAllWindowsToModels"/> before it reads the panels, so it never
+    /// serializes a snapshot with stale <c>ChildWindowModel.FilePaths</c>.
+    /// </summary>
     [Fact]
     public void Capture_SyncsAllWindowsToModels_BeforeReadingPanels()
     {
@@ -64,6 +47,10 @@ public class LayoutSnapshotServiceTests
         _windowManagerMock.Verify(wm => wm.SyncAllWindowsToModels(), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutSnapshotService.Capture"/> stores exactly one serialized JSON item
+    /// per current panel.
+    /// </summary>
     [Fact]
     public void Capture_StoresOneJsonItemPerPanel()
     {
@@ -78,6 +65,10 @@ public class LayoutSnapshotServiceTests
         Assert.Contains("Panel 2", snapshot.PanelJsonItems[1]);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutSnapshotService.Capture"/> persists the new snapshot by calling
+    /// <see cref="IApplicationStateService.SaveNow"/>.
+    /// </summary>
     [Fact]
     public void Capture_CallsApplicationStateServiceSaveNow()
     {
@@ -90,6 +81,10 @@ public class LayoutSnapshotServiceTests
 
     // ── Restore — M4 regression: bulk removal must defer per-panel writes, flush once ──────────
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutSnapshotService.Restore"/> is a silent no-op for an unknown
+    /// snapshot id: no panels are removed and no exception is thrown.
+    /// </summary>
     [Fact]
     public void Restore_UnknownSnapshotId_DoesNothing()
     {
@@ -101,6 +96,11 @@ public class LayoutSnapshotServiceTests
         _windowManagerMock.Verify(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutSnapshotService.Restore"/> removes every current panel with the
+    /// save deferred, then flushes the window state exactly once after the whole panel set has been torn
+    /// down and recreated — never once per removed panel.
+    /// </summary>
     [Fact]
     public void Restore_RemovesEveryCurrentPanel_WithDeferSaveTrue_ThenFlushesOnce()
     {
@@ -121,6 +121,10 @@ public class LayoutSnapshotServiceTests
         _windowManagerMock.Verify(wm => wm.SaveWindowsStateNow(), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutSnapshotService.Restore"/> recreates each panel from the snapshot's
+    /// serialized data, preserving fields like <c>Title</c> but assigning a fresh <c>Id</c>.
+    /// </summary>
     [Fact]
     public void Restore_RecreatesPanelsFromSnapshot_WithFreshIds()
     {
@@ -141,6 +145,10 @@ public class LayoutSnapshotServiceTests
 
     // ── MAJOR-1 (P08 fix cycle 2, 2026-09-22): cross-panel-aware stale-path resolution ──────────────
 
+    /// <summary>
+    /// Verifies that a single restored panel whose only file path is a stale original with exactly one
+    /// live managed candidate gets remapped to that managed copy before the panel is created.
+    /// </summary>
     [Fact]
     public void Restore_SinglePanelWithUnambiguousStaleOriginal_RemapsToManagedCopyBeforeCreating()
     {
@@ -168,6 +176,11 @@ public class LayoutSnapshotServiceTests
         Assert.Equal(managed, Assert.Single(created!.FilePaths));
     }
 
+    /// <summary>
+    /// Verifies the ADR-009 Amendment 2 tie-break rule: when two panels' distinct stale originals both
+    /// resolve to the same single managed candidate, that candidate is claimed by neither panel and both
+    /// keep their original stale path.
+    /// </summary>
     [Fact]
     public void Restore_TwoPanelsWithDifferentStaleOriginalsResolvingToTheSameSingleCandidate_NeitherClaimsIt()
     {
@@ -200,6 +213,11 @@ public class LayoutSnapshotServiceTests
         Assert.Equal(staleB, Assert.Single(created[1].FilePaths));
     }
 
+    /// <summary>
+    /// Verifies that a stale-original candidate already directly referenced (and owned) by another
+    /// panel in the same restore stays with that owning panel; the panel whose stale entry would have
+    /// claimed it is left with its original stale path instead of duplicating the reference.
+    /// </summary>
     [Fact]
     public void Restore_StaleOriginalCandidateAlreadyReferencedByAnotherPanel_LeavesItUntouched()
     {
@@ -231,6 +249,10 @@ public class LayoutSnapshotServiceTests
     // must survive the raw ChildWindowModel JSON round trip Capture/Restore uses, including two
     // restore cycles in a row producing identical values (docs/fix-prompts/06-fit-content.md DoD). ──
 
+    /// <summary>
+    /// Verifies that the workspace-grid and icon-layout fields (<c>GeometryMode</c>, span units,
+    /// <c>SizingMode</c>, <c>IconLayoutPolicy</c>) survive the Capture/Restore JSON round trip unchanged.
+    /// </summary>
     [Fact]
     public void Restore_PreservesGeometryModeSpanUnitsSizingModeAndIconLayoutPolicy()
     {
@@ -261,6 +283,10 @@ public class LayoutSnapshotServiceTests
         Assert.Equal(IconLayoutPolicy.FixedGap, created.IconLayoutPolicy);
     }
 
+    /// <summary>
+    /// Verifies that restoring the same, unmutated snapshot twice in a row produces two panels agreeing
+    /// on every workspace-grid/icon-layout field — only <c>Id</c> is expected to differ per restore.
+    /// </summary>
     [Fact]
     public void Restore_TwiceInARow_ProducesIdenticalWorkspaceGridAndIconLayoutFields()
     {
@@ -300,6 +326,10 @@ public class LayoutSnapshotServiceTests
 
     // ── Load — reads IApplicationStateService.Snapshots ─────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutSnapshotService.Load"/> populates
+    /// <see cref="LayoutSnapshotService.Snapshots"/> from <see cref="IApplicationStateService.Snapshots"/>.
+    /// </summary>
     [Fact]
     public void Load_PopulatesSnapshotsFromApplicationStateService()
     {
@@ -311,6 +341,10 @@ public class LayoutSnapshotServiceTests
         Assert.Contains(sut.Snapshots, s => s.Id == "s1");
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="LayoutSnapshotService.Load"/> twice does not duplicate entries in
+    /// <see cref="LayoutSnapshotService.Snapshots"/>.
+    /// </summary>
     [Fact]
     public void Load_CalledTwice_DoesNotDuplicateEntries()
     {
@@ -323,6 +357,11 @@ public class LayoutSnapshotServiceTests
         Assert.Single(sut.Snapshots);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="LayoutSnapshotService.Load"/> again after a
+    /// <see cref="LayoutSnapshotService.Capture"/> in the same session does not wipe out the snapshot
+    /// captured earlier — the in-memory list is merged, not replaced wholesale.
+    /// </summary>
     [Fact]
     public void Load_CalledAgainAfterCaptureInSession_DoesNotDropTheNewSnapshot()
     {
@@ -342,5 +381,28 @@ public class LayoutSnapshotServiceTests
 
         Assert.Contains(sut.Snapshots, s => s.Name == "captured-this-session");
         Assert.Contains(sut.Snapshots, s => s.Id == "s1");
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private LayoutSnapshotService BuildSut(
+        IEnumerable<ChildWindowModel>? panels = null,
+        IReadOnlyList<LayoutSnapshot>? initialSnapshots = null)
+    {
+        var panelList = (panels ?? Enumerable.Empty<ChildWindowModel>()).ToList();
+        _windowManagerMock.Setup(wm => wm.GetAllChildWindows()).Returns(panelList);
+        _windowManagerMock.Setup(wm => wm.SyncAllWindowsToModels());
+        _windowManagerMock.Setup(wm => wm.SaveWindowsStateNow());
+        _windowManagerMock.Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()));
+        _windowManagerMock.Setup(wm => wm.CreateChildWindow(It.IsAny<ChildWindowModel>()));
+
+        _applicationStateServiceMock.SetupGet(s => s.Snapshots).Returns(initialSnapshots ?? []);
+        _applicationStateServiceMock.Setup(s => s.SaveNow());
+
+        // Default: nothing is managed, no manifest candidates — matches the pre-existing (pre-MAJOR-1-fix)
+        // behavior for every test that doesn't itself save/restore a panel with a stale FilePaths entry.
+        _itemStorageMock.Setup(s => s.IsManaged(It.IsAny<string>())).Returns(false);
+        _itemStorageMock.Setup(s => s.FindManagedCandidates(It.IsAny<string>())).Returns([]);
+
+        return new LayoutSnapshotService(_windowManagerMock.Object, _applicationStateServiceMock.Object, _itemStorageMock.Object);
     }
 }

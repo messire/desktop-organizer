@@ -168,6 +168,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
     }
 
     /// <summary>
+    /// Initializes a new instance of the <see cref="NativePanelResizeController"/> class.
     /// Testability-seam constructor (code-quality-reviewer finding, Phase 2 §1.5/§5): identical to the
     /// public <see cref="Window"/>-taking constructor above, except the three points where that
     /// constructor previously read/wrote <c>_window</c> directly (<c>EndResize</c>'s diagnostics geometry
@@ -282,33 +283,6 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
         _isResizeEnabled = isResizeEnabled;
         _gridHost = gridHost;
     }
-
-    /// <summary>Builds the public constructor's <c>getBounds</c> delegate — also where <c>window</c>'s null check actually happens (evaluated eagerly, as a constructor-initializer argument, before <c>: this(...)</c> runs).</summary>
-    private static Func<Rect> GetBoundsDelegate(Window window)
-    {
-        ArgumentNullException.ThrowIfNull(window);
-        return () => new Rect(window.Left, window.Top, window.Width, window.Height);
-    }
-
-    /// <summary>Builds the public constructor's <c>setWidth</c> delegate.</summary>
-    private static Action<double> SetWidthDelegate(Window window) => width => window.Width = width;
-
-    /// <summary>
-    /// Builds the public constructor's <c>setBounds</c> delegate (ADR-011 Amendment 2026-09-24, resize
-    /// extension) — writes all four of <c>Left</c>/<c>Top</c>/<c>Width</c>/<c>Height</c>, unlike
-    /// <see cref="SetWidthDelegate"/>.
-    /// </summary>
-    private static Action<Rect> SetBoundsDelegate(Window window) => bounds =>
-    {
-        window.Left = bounds.Left;
-        window.Top = bounds.Top;
-        window.Width = bounds.Width;
-        window.Height = bounds.Height;
-    };
-
-    /// <summary>Builds the public constructor's <c>scheduleDeferredPersist</c> delegate — the real WPF dispatcher, <see cref="DispatcherPriority.Background"/>, matching pre-seam behavior exactly.</summary>
-    private static Action<Action> ScheduleDeferredPersistDelegate(Window window) =>
-        action => window.Dispatcher.BeginInvoke(DispatcherPriority.Background, action);
 
     /// <summary>
     /// Installs the native sizing-loop hook on the panel's HWND (call once, from
@@ -584,6 +558,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
         if (PanelSizingGridSupport.IsGridAligned(_gridHost, _getBounds())) return;
 
         var cell = GridMetrics.CellSize(model.IconSize);
+
         // M-2 fix-cycle amendment (adr/ADR-029-icon-layout-policy.md Решение 4) — see
         // PanelResizeController.SnapWidthToGrid's matching remark; duplicated here rather than shared,
         // matching that method's own precedent of keeping this one-liner duplicated rather than reaching
@@ -607,6 +582,33 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
         _attachToken = null;
     }
 
+    /// <summary>Builds the public constructor's <c>getBounds</c> delegate — also where <c>window</c>'s null check actually happens (evaluated eagerly, as a constructor-initializer argument, before <c>: this(...)</c> runs).</summary>
+    private static Func<Rect> GetBoundsDelegate(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        return () => new Rect(window.Left, window.Top, window.Width, window.Height);
+    }
+
+    /// <summary>Builds the public constructor's <c>setWidth</c> delegate.</summary>
+    private static Action<double> SetWidthDelegate(Window window) => width => window.Width = width;
+
+    /// <summary>
+    /// Builds the public constructor's <c>setBounds</c> delegate (ADR-011 Amendment 2026-09-24, resize
+    /// extension) — writes all four of <c>Left</c>/<c>Top</c>/<c>Width</c>/<c>Height</c>, unlike
+    /// <see cref="SetWidthDelegate"/>.
+    /// </summary>
+    private static Action<Rect> SetBoundsDelegate(Window window) => bounds =>
+    {
+        window.Left = bounds.Left;
+        window.Top = bounds.Top;
+        window.Width = bounds.Width;
+        window.Height = bounds.Height;
+    };
+
+    /// <summary>Builds the public constructor's <c>scheduleDeferredPersist</c> delegate — the real WPF dispatcher, <see cref="DispatcherPriority.Background"/>, matching pre-seam behavior exactly.</summary>
+    private static Action<Action> ScheduleDeferredPersistDelegate(Window window) =>
+        action => window.Dispatcher.BeginInvoke(DispatcherPriority.Background, action);
+
     /// <summary>
     /// HORIZONTAL edge padding (<c>m</c>) for <see cref="SnapWidthToGrid"/> — see
     /// <see cref="PanelResizeController"/>'s identically-named private method for the full doc comment;
@@ -622,7 +624,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
     /// </summary>
     /// <param name="reason">Why the gesture is ending.</param>
     /// <param name="exceptionType">
-    /// The failing exception's <see cref="Type.Name"/> when <paramref name="reason"/> is
+    /// The failing exception's <c>Type.Name</c> when <paramref name="reason"/> is
     /// <see cref="ResizeEndReason.Failed"/> — <see langword="null"/> for every other reason.
     /// </param>
     /// <param name="deferPersist">

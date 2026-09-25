@@ -18,6 +18,15 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
 
     // ───────────────────────────── Policy overload: LegacyStretch delegates unchanged ─────────────────
 
+    /// <summary>
+    /// Verifies that the <see cref="IconLayoutPolicy"/> overload of
+    /// <see cref="AdaptiveGridLayout.RowGap(int, int, double, double, double, double, IconLayoutPolicy)"/> with
+    /// <see cref="IconLayoutPolicy.LegacyStretch"/> returns exactly the same gap as the legacy six-argument
+    /// overload, across full, partial, and single-item rows.
+    /// </summary>
+    /// <param name="itemsInRow">The number of icons placed in the row under test.</param>
+    /// <param name="rowCapacity">The maximum number of icons the row can hold.</param>
+    /// <param name="extraSlack">Extra width added beyond the row's exact-fit extent.</param>
     [Theory]
     [InlineData(3, 3, 20d)] // full row, slack -> stretches under the 6-arg overload too
     [InlineData(3, 3, 0d)] // full row, exact fit -> gap == MinGap either way
@@ -35,6 +44,13 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
 
     // ───────────────────────────── Policy overload: FixedGap never stretches ──────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="IconLayoutPolicy.FixedGap"/> always returns <c>MinGap</c>, regardless of
+    /// whether the row is full or partial and regardless of how much slack space is available.
+    /// </summary>
+    /// <param name="itemsInRow">The number of icons placed in the row under test.</param>
+    /// <param name="rowCapacity">The maximum number of icons the row can hold.</param>
+    /// <param name="extraSlack">Extra width added beyond the row's exact-fit extent.</param>
     [Theory]
     [InlineData(3, 3, 0d)] // full row, exact fit
     [InlineData(3, 3, 20d)] // full row, WOULD stretch under LegacyStretch
@@ -76,9 +92,14 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
     // иконками одинаков... для разных ширин" (FixedGap). Each case below computes RowCapacity/RowGap/
     // Offset exactly the way AdaptiveIconGridPanel.ArrangeOverride does, at three different panel
     // widths for the SAME icon count/IconSize, and asserts on the resulting exact coordinates.
-
     private static double Step => Cell + MinGap; // FixedGap's constant column pitch at IconSize=48.
 
+    /// <summary>
+    /// Provides (itemCount, panelWidth) pairs spanning 1/3/7 icons across several panel widths —
+    /// including widths narrower than the item count (forcing wrap) and widths much wider than needed
+    /// (forcing a single row) — for the FixedGap coordinate tables below.
+    /// </summary>
+    /// <returns>A sequence of <c>{ itemCount, panelWidth }</c> argument arrays.</returns>
     public static IEnumerable<object[]> OneThreeSevenIconsAtSeveralWidths()
     {
         // (itemCount, panelWidth) — widths deliberately span very different RowCapacity values for the
@@ -101,6 +122,8 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
     /// requirement: "позиции 1-й и 2-й иконок одной grid preset совпадают относительно content origin в
     /// панелях разной ширины".
     /// </summary>
+    /// <param name="itemCount">The total number of icons laid out.</param>
+    /// <param name="panelWidth">The panel width used to compute row capacity.</param>
     [Theory]
     [MemberData(nameof(OneThreeSevenIconsAtSeveralWidths))]
     public void FixedGap_FirstAndSecondIconPositions_AreIndependentOfPanelWidth(int itemCount, double panelWidth)
@@ -126,6 +149,8 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
     /// STEP explicitly, not just the absolute first/second coordinates (DoD: "шаг между соседними
     /// иконками одинаков при FixedGap для разных ширин").
     /// </summary>
+    /// <param name="itemCount">The total number of icons laid out.</param>
+    /// <param name="panelWidth">The panel width used to compute row capacity.</param>
     [Theory]
     [MemberData(nameof(OneThreeSevenIconsAtSeveralWidths))]
     public void FixedGap_StepBetweenAdjacentIcons_IsConstantAcrossWidths(int itemCount, double panelWidth)
@@ -148,6 +173,8 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
     /// visibly left on the right rather than being absorbed into the gaps (ADR-029 Решение 1, surplus
     /// space alternative A).
     /// </summary>
+    /// <param name="itemCount">The total number of icons in the full row under test.</param>
+    /// <param name="slack">Extra width added beyond the row's exact-fit extent.</param>
     [Theory]
     [InlineData(3, 40d)]
     [InlineData(7, 30d)]
@@ -175,6 +202,8 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
     /// than one item; a partial row was always <c>MinGap</c> under ADR-018, and stays that way under
     /// both <see cref="IconLayoutPolicy"/> values.
     /// </summary>
+    /// <param name="itemCount">The total number of icons laid out.</param>
+    /// <param name="panelWidth">The panel width used to compute row capacity.</param>
     [Theory]
     [MemberData(nameof(OneThreeSevenIconsAtSeveralWidths))]
     public void PartialRow_BothPoliciesAgree(int itemCount, double panelWidth)
@@ -228,6 +257,10 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
     // numbers at IconSize=48 for 1/3/7 icons as an explicit, human-checkable snapshot table, matching
     // the prompt's "snapshot-таблицы координат как ожидания" requirement literally.
 
+    /// <summary>
+    /// Pins the concrete, human-checkable coordinate for a single icon at IconSize=48, at a panel width
+    /// that exactly fits one column.
+    /// </summary>
     [Fact]
     public void FixedGap_SnapshotTable_OneIcon_ExactFitWidth()
     {
@@ -241,6 +274,10 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
         Assert.Equal(42d, AdaptiveGridLayout.Offset(0, Cell, gap, EdgeM));
     }
 
+    /// <summary>
+    /// Pins the concrete, human-checkable coordinates for three icons at IconSize=48, at a panel width
+    /// that exactly fits a single full row of three columns.
+    /// </summary>
     [Fact]
     public void FixedGap_SnapshotTable_ThreeIcons_ExactFitWidth()
     {
@@ -257,6 +294,11 @@ public class AdaptiveGridLayoutIconLayoutPolicyTests
         Assert.Equal(218d, AdaptiveGridLayout.Offset(2, Cell, gap, EdgeM)); // 42 + 2*(84+4)
     }
 
+    /// <summary>
+    /// Pins the concrete, human-checkable coordinates for seven icons at IconSize=48, wrapped into a
+    /// full row of four followed by a partial row of three, at a panel width that exactly fits four
+    /// columns.
+    /// </summary>
     [Fact]
     public void FixedGap_SnapshotTable_SevenIcons_WrapsIntoTwoRowsOfFour()
     {

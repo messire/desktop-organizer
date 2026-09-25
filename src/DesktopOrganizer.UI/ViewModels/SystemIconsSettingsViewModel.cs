@@ -24,6 +24,7 @@ public class SystemIconsSettingsViewModel : INotifyPropertyChanged
     /// <summary>
     /// Initializes a new instance of the <see cref="SystemIconsSettingsViewModel"/> class.
     /// </summary>
+    /// <param name="systemIconsPanelManager">Owns the system-icons panel's lifecycle and persisted state.</param>
     public SystemIconsSettingsViewModel(ISystemIconsPanelManager systemIconsPanelManager)
     {
         _systemIconsPanelManager = systemIconsPanelManager;

@@ -19,6 +19,9 @@ public class PanelSurfaceBrushConverterTests
     private static readonly PanelSurfaceBrushConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that valid hex/opacity/style inputs produce a frozen <see cref="SolidColorBrush"/>.
+    /// </summary>
     [Fact]
     public void Convert_ValidInputs_ReturnsFrozenBrush()
     {
@@ -28,6 +31,9 @@ public class PanelSurfaceBrushConverterTests
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that converting identical hex/opacity/style inputs twice returns the same cached brush instance.
+    /// </summary>
     [Fact]
     public void Convert_SameInputsTwice_ReturnsSameInstance()
     {
@@ -37,6 +43,10 @@ public class PanelSurfaceBrushConverterTests
         Assert.Same(first, second);
     }
 
+    /// <summary>
+    /// Verifies that fewer values than the converter expects returns <see cref="Brushes.Transparent"/> instead
+    /// of throwing.
+    /// </summary>
     [Fact]
     public void Convert_TooFewValues_ReturnsTransparent_DoesNotThrow()
     {
@@ -45,6 +55,9 @@ public class PanelSurfaceBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that a malformed accent hex string still produces a frozen brush instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_GarbageAccentHex_DoesNotThrow_StillReturnsFrozenBrush()
     {
@@ -54,6 +67,9 @@ public class PanelSurfaceBrushConverterTests
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that a non-<see cref="double"/> opacity value still produces a frozen brush instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonDoubleOpacity_DoesNotThrow()
     {
@@ -63,6 +79,9 @@ public class PanelSurfaceBrushConverterTests
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that a non-<see cref="PanelSurfaceStyle"/> third value still produces a frozen brush instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonStyleThirdValue_DoesNotThrow()
     {
@@ -72,6 +91,10 @@ public class PanelSurfaceBrushConverterTests
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that passing a high-contrast flag of <see langword="true"/> forces the resulting brush to be
+    /// fully opaque regardless of the requested opacity.
+    /// </summary>
     [Fact]
     public void Convert_HighContrastTrue_ProducesFullyOpaqueBrush()
     {
@@ -81,6 +104,9 @@ public class PanelSurfaceBrushConverterTests
         Assert.Equal(255, brush.Color.A);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceStyle.Solid"/> produces the same brush color regardless of accent hex.
+    /// </summary>
     [Fact]
     public void Convert_SolidStyle_IgnoresAccentColor()
     {
@@ -92,6 +118,10 @@ public class PanelSurfaceBrushConverterTests
         Assert.Equal(blueBrush.Color, violetBrush.Color);
     }
 
+    /// <summary>
+    /// Verifies that repeatedly converting many distinct hex/opacity/style combinations keeps producing frozen
+    /// brushes, exercising the converter's bounded cache eviction path without failure.
+    /// </summary>
     [Fact]
     public void Convert_ManyDistinctInputs_CacheStaysBounded()
     {
@@ -108,6 +138,10 @@ public class PanelSurfaceBrushConverterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceBrushConverter.ConvertBack"/> always throws
+    /// <see cref="NotSupportedException"/> because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_Always_ThrowsNotSupportedException()
     {
@@ -118,12 +152,20 @@ public class PanelSurfaceBrushConverterTests
 
 // Cheap fix (review round 3): AccentIndicatorWidthConverter (MAJOR-B) had no dedicated unit test —
 // only exercised transitively via ResourceDictionaryMergeTests' template materialization.
+
+/// <summary>
+/// Unit tests for <see cref="AccentIndicatorWidthConverter"/>, covering how it scales the accent indicator
+/// thickness by <see cref="PanelVisualState"/> and falls back to the idle thickness on garbage input.
+/// </summary>
 [Trait(UnitTests, "UI")]
 public class AccentIndicatorWidthConverterTests
 {
     private static readonly AccentIndicatorWidthConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that <see cref="PanelVisualState.Resizing"/> scales the base thickness by the maximum emphasis factor.
+    /// </summary>
     [Fact]
     public void Convert_Resizing_ReturnsThicknessScaledByMaxEmphasis()
     {
@@ -133,6 +175,9 @@ public class AccentIndicatorWidthConverterTests
         Assert.Equal(5.1, result);
     }
 
+    /// <summary>
+    /// Verifies that a <see langword="null"/> value falls back to the idle thickness instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_Null_DoesNotThrow_FallsBackToIdleThickness()
     {
@@ -142,6 +187,9 @@ public class AccentIndicatorWidthConverterTests
         Assert.Equal(3.0, result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DependencyProperty.UnsetValue"/> falls back to the idle thickness instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_UnsetValue_DoesNotThrow_FallsBackToIdleThickness()
     {
@@ -150,6 +198,10 @@ public class AccentIndicatorWidthConverterTests
         Assert.Equal(3.0, result);
     }
 
+    /// <summary>
+    /// Verifies that a value that is not a <see cref="PanelVisualState"/> falls back to the idle thickness
+    /// instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonPanelVisualStateValue_DoesNotThrow_FallsBackToIdleThickness()
     {
@@ -158,6 +210,10 @@ public class AccentIndicatorWidthConverterTests
         Assert.Equal(3.0, result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AccentIndicatorWidthConverter.ConvertBack"/> returns <c>Binding.DoNothing</c>
+    /// because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_ReturnsDoNothing()
     {
@@ -167,12 +223,20 @@ public class AccentIndicatorWidthConverterTests
     }
 }
 
+/// <summary>
+/// Unit tests for <see cref="AccentBrushConverter"/>, covering per-mode opacity, cache bounding, and the
+/// pinned alpha constants consumed directly from XAML via <c>x:Static</c>.
+/// </summary>
 [Trait(UnitTests, "UI")]
 public class AccentBrushConverterTests
 {
     private static readonly AccentBrushConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that each known mode parameter ("indicator", "selection", "hover", "full") produces a frozen brush.
+    /// </summary>
+    /// <param name="parameter">The converter parameter selecting the accent mode.</param>
     [Theory]
     [InlineData("indicator")]
     [InlineData("selection")]
@@ -186,6 +250,9 @@ public class AccentBrushConverterTests
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that an unrecognized mode parameter still produces a frozen brush instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_UnknownParameter_DoesNotThrow()
     {
@@ -195,6 +262,9 @@ public class AccentBrushConverterTests
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that a <see langword="null"/> converter parameter still produces a brush instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NullParameter_DoesNotThrow()
     {
@@ -203,6 +273,10 @@ public class AccentBrushConverterTests
         Assert.IsType<SolidColorBrush>(result);
     }
 
+    /// <summary>
+    /// Verifies that a malformed hex string falls back to the neutral accent brush instead of throwing, since
+    /// <c>AccentPalette.Normalize</c> maps junk input to the default accent.
+    /// </summary>
     [Fact]
     public void Convert_GarbageHex_DoesNotThrow_ReturnsFallbackAccentBrush()
     {
@@ -213,6 +287,9 @@ public class AccentBrushConverterTests
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that a non-<see cref="string"/> value still produces a brush instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonStringValue_DoesNotThrow()
     {
@@ -221,6 +298,9 @@ public class AccentBrushConverterTests
         Assert.IsType<SolidColorBrush>(result);
     }
 
+    /// <summary>
+    /// Verifies that the "indicator" mode produces a more opaque brush than the "hover" mode for the same accent.
+    /// </summary>
     [Fact]
     public void Convert_IndicatorMode_IsMoreOpaqueThanHoverMode()
     {
@@ -230,6 +310,10 @@ public class AccentBrushConverterTests
         Assert.True(indicator.Color.A > hover.Color.A);
     }
 
+    /// <summary>
+    /// Verifies that repeatedly converting many distinct hex values keeps producing frozen brushes, exercising
+    /// the converter's bounded cache eviction path without failure.
+    /// </summary>
     [Fact]
     public void Convert_ManyDistinctInputs_CacheStaysBounded()
     {
@@ -244,6 +328,10 @@ public class AccentBrushConverterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AccentBrushConverter.ConvertBack"/> returns <c>Binding.DoNothing</c> because the
+    /// conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_ReturnsDoNothing()
     {
@@ -260,12 +348,20 @@ public class AccentBrushConverterTests
     // x:Static reference to resolve at runtime in the first place (CRITICAL-1 — WPF on .NET (Core)
     // resolves x:Static via public-only reflection, even within the same assembly), so this test also
     // guards against a well-meaning future refactor re-narrowing the constant back to `internal`.
+
+    /// <summary>
+    /// Verifies that <see cref="AccentBrushConverter.SelectionAlpha"/> stays pinned at 0.28, matching the
+    /// XAML <c>x:Static</c> reference in <c>PanelItemContainerStyle</c>.
+    /// </summary>
     [Fact]
     public void SelectionAlpha_IsPinnedAt028()
     {
         Assert.Equal(0.28, AccentBrushConverter.SelectionAlpha);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AccentBrushConverter.HoverAlpha"/> stays pinned at 0.16.
+    /// </summary>
     [Fact]
     public void HoverAlpha_IsPinnedAt016()
     {
@@ -273,12 +369,20 @@ public class AccentBrushConverterTests
     }
 }
 
+/// <summary>
+/// Unit tests for <see cref="VisualStateToDoubleConverter"/>, covering per-channel opacity lookups by
+/// <see cref="PanelVisualState"/> and graceful fallback on unrecognized input.
+/// </summary>
 [Trait(UnitTests, "UI")]
 public class VisualStateToDoubleConverterTests
 {
     private static readonly VisualStateToDoubleConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that each known channel parameter ("border", "chrome", "accent") returns a <see cref="double"/>.
+    /// </summary>
+    /// <param name="parameter">The converter parameter selecting the visual channel.</param>
     [Theory]
     [InlineData("border")]
     [InlineData("chrome")]
@@ -290,6 +394,9 @@ public class VisualStateToDoubleConverterTests
         Assert.IsType<double>(result);
     }
 
+    /// <summary>
+    /// Verifies that an unrecognized channel parameter does not throw.
+    /// </summary>
     [Fact]
     public void Convert_UnknownParameter_DoesNotThrow()
     {
@@ -298,6 +405,10 @@ public class VisualStateToDoubleConverterTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Verifies that a value that is not a <see cref="PanelVisualState"/> defaults to the idle state's opacity
+    /// instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonPanelVisualStateValue_DoesNotThrow_DefaultsToIdle()
     {
@@ -306,6 +417,10 @@ public class VisualStateToDoubleConverterTests
         Assert.Equal(InteractionVisualState.BorderOpacityFor(PanelVisualState.Idle), result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="VisualStateToDoubleConverter.ConvertBack"/> returns <c>Binding.DoNothing</c>
+    /// because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_ReturnsDoNothing()
     {
@@ -320,12 +435,22 @@ public class VisualStateToDoubleConverterTests
 // isLayoutEditing:false reproduces the original single-value converters' output exactly (LayoutEditVisuals
 // itself is what pins that; LayoutEditVisualsTests covers it directly — these tests only confirm the
 // converters wire values/parameter through correctly).
+
+/// <summary>
+/// Unit tests for <see cref="EditAwareVisualStateToDoubleConverter"/>, the multi-value, layout-editing-aware
+/// sibling of <see cref="VisualStateToDoubleConverter"/>.
+/// </summary>
 [Trait(UnitTests, "UI")]
 public class EditAwareVisualStateToDoubleConverterTests
 {
     private static readonly EditAwareVisualStateToDoubleConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that with <c>isLayoutEditing:false</c>, the converter reproduces
+    /// <see cref="VisualStateToDoubleConverter"/>'s output exactly for the "border" and "chrome" channels.
+    /// </summary>
+    /// <param name="parameter">The converter parameter selecting the visual channel.</param>
     [Theory]
     [InlineData("border")]
     [InlineData("chrome")]
@@ -337,6 +462,9 @@ public class EditAwareVisualStateToDoubleConverterTests
         Assert.Equal(single, multi);
     }
 
+    /// <summary>
+    /// Verifies that idle state with <c>isLayoutEditing:true</c> returns a fully opaque value for the "chrome" channel.
+    /// </summary>
     [Fact]
     public void Convert_IdleEditingTrue_Chrome_ReturnsFullyOpaque()
     {
@@ -345,6 +473,10 @@ public class EditAwareVisualStateToDoubleConverterTests
         Assert.Equal(1.0, result);
     }
 
+    /// <summary>
+    /// Verifies that idle state with <c>isLayoutEditing:true</c> returns the editing border opacity floor for
+    /// the "border" channel.
+    /// </summary>
     [Fact]
     public void Convert_IdleEditingTrue_Border_ReturnsEditFloor()
     {
@@ -353,6 +485,9 @@ public class EditAwareVisualStateToDoubleConverterTests
         Assert.Equal(LayoutEditVisuals.EditBorderFloor, result);
     }
 
+    /// <summary>
+    /// Verifies that an empty values array defaults to idle, not-editing behavior instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_TooFewValues_DoesNotThrow_DefaultsToIdleNotEditing()
     {
@@ -361,6 +496,9 @@ public class EditAwareVisualStateToDoubleConverterTests
         Assert.Equal(InteractionVisualState.BorderOpacityFor(PanelVisualState.Idle), result);
     }
 
+    /// <summary>
+    /// Verifies that a first value that is not a <see cref="PanelVisualState"/> defaults to idle instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonPanelVisualStateFirstValue_DoesNotThrow_DefaultsToIdle()
     {
@@ -369,6 +507,9 @@ public class EditAwareVisualStateToDoubleConverterTests
         Assert.Equal(LayoutEditVisuals.EditBorderFloor, result);
     }
 
+    /// <summary>
+    /// Verifies that a second value that is not a <see cref="bool"/> defaults to not-editing instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonBoolSecondValue_DoesNotThrow_DefaultsToNotEditing()
     {
@@ -377,6 +518,9 @@ public class EditAwareVisualStateToDoubleConverterTests
         Assert.Equal(InteractionVisualState.BorderOpacityFor(PanelVisualState.Idle), result);
     }
 
+    /// <summary>
+    /// Verifies that an unrecognized channel parameter falls back to the "border" channel instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_UnknownParameter_DoesNotThrow_FallsBackToBorder()
     {
@@ -385,6 +529,10 @@ public class EditAwareVisualStateToDoubleConverterTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="EditAwareVisualStateToDoubleConverter.ConvertBack"/> always throws
+    /// <see cref="NotSupportedException"/> because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_ThrowsNotSupportedException()
     {
@@ -396,6 +544,13 @@ public class EditAwareVisualStateToDoubleConverterTests
     // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.1, T-K1) —
     // "glow"/"accentStroke"/"neutralStroke"/"glowFallback" parameters, delegating to LayeredChromeVisuals.
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Verifies that the "glow", "accentStroke", and "neutralStroke" channel parameters match
+    /// <see cref="LayeredChromeVisuals"/>'s corresponding opacity methods exactly, across every
+    /// <see cref="PanelVisualState"/> and layout-editing combination.
+    /// </summary>
+    /// <param name="parameter">The converter parameter selecting the layered chrome channel.</param>
     [Theory]
     [InlineData("glow")]
     [InlineData("accentStroke")]
@@ -420,6 +575,10 @@ public class EditAwareVisualStateToDoubleConverterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that the "glowFallback" parameter equals the "glow" channel's opacity multiplied by
+    /// <c>PanelMetrics.GlowFallbackOpacityFactor</c>.
+    /// </summary>
     [Fact]
     public void Convert_GlowFallbackParameter_EqualsGlowChannelTimesGlowFallbackOpacityFactor()
     {
@@ -429,6 +588,10 @@ public class EditAwareVisualStateToDoubleConverterTests
         Assert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// Verifies that an unrecognized channel parameter still falls back to the "border" channel even after
+    /// additional named channels ("glow", "accentStroke", etc.) were introduced.
+    /// </summary>
     [Fact]
     public void Convert_UnknownParameterAfterAddingNewOnes_StillFallsBackToBorder()
     {
@@ -439,12 +602,20 @@ public class EditAwareVisualStateToDoubleConverterTests
     }
 }
 
+/// <summary>
+/// Unit tests for <see cref="EditAwareAccentIndicatorWidthConverter"/>, the multi-value, layout-editing-aware
+/// sibling of <see cref="AccentIndicatorWidthConverter"/>.
+/// </summary>
 [Trait(UnitTests, "UI")]
 public class EditAwareAccentIndicatorWidthConverterTests
 {
     private static readonly EditAwareAccentIndicatorWidthConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that with <c>isLayoutEditing:false</c>, the converter reproduces
+    /// <see cref="AccentIndicatorWidthConverter"/>'s output exactly.
+    /// </summary>
     [Fact]
     public void Convert_EditingFalse_MatchesSingleValueConverterExactly()
     {
@@ -454,6 +625,10 @@ public class EditAwareAccentIndicatorWidthConverterTests
         Assert.Equal(single, multi);
     }
 
+    /// <summary>
+    /// Verifies that <c>isLayoutEditing:true</c> produces a wider indicator than <c>isLayoutEditing:false</c>
+    /// for the same visual state.
+    /// </summary>
     [Fact]
     public void Convert_EditingTrue_IsWiderThanEditingFalse()
     {
@@ -463,6 +638,9 @@ public class EditAwareAccentIndicatorWidthConverterTests
         Assert.True(editing > normal);
     }
 
+    /// <summary>
+    /// Verifies that an empty values array falls back to the idle thickness instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_TooFewValues_DoesNotThrow_FallsBackToIdleThickness()
     {
@@ -481,6 +659,10 @@ public class EditAwareAccentIndicatorWidthConverterTests
         Assert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// Verifies that a <see langword="null"/> converter parameter still uses the accent indicator thickness
+    /// rather than the marker stroke thickness.
+    /// </summary>
     [Fact]
     public void Convert_NullParameter_StillUsesAccentIndicatorThickness()
     {
@@ -490,6 +672,10 @@ public class EditAwareAccentIndicatorWidthConverterTests
         Assert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="EditAwareAccentIndicatorWidthConverter.ConvertBack"/> always throws
+    /// <see cref="NotSupportedException"/> because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_ThrowsNotSupportedException()
     {
@@ -498,12 +684,19 @@ public class EditAwareAccentIndicatorWidthConverterTests
     }
 }
 
+/// <summary>
+/// Unit tests for <see cref="ItemCountToTextConverter"/>, covering singular/plural formatting and graceful
+/// handling of negative or non-integer counts.
+/// </summary>
 [Trait(UnitTests, "UI")]
 public class ItemCountToTextConverterTests
 {
     private static readonly ItemCountToTextConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that a count of zero returns an empty string.
+    /// </summary>
     [Fact]
     public void Convert_Zero_ReturnsEmptyString()
     {
@@ -512,6 +705,9 @@ public class ItemCountToTextConverterTests
         Assert.Equal(string.Empty, result);
     }
 
+    /// <summary>
+    /// Verifies that a count of one returns the singular "1 item" text.
+    /// </summary>
     [Fact]
     public void Convert_One_ReturnsSingularText()
     {
@@ -520,6 +716,11 @@ public class ItemCountToTextConverterTests
         Assert.Equal("1 item", result);
     }
 
+    /// <summary>
+    /// Verifies that counts greater than one return the plural "N items" text.
+    /// </summary>
+    /// <param name="count">The item count to convert.</param>
+    /// <param name="expected">The expected formatted text.</param>
     [Theory]
     [InlineData(2, "2 items")]
     [InlineData(42, "42 items")]
@@ -530,6 +731,9 @@ public class ItemCountToTextConverterTests
         Assert.Equal(expected, result);
     }
 
+    /// <summary>
+    /// Verifies that a negative count returns an empty string instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NegativeCount_ReturnsEmptyString_DoesNotThrow()
     {
@@ -538,6 +742,9 @@ public class ItemCountToTextConverterTests
         Assert.Equal(string.Empty, result);
     }
 
+    /// <summary>
+    /// Verifies that a non-<see cref="int"/> value returns an empty string instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonIntValue_ReturnsEmptyString_DoesNotThrow()
     {
@@ -546,6 +753,9 @@ public class ItemCountToTextConverterTests
         Assert.Equal(string.Empty, result);
     }
 
+    /// <summary>
+    /// Verifies that a <see langword="null"/> value does not throw.
+    /// </summary>
     [Fact]
     public void Convert_NullValue_DoesNotThrow()
     {
@@ -554,6 +764,10 @@ public class ItemCountToTextConverterTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ItemCountToTextConverter.ConvertBack"/> returns <c>Binding.DoNothing</c> because
+    /// the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_ReturnsDoNothing()
     {

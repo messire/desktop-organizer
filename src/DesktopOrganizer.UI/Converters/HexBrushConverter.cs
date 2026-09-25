@@ -72,6 +72,7 @@ public class HexBrushConverter : IValueConverter
     /// Normalizes a hex colour string into a cache key that is insensitive to surrounding
     /// whitespace and letter casing (e.g. <c>" #ddd "</c> and <c>"#DDD"</c> map to the same key).
     /// </summary>
+    /// <param name="hex">The raw hex colour string to normalize.</param>
     internal static string NormalizeKey(string hex) => hex.Trim().ToUpperInvariant();
 
     /// <summary>
@@ -80,6 +81,8 @@ public class HexBrushConverter : IValueConverter
     /// method, since it is reachable from a live-editing settings <see cref="System.Windows.Controls.TextBox"/>
     /// binding where an uncaught exception would crash the whole application.
     /// </summary>
+    /// <param name="hex">The candidate hex colour string (e.g. <c>#DDDDDD</c>).</param>
+    /// <param name="color">The parsed <see cref="Color"/> on success, or <see cref="Colors.Transparent"/> on failure.</param>
     internal static bool TryParseColor(string hex, out Color color)
     {
         var trimmed = hex.Trim();

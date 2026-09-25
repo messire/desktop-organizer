@@ -37,6 +37,9 @@ public static class ResizeGeometryCalculator
     /// SUBTRACT it. An edge that doesn't affect an axis (<see cref="ResizeEdgeParser.AffectsWidth"/>/
     /// <see cref="ResizeEdgeParser.AffectsHeight"/>) leaves that axis of <paramref name="current"/> untouched.
     /// </summary>
+    /// <param name="current">The gesture's raw extent accumulated so far.</param>
+    /// <param name="edge">The edge/corner being dragged, selecting which axes and signs the delta applies to.</param>
+    /// <param name="delta">The incremental cursor movement reported by this <c>Thumb.DragDelta</c>.</param>
     public static ResizeRawExtent Accumulate(ResizeRawExtent current, ResizeEdge edge, Vector delta)
     {
         var width = current.Width;
@@ -127,15 +130,19 @@ public static class ResizeGeometryCalculator
             // Points 2/3 — width: snap branch re-adds HorizontalChrome after quantising (Math.Ceiling —
             // never round down, see ResizeSnapEdgePadding's remarks); free branch re-adds it too
             // (content + chrome), symmetrically.
-            newWidth = constraints.SnapCellWidth > 0d
-                ? Math.Ceiling(Math.Max(
-                    constraints.MinWidth,
-                    AdaptiveGridLayout.SnapExtent(
-                        contentW,
-                        constraints.SnapCellWidth,
-                        AdaptiveGridLayout.DefaultMinGap,
-                        ResizeSnapEdgePadding(constraints.SnapCellWidth)) + constraints.HorizontalChrome))
-                : Math.Max(constraints.MinWidth, contentW + constraints.HorizontalChrome);
+            if (constraints.SnapCellWidth > 0d)
+            {
+                var snappedWidth = AdaptiveGridLayout.SnapExtent(
+                    contentW,
+                    constraints.SnapCellWidth,
+                    AdaptiveGridLayout.DefaultMinGap,
+                    ResizeSnapEdgePadding(constraints.SnapCellWidth));
+                newWidth = Math.Ceiling(Math.Max(constraints.MinWidth, snappedWidth + constraints.HorizontalChrome));
+            }
+            else
+            {
+                newWidth = Math.Max(constraints.MinWidth, contentW + constraints.HorizontalChrome);
+            }
 
             // Points 4/5 — height: snap branch re-adds chrome after quantising (symmetric with width), but
             // the FREE branch deliberately uses raw.Height DIRECTLY, NOT `contentH + TitleBarHeight +
@@ -149,15 +156,21 @@ public static class ResizeGeometryCalculator
             // been 0, and this is independent of HorizontalChrome/GridMetrics.FileListHPadding (a completely
             // different axis's chrome; see ADR-029's F-3 fix for why THAT one changed from 0 to
             // PanelMetrics.ContentLeftInset = 8).
-            newHeight = constraints.SnapCellHeight > 0d
-                ? Math.Ceiling(Math.Max(
+            if (constraints.SnapCellHeight > 0d)
+            {
+                var snappedHeight = AdaptiveGridLayout.SnapExtent(
+                    contentH,
+                    constraints.SnapCellHeight,
+                    AdaptiveGridLayout.DefaultMinGap,
+                    ResizeSnapVerticalEdgePadding(constraints.SnapCellHeight));
+                newHeight = Math.Ceiling(Math.Max(
                     constraints.MinHeight,
-                    constraints.TitleBarHeight + constraints.VerticalChrome + AdaptiveGridLayout.SnapExtent(
-                        contentH,
-                        constraints.SnapCellHeight,
-                        AdaptiveGridLayout.DefaultMinGap,
-                        ResizeSnapVerticalEdgePadding(constraints.SnapCellHeight))))
-                : Math.Max(constraints.MinHeight, raw.Height);
+                    constraints.TitleBarHeight + constraints.VerticalChrome + snappedHeight));
+            }
+            else
+            {
+                newHeight = Math.Max(constraints.MinHeight, raw.Height);
+            }
         }
 
         // Point 8 — the calculator must never return a width below MinWidth; both branches above are

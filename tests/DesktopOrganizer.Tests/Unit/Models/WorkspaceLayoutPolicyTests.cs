@@ -18,6 +18,12 @@ public class WorkspaceLayoutPolicyTests
     private const double U = WorkspaceGridMetrics.UnitSize; // 8 DIP
     private const double G = WorkspaceGridMetrics.DefaultGap; // 8 DIP
 
+    /// <summary>
+    /// Supplies raw DIP values used by the idempotency theories below — plain values, values already
+    /// on the grid, negative values, and fractional DIP values arising from a physical-pixel position
+    /// converted back to DIP at various DPI scales.
+    /// </summary>
+    /// <returns>Each raw DIP value, wrapped as a single-element row.</returns>
     public static IEnumerable<object[]> RepeatedSnapRawValues()
     {
         // Includes plain values, values already on the grid, negative values, and fractional DIP values
@@ -28,6 +34,8 @@ public class WorkspaceLayoutPolicyTests
             yield return [raw];
     }
 
+    /// <summary>Supplies a representative set of <see cref="GridSpan"/> values used by the bounds/spans round-trip theories below.</summary>
+    /// <returns>Each span, wrapped as a single-element row.</returns>
     public static IEnumerable<object[]> RoundTripSpans()
     {
         GridSpan[] spans = [new(1, 1), new(2, 3), new(12, 12), new(20, 20), new(60, 50), new(100, 1)];
@@ -35,6 +43,8 @@ public class WorkspaceLayoutPolicyTests
             yield return [span];
     }
 
+    /// <summary>Supplies every <see cref="ResizeEdge"/> value for theories exercised across all eight resize edges/corners.</summary>
+    /// <returns>Each resize edge, wrapped as a single-element row.</returns>
     public static IEnumerable<object[]> AllResizeEdges()
     {
         foreach (ResizeEdge edge in Enum.GetValues<ResizeEdge>())
@@ -42,6 +52,15 @@ public class WorkspaceLayoutPolicyTests
     }
 
     // ===================== SnapCoordinate / SnapPosition =====================
+
+    /// <summary>
+    /// Verifies that a raw coordinate already exactly on a grid line is returned unchanged by
+    /// <see cref="WorkspaceLayoutPolicy.SnapCoordinate"/>.
+    /// </summary>
+    /// <param name="raw">The raw coordinate, already an exact multiple of the unit size from the origin.</param>
+    /// <param name="origin">The grid origin coordinate.</param>
+    /// <param name="unitSize">The grid unit size, in DIP.</param>
+    /// <param name="expected">The expected (unchanged) snapped coordinate.</param>
     [Theory]
     [InlineData(0d, 0d, 8d, 0d)]
     [InlineData(8d, 0d, 8d, 8d)]
@@ -54,6 +73,10 @@ public class WorkspaceLayoutPolicyTests
     /// default <see cref="MidpointRounding.ToEven"/>), matching <see cref="GridSnap.SnapAxis"/>'s existing
     /// choice for the same "position snap" family (ADR-028 "px↔DIP").
     /// </summary>
+    /// <param name="raw">The raw coordinate, exactly halfway between two grid lines.</param>
+    /// <param name="origin">The grid origin coordinate.</param>
+    /// <param name="unitSize">The grid unit size, in DIP.</param>
+    /// <param name="expected">The expected snapped coordinate (the even neighbour).</param>
     [Theory]
     [InlineData(4d, 0d, 8d, 0d)] // origin + 0.5*U: tie between 0*U (even multiple) and 1*U -> 0
     [InlineData(12d, 0d, 8d, 16d)] // origin + 1.5*U: tie between 1*U and 2*U (even) -> 16
@@ -62,6 +85,13 @@ public class WorkspaceLayoutPolicyTests
     public void SnapCoordinate_HalfwayBetweenGridLines_RoundsToEven(double raw, double origin, double unitSize, double expected)
         => Assert.Equal(expected, WorkspaceLayoutPolicy.SnapCoordinate(raw, origin, unitSize));
 
+    /// <summary>
+    /// Verifies that a raw coordinate not on a grid line rounds to the nearest grid line.
+    /// </summary>
+    /// <param name="raw">The raw coordinate, not on a grid line.</param>
+    /// <param name="origin">The grid origin coordinate.</param>
+    /// <param name="unitSize">The grid unit size, in DIP.</param>
+    /// <param name="expected">The expected, rounded snapped coordinate.</param>
     [Theory]
     [InlineData(3d, 0d, 8d, 0d)] // rounds down to nearest multiple (3/8 = 0.375)
     [InlineData(5d, 0d, 8d, 8d)] // rounds up (5/8 = 0.625)
@@ -76,6 +106,10 @@ public class WorkspaceLayoutPolicyTests
     /// The formula requires no special-casing for sign — snapping near such an origin behaves exactly
     /// like snapping near a positive one, shifted by the origin.
     /// </summary>
+    /// <param name="raw">The raw coordinate, near a negative-coordinate origin.</param>
+    /// <param name="origin">The grid origin coordinate, negative.</param>
+    /// <param name="unitSize">The grid unit size, in DIP.</param>
+    /// <param name="expected">The expected snapped coordinate.</param>
     [Theory]
     [InlineData(-1366d, -1366d, 8d, -1366d)] // exactly at origin
     [InlineData(-1362d, -1366d, 8d, -1366d)] // origin + 0.5*U: tie -> even multiple (0*U) -> origin
@@ -84,6 +118,12 @@ public class WorkspaceLayoutPolicyTests
     public void SnapCoordinate_NegativeOrigin_NoSpecialCasingForSign(double raw, double origin, double unitSize, double expected)
         => Assert.Equal(expected, WorkspaceLayoutPolicy.SnapCoordinate(raw, origin, unitSize));
 
+    /// <summary>
+    /// Verifies that a zero, negative, or non-finite unit size makes
+    /// <see cref="WorkspaceLayoutPolicy.SnapCoordinate"/> return the raw coordinate unchanged, rather
+    /// than dividing by a degenerate unit size.
+    /// </summary>
+    /// <param name="unitSize">A zero, negative, or non-finite unit size.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(-1d)]
@@ -92,6 +132,10 @@ public class WorkspaceLayoutPolicyTests
     public void SnapCoordinate_DegenerateUnitSize_ReturnsRawUnchanged(double unitSize)
         => Assert.Equal(123.456d, WorkspaceLayoutPolicy.SnapCoordinate(123.456d, 0d, unitSize));
 
+    /// <summary>
+    /// Verifies that a non-finite raw coordinate or origin makes
+    /// <see cref="WorkspaceLayoutPolicy.SnapCoordinate"/> return the raw value unchanged.
+    /// </summary>
     [Fact]
     public void SnapCoordinate_NonFiniteRawOrOrigin_ReturnsRawUnchanged()
     {
@@ -99,6 +143,10 @@ public class WorkspaceLayoutPolicyTests
         Assert.True(double.IsPositiveInfinity(WorkspaceLayoutPolicy.SnapCoordinate(double.PositiveInfinity, 0d, 8d)));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceLayoutPolicy.SnapPosition"/> snaps the X and Y axes
+    /// independently, each rounding to its own nearest grid line.
+    /// </summary>
     [Fact]
     public void SnapPosition_SnapsBothAxesIndependently()
     {
@@ -112,6 +160,12 @@ public class WorkspaceLayoutPolicyTests
     }
 
     // ===================== Idempotency: Snap(Snap(x)) == Snap(x) =====================
+
+    /// <summary>
+    /// Verifies that snapping an already-snapped coordinate a second time changes nothing —
+    /// <see cref="WorkspaceLayoutPolicy.SnapCoordinate"/> is idempotent.
+    /// </summary>
+    /// <param name="raw">The raw coordinate to snap, drawn from <see cref="RepeatedSnapRawValues"/>.</param>
     [Theory]
     [MemberData(nameof(RepeatedSnapRawValues))]
     public void SnapCoordinate_RepeatedApplication_IsIdempotent(double raw)
@@ -122,6 +176,10 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(once, twice);
     }
 
+    /// <summary>
+    /// Verifies that idempotency also holds against a negative-coordinate origin.
+    /// </summary>
+    /// <param name="raw">The raw coordinate to snap, drawn from <see cref="RepeatedSnapRawValues"/>.</param>
     [Theory]
     [MemberData(nameof(RepeatedSnapRawValues))]
     public void SnapCoordinate_RepeatedApplication_IsIdempotent_WithNegativeOrigin(double raw)
@@ -134,6 +192,7 @@ public class WorkspaceLayoutPolicyTests
     }
 
     /// <summary>DPI 100/125/150/200%: idempotency must hold regardless of which scale the raw DIP value came from.</summary>
+    /// <param name="dpiScale">The monitor DPI scale factor the raw DIP value is derived from.</param>
     [Theory]
     [InlineData(1.0d)]
     [InlineData(1.25d)]
@@ -159,6 +218,8 @@ public class WorkspaceLayoutPolicyTests
     /// left of/above the primary, whose <c>WorkArea</c> top-left need not itself be a whole DIP after a
     /// fractional System-DPI conversion, ADR-028 "Origin для системы B").
     /// </summary>
+    /// <param name="originX">The grid origin's X coordinate, possibly negative and/or fractional.</param>
+    /// <param name="originY">The grid origin's Y coordinate, possibly negative and/or fractional.</param>
     [Theory]
     [InlineData(-1366.25d, -200.5d)]
     [InlineData(1366.25d, 0d)]
@@ -218,6 +279,12 @@ public class WorkspaceLayoutPolicyTests
     // ===================== PositionToSlot / SlotToPosition =====================
 
     /// <summary>Fix-cycle 1, MAJOR-5(a): the position-side counterpart of <see cref="WorkspaceLayoutPolicy.BoundsToSpans"/>/<see cref="WorkspaceLayoutPolicy.SpansToBounds"/>.</summary>
+    /// <param name="rawX">The raw X coordinate, already an exact grid position.</param>
+    /// <param name="rawY">The raw Y coordinate, already an exact grid position.</param>
+    /// <param name="originX">The grid origin's X coordinate.</param>
+    /// <param name="originY">The grid origin's Y coordinate.</param>
+    /// <param name="expectedCol">The expected column slot index.</param>
+    /// <param name="expectedRow">The expected row slot index.</param>
     [Theory]
     [InlineData(0d, 0d, 0d, 0d, 0, 0)]
     [InlineData(16d, 24d, 0d, 0d, 2, 3)]
@@ -230,6 +297,11 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal((expectedCol, expectedRow), slot);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceLayoutPolicy.SlotToPosition"/> and
+    /// <see cref="WorkspaceLayoutPolicy.PositionToSlot"/> are exact inverses of each other for whole
+    /// slot indices, including negative column/row indices.
+    /// </summary>
     [Fact]
     public void SlotToPosition_IsInverseOfPositionToSlot_ForWholeSlots()
     {
@@ -244,6 +316,12 @@ public class WorkspaceLayoutPolicyTests
         }
     }
 
+    /// <summary>
+    /// Verifies that round-tripping an already-snapped position through
+    /// <see cref="WorkspaceLayoutPolicy.PositionToSlot"/> and back through
+    /// <see cref="WorkspaceLayoutPolicy.SlotToPosition"/> reproduces the same snapped position.
+    /// </summary>
+    /// <param name="rawOffset">The raw offset used to build the test position, drawn from <see cref="RepeatedSnapRawValues"/>.</param>
     [Theory]
     [MemberData(nameof(RepeatedSnapRawValues))]
     public void PositionToSlot_SlotToPosition_RoundTrip_IsIdempotentForAlreadySnappedPositions(double rawOffset)
@@ -299,6 +377,7 @@ public class WorkspaceLayoutPolicyTests
     /// normal cursor jitter) must not cause the snapped value to jump by more than one grid step —
     /// i.e. no "dribbling" between two far-apart grid lines from sub-pixel mouse noise.
     /// </summary>
+    /// <param name="tieRaw">A raw coordinate sitting exactly on a half-unit tie boundary.</param>
     [Theory]
     [InlineData(4d)] // origin + 0.5*U (U=8) — tie between grid line 0 and grid line 1
     [InlineData(12d)] // origin + 1.5*U — tie between grid line 1 and grid line 2
@@ -313,6 +392,17 @@ public class WorkspaceLayoutPolicyTests
     }
 
     // ===================== BoundsToSpans / SpansToBounds =====================
+
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceLayoutPolicy.SpansToBounds"/> computes the ADR-028
+    /// "cell + gap" extent formula (<c>n*unitSize - gap</c>) exactly.
+    /// </summary>
+    /// <param name="widthUnits">The span's width, in grid units.</param>
+    /// <param name="heightUnits">The span's height, in grid units.</param>
+    /// <param name="unitSize">The grid unit size, in DIP.</param>
+    /// <param name="gap">The gap, in DIP.</param>
+    /// <param name="expectedWidth">The expected DIP width.</param>
+    /// <param name="expectedHeight">The expected DIP height.</param>
     [Theory]
     [InlineData(1, 1, 8d, 8d, 0d, 0d)] // n*U - G = 1*8 - 8 = 0
     [InlineData(2, 1, 8d, 8d, 8d, 0d)] // 2*8 - 8 = 8
@@ -325,6 +415,11 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(expectedHeight, size.Height);
     }
 
+    /// <summary>
+    /// Verifies that when the gap is pathologically larger than the span's own extent,
+    /// <see cref="WorkspaceLayoutPolicy.SpansToBounds"/> clamps the result to zero rather than
+    /// returning a negative size.
+    /// </summary>
     [Fact]
     public void SpansToBounds_NeverReturnsNegativeSize()
     {
@@ -335,6 +430,12 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(0d, size.Height);
     }
 
+    /// <summary>
+    /// Verifies that a zero or negative span component is clamped up to one grid unit before
+    /// computing the DIP extent.
+    /// </summary>
+    /// <param name="widthUnits">A zero or negative width span component.</param>
+    /// <param name="heightUnits">A zero or negative height span component.</param>
     [Theory]
     [InlineData(0, 0)]
     [InlineData(-5, -5)]
@@ -357,6 +458,12 @@ public class WorkspaceLayoutPolicyTests
     /// new <c>0.5xxx</c> rows below cover the actual (now much narrower) "just over the tolerance" case
     /// that those two rows used to stand in for.
     /// </summary>
+    /// <param name="width">The raw content width, in DIP.</param>
+    /// <param name="height">The raw content height, in DIP.</param>
+    /// <param name="unitSize">The grid unit size, in DIP.</param>
+    /// <param name="gap">The gap, in DIP.</param>
+    /// <param name="expectedWidthUnits">The expected width span, in grid units.</param>
+    /// <param name="expectedHeightUnits">The expected height span, in grid units.</param>
     [Theory]
     [InlineData(0d, 0d, 8d, 8d, 1, 1)] // empty content still occupies at least 1x1 unit
     [InlineData(0.001d, 0.001d, 8d, 8d, 1, 1)] // within the 0.5 DIP tolerance of the 1-unit (0 DIP) boundary -- stays at 1
@@ -374,6 +481,12 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(expectedHeightUnits, span.HeightUnits);
     }
 
+    /// <summary>
+    /// Verifies that a zero or negative unit size makes
+    /// <see cref="WorkspaceLayoutPolicy.BoundsToSpans"/> return a degenerate 1x1 span rather than
+    /// dividing by a degenerate unit size.
+    /// </summary>
+    /// <param name="unitSize">A zero or negative unit size.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(-1d)]
@@ -399,6 +512,11 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(1, span.WidthUnits); // 0 DIP content still needs at least one unit
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="Size.Empty"/> sentinel (negative infinity on both axes) is
+    /// clamped to zero DIP before quantising, producing a degenerate 1x1 span rather than propagating
+    /// a negative or infinite span.
+    /// </summary>
     [Fact]
     public void BoundsToSpans_EmptySize_ClampsToZeroBeforeQuantising()
     {
@@ -408,6 +526,11 @@ public class WorkspaceLayoutPolicyTests
     }
 
     // ----- Round-trip idempotency: BoundsToSpans(SpansToBounds(span)) == span -----
+
+    /// <summary>
+    /// Verifies that converting a span to DIP bounds and back reproduces the exact original span.
+    /// </summary>
+    /// <param name="span">The grid span to round-trip, drawn from <see cref="RoundTripSpans"/>.</param>
     [Theory]
     [MemberData(nameof(RoundTripSpans))]
     public void SpansToBounds_BoundsToSpans_RoundTrip_IsIdempotent(GridSpan span)
@@ -428,6 +551,7 @@ public class WorkspaceLayoutPolicyTests
     /// <c>Assert.Equal(span, span1)</c> is the assertion that actually catches MAJOR-1's ratchet bug, by
     /// checking the FIRST round-trip against the ORIGINAL span, not just against a second round-trip).
     /// </summary>
+    /// <param name="dpiScale">The simulated DPI scale the DIP size round-trips through px at.</param>
     [Theory]
     [InlineData(1.0d)]
     [InlineData(1.1d)]
@@ -455,6 +579,11 @@ public class WorkspaceLayoutPolicyTests
     }
 
     // ===================== SnapBounds (position variant) =====================
+
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceLayoutPolicy.SnapBounds(Rect, Point, double, double, GridSpan)"/>
+    /// quantises both the position and the size of the rectangle together.
+    /// </summary>
     [Fact]
     public void SnapBounds_QuantisesPositionAndSizeTogether()
     {
@@ -467,6 +596,10 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(24d, result.Y); // 21/8 = 2.625 -> rounds to 3*8 = 24
     }
 
+    /// <summary>
+    /// Verifies that a rectangle far below the minimum span is snapped up to the minimum span's DIP
+    /// size.
+    /// </summary>
     [Fact]
     public void SnapBounds_EnforcesMinimumSpan()
     {
@@ -493,6 +626,10 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(WorkspaceLayoutPolicy.SnapCoordinate(-195d, -200d, U), result.Y);
     }
 
+    /// <summary>
+    /// Verifies that snapping an already-snapped rectangle a second time changes nothing.
+    /// </summary>
+    /// <param name="rawOffset">The raw position offset used to build the test rectangle, drawn from <see cref="RepeatedSnapRawValues"/>.</param>
     [Theory]
     [MemberData(nameof(RepeatedSnapRawValues))]
     public void SnapBounds_RepeatedApplication_IsIdempotent(double rawOffset)
@@ -569,6 +706,7 @@ public class WorkspaceLayoutPolicyTests
     /// workspace grid, must leave it exactly fixed — the "hard wall" anchoring contract shared with the
     /// legacy <c>ResizeGeometryCalculator.Apply</c> (ADR-028 "Resize: ... Corner/edge anchoring").
     /// </summary>
+    /// <param name="edge">The resize edge being dragged, drawn from <see cref="AllResizeEdges"/>.</param>
     [Theory]
     [MemberData(nameof(AllResizeEdges))]
     public void SnapBounds_ResizeFromEachEdge_KeepsOppositeEdgeFixed_WhenAlreadyOnGrid(ResizeEdge edge)
@@ -603,6 +741,7 @@ public class WorkspaceLayoutPolicyTests
     /// verifies BOTH resulting edges on every resized axis end up exactly on the grid, regardless of which
     /// single edge was nominally dragged.
     /// </summary>
+    /// <param name="edge">The resize edge being dragged, drawn from <see cref="AllResizeEdges"/>.</param>
     [Theory]
     [MemberData(nameof(AllResizeEdges))]
     public void SnapBounds_ResizeFromEachEdge_WhenOppositeEdgeOffGrid_AlignsItFirst(ResizeEdge edge)
@@ -637,6 +776,11 @@ public class WorkspaceLayoutPolicyTests
         AssertOnGrid(result.Bottom, origin.Y, U);
     }
 
+    /// <summary>
+    /// Verifies that resizing from any of the eight edges/corners to a size far below the minimum
+    /// span is snapped up to the minimum span's DIP size.
+    /// </summary>
+    /// <param name="edge">The resize edge being dragged, drawn from <see cref="AllResizeEdges"/>.</param>
     [Theory]
     [MemberData(nameof(AllResizeEdges))]
     public void SnapBounds_ResizeFromEachEdge_EnforcesMinimumSpan(ResizeEdge edge)
@@ -660,6 +804,7 @@ public class WorkspaceLayoutPolicyTests
     /// interaction with anchoring was never covered by any of them. Uses <see cref="WorkspaceGridMetrics.MinSpanExpanded"/>
     /// (12x12), the REAL production floor, not an arbitrary "> 1x1" placeholder.
     /// </summary>
+    /// <param name="edge">The resize edge being dragged, drawn from <see cref="AllResizeEdges"/>.</param>
     [Theory]
     [MemberData(nameof(AllResizeEdges))]
     public void SnapBounds_ResizeFromEachEdge_MinClampPreservesAnchorPosition(ResizeEdge edge)
@@ -685,6 +830,11 @@ public class WorkspaceLayoutPolicyTests
             Assert.Equal(raw.Top, result.Top);
     }
 
+    /// <summary>
+    /// Verifies that resizing from any edge produces a result already on the grid, so repeating the
+    /// exact same resize call on that result changes nothing.
+    /// </summary>
+    /// <param name="edge">The resize edge being dragged, drawn from <see cref="AllResizeEdges"/>.</param>
     [Theory]
     [MemberData(nameof(AllResizeEdges))]
     public void SnapBounds_ResizeFromEachEdge_ResultIsAlreadyOnGrid_SoRepeatedResizeFromSameEdgeIsIdempotent(ResizeEdge edge)
@@ -697,13 +847,6 @@ public class WorkspaceLayoutPolicyTests
         var twice = WorkspaceLayoutPolicy.SnapBounds(once, origin, edge, U, G, minSpan);
 
         Assert.Equal(once, twice);
-    }
-
-    /// <summary>Asserts <paramref name="coordinate"/> is exactly <paramref name="origin"/> plus a whole multiple of <paramref name="unitSize"/> (within floating-point tolerance).</summary>
-    private static void AssertOnGrid(double coordinate, double origin, double unitSize)
-    {
-        var units = (coordinate - origin) / unitSize;
-        Assert.Equal(Math.Round(units), units, 9);
     }
 
     /// <summary>Fix-cycle 2, MINOR-E: same missing-validation gap as the position-variant overload.</summary>
@@ -765,6 +908,10 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(0d, result.Left);
     }
 
+    /// <summary>
+    /// Verifies that with an empty obstacle list, <see cref="WorkspaceLayoutPolicy.ClampResizeToSlots"/>
+    /// returns the candidate rectangle unchanged.
+    /// </summary>
     [Fact]
     public void ClampResizeToSlots_EmptyObstacles_ReturnsCandidateUnchanged()
     {
@@ -779,10 +926,11 @@ public class WorkspaceLayoutPolicyTests
     /// Fix-cycle 2, MAJOR-B repro (exact numbers from the review): an obstacle on the ANCHOR side of the
     /// resize can never be cleared by moving the opposite edge — the anchor itself never moves. The old
     /// implementation shrank blindly for 20 iterations down to <c>(100,100,88,248)</c>, still overlapping,
-    /// width destroyed for nothing. The fix returns <paramref name="candidate"/> completely unchanged for
+    /// width destroyed for nothing. The fix returns <c>candidate</c> completely unchanged for
     /// every one of the 8 edges/corners, because the obstacle is verifiably unresolvable on every axis each
     /// one actually moves.
     /// </summary>
+    /// <param name="edge">The resize edge being dragged, drawn from <see cref="AllResizeEdges"/>.</param>
     [Theory]
     [MemberData(nameof(AllResizeEdges))]
     public void ClampResizeToSlots_ObstacleOnAnchorSide_NeverClears_ReturnsCandidateUnchanged(ResizeEdge edge)
@@ -854,6 +1002,14 @@ public class WorkspaceLayoutPolicyTests
     }
 
     // ===================== PreferredSize =====================
+
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceLayoutPolicy.PreferredSize(PanelSizePreset, double, double)"/>
+    /// matches the DIP extent of the preset's own span exactly, for every named preset.
+    /// </summary>
+    /// <param name="preset">The size preset to resolve.</param>
+    /// <param name="widthUnits">The preset's expected width span, in grid units.</param>
+    /// <param name="heightUnits">The preset's expected height span, in grid units.</param>
     [Theory]
     [InlineData(PanelSizePreset.Small, 20, 20)]
     [InlineData(PanelSizePreset.Medium, 32, 30)]
@@ -913,6 +1069,11 @@ public class WorkspaceLayoutPolicyTests
     }
 
     // ===================== SafeClamp =====================
+
+    /// <summary>
+    /// Verifies that a rectangle already fully inside the work area is returned unchanged by
+    /// <see cref="WorkspaceLayoutPolicy.SafeClampFreeform"/>.
+    /// </summary>
     [Fact]
     public void SafeClamp_FullyInsideWorkArea_ReturnsUnchanged()
     {
@@ -924,6 +1085,10 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(proposed, result);
     }
 
+    /// <summary>
+    /// Verifies that a rectangle hanging off the work area's right edge is translated left so it fits
+    /// inside, without changing its size.
+    /// </summary>
     [Fact]
     public void SafeClamp_ProposedPastRightEdge_ClampsLeftSoPanelFitsInside()
     {
@@ -969,6 +1134,11 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(2000d, result.Height);
     }
 
+    /// <summary>
+    /// Verifies that a non-finite (NaN) proposed rectangle is returned unchanged by
+    /// <see cref="WorkspaceLayoutPolicy.SafeClampFreeform"/> rather than propagating NaN through
+    /// arithmetic.
+    /// </summary>
     [Fact]
     public void SafeClamp_NonFiniteProposed_ReturnsProposedUnchanged()
     {
@@ -980,6 +1150,14 @@ public class WorkspaceLayoutPolicyTests
         Assert.True(double.IsNaN(result.X));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceLayoutPolicy.SafeClampFreeform"/> never changes the
+    /// rectangle's size, across a spread of positions inside, outside, and far outside the work area.
+    /// </summary>
+    /// <param name="x">The proposed rectangle's X position.</param>
+    /// <param name="y">The proposed rectangle's Y position.</param>
+    /// <param name="width">The proposed rectangle's width, expected to be preserved.</param>
+    /// <param name="height">The proposed rectangle's height, expected to be preserved.</param>
     [Theory]
     [InlineData(-100d, -50d, 200d, 200d)]
     [InlineData(500d, 500d, 200d, 200d)]
@@ -1021,6 +1199,17 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(result.X, reSnapped);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceLayoutPolicy.SafeClamp"/> always returns a position exactly
+    /// on the grid, across a spread of work-area origins and panel sizes, even when the proposed
+    /// rectangle is deliberately off-grid.
+    /// </summary>
+    /// <param name="originX">The work area's origin X coordinate.</param>
+    /// <param name="originY">The work area's origin Y coordinate.</param>
+    /// <param name="areaWidth">The work area's width.</param>
+    /// <param name="areaHeight">The work area's height.</param>
+    /// <param name="panelWidth">The proposed panel's width.</param>
+    /// <param name="panelHeight">The proposed panel's height.</param>
     [Theory]
     [InlineData(0d, 0d, 1366d, 768d, 200d, 200d)]
     [InlineData(-1366.5d, -200.25d, 1366d, 768d, 248d, 232d)] // negative, fractional origin
@@ -1036,6 +1225,16 @@ public class WorkspaceLayoutPolicyTests
         AssertOnGrid(result.Y, workArea.Y, U);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceLayoutPolicy.SafeClamp"/> never lets the result's right/bottom
+    /// edge exceed the work area's, across a spread of work-area origins and panel sizes.
+    /// </summary>
+    /// <param name="originX">The work area's origin X coordinate.</param>
+    /// <param name="originY">The work area's origin Y coordinate.</param>
+    /// <param name="areaWidth">The work area's width.</param>
+    /// <param name="areaHeight">The work area's height.</param>
+    /// <param name="panelWidth">The proposed panel's width.</param>
+    /// <param name="panelHeight">The proposed panel's height.</param>
     [Theory]
     [InlineData(0d, 0d, 1366d, 768d, 200d, 200d)]
     [InlineData(-1366.5d, -200.25d, 1366d, 768d, 248d, 232d)]
@@ -1065,6 +1264,10 @@ public class WorkspaceLayoutPolicyTests
         Assert.Equal(2000d, result.Height);
     }
 
+    /// <summary>
+    /// Verifies that a non-finite (NaN) proposed rectangle is returned unchanged by
+    /// <see cref="WorkspaceLayoutPolicy.SafeClamp"/> rather than propagating NaN through arithmetic.
+    /// </summary>
     [Fact]
     public void SafeClamp_GridAware_NonFiniteProposed_ReturnsProposedUnchanged()
     {
@@ -1076,6 +1279,14 @@ public class WorkspaceLayoutPolicyTests
         Assert.True(double.IsNaN(result.X));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceLayoutPolicy.SafeClamp"/> never changes the rectangle's size,
+    /// across a spread of positions inside and outside the work area.
+    /// </summary>
+    /// <param name="x">The proposed rectangle's X position.</param>
+    /// <param name="y">The proposed rectangle's Y position.</param>
+    /// <param name="width">The proposed rectangle's width, expected to be preserved.</param>
+    /// <param name="height">The proposed rectangle's height, expected to be preserved.</param>
     [Theory]
     [InlineData(-100d, -50d, 200d, 200d)]
     [InlineData(500d, 500d, 200d, 200d)]
@@ -1172,5 +1383,14 @@ public class WorkspaceLayoutPolicyTests
         var gapBetween = panelB.Left - panelA.Right;
 
         Assert.Equal(G, gapBetween);
+    }
+
+    // ===================== helpers =====================
+
+    /// <summary>Asserts <paramref name="coordinate"/> is exactly <paramref name="origin"/> plus a whole multiple of <paramref name="unitSize"/> (within floating-point tolerance).</summary>
+    private static void AssertOnGrid(double coordinate, double origin, double unitSize)
+    {
+        var units = (coordinate - origin) / unitSize;
+        Assert.Equal(Math.Round(units), units, 9);
     }
 }

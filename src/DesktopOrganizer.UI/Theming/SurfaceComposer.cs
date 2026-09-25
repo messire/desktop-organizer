@@ -15,6 +15,7 @@ public static class SurfaceComposer
     /// <summary>Floor for panel surface opacity — below this, text/icon contrast is not guaranteed readable.</summary>
     public const double MinSurfaceOpacity = 0.35;
 
+    /// <summary>Ceiling for panel surface opacity — fully opaque.</summary>
     public const double MaxSurfaceOpacity = 1.0;
 
     /// <summary>Fraction of accent mixed into the neutral base for <see cref="PanelSurfaceStyle.Ambient"/> (ADR-025 "~10% accent").</summary>
@@ -29,6 +30,7 @@ public static class SurfaceComposer
     /// <see cref="double.NegativeInfinity"/>) is untrusted by construction and floors to
     /// <see cref="MinSurfaceOpacity"/> rather than propagating.
     /// </summary>
+    /// <param name="value">The candidate opacity value to clamp.</param>
     public static double ClampOpacity(double value)
     {
         if (double.IsNaN(value) || double.IsInfinity(value))
@@ -38,6 +40,9 @@ public static class SurfaceComposer
     }
 
     /// <summary>Converts a (clamped) opacity to a rounded byte alpha channel value.</summary>
+    /// <param name="opacity">
+    /// Clamped to <c>[<see cref="MinSurfaceOpacity"/> (0.35), 1]</c>; non-finite values become 0.35.
+    /// </param>
     public static byte AlphaFromOpacity(double opacity)
     {
         var clamped = ClampOpacity(opacity);
@@ -45,6 +50,8 @@ public static class SurfaceComposer
     }
 
     /// <summary>Returns <paramref name="color"/> with its alpha channel replaced by <paramref name="alpha"/>.</summary>
+    /// <param name="color">The source colour, whose R/G/B channels are kept unchanged.</param>
+    /// <param name="alpha">The new alpha channel value.</param>
     public static Color WithAlpha(Color color, byte alpha)
     {
         var result = color;
@@ -53,6 +60,9 @@ public static class SurfaceComposer
     }
 
     /// <summary>Linearly interpolates every channel (including alpha) of <paramref name="a"/> toward <paramref name="b"/> by <paramref name="ratio"/> (clamped to <c>[0, 1]</c>).</summary>
+    /// <param name="a">The starting colour, at <paramref name="ratio"/> == 0.</param>
+    /// <param name="b">The target colour, at <paramref name="ratio"/> == 1.</param>
+    /// <param name="ratio">The interpolation fraction, clamped to <c>[0, 1]</c>.</param>
     public static Color Mix(Color a, Color b, double ratio)
     {
         var r = Math.Clamp(ratio, 0.0, 1.0);
@@ -72,6 +82,14 @@ public static class SurfaceComposer
     /// forces the result to <c>neutralBase</c> with alpha 255 (D-12) — opaque, no accent mixed in —
     /// regardless of <paramref name="style"/>.
     /// </summary>
+    /// <param name="neutralBase">The panel's neutral (non-accent) base colour.</param>
+    /// <param name="accent">The panel's accent colour, mixed in per <paramref name="style"/>.</param>
+    /// <param name="style">Which of the ADR-025/ADR-030 surface treatments to compose.</param>
+    /// <param name="surfaceOpacity">
+    /// The panel's configured surface opacity. Clamped to <c>[<see cref="MinSurfaceOpacity"/> (0.35), 1]</c>;
+    /// non-finite values become 0.35.
+    /// </param>
+    /// <param name="highContrast">When <see langword="true"/>, forces an opaque <paramref name="neutralBase"/> result with no accent mixed in, regardless of <paramref name="style"/>.</param>
     public static Color ComposeSurface(
         Color neutralBase, Color accent, PanelSurfaceStyle style, double surfaceOpacity, bool highContrast = false)
     {
@@ -105,6 +123,8 @@ public static class SurfaceComposer
     }
 
     /// <summary>Accent at a low, explicit alpha (0..1, clamped; non-finite input treated as 0) — used for selection/hover tints, not the surface fill.</summary>
+    /// <param name="accent">The panel's accent colour.</param>
+    /// <param name="alpha">The desired alpha, in <c>[0, 1]</c> (clamped; non-finite treated as 0).</param>
     public static Color AccentTint(Color accent, double alpha)
     {
         var a = double.IsNaN(alpha) ? 0.0 : Math.Clamp(alpha, 0.0, 1.0);

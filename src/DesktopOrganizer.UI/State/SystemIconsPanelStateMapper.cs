@@ -11,6 +11,7 @@ namespace DesktopOrganizer.UI.State;
 internal static class SystemIconsPanelStateMapper
 {
     /// <summary>Maps the live <see cref="SystemIconsPanelModel"/> to its schema-v3 DTO.</summary>
+    /// <param name="model">The system-icons panel model to map.</param>
     public static SystemIconsPanelStateDto ToDto(SystemIconsPanelModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -36,6 +37,8 @@ internal static class SystemIconsPanelStateMapper
     /// per-field-isolated defaults (a single bad field must never discard the rest — see
     /// <see cref="Dto.SystemIconsPanelStateDto"/>'s remarks on <c>AnchorVirtualDesktopId</c>).
     /// </summary>
+    /// <param name="dto">The persisted system-icons panel DTO to apply.</param>
+    /// <param name="model">The live model to update in place.</param>
     public static void ApplyTo(SystemIconsPanelStateDto dto, SystemIconsPanelModel model)
     {
         ArgumentNullException.ThrowIfNull(dto);

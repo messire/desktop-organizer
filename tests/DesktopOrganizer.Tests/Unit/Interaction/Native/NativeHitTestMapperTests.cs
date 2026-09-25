@@ -28,6 +28,8 @@ public class NativeHitTestMapperTests
     // pass via a bug that ignores windowRect.Left/Top).
     private static readonly NativeRectPx WindowRect = new(100, 200, 500, 500);
 
+    /// <summary>Verifies that all eight corner/edge zones plus the dead center resolve to the correct <see cref="NativeSizingEdge"/>, at a given DPI <paramref name="scale"/>.</summary>
+    /// <param name="scale">The DPI scale factor applied to the edge/corner thresholds.</param>
     [Theory]
     [InlineData(1.0)]
     [InlineData(1.25)]
@@ -103,6 +105,8 @@ public class NativeHitTestMapperTests
         Assert.Equal(NativeSizingEdge.Left, edge);
     }
 
+    /// <summary>Verifies that a point exactly at the edge boundary, away from every corner, resolves to <see cref="NativeSizingEdge.None"/> rather than an edge.</summary>
+    /// <param name="scale">The DPI scale factor applied to the edge threshold.</param>
     [Theory]
     [InlineData(1.0)]
     [InlineData(2.0)]
@@ -117,6 +121,8 @@ public class NativeHitTestMapperTests
         Assert.Equal(NativeSizingEdge.None, edge);
     }
 
+    /// <summary>Verifies that a point one pixel inside the edge boundary, away from every corner, resolves to the straight edge.</summary>
+    /// <param name="scale">The DPI scale factor applied to the edge threshold.</param>
     [Theory]
     [InlineData(1.0)]
     [InlineData(2.0)]
@@ -131,6 +137,8 @@ public class NativeHitTestMapperTests
         Assert.Equal(NativeSizingEdge.Left, edge);
     }
 
+    /// <summary>Verifies that a point exactly at the corner boundary on one axis, but still within the edge band on the other axis, resolves to the straight edge, not the corner.</summary>
+    /// <param name="scale">The DPI scale factor applied to the edge/corner thresholds.</param>
     [Theory]
     [InlineData(1.0)]
     [InlineData(2.0)]
@@ -148,6 +156,9 @@ public class NativeHitTestMapperTests
         Assert.Equal(NativeSizingEdge.Top, edge);
     }
 
+    /// <summary>Verifies that a point outside the window rect entirely resolves to <see cref="NativeSizingEdge.None"/>.</summary>
+    /// <param name="x">The probe point's X coordinate, in screen pixels.</param>
+    /// <param name="y">The probe point's Y coordinate, in screen pixels.</param>
     [Theory]
     [InlineData(50, 50)] // left of and above the window
     [InlineData(600, 300)] // right of the window
@@ -160,6 +171,7 @@ public class NativeHitTestMapperTests
         Assert.Equal(NativeSizingEdge.None, edge);
     }
 
+    /// <summary>Verifies that with resize disabled, every one of the eight zones resolves to <see cref="NativeSizingEdge.None"/>.</summary>
     [Fact]
     public void Map_Disabled_AllEightZonesReturnNone()
     {
@@ -182,6 +194,7 @@ public class NativeHitTestMapperTests
         }
     }
 
+    /// <summary>Verifies that when the window is smaller than twice the corner threshold, so the corner bands overlap across the whole window, every probe still resolves to a corner.</summary>
     [Fact]
     public void Map_WindowSmallerThanTwiceCorner_OverlappingBands_PrioritizesCorner()
     {

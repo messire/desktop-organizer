@@ -21,17 +21,20 @@ public interface IPageManager
     /// Switches the active page to <paramref name="pageId"/>.
     /// Panels belonging to the old page are hidden; panels of the new page are shown.
     /// </summary>
+    /// <param name="pageId">The identifier of the page to switch to.</param>
     void SwitchTo(string pageId);
 
     /// <summary>
     /// Adds a new page with the given identifier. No-op if the page already exists.
     /// </summary>
+    /// <param name="pageId">The identifier of the page to add.</param>
     void AddPage(string pageId);
 
     /// <summary>
     /// Removes <paramref name="pageId"/> and closes all panels that belong to it.
     /// The <c>"default"</c> page cannot be removed.
     /// </summary>
+    /// <param name="pageId">The identifier of the page to remove.</param>
     /// <returns>
     /// <see langword="true"/> if the page (and its panels) were actually removed; <see langword="false"/>
     /// if nothing changed — <paramref name="pageId"/> is <c>"default"</c> or unknown, or the user

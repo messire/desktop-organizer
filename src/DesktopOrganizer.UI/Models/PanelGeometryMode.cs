@@ -47,6 +47,7 @@ public static class PanelGeometryModeParser
     /// hand-edited/corrupted-file inputs that must degrade to the safe default, not silently produce a
     /// value that never appeared as a single named member in the document.
     /// </summary>
+    /// <param name="value">The candidate string to parse, e.g. from persisted panel state.</param>
     public static PanelGeometryMode ParseOrLegacyFreeform(string? value) =>
         value is not null
         && !value.Contains(',')

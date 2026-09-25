@@ -21,6 +21,7 @@ namespace DesktopOrganizer.UI.State;
 internal static class PanelStateMapper
 {
     /// <summary>Maps a live <see cref="ChildWindowModel"/> to its schema-v3 <see cref="PanelStateDto"/>.</summary>
+    /// <param name="model">The panel model to map.</param>
     public static PanelStateDto ToDto(ChildWindowModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -41,6 +42,7 @@ internal static class PanelStateMapper
                 IsRolledUp = model.IsRolledUp,
                 IsVisible = model.IsVisible,
                 GeometryMode = model.GeometryMode.ToString(),
+
                 // MINOR fix (fix-cycle 1, docs/PLANS/workspace-grid-migration.md §10.5): spans are only
                 // meaningful for GridAligned (§2 of the plan) — a LegacyFreeform panel that happens to
                 // still carry a stale span pair (e.g. the user switched it back from GridAligned) must
@@ -70,6 +72,7 @@ internal static class PanelStateMapper
     }
 
     /// <summary>Maps a schema-v3 <see cref="PanelStateDto"/> back to a fresh <see cref="ChildWindowModel"/>.</summary>
+    /// <param name="dto">The persisted panel DTO to map.</param>
     public static ChildWindowModel FromDto(PanelStateDto dto)
     {
         ArgumentNullException.ThrowIfNull(dto);

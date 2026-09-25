@@ -33,7 +33,11 @@ public class NamedPipeActivationIntegrationTests
     /// </summary>
     private static readonly TimeSpan GenerousWaitBudget = TimeSpan.FromSeconds(10);
 
-    // T-IPC-01
+    /// <summary>
+    /// Verifies that an <see cref="ActivationRequest"/> sent by <see cref="NamedPipeActivationClient"/>
+    /// is received intact by <see cref="NamedPipeActivationServer"/>'s <c>onRequest</c> callback, and
+    /// that the client observes <see cref="ActivationSendResult.Delivered"/> (T-IPC-01).
+    /// </summary>
     [Fact]
     public void Server_And_Client_DeliverActivationRequest_EndToEnd()
     {
@@ -67,7 +71,12 @@ public class NamedPipeActivationIntegrationTests
         }
     }
 
-    // T-IPC-02
+    /// <summary>
+    /// Verifies that a second <see cref="NamedPipeActivationServer"/> started on the same pipe name
+    /// fails to start and reports <see cref="ActivationServerUnavailableReason.PipeBusy"/> (not
+    /// <c>AclFailed</c>), matching the real <c>ERROR_PIPE_BUSY</c> Win32 error for a
+    /// <c>maxNumberOfServerInstances: 1</c> pipe already owned by another server (T-IPC-02).
+    /// </summary>
     [Fact]
     public void TryStart_SecondServerWithSameName_ReturnsFalse_PipeBusy()
     {
@@ -220,7 +229,11 @@ public class NamedPipeActivationIntegrationTests
         }
     }
 
-    // T-IPC-03
+    /// <summary>
+    /// Verifies that <see cref="NamedPipeActivationServer.Stop"/> completes within its bounded join
+    /// budget even while the background accept loop is blocked waiting for a connection that never
+    /// arrives (ADR-023 R-10, T-IPC-03).
+    /// </summary>
     [Fact]
     public void Stop_CompletesWithinBudget_WhileAcceptLoopIsBlockedWaitingForAConnection()
     {
@@ -247,6 +260,12 @@ public class NamedPipeActivationIntegrationTests
     // Beyond the plan's required T-IPC-01..03: exercises the server's own status/session branching,
     // which is new logic introduced by this commit and not covered by the pure ActivationMessageCodec
     // unit tests (those only round-trip strings, they never see a real connection).
+
+    /// <summary>
+    /// Verifies that when the server's <c>statusProvider</c> reports
+    /// <see cref="ActivationResponseCode.ShuttingDown"/>, the client observes
+    /// <see cref="ActivationSendResult.PrimaryShuttingDown"/> and <c>onRequest</c> is never invoked.
+    /// </summary>
     [Fact]
     public void Client_ReceivesShuttingDown_WhenStatusProviderReportsShuttingDown_AndOnRequestNeverFires()
     {
@@ -270,6 +289,11 @@ public class NamedPipeActivationIntegrationTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when the request's session id differs from the server's own session (Fast User
+    /// Switching, ADR-023 D-4), the client observes <see cref="ActivationSendResult.OtherSession"/> and
+    /// <c>onRequest</c> is never invoked.
+    /// </summary>
     [Fact]
     public void Client_ReceivesOtherSession_WhenRequestSessionDiffersFromServersOwnSession_AndOnRequestNeverFires()
     {
@@ -295,6 +319,10 @@ public class NamedPipeActivationIntegrationTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="NamedPipeActivationClient.TrySend"/> returns
+    /// <see cref="ActivationSendResult.NoListener"/> promptly when no server is listening on the pipe.
+    /// </summary>
     [Fact]
     public void TrySend_NoServerListening_ReturnsNoListener()
     {

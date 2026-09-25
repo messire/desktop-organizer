@@ -42,6 +42,7 @@ internal static class StateEnvelope
     public static IReadOnlyCollection<string> ReservedKeys => ReservedKeysArray;
 
     /// <summary>Whether <paramref name="key"/> is one of the three reserved envelope keys.</summary>
+    /// <param name="key">The key to test.</param>
     public static bool IsReservedKey(string key) =>
         key is SchemaVersionKey or WrittenAtUtcKey or AppVersionKey;
 
@@ -52,6 +53,10 @@ internal static class StateEnvelope
     /// <see cref="JsonObject"/> — <paramref name="payload"/> itself is not mutated, and its nodes are
     /// deep-cloned (a <see cref="JsonNode"/> can only ever be attached under one parent at a time).
     /// </summary>
+    /// <param name="payload">The payload-only object to wrap; must not contain any reserved key.</param>
+    /// <param name="schemaVersion">The schema version to record in the envelope.</param>
+    /// <param name="writtenAtUtc">The write timestamp to record in the envelope.</param>
+    /// <param name="appVersion">The application version to record in the envelope.</param>
     public static JsonObject Wrap(JsonObject payload, int schemaVersion, DateTimeOffset writtenAtUtc, string appVersion)
     {
         ArgumentNullException.ThrowIfNull(payload);
@@ -79,6 +84,7 @@ internal static class StateEnvelope
     /// Returns a new <see cref="JsonObject"/> containing every key of <paramref name="document"/>
     /// except the three reserved envelope keys — i.e. payload only.
     /// </summary>
+    /// <param name="document">The full envelope document to strip.</param>
     public static JsonObject StripEnvelope(JsonObject document)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -99,6 +105,8 @@ internal static class StateEnvelope
     /// JSON number that fits in an <see cref="int"/> — any of which makes the document count as
     /// corrupt for the purposes of the read/recovery ladder (ADR-024 D-7).
     /// </summary>
+    /// <param name="document">The envelope document to read from.</param>
+    /// <param name="schemaVersion">The decoded schema version when this method returns <see langword="true"/>.</param>
     public static bool TryGetSchemaVersion(JsonObject document, out int schemaVersion)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -120,6 +128,7 @@ internal static class StateEnvelope
     }
 
     /// <summary>Whether <paramref name="document"/> carries a well-formed <c>schemaVersion</c> (see <see cref="TryGetSchemaVersion"/>).</summary>
+    /// <param name="document">The envelope-wrapped state document to inspect.</param>
     public static bool HasValidSchemaVersion(JsonObject document) => TryGetSchemaVersion(document, out _);
 
     /// <summary>

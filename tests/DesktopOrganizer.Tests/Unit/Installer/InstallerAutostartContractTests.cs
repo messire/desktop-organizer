@@ -23,6 +23,10 @@ public class InstallerAutostartContractTests
     private static readonly Regex ValueNamePattern =
         new(@"^#define AutostartValueName ""(?<value>[^""]+)""\s*$", RegexOptions.Multiline);
 
+    /// <summary>
+    /// Verifies that the installer script's <c>AutostartRunKey</c> define matches
+    /// <see cref="AutostartService.RunKeyPath"/> byte-for-byte.
+    /// </summary>
     [Fact]
     public void IssAutostartRunKey_MatchesAutostartServiceConstant()
     {
@@ -32,6 +36,10 @@ public class InstallerAutostartContractTests
         Assert.Equal(AutostartService.RunKeyPath, match.Groups["value"].Value);
     }
 
+    /// <summary>
+    /// Verifies that the installer script's <c>AutostartValueName</c> define matches
+    /// <see cref="AutostartService.InstallerValueName"/> byte-for-byte.
+    /// </summary>
     [Fact]
     public void IssAutostartValueName_MatchesAutostartServiceConstant()
     {

@@ -13,25 +13,12 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 [Trait(UnitTests, "DesktopOrganizer.Services")]
 public class SystemShellServiceTests
 {
-    // ── helpers ──────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Builds a minimal mock of INativeApi that returns safe defaults for
-    /// methods not directly relevant to the test under scrutiny.
-    /// </summary>
-    private static Mock<INativeApi> BuildSafeNativeMock()
-    {
-        var m = new Mock<INativeApi>();
-
-        // Default: QueryRecycleBin returns empty state so the ctor timer-poll is safe.
-        m.Setup(n => n.QueryRecycleBin())
-            .Returns(new RecycleBinNativeState(0, 0));
-
-        return m;
-    }
-
     // ── GetSystemIcon: graceful degrade when pidl is zero ────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.GetSystemIcon"/> returns <see langword="null"/>
+    /// instead of throwing when the known-folder pidl is unavailable on this system.
+    /// </summary>
     [Fact]
     public void GetSystemIcon_ReturnsNull_WhenPidlIsZero()
     {
@@ -54,6 +41,10 @@ public class SystemShellServiceTests
 
     // ── GetSystemIcon: caching ────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.GetSystemIcon"/> caches its result for the same
+    /// icon kind and size, hitting the native layer only on the first call.
+    /// </summary>
     [Fact]
     public void GetSystemIcon_CachesResult_ForSameKindAndSize()
     {
@@ -86,6 +77,10 @@ public class SystemShellServiceTests
 
     // ── GetSystemIcon: invalid / unknown kind must not throw ─────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.GetSystemIcon"/> does not throw for an out-of-range
+    /// <see cref="SystemIconKind"/> value.
+    /// </summary>
     [Fact]
     public void GetSystemIcon_InvalidKind_DoesNotThrow()
     {
@@ -101,6 +96,10 @@ public class SystemShellServiceTests
 
     // ── GetRecycleBinState: maps ItemCount=0 → IsEmpty=true ──────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.GetRecycleBinState"/> maps a zero item count to
+    /// <c>IsEmpty == true</c>.
+    /// </summary>
     [Fact]
     public void GetRecycleBinState_ReturnsIsEmptyTrue_WhenItemCountIsZero()
     {
@@ -121,6 +120,10 @@ public class SystemShellServiceTests
         Assert.Equal(0L, state.ItemCount);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.GetRecycleBinState"/> maps a non-zero item count to
+    /// <c>IsEmpty == false</c>.
+    /// </summary>
     [Fact]
     public void GetRecycleBinState_ReturnsIsEmptyFalse_WhenItemCountIsNonZero()
     {
@@ -143,6 +146,10 @@ public class SystemShellServiceTests
 
     // ── ShowContextMenu (right-click): regression for AccessViolation crash ───
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.ShowContextMenu"/> passes the resolved pidl, owner
+    /// handle, and screen coordinates to the native shell menu call, and releases the pidl afterwards.
+    /// </summary>
     [Fact]
     public void ShowContextMenu_PassesResolvedPidlAndCoordinates_ToNativeApi()
     {
@@ -169,6 +176,11 @@ public class SystemShellServiceTests
         nativeMock.Verify(n => n.FreePidl(fakePidl), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.ShowContextMenu"/> never propagates an exception
+    /// raised by the native shell menu call (regression for a former AccessViolation crash), and that
+    /// the pidl is still released even though the call faulted.
+    /// </summary>
     [Fact]
     public void ShowContextMenu_DoesNotThrow_WhenNativeMenuFaults()
     {
@@ -194,6 +206,10 @@ public class SystemShellServiceTests
         nativeMock.Verify(n => n.FreePidl(fakePidl), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.ShowContextMenu"/> never calls the native shell menu
+    /// when the resolved pidl is unavailable, and does not throw.
+    /// </summary>
     [Fact]
     public void ShowContextMenu_DoesNotInvokeNative_WhenPidlUnavailable()
     {
@@ -217,6 +233,10 @@ public class SystemShellServiceTests
 
     // ── SendToRecycleBin: returns false on native failure, never throws ───────
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.SendToRecycleBin"/> returns <see langword="false"/>
+    /// instead of propagating an exception thrown by the native call.
+    /// </summary>
     [Fact]
     public void SendToRecycleBin_ReturnsFalse_OnNativeFailure()
     {
@@ -236,6 +256,10 @@ public class SystemShellServiceTests
         Assert.False(result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemShellService.SendToRecycleBin"/> returns <see langword="true"/>
+    /// when the native call succeeds.
+    /// </summary>
     [Fact]
     public void SendToRecycleBin_ReturnsTrue_OnSuccess()
     {
@@ -253,5 +277,22 @@ public class SystemShellServiceTests
 
         // Assert
         Assert.True(result);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds a minimal mock of INativeApi that returns safe defaults for
+    /// methods not directly relevant to the test under scrutiny.
+    /// </summary>
+    private static Mock<INativeApi> BuildSafeNativeMock()
+    {
+        var m = new Mock<INativeApi>();
+
+        // Default: QueryRecycleBin returns empty state so the ctor timer-poll is safe.
+        m.Setup(n => n.QueryRecycleBin())
+            .Returns(new RecycleBinNativeState(0, 0));
+
+        return m;
     }
 }

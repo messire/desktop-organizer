@@ -4,8 +4,9 @@ namespace DesktopOrganizer.Services.SingleInstance;
 
 /// <summary>
 /// <see cref="EventWaitHandle"/>-backed <see cref="IShutdownRequestListener"/>. Waits on a named event
-/// using a single-shot <see cref="ThreadPool.RegisterWaitForSingleObject"/> registration — no dedicated
-/// thread, no polling, and at most one <see cref="ShutdownRequested"/> raise per process lifetime.
+/// using a single-shot <see cref="ThreadPool.RegisterWaitForSingleObject(WaitHandle, WaitOrTimerCallback, object?, int, bool)"/>
+/// registration — no dedicated thread, no polling, and at most one <see cref="ShutdownRequested"/> raise
+/// per process lifetime.
 /// </summary>
 internal sealed class InstallerShutdownRequestListener : IShutdownRequestListener
 {

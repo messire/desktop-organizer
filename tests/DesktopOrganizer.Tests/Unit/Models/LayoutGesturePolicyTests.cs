@@ -24,6 +24,12 @@ public class LayoutGesturePolicyTests
 
     // ----- Locked always wins (6 cases: 2 modes x 3 normal policies) -----
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutGesturePolicy.Resolve"/> forbids both move and resize whenever
+    /// the layout is locked, regardless of interaction mode or <see cref="NormalModeLayoutGestures"/>.
+    /// </summary>
+    /// <param name="mode">The layout interaction mode under test.</param>
+    /// <param name="normalPolicy">The normal-mode gesture policy under test.</param>
     [Theory]
     [InlineData(LayoutInteractionMode.Normal, NormalModeLayoutGestures.MoveAndResize)]
     [InlineData(LayoutInteractionMode.Normal, NormalModeLayoutGestures.MoveOnly)]
@@ -41,6 +47,12 @@ public class LayoutGesturePolicyTests
 
     // ----- Unlocked + EditLayout always allows both, regardless of NormalPolicy (3 cases) -----
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutGesturePolicy.Resolve"/> allows both move and resize when
+    /// unlocked in <see cref="LayoutInteractionMode.EditLayout"/>, regardless of
+    /// <see cref="NormalModeLayoutGestures"/>.
+    /// </summary>
+    /// <param name="normalPolicy">The normal-mode gesture policy under test.</param>
     [Theory]
     [InlineData(NormalModeLayoutGestures.MoveAndResize)]
     [InlineData(NormalModeLayoutGestures.MoveOnly)]
@@ -55,6 +67,11 @@ public class LayoutGesturePolicyTests
 
     // ----- Unlocked + Normal is decided per-gesture by NormalPolicy (3 cases) -----
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutGesturePolicy.Resolve"/>, unlocked in
+    /// <see cref="LayoutInteractionMode.Normal"/> with <see cref="NormalModeLayoutGestures.MoveAndResize"/>,
+    /// allows both move and resize.
+    /// </summary>
     [Fact]
     public void Resolve_UnlockedNormal_MoveAndResize_AllowsBoth()
     {
@@ -64,6 +81,11 @@ public class LayoutGesturePolicyTests
         Assert.True(result.CanResize);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutGesturePolicy.Resolve"/>, unlocked in
+    /// <see cref="LayoutInteractionMode.Normal"/> with <see cref="NormalModeLayoutGestures.MoveOnly"/>,
+    /// allows move but forbids resize.
+    /// </summary>
     [Fact]
     public void Resolve_UnlockedNormal_MoveOnly_AllowsMoveForbidsResize()
     {
@@ -73,6 +95,11 @@ public class LayoutGesturePolicyTests
         Assert.False(result.CanResize);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="LayoutGesturePolicy.Resolve"/>, unlocked in
+    /// <see cref="LayoutInteractionMode.Normal"/> with <see cref="NormalModeLayoutGestures.None"/>,
+    /// forbids both move and resize.
+    /// </summary>
     [Fact]
     public void Resolve_UnlockedNormal_None_ForbidsBoth()
     {
@@ -84,6 +111,12 @@ public class LayoutGesturePolicyTests
 
     // ----- NormalModeLayoutGesturesParser — same contract as PanelSurfaceStyleParser (ADR-025 D-10) -----
 
+    /// <summary>
+    /// Verifies that <c>NormalModeLayoutGesturesParser.ParseOrMoveOnly</c> parses a recognised value
+    /// case-insensitively into the expected <see cref="NormalModeLayoutGestures"/>.
+    /// </summary>
+    /// <param name="value">The candidate string to parse.</param>
+    /// <param name="expected">The expected parsed <see cref="NormalModeLayoutGestures"/> value.</param>
     [Theory]
     [InlineData("MoveAndResize", NormalModeLayoutGestures.MoveAndResize)]
     [InlineData("moveandresize", NormalModeLayoutGestures.MoveAndResize)]
@@ -97,6 +130,12 @@ public class LayoutGesturePolicyTests
         Assert.Equal(expected, result);
     }
 
+    /// <summary>
+    /// Verifies that <c>NormalModeLayoutGesturesParser.ParseOrMoveOnly</c> falls back to
+    /// <see cref="NormalModeLayoutGestures.MoveOnly"/>, without throwing, for
+    /// <see langword="null"/>, empty, whitespace-only, or unrecognised input.
+    /// </summary>
+    /// <param name="value">The unrecognised or empty candidate string to parse.</param>
     [Theory]
     [InlineData(null)]
     [InlineData("")]

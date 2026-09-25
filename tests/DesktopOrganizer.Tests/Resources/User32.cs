@@ -12,13 +12,13 @@ public static partial class User32
     /// <summary>
     /// The resource identifier for the default application icon.
     /// </summary>
-    public const int IDI_APPLICATION = 0x7F00;
+    public const int IdiApplication = 0x7F00;
 
     /// <summary>
     /// Loads an icon resource from the user32.dll library.
     /// </summary>
     /// <param name="hInstance">A handle to the instance of the module.</param>
-    /// <param name="lpIconName">The identifier of the icon to load (provides predefined icons like <see cref="IDI_APPLICATION" />).</param>
+    /// <param name="lpIconName">The identifier of the icon to load (provides predefined icons like <see cref="IdiApplication" />).</param>
     /// <returns>A handle to the icon.</returns>
     [LibraryImport("user32.dll", EntryPoint = "LoadIconW", SetLastError = true)]
     public static partial IntPtr LoadIcon(IntPtr hInstance, int lpIconName);

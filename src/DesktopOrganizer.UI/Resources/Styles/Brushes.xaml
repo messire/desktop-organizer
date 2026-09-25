@@ -76,4 +76,16 @@
     </LinearGradientBrush>
 
     <SolidColorBrush x:Key="Brush.HitTest.Catcher" Color="{StaticResource Color.HitTest.Catcher}" po:Freeze="True"/>
+<!--
+        Overlay scrollbar (Controls.xaml's Control.ScrollBar.Overlay / Control.ScrollBar.Thumb) — see
+        Colors.xaml's Color.ScrollBar.* remarks. Plain frozen SolidColorBrushes (spec 04 allows a 2-3 stop
+        LinearGradientBrush, but a flat fill is what "dissolves into the panel" best and is the cheaper
+        render); the hover/pressed brushes are swapped in by ControlTemplate.Triggers, so every state is
+        still one shared immutable instance, no per-thumb allocation.
+    -->
+    <SolidColorBrush x:Key="Brush.ScrollBar.Track" Color="{StaticResource Color.ScrollBar.Track}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.ScrollBar.Thumb" Color="{StaticResource Color.ScrollBar.Thumb}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.ScrollBar.ThumbBorder" Color="{StaticResource Color.ScrollBar.ThumbBorder}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.ScrollBar.ThumbHover" Color="{StaticResource Color.ScrollBar.ThumbHover}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.ScrollBar.ThumbPressed" Color="{StaticResource Color.ScrollBar.ThumbPressed}" po:Freeze="True"/>
 </ResourceDictionary>

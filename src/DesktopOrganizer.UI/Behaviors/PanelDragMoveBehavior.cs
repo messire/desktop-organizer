@@ -194,6 +194,14 @@ public sealed class PanelDragMoveBehavior
         _gridState = PanelGridState.Legacy;
     }
 
+    /// <summary>
+    /// Handles the initial press on the panel's title bar: commits any active inline rename, toggles
+    /// roll-up on a double click, or — for a single click, when moving is currently allowed — captures
+    /// the mouse and arms a drag gesture (without yet claiming <see cref="PanelInteractionState.Dragging"/>;
+    /// see <see cref="OnTitleBarMouseMove"/>).
+    /// </summary>
+    /// <param name="sender">The title-bar element that receives mouse capture for the gesture.</param>
+    /// <param name="e">The mouse-button event; used to detect the click count and button state.</param>
     public void OnTitleBarMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ButtonState != MouseButtonState.Pressed) return;
@@ -246,6 +254,12 @@ public sealed class PanelDragMoveBehavior
     /// clamps it against the drag-obstacle snapshot so the panel can never overlap another live panel
     /// (docs/PLANS/panel-anti-overlap.md §3.5).
     /// </summary>
+    /// <param name="sender">Unused; present to match the WPF mouse-event handler signature.</param>
+    /// <param name="e">
+    /// The mouse-move event; only its <see cref="MouseEventArgs.LeftButton"/> is read — the cursor
+    /// position driving the live drag delta comes from <see cref="Mouse.GetPosition(IInputElement)"/>,
+    /// not from this event.
+    /// </param>
     public void OnTitleBarMouseMove(object sender, MouseEventArgs e)
     {
         if (!_isArmed || e.LeftButton != MouseButtonState.Pressed) return;
@@ -325,7 +339,7 @@ public sealed class PanelDragMoveBehavior
         }
 
         var rawLeft = _dragStartLeft + deltaX;
-        var rawTop  = _dragStartTop  + deltaY;
+        var rawTop = _dragStartTop + deltaY;
 
         // P03-D4/D5/D6/D7: a GridAligned panel runs the whole ADR-028 pipeline (workspace-grid
         // quantisation -> ADR-026 guides -> gap-aware hard wall) in one pure call; the Alt modifier is
@@ -346,7 +360,7 @@ public sealed class PanelDragMoveBehavior
                 freeMove: IsFreeMoveModifierDown);
 
             _window.Left = gridPosition.X;
-            _window.Top  = gridPosition.Y;
+            _window.Top = gridPosition.Y;
 
             _diagnostics.DragDelta(_getPanelId(), new Rect(_window.Left, _window.Top, _window.Width, _window.Height));
             return;
@@ -395,7 +409,7 @@ public sealed class PanelDragMoveBehavior
         var clamped = PanelCollision.ClampAgainstObstacles(current, snappedLeft, snappedTop, _dragObstacles);
 
         _window.Left = clamped.X;
-        _window.Top  = clamped.Y;
+        _window.Top = clamped.Y;
 
         // Width/Height, not ActualWidth/ActualHeight — see the DragStarted comment above for why;
         // `clamped`/`current` above are the real (unmodified) clamp math and still use
@@ -403,6 +417,9 @@ public sealed class PanelDragMoveBehavior
         _diagnostics.DragDelta(_getPanelId(), new Rect(_window.Left, _window.Top, _window.Width, _window.Height));
     }
 
+    /// <summary>Ends the drag gesture (if any) on release of the title-bar mouse button.</summary>
+    /// <param name="sender">The element releasing mouse capture; forwarded to <see cref="EndDrag"/>.</param>
+    /// <param name="e">Unused; present to match the WPF mouse-event handler signature.</param>
     public void OnTitleBarMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         => EndDrag(sender as UIElement);
 
@@ -411,6 +428,8 @@ public sealed class PanelDragMoveBehavior
     /// a drag never gets "stuck" with the armed/dragging flags left <see langword="true"/>. Safe to call
     /// redundantly: <see cref="EndDrag"/> is a no-op once the gesture has already ended.
     /// </summary>
+    /// <param name="sender">The element that lost mouse capture; forwarded to <see cref="EndDrag"/>.</param>
+    /// <param name="e">Unused; present to match the WPF mouse-event handler signature.</param>
     public void OnTitleBarLostMouseCapture(object sender, MouseEventArgs e)
         => EndDrag(sender as UIElement);
 
@@ -426,73 +445,6 @@ public sealed class PanelDragMoveBehavior
     /// </summary>
     public void AbortDrag() => EndDrag(_captureElement);
 
-    private void EndDrag(UIElement? element)
-    {
-        if (!_isArmed) return;
-
-        _isArmed = false;
-        var wasDragging = _isDragging;
-        _isDragging = false;
-
-        // Cleared here (not just on the successful path below) so a second AbortDrag()/lost-capture
-        // call after this gesture has already ended can never resolve a stale element reference — see
-        // this field's own doc comment (D-4).
-        _captureElement = null;
-
-        if (!wasDragging)
-        {
-            // R-3: the press never crossed the drag threshold — a plain click. Release capture, but
-            // never touch the tracker (Dragging was never claimed), SnapToGrid, or SaveWindowsState —
-            // exactly the documented defect this threshold exists to fix (a click-only title-bar press
-            // must not snap-to-grid/persist with a zero net offset).
-            element?.ReleaseMouseCapture();
-            return;
-        }
-
-        // ADR-021 "every Begin has exactly one logical End" / "window disposal forces state to Idle":
-        // Exit runs in `finally` so a throw from SnapToGrid/SaveWindowsState below still releases
-        // Dragging back to Idle instead of leaving the tracker stuck and blocking every future resize
-        // on this panel (plan §3.2, R2).
-        try
-        {
-            element?.ReleaseMouseCapture();
-            SnapToGrid();
-
-            // F-6 (P03-D10, ADR-028 «MonitorDeviceId при межмониторном drag», OQ-2 = A): record which
-            // monitor the panel actually came to rest on, in BOTH geometry modes — the field is not part
-            // of any drag-frame geometry, it only decides which monitor WindowManager restores the panel
-            // onto later, which is exactly the bug this closes (drag to DISPLAY2 -> any
-            // WM_SETTINGCHANGE/restart pulled the panel back to DISPLAY1). Must run BEFORE
-            // SaveWindowsState() below.
-            UpdateMonitorDeviceIdOnDrop();
-
-            // Drop the drag-gesture obstacle snapshot (docs/PLANS/panel-anti-overlap.md §3.3, R5): never
-            // leave a stale snapshot lying around between gestures (e.g. after Alt+Tab/system-dialog
-            // involuntary capture loss via OnTitleBarLostMouseCapture). _dragMonitors (MAJOR-2/MAJOR-A
-            // fix) is cleared alongside it for the same reason, even though it is always re-snapshotted
-            // before its next read.
-            _dragObstacles.Clear();
-            _dragMonitors.Clear();
-            _gridState = PanelGridState.Legacy;
-
-            _windowManager.SaveWindowsState();
-        }
-        finally
-        {
-            _tracker.Exit(PanelInteractionState.Dragging);
-        }
-
-        // Diagnostics is recorded AFTER SnapToGrid()/SaveWindowsState() (not before, as originally
-        // written) so it reads the post-snap, actually-committed/persisted geometry rather than the
-        // raw pre-snap drag result (finalization M-5) — mirrors PanelResizeController.OnResizeDragCompleted.
-        // Purely a reordering of the log-only diagnostics call; the real control flow above (capture
-        // release, SnapToGrid, obstacle clear, SaveWindowsState, and their internal order) is
-        // unchanged. Width/Height (not ActualWidth/ActualHeight) for the same reason as DragStarted/
-        // DragDelta above. If SnapToGrid/SaveWindowsState throws, diagnostics simply never gets
-        // recorded for this gesture — acceptable, diagnostics is best-effort by design.
-        _diagnostics.DragCompleted(_getPanelId(), new Rect(_window.Left, _window.Top, _window.Width, _window.Height));
-    }
-
     /// <summary>
     /// Rounds Left and Top to the nearest grid cell after a drag or resize operation, using the same
     /// <see cref="IAppSettings.GridSnapDistance"/> threshold as the live drag-time magnet (rather than an
@@ -504,7 +456,8 @@ public sealed class PanelDragMoveBehavior
     /// </summary>
     /// <remarks>
     /// Anti-overlap on mouse-up (docs/PLANS/panel-anti-overlap.md §3.5): this is NOT a full
-    /// <see cref="PanelCollision.ClampAgainstObstacles"/> pass — the live drag already clamped the panel
+    /// <see cref="PanelCollision.ClampAgainstObstacles(Rect, double, double, System.Collections.Generic.IReadOnlyList{Rect})"/>
+    /// pass — the live drag already clamped the panel
     /// against <see cref="_dragObstacles"/> on every frame, so it cannot already be inside a neighbour
     /// when this runs. The only way the grid snap below could create a NEW overlap is by nudging the
     /// already-clamped position by up to <see cref="IAppSettings.GridSnapDistance"/> pixels back toward a
@@ -578,6 +531,73 @@ public sealed class PanelDragMoveBehavior
         var afterY = new Rect(_window.Left, snappedTop, width, height);
         if (!PanelCollision.CreatesNewOverlap(beforeY, afterY, _dragObstacles))
             _window.Top = snappedTop;
+    }
+
+    private void EndDrag(UIElement? element)
+    {
+        if (!_isArmed) return;
+
+        _isArmed = false;
+        var wasDragging = _isDragging;
+        _isDragging = false;
+
+        // Cleared here (not just on the successful path below) so a second AbortDrag()/lost-capture
+        // call after this gesture has already ended can never resolve a stale element reference — see
+        // this field's own doc comment (D-4).
+        _captureElement = null;
+
+        if (!wasDragging)
+        {
+            // R-3: the press never crossed the drag threshold — a plain click. Release capture, but
+            // never touch the tracker (Dragging was never claimed), SnapToGrid, or SaveWindowsState —
+            // exactly the documented defect this threshold exists to fix (a click-only title-bar press
+            // must not snap-to-grid/persist with a zero net offset).
+            element?.ReleaseMouseCapture();
+            return;
+        }
+
+        // ADR-021 "every Begin has exactly one logical End" / "window disposal forces state to Idle":
+        // Exit runs in `finally` so a throw from SnapToGrid/SaveWindowsState below still releases
+        // Dragging back to Idle instead of leaving the tracker stuck and blocking every future resize
+        // on this panel (plan §3.2, R2).
+        try
+        {
+            element?.ReleaseMouseCapture();
+            SnapToGrid();
+
+            // F-6 (P03-D10, ADR-028 «MonitorDeviceId при межмониторном drag», OQ-2 = A): record which
+            // monitor the panel actually came to rest on, in BOTH geometry modes — the field is not part
+            // of any drag-frame geometry, it only decides which monitor WindowManager restores the panel
+            // onto later, which is exactly the bug this closes (drag to DISPLAY2 -> any
+            // WM_SETTINGCHANGE/restart pulled the panel back to DISPLAY1). Must run BEFORE
+            // SaveWindowsState() below.
+            UpdateMonitorDeviceIdOnDrop();
+
+            // Drop the drag-gesture obstacle snapshot (docs/PLANS/panel-anti-overlap.md §3.3, R5): never
+            // leave a stale snapshot lying around between gestures (e.g. after Alt+Tab/system-dialog
+            // involuntary capture loss via OnTitleBarLostMouseCapture). _dragMonitors (MAJOR-2/MAJOR-A
+            // fix) is cleared alongside it for the same reason, even though it is always re-snapshotted
+            // before its next read.
+            _dragObstacles.Clear();
+            _dragMonitors.Clear();
+            _gridState = PanelGridState.Legacy;
+
+            _windowManager.SaveWindowsState();
+        }
+        finally
+        {
+            _tracker.Exit(PanelInteractionState.Dragging);
+        }
+
+        // Diagnostics is recorded AFTER SnapToGrid()/SaveWindowsState() (not before, as originally
+        // written) so it reads the post-snap, actually-committed/persisted geometry rather than the
+        // raw pre-snap drag result (finalization M-5) — mirrors PanelResizeController.OnResizeDragCompleted.
+        // Purely a reordering of the log-only diagnostics call; the real control flow above (capture
+        // release, SnapToGrid, obstacle clear, SaveWindowsState, and their internal order) is
+        // unchanged. Width/Height (not ActualWidth/ActualHeight) for the same reason as DragStarted/
+        // DragDelta above. If SnapToGrid/SaveWindowsState throws, diagnostics simply never gets
+        // recorded for this gesture — acceptable, diagnostics is best-effort by design.
+        _diagnostics.DragCompleted(_getPanelId(), new Rect(_window.Left, _window.Top, _window.Width, _window.Height));
     }
 
     /// <summary>

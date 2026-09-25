@@ -20,17 +20,27 @@ public class HoverOverlayBrushConverterTests
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
     private static readonly SolidColorBrush FallbackHoverBrush = new(Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF));
 
+    /// <summary>
+    /// Verifies that valid accent/style/high-contrast/fallback inputs produce a frozen <see cref="SolidColorBrush"/>.
+    /// </summary>
     [Fact]
     public void Convert_ValidInputs_ReturnsFrozenBrush()
     {
         var result = Converter.Convert(
             new object?[] { AccentPalette.Neutral, PanelSurfaceStyle.Ambient, false, FallbackHoverBrush },
-            typeof(Brush), null, AnyCulture);
+            typeof(Brush),
+            null,
+            AnyCulture);
 
         var brush = Assert.IsType<SolidColorBrush>(result);
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that every shipped surface style/accent combination resolves to
+    /// <see cref="HoverOverlayPolicy.DarkenWash"/>, pinning the full converter-to-policy wiring rather than a
+    /// single hand-picked token.
+    /// </summary>
     [Fact]
     public void Convert_EveryShippedSurfaceToken_ReturnsDarkenWash()
     {
@@ -45,7 +55,9 @@ public class HoverOverlayBrushConverterTests
             {
                 var result = Converter.Convert(
                     new object?[] { accent, style, false, FallbackHoverBrush },
-                    typeof(Brush), null, AnyCulture);
+                    typeof(Brush),
+                    null,
+                    AnyCulture);
 
                 var brush = Assert.IsType<SolidColorBrush>(result);
                 Assert.Equal(HoverOverlayPolicy.DarkenWash, brush.Color);
@@ -53,26 +65,41 @@ public class HoverOverlayBrushConverterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a high-contrast flag of <see langword="true"/> returns the supplied fallback brush verbatim.
+    /// </summary>
     [Fact]
     public void Convert_HighContrastTrue_ReturnsFallbackBrushVerbatim()
     {
         var result = Converter.Convert(
             new object?[] { AccentPalette.Neutral, PanelSurfaceStyle.Glass, true, FallbackHoverBrush },
-            typeof(Brush), null, AnyCulture);
+            typeof(Brush),
+            null,
+            AnyCulture);
 
         Assert.Same(FallbackHoverBrush, result);
     }
 
+    /// <summary>
+    /// Verifies that a high-contrast flag of <see langword="true"/> with a missing fallback brush returns
+    /// <see cref="Brushes.Transparent"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_HighContrastTrue_MissingFallback_ReturnsTransparent_DoesNotThrow()
     {
         var result = Converter.Convert(
             new object?[] { AccentPalette.Neutral, PanelSurfaceStyle.Glass, true, null },
-            typeof(Brush), null, AnyCulture);
+            typeof(Brush),
+            null,
+            AnyCulture);
 
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that fewer values than the converter expects returns <see cref="Brushes.Transparent"/> instead
+    /// of throwing.
+    /// </summary>
     [Fact]
     public void Convert_TooFewValues_ReturnsTransparent_DoesNotThrow()
     {
@@ -81,28 +108,42 @@ public class HoverOverlayBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that a malformed accent hex string still produces a frozen brush instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_GarbageAccentHex_DoesNotThrow_StillReturnsFrozenBrush()
     {
         var result = Converter.Convert(
             new object?[] { "not-a-colour", PanelSurfaceStyle.Ambient, false, FallbackHoverBrush },
-            typeof(Brush), null, AnyCulture);
+            typeof(Brush),
+            null,
+            AnyCulture);
 
         var brush = Assert.IsType<SolidColorBrush>(result);
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that a non-<see cref="PanelSurfaceStyle"/> second value still produces a frozen brush instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NonStyleSecondValue_DoesNotThrow()
     {
         var result = Converter.Convert(
             new object?[] { AccentPalette.Neutral, "not-a-style", false, FallbackHoverBrush },
-            typeof(Brush), null, AnyCulture);
+            typeof(Brush),
+            null,
+            AnyCulture);
 
         var brush = Assert.IsType<SolidColorBrush>(result);
         Assert.True(brush.IsFrozen);
     }
 
+    /// <summary>
+    /// Verifies that a <see langword="null"/> values array returns <see cref="Brushes.Transparent"/> instead
+    /// of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NullValues_ReturnsTransparent_DoesNotThrow()
     {
@@ -111,6 +152,9 @@ public class HoverOverlayBrushConverterTests
         Assert.Same(Brushes.Transparent, result);
     }
 
+    /// <summary>
+    /// Verifies that converting identical inputs twice returns the same cached brush instance.
+    /// </summary>
     [Fact]
     public void Convert_SameInputsTwice_ReturnsSameInstance()
     {
@@ -120,6 +164,10 @@ public class HoverOverlayBrushConverterTests
         Assert.Same(first, second);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="HoverOverlayBrushConverter.ConvertBack"/> always throws
+    /// <see cref="NotSupportedException"/> because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_AlwaysThrowsNotSupportedException()
     {

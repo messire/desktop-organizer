@@ -13,7 +13,10 @@ namespace DesktopOrganizer.Tests.Unit.SingleInstance;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class ActivationRequestRelayTests
 {
-    // T-REL-01
+    /// <summary>
+    /// Verifies that <c>ActivationRequestRelay.Publish</c> buffers requests published before a sink has
+    /// been attached (T-REL-01).
+    /// </summary>
     [Fact]
     public void Publish_BeforeAttachSink_Buffers()
     {
@@ -25,7 +28,10 @@ public class ActivationRequestRelayTests
         Assert.Equal(2, relay.BufferedCount);
     }
 
-    // T-REL-02
+    /// <summary>
+    /// Verifies that <c>ActivationRequestRelay.AttachSink</c> drains the buffered requests in the
+    /// exact order they were published (T-REL-02).
+    /// </summary>
     [Fact]
     public void AttachSink_DrainsBuffer_InPublishOrder()
     {
@@ -45,9 +51,12 @@ public class ActivationRequestRelayTests
         Assert.Equal(0, relay.BufferedCount);
     }
 
-    // T-REL-03
+    /// <summary>
+    /// Verifies that every request published concurrently from many threads is buffered exactly once,
+    /// with no duplicates and no loss (T-REL-03).
+    /// </summary>
     [Fact]
-    public void Publish_FromManyThreadsConcurrently_AllArePublishedExactlyOnce()
+    public async Task Publish_FromManyThreadsConcurrently_AllArePublishedExactlyOnce()
     {
         var relay = new ActivationRequestRelay();
         const int threadCount = 16;
@@ -66,7 +75,7 @@ public class ActivationRequestRelayTests
             });
         }
 
-        Task.WaitAll(tasks);
+        await Task.WhenAll(tasks);
 
         Assert.Equal(threadCount * perThread, relay.BufferedCount);
 
@@ -77,7 +86,10 @@ public class ActivationRequestRelayTests
         Assert.Equal(received.Select(r => r.SessionId).Distinct().Count(), received.Count);
     }
 
-    // T-REL-04
+    /// <summary>
+    /// Verifies that once a sink is attached, <c>ActivationRequestRelay.Publish</c> delivers directly
+    /// to it rather than buffering (T-REL-04).
+    /// </summary>
     [Fact]
     public void Publish_AfterAttachSink_DeliveredDirectly_NotBuffered()
     {
@@ -92,6 +104,10 @@ public class ActivationRequestRelayTests
         Assert.Equal(0, relay.BufferedCount);
     }
 
+    /// <summary>
+    /// Verifies that <c>ActivationRequestRelay.AttachSink</c> throws <see cref="ArgumentNullException"/>
+    /// for a <see langword="null"/> sink.
+    /// </summary>
     [Fact]
     public void AttachSink_NullSink_Throws()
     {
@@ -100,6 +116,10 @@ public class ActivationRequestRelayTests
         Assert.Throws<ArgumentNullException>(() => relay.AttachSink(null!));
     }
 
+    /// <summary>
+    /// Verifies that a freshly constructed <c>ActivationRequestRelay</c> starts with
+    /// <c>BufferedCount</c> equal to zero.
+    /// </summary>
     [Fact]
     public void BufferedCount_InitiallyZero()
     {
@@ -118,15 +138,16 @@ public class ActivationRequestRelayTests
     /// returns immediately, never blocking on the UI thread. Before that fix, a sink ending in a BLOCKING
     /// <c>Dispatcher.Invoke</c> could hold this gate for as long as the UI thread took to service it —
     /// and if the UI thread's own next step needed this same gate (e.g. a hypothetical future
-    /// re-subscription reaching <see cref="ActivationRequestRelay.AttachSink"/> while a <see cref="Publish"/>
-    /// call from the single accept thread was mid-flight), the two would deadlock. This test pins the
-    /// FIX's guarantee at the relay's own boundary: many concurrent <see cref="Publish"/> calls racing a
-    /// concurrent <see cref="AttachSink"/>, through a sink shaped like the current production one (fast,
+    /// re-subscription reaching <see cref="ActivationRequestRelay.AttachSink"/> while a
+    /// <see cref="ActivationRequestRelay.Publish"/> call from the single accept thread was mid-flight),
+    /// the two would deadlock. This test pins the FIX's guarantee at the relay's own boundary: many
+    /// concurrent <see cref="ActivationRequestRelay.Publish"/> calls racing a concurrent
+    /// <see cref="ActivationRequestRelay.AttachSink"/>, through a sink shaped like the current production one (fast,
     /// non-blocking), complete within a tight bound — not the unbounded hang the pre-fix blocking sink
     /// could have produced.
     /// </summary>
     [Fact]
-    public void Publish_RacingConcurrentlyWithAttachSink_ThroughANonBlockingSink_NeverHangs()
+    public async Task Publish_RacingConcurrentlyWithAttachSink_ThroughANonBlockingSink_NeverHangs()
     {
         var relay = new ActivationRequestRelay();
         using var attachSinkMayProceed = new ManualResetEventSlim(initialState: false);
@@ -148,9 +169,11 @@ public class ActivationRequestRelayTests
             relay.AttachSink(r => received.Add(r));
         });
 
-        var completed = Task.WaitAll([publisher, attacher], TimeSpan.FromSeconds(5));
+        var bothCompleted = Task.WhenAll(publisher, attacher);
+        var completed = await Task.WhenAny(bothCompleted, Task.Delay(TimeSpan.FromSeconds(5))) == bothCompleted;
 
         Assert.True(completed, "Publish/AttachSink must not hang against a fast, non-blocking sink.");
+        await bothCompleted;
         Assert.Equal(200, received.Select(r => r.SessionId).Distinct().Count());
     }
 }

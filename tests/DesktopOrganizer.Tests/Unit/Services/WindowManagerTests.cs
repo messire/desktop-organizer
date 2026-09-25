@@ -40,6 +40,10 @@ public class WindowManagerTests
 {
     // ── ReleaseManagedItems ──────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.ReleaseManagedItems"/> releases each managed path exactly
+    /// once and never touches unmanaged paths.
+    /// </summary>
     [Fact]
     public void ReleaseManagedItems_OnlyReleasesManagedPaths_OnceEach()
     {
@@ -64,6 +68,11 @@ public class WindowManagerTests
         storageMock.Verify(s => s.Release(unmanagedC), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.ReleaseManagedItems"/> never calls
+    /// <see cref="IPanelItemStorageService.Release"/> for a panel with no managed paths (e.g. a Folder
+    /// Portal panel).
+    /// </summary>
     [Fact]
     public void ReleaseManagedItems_NoManagedPaths_NeverCallsRelease()
     {
@@ -80,6 +89,10 @@ public class WindowManagerTests
         storageMock.Verify(s => s.Release(It.IsAny<string>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.ReleaseManagedItems"/> does not throw and never calls
+    /// <see cref="IPanelItemStorageService.Release"/> for a panel with an empty file paths list.
+    /// </summary>
     [Fact]
     public void ReleaseManagedItems_EmptyFilePaths_DoesNotThrowOrCallRelease()
     {
@@ -94,6 +107,11 @@ public class WindowManagerTests
 
     // ── ReleaseManagedItemsIfRequested (RemoveChildWindow's releaseManagedItems gate) ─────────────
 
+    /// <summary>
+    /// Verifies the <c>LayoutSnapshotService.Restore</c> data-loss regression guard: with
+    /// <c>releaseManagedItems: false</c>, <see cref="WindowManager.ReleaseManagedItemsIfRequested"/>
+    /// never touches managed storage, even when the panel's paths are managed.
+    /// </summary>
     [Fact]
     public void ReleaseManagedItemsIfRequested_ReleaseFalse_NeverCallsRelease_EvenForManagedPaths()
     {
@@ -111,6 +129,10 @@ public class WindowManagerTests
         storageMock.Verify(s => s.Release(It.IsAny<string>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that with <c>releaseManagedItems: true</c> (permanent deletion),
+    /// <see cref="WindowManager.ReleaseManagedItemsIfRequested"/> still releases every managed path.
+    /// </summary>
     [Fact]
     public void ReleaseManagedItemsIfRequested_ReleaseTrue_CallsReleaseForManagedPaths()
     {
@@ -132,9 +154,10 @@ public class WindowManagerTests
 
     // ── ClampIntoMonitor ─────────────────────────────────────────────────────────
 
-    private static MonitorInfo BuildMonitor(Rect workArea) =>
-        new("\\\\.\\DISPLAY1", workArea, workArea, IsPrimary: true);
-
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.ClampIntoMonitor"/> pulls a panel's position back inside
+    /// the monitor's work area after that work area shrinks below the panel.
+    /// </summary>
     [Fact]
     public void ClampIntoMonitor_PanelOutsideShrunkWorkArea_PullsPositionBackInside()
     {
@@ -159,6 +182,11 @@ public class WindowManagerTests
         Assert.True(model.Position.Y >= shrunkWorkArea.Top);
     }
 
+    /// <summary>
+    /// Verifies the m-1 fix-cycle 1 pin: when the clamp result lands exactly on a negative half-DIP
+    /// midpoint, <see cref="WindowManager.ClampIntoMonitor"/> uses banker's rounding (away from zero for
+    /// this midpoint), matching <c>PanelGeometryWriter</c>'s own choice.
+    /// </summary>
     [Fact]
     public void ClampIntoMonitor_FractionalNegativeClampResult_RoundsToNearest_NotTowardZero()
     {
@@ -182,6 +210,10 @@ public class WindowManagerTests
         Assert.Equal(50, model.Position.Y);
     }
 
+    /// <summary>
+    /// Verifies the early-out case: <see cref="WindowManager.ClampIntoMonitor"/> leaves the position
+    /// untouched when the panel is already fully inside the work area.
+    /// </summary>
     [Fact]
     public void ClampIntoMonitor_PanelAlreadyInsideWorkArea_LeavesPositionUntouched()
     {
@@ -201,6 +233,11 @@ public class WindowManagerTests
         Assert.Equal(new Point(100, 100), model.Position);
     }
 
+    /// <summary>
+    /// Regression test: verifies that <see cref="WindowManager.ClampIntoMonitor"/> still re-clamps when
+    /// only the panel's top-left point is inside the work area but its bottom-right overflows —
+    /// the "inside" check must consider the whole panel rect, not just its top-left point.
+    /// </summary>
     [Fact]
     public void ClampIntoMonitor_TopLeftInsideButBottomRightOverflows_PullsPositionBackInside()
     {
@@ -235,6 +272,10 @@ public class WindowManagerTests
     // ── GridAlignedBoundsUnchanged (M-3 fix-cycle 1: OnMonitorsChanged's "did anything actually change"
     //    gate — see that method's own remarks for why the surrounding loop itself is manual verify) ────
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.GridAlignedBoundsUnchanged"/> returns
+    /// <see langword="true"/> for two identical rectangles.
+    /// </summary>
     [Fact]
     public void GridAlignedBoundsUnchanged_IdenticalRects_ReturnsTrue()
     {
@@ -243,6 +284,10 @@ public class WindowManagerTests
         Assert.True(WindowManager.GridAlignedBoundsUnchanged(rect, rect));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.GridAlignedBoundsUnchanged"/> returns
+    /// <see langword="true"/> when every delta between the two rectangles is below the tolerance.
+    /// </summary>
     [Fact]
     public void GridAlignedBoundsUnchanged_WithinTolerance_ReturnsTrue()
     {
@@ -252,6 +297,10 @@ public class WindowManagerTests
         Assert.True(WindowManager.GridAlignedBoundsUnchanged(current, bounds));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.GridAlignedBoundsUnchanged"/> returns
+    /// <see langword="false"/> when the position moved by a whole workspace-grid unit.
+    /// </summary>
     [Fact]
     public void GridAlignedBoundsUnchanged_PositionMovedByAWholeUnit_ReturnsFalse()
     {
@@ -261,6 +310,10 @@ public class WindowManagerTests
         Assert.False(WindowManager.GridAlignedBoundsUnchanged(current, bounds));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.GridAlignedBoundsUnchanged"/> returns
+    /// <see langword="false"/> when the size changed by a whole workspace-grid column.
+    /// </summary>
     [Fact]
     public void GridAlignedBoundsUnchanged_SizeChanged_ReturnsFalse()
     {
@@ -270,6 +323,10 @@ public class WindowManagerTests
         Assert.False(WindowManager.GridAlignedBoundsUnchanged(current, bounds));
     }
 
+    /// <summary>
+    /// Sanity check for the C-1 finding's own repro class of delta: verifies that a large ("teleport
+    /// sized") position jump is never masked by the tolerance.
+    /// </summary>
     [Fact]
     public void GridAlignedBoundsUnchanged_TeleportSizedDelta_ReturnsFalse()
     {
@@ -298,6 +355,10 @@ public class WindowManagerTests
         Assert.False(WindowManager.GridAlignedBoundsUnchanged(current, bounds, isRolledUp: false));
     }
 
+    /// <summary>
+    /// Verifies that while rolled up, <see cref="WindowManager.GridAlignedBoundsUnchanged"/> still
+    /// detects a genuine position change even though the collapsed header height is ignored.
+    /// </summary>
     [Fact]
     public void GridAlignedBoundsUnchanged_RolledUp_StillDetectsAPositionChange()
     {
@@ -309,6 +370,10 @@ public class WindowManagerTests
 
     // ── ResolveStalePanelPaths (M1 fix, P08 fix cycle 1, 2026-09-22) ────────────────────────────────
 
+    /// <summary>
+    /// Verifies that a stale path with exactly one live, unclaimed managed candidate is remapped to
+    /// that candidate in place.
+    /// </summary>
     [Fact]
     public void ResolveStalePanelPaths_SingleUnclaimedCandidate_RemapsInPlace()
     {
@@ -333,6 +398,10 @@ public class WindowManagerTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a stale path with more than one live managed candidate is left untouched, since the
+    /// resolution is ambiguous.
+    /// </summary>
     [Fact]
     public void ResolveStalePanelPaths_AmbiguousCandidates_LeavesPathUntouched()
     {
@@ -350,6 +419,11 @@ public class WindowManagerTests
         Assert.Equal(stale, Assert.Single(panel.FilePaths));
     }
 
+    /// <summary>
+    /// Verifies M1's cross-panel ownership rule: a candidate already directly referenced by another
+    /// panel is never remapped onto by a different panel's stale entry, which would give two panels
+    /// ownership of the same physical file.
+    /// </summary>
     [Fact]
     public void ResolveStalePanelPaths_CandidateAlreadyReferencedByAnotherPanel_LeavesStalePathUntouched()
     {
@@ -365,6 +439,7 @@ public class WindowManagerTests
         var storageMock = new Mock<IPanelItemStorageService>();
         storageMock.Setup(s => s.IsManaged(sharedManaged)).Returns(true);
         storageMock.Setup(s => s.IsManaged(stale)).Returns(false);
+
         // sharedManaged is a fake path (doesn't exist on disk) standing in for "a real managed file
         // panel B already references directly" — the resolve loop still visits it (File.Exists is
         // false for a fake path) and calls FindManagedCandidates for it too, so this catch-all must be
@@ -379,6 +454,10 @@ public class WindowManagerTests
         Assert.Equal(sharedManaged, Assert.Single(panelB.FilePaths)); // untouched
     }
 
+    /// <summary>
+    /// Verifies the dedup case: a stale entry is not remapped to a managed copy already directly listed
+    /// elsewhere in the same panel's <c>FilePaths</c>, which would show the same item twice.
+    /// </summary>
     [Fact]
     public void ResolveStalePanelPaths_CandidateAlreadyPresentInSamePanel_DoesNotDuplicate()
     {
@@ -391,6 +470,7 @@ public class WindowManagerTests
         var storageMock = new Mock<IPanelItemStorageService>();
         storageMock.Setup(s => s.IsManaged(managed)).Returns(true);
         storageMock.Setup(s => s.IsManaged(stale)).Returns(false);
+
         // managed is a fake path (doesn't exist on disk) standing in for "a real managed file already
         // directly present in this panel" — the resolve loop still visits it, so this catch-all must be
         // set up even though it's never meant to be remapped itself (IsManaged above is what protects
@@ -403,6 +483,10 @@ public class WindowManagerTests
         Assert.Equal([stale, managed], panel.FilePaths);
     }
 
+    /// <summary>
+    /// Verifies that a Folder Portal panel (<c>SourceFolderPath</c> set) is skipped entirely: neither the
+    /// storage service nor its <c>FilePaths</c> are touched.
+    /// </summary>
     [Fact]
     public void ResolveStalePanelPaths_PortalPanel_NeverConsultsStorageOrMutatesFilePaths()
     {
@@ -415,6 +499,10 @@ public class WindowManagerTests
         storageMock.Verify(s => s.FindManagedCandidates(It.IsAny<string>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that a path that still exists on disk is never resolved through the storage service —
+    /// only genuinely stale (missing) paths trigger a candidate lookup.
+    /// </summary>
     [Fact]
     public void ResolveStalePanelPaths_PathAlreadyExists_NeverConsultsStorage()
     {
@@ -436,6 +524,11 @@ public class WindowManagerTests
         }
     }
 
+    /// <summary>
+    /// Verifies the ADR-009 Amendment 2 tie-break rule (MINOR-2 fix): when two panels' equally-valid
+    /// stale entries both resolve to the same single live candidate, neither may claim it — silently
+    /// awarding it by iteration order would be an unexplained guess.
+    /// </summary>
     [Fact]
     public void ResolveStalePanelPaths_TwoPanelsCompetingForTheSameSingleCandidate_BothRefuseTheAmbiguousClaim()
     {
@@ -462,6 +555,10 @@ public class WindowManagerTests
         Assert.Equal(staleB, Assert.Single(panelB.FilePaths));
     }
 
+    /// <summary>
+    /// Regression guard for the two-pass MINOR-2 fix: a contested candidate elsewhere in the same batch
+    /// must not collaterally block an unrelated, genuinely unambiguous remap in the same batch.
+    /// </summary>
     [Fact]
     public void ResolveStalePanelPaths_UncontestedCandidateAlongsideAContestedOne_StillRemapsTheUncontestedOne()
     {
@@ -491,6 +588,10 @@ public class WindowManagerTests
 
     // ── CreateEachIsolated (LoadWindowsState's per-item isolation) ─────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.CreateEachIsolated"/> creates every state and returns
+    /// zero skipped when all factory calls succeed.
+    /// </summary>
     [Fact]
     public void CreateEachIsolated_AllFactoriesSucceed_CreatesEveryStateAndReturnsZeroSkipped()
     {
@@ -506,6 +607,11 @@ public class WindowManagerTests
         Assert.Equal(states.Select(s => s.Id), created);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.CreateEachIsolated"/> skips only the factory call that
+    /// throws and still creates every other state, so a single corrupt panel does not abort the rest
+    /// of the load.
+    /// </summary>
     [Fact]
     public void CreateEachIsolated_OneOfSeveralFactoriesThrows_SkipsOnlyThatOne_CreatesTheRest()
     {
@@ -530,6 +636,10 @@ public class WindowManagerTests
         Assert.Equal([good1, good2], created);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.CreateEachIsolated"/> skips every state and never
+    /// propagates an exception when every factory call throws.
+    /// </summary>
     [Fact]
     public void CreateEachIsolated_EveryFactoryThrows_SkipsAll_NeverPropagatesException()
     {
@@ -546,6 +656,10 @@ public class WindowManagerTests
         Assert.Equal(2, skipped);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.CreateEachIsolated"/> returns zero and never invokes the
+    /// factory for an empty states collection.
+    /// </summary>
     [Fact]
     public void CreateEachIsolated_EmptyStates_ReturnsZero_NeverInvokesFactory()
     {
@@ -558,6 +672,10 @@ public class WindowManagerTests
 
     // ── SyncEachIsolated (PersistWindowsState's / SyncAllWindowsToModels' per-item isolation) ──────
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.SyncEachIsolated"/> syncs every entry when all sync calls
+    /// succeed.
+    /// </summary>
     [Fact]
     public void SyncEachIsolated_AllSucceed_SyncsEveryEntry()
     {
@@ -576,6 +694,11 @@ public class WindowManagerTests
         Assert.Equal(entries.Select(e => e.Model), synced);
     }
 
+    /// <summary>
+    /// Regression test for the Phase 7 / Block C M1 review finding: verifies that
+    /// <see cref="WindowManager.SyncEachIsolated"/> isolates a throwing entry, still syncs every other
+    /// entry, and never propagates the exception.
+    /// </summary>
     [Fact]
     public void SyncEachIsolated_OneOfSeveralThrows_SyncsTheRest_NeverPropagatesException()
     {
@@ -607,6 +730,10 @@ public class WindowManagerTests
         Assert.Equal([good1, good2], synced);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.SyncEachIsolated"/> does nothing for an empty entries
+    /// collection.
+    /// </summary>
     [Fact]
     public void SyncEachIsolated_EmptyWindows_DoesNothing()
     {
@@ -617,7 +744,128 @@ public class WindowManagerTests
         Assert.Equal(0, synced);
     }
 
-    // ── SaveWindowsState / SaveWindowsStateNow — persistence failures never escape ──────────────
+    // ── SaveWindowsState / SaveWindowsStateNow — thin delegates onto IApplicationStateService ────
+    //
+    // ADR-024 C6: the sync-then-serialize-then-write work (and its per-panel isolation / never-throws
+    // contract) moved entirely into ApplicationStateService.PersistNow() — the single writer for the
+    // whole shared document. WindowManager.SaveWindowsState()/SaveWindowsStateNow() are now pure
+    // delegates, so their own tests only need to prove the delegation; the sync-failure-isolation
+    // behaviour itself is covered by ApplicationStateServiceTests, and WindowManager.SyncEachIsolated's
+    // own per-item isolation is still covered directly above.
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.SaveWindowsState"/> delegates to
+    /// <see cref="IApplicationStateService.RequestSave"/>.
+    /// </summary>
+    [Fact]
+    public void SaveWindowsState_DelegatesToApplicationStateServiceRequestSave()
+    {
+        var manager = BuildWindowManager(out var applicationStateServiceMock);
+
+        manager.SaveWindowsState();
+
+        applicationStateServiceMock.Verify(s => s.RequestSave(), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.SaveWindowsStateNow"/> delegates to
+    /// <see cref="IApplicationStateService.SaveNow"/>.
+    /// </summary>
+    [Fact]
+    public void SaveWindowsStateNow_DelegatesToApplicationStateServiceSaveNow()
+    {
+        var manager = BuildWindowManager(out var applicationStateServiceMock);
+
+        manager.SaveWindowsStateNow();
+
+        applicationStateServiceMock.Verify(s => s.SaveNow(), Times.Once);
+    }
+
+    // ── LoadWindowsState — reads IApplicationStateService.Panels, per-item construction isolation ─
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.LoadWindowsState"/> does nothing and creates no windows
+    /// when <see cref="IApplicationStateService.Panels"/> is empty.
+    /// </summary>
+    [Fact]
+    public void LoadWindowsState_EmptyPanelsList_DoesNothing_NoWindowsCreated()
+    {
+        // Arrange — JSON validity/corruption recovery is entirely the store's concern now (ADR-024
+        // D-6/D-7); an empty Panels list is what a FirstRun/empty document looks like by the time it
+        // reaches WindowManager.
+        var manager = BuildWindowManager(panels: []);
+
+        // Act
+        var exception = Record.Exception(manager.LoadWindowsState);
+
+        // Assert
+        Assert.Null(exception);
+        Assert.Empty(manager.GetAllChildWindows());
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.LoadWindowsState"/> attempts to create a window for every
+    /// persisted panel without throwing, even though a headless test host cannot resolve a real WPF
+    /// <c>ChildWindow</c> (per-item construction is isolated instead).
+    /// </summary>
+    [Fact]
+    public void LoadWindowsState_PanelsPresent_CreatesAWindowForEach()
+    {
+        // Arrange
+        var panels = new List<ChildWindowModel> { new() { Title = "A" }, new() { Title = "B" } };
+        var manager = BuildWindowManager(panels: panels);
+
+        // Act — CreateChildWindow resolves a real WPF ChildWindow via DI, which the headless test
+        // service provider mock cannot supply, so panel construction is expected to fail per-item and
+        // be isolated (see CreateEachIsolated_* above) rather than throw out of LoadWindowsState.
+        var exception = Record.Exception(manager.LoadWindowsState);
+
+        // Assert
+        Assert.Null(exception);
+    }
+
+    // ── LoadWindowsState — ReportPartialLoad on skipped panels (ADR-024 finalization C-1) ─────────
+
+    /// <summary>
+    /// Regression test for the C-1 review finding: verifies that
+    /// <see cref="WindowManager.LoadWindowsState"/> reports a partial load via
+    /// <see cref="IApplicationStateService.ReportPartialLoad"/> when one or more panels fail to
+    /// construct, so the store can quarantine the just-loaded document before the next save.
+    /// </summary>
+    [Fact]
+    public void LoadWindowsState_SomePanelsFailToConstruct_ReportsPartialLoad()
+    {
+        // Regression test for the C-1 review finding: a per-panel construction failure must not
+        // silently vanish — WindowManager must tell IApplicationStateService so it can quarantine the
+        // just-loaded (still-complete) document before the next Save() persists a reduced one. In this
+        // headless test environment CreateChildWindow always fails (no real WPF ChildWindow registered
+        // on the mocked IServiceProvider — see LoadWindowsState_PanelsPresent_CreatesAWindowForEach
+        // above), so every panel here exercises exactly the skipped > 0 path.
+        var panels = new List<ChildWindowModel> { new() { Title = "A" }, new() { Title = "B" } };
+        var manager = BuildWindowManager(out var applicationStateServiceMock, panels: panels);
+
+        manager.LoadWindowsState();
+
+        applicationStateServiceMock.Verify(s => s.ReportPartialLoad(It.IsAny<string>()), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.LoadWindowsState"/> never reports a partial load when
+    /// <see cref="IApplicationStateService.Panels"/> is empty.
+    /// </summary>
+    [Fact]
+    public void LoadWindowsState_EmptyPanelsList_NeverReportsPartialLoad()
+    {
+        var manager = BuildWindowManager(out var applicationStateServiceMock, panels: []);
+
+        manager.LoadWindowsState();
+
+        applicationStateServiceMock.Verify(s => s.ReportPartialLoad(It.IsAny<string>()), Times.Never);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static MonitorInfo BuildMonitor(Rect workArea) =>
+        new("\\\\.\\DISPLAY1", workArea, workArea, IsPrimary: true);
 
     private static WindowManager BuildWindowManager(IReadOnlyList<ChildWindowModel>? panels = null)
         => BuildWindowManager(out _, panels);
@@ -644,97 +892,5 @@ public class WindowManagerTests
             itemStorageMock.Object,
             applicationStateServiceMock.Object,
             appSettingsMock.Object);
-    }
-
-    // ── SaveWindowsState / SaveWindowsStateNow — thin delegates onto IApplicationStateService ────
-    //
-    // ADR-024 C6: the sync-then-serialize-then-write work (and its per-panel isolation / never-throws
-    // contract) moved entirely into ApplicationStateService.PersistNow() — the single writer for the
-    // whole shared document. WindowManager.SaveWindowsState()/SaveWindowsStateNow() are now pure
-    // delegates, so their own tests only need to prove the delegation; the sync-failure-isolation
-    // behaviour itself is covered by ApplicationStateServiceTests, and WindowManager.SyncEachIsolated's
-    // own per-item isolation is still covered directly above.
-
-    [Fact]
-    public void SaveWindowsState_DelegatesToApplicationStateServiceRequestSave()
-    {
-        var manager = BuildWindowManager(out var applicationStateServiceMock);
-
-        manager.SaveWindowsState();
-
-        applicationStateServiceMock.Verify(s => s.RequestSave(), Times.Once);
-    }
-
-    [Fact]
-    public void SaveWindowsStateNow_DelegatesToApplicationStateServiceSaveNow()
-    {
-        var manager = BuildWindowManager(out var applicationStateServiceMock);
-
-        manager.SaveWindowsStateNow();
-
-        applicationStateServiceMock.Verify(s => s.SaveNow(), Times.Once);
-    }
-
-    // ── LoadWindowsState — reads IApplicationStateService.Panels, per-item construction isolation ─
-
-    [Fact]
-    public void LoadWindowsState_EmptyPanelsList_DoesNothing_NoWindowsCreated()
-    {
-        // Arrange — JSON validity/corruption recovery is entirely the store's concern now (ADR-024
-        // D-6/D-7); an empty Panels list is what a FirstRun/empty document looks like by the time it
-        // reaches WindowManager.
-        var manager = BuildWindowManager(panels: []);
-
-        // Act
-        var exception = Record.Exception(manager.LoadWindowsState);
-
-        // Assert
-        Assert.Null(exception);
-        Assert.Empty(manager.GetAllChildWindows());
-    }
-
-    [Fact]
-    public void LoadWindowsState_PanelsPresent_CreatesAWindowForEach()
-    {
-        // Arrange
-        var panels = new List<ChildWindowModel> { new() { Title = "A" }, new() { Title = "B" } };
-        var manager = BuildWindowManager(panels: panels);
-
-        // Act — CreateChildWindow resolves a real WPF ChildWindow via DI, which the headless test
-        // service provider mock cannot supply, so panel construction is expected to fail per-item and
-        // be isolated (see CreateEachIsolated_* above) rather than throw out of LoadWindowsState.
-        var exception = Record.Exception(manager.LoadWindowsState);
-
-        // Assert
-        Assert.Null(exception);
-    }
-
-    // ── LoadWindowsState — ReportPartialLoad on skipped panels (ADR-024 finalization C-1) ─────────
-
-    [Fact]
-    public void LoadWindowsState_SomePanelsFailToConstruct_ReportsPartialLoad()
-    {
-        // Regression test for the C-1 review finding: a per-panel construction failure must not
-        // silently vanish — WindowManager must tell IApplicationStateService so it can quarantine the
-        // just-loaded (still-complete) document before the next Save() persists a reduced one. In this
-        // headless test environment CreateChildWindow always fails (no real WPF ChildWindow registered
-        // on the mocked IServiceProvider — see LoadWindowsState_PanelsPresent_CreatesAWindowForEach
-        // above), so every panel here exercises exactly the skipped > 0 path.
-        var panels = new List<ChildWindowModel> { new() { Title = "A" }, new() { Title = "B" } };
-        var manager = BuildWindowManager(out var applicationStateServiceMock, panels: panels);
-
-        manager.LoadWindowsState();
-
-        applicationStateServiceMock.Verify(s => s.ReportPartialLoad(It.IsAny<string>()), Times.Once);
-    }
-
-    [Fact]
-    public void LoadWindowsState_EmptyPanelsList_NeverReportsPartialLoad()
-    {
-        var manager = BuildWindowManager(out var applicationStateServiceMock, panels: []);
-
-        manager.LoadWindowsState();
-
-        applicationStateServiceMock.Verify(s => s.ReportPartialLoad(It.IsAny<string>()), Times.Never);
     }
 }

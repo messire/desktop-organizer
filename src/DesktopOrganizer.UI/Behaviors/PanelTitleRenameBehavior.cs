@@ -102,6 +102,8 @@ public sealed class PanelTitleRenameBehavior
     }
 
     /// <summary>Handles <c>Enter</c> (commit) and <c>Escape</c> (cancel) within the title edit box.</summary>
+    /// <param name="sender">Unused; present to match the WPF key-event handler signature.</param>
+    /// <param name="e">The key event; <see cref="KeyEventArgs.Key"/> selects commit vs. cancel.</param>
     public void OnTitleEditBoxKeyDown(object sender, KeyEventArgs e)
     {
         switch (e.Key)
@@ -118,6 +120,8 @@ public sealed class PanelTitleRenameBehavior
     }
 
     /// <summary>Commits the rename when the edit box loses keyboard focus (click-away, Tab, etc.).</summary>
+    /// <param name="sender">The event source; unused.</param>
+    /// <param name="e">The keyboard-focus event data; unused, present only to match the WPF handler signature.</param>
     public void OnTitleEditBoxLostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
         => CommitRename();
 }

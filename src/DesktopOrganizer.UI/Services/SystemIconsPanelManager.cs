@@ -26,6 +26,31 @@ namespace DesktopOrganizer.UI.Services;
 internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDisposable
 {
     /// <summary>
+    /// Circuit breaker threshold for <see cref="PollVirtualDesktopOnce"/> (ON, "show on all virtual
+    /// desktops"). <c>MoveWindowToDesktop</c> answers <c>S_OK</c> even for windows the shell does not
+    /// track, where it is a silent no-op (measured, ADR-016 §E0.2). After this many consecutive "the
+    /// call succeeded but the window still is not on the active desktop" rounds the feature is
+    /// declared inapplicable to this window, the poll timer is stopped, and
+    /// <see cref="SystemIconsPanelModel.VirtualDesktopFeatureIneffective"/> is raised — otherwise the
+    /// app would ask the shell to do the impossible once a second, forever.
+    /// <see cref="EnforceAnchorDesktopOnce"/> (OFF) shares the same <see cref="_ineffectiveMoveCount"/>
+    /// field but is event-driven, not timer-driven, and never raises that flag (M1) — it uses
+    /// <see cref="SelfHealMinConsecutiveFailures"/> instead, a lower threshold, to gate its own
+    /// self-heal (see the self-heal comment there).
+    /// </summary>
+    private const int MaxIneffectiveMoves = 3;
+
+    /// <summary>
+    /// Minimum number of consecutive anchor-move failures required before
+    /// <see cref="EnforceAnchorDesktopOnce"/>'s self-heal (§3.3) is allowed to overwrite
+    /// <see cref="SystemIconsPanelModel.AnchorVirtualDesktopId"/> (M3). Deliberately lower than
+    /// <see cref="MaxIneffectiveMoves"/> and requires more than a single failure: a lone refusal or
+    /// no-op is not enough evidence that the anchor desktop was deleted (vs. a transient shell hiccup)
+    /// to justify silently discarding the user's real anchor.
+    /// </summary>
+    private const int SelfHealMinConsecutiveFailures = 2;
+
+    /// <summary>
     /// Poll interval for the "follow the active virtual desktop" feature. One second is the same
     /// order of magnitude as the Recycle Bin poll (ADR-007) and keeps the worst-case lag after a
     /// desktop switch to a single tick. A WinEvent hook was rejected on purpose: a second global
@@ -53,31 +78,6 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     /// </summary>
     private static readonly TimeSpan ZOrderReassertInterval = TimeSpan.FromMilliseconds(300);
 
-    /// <summary>
-    /// Circuit breaker threshold for <see cref="PollVirtualDesktopOnce"/> (ON, "show on all virtual
-    /// desktops"). <c>MoveWindowToDesktop</c> answers <c>S_OK</c> even for windows the shell does not
-    /// track, where it is a silent no-op (measured, ADR-016 §E0.2). After this many consecutive "the
-    /// call succeeded but the window still is not on the active desktop" rounds the feature is
-    /// declared inapplicable to this window, the poll timer is stopped, and
-    /// <see cref="SystemIconsPanelModel.VirtualDesktopFeatureIneffective"/> is raised — otherwise the
-    /// app would ask the shell to do the impossible once a second, forever.
-    /// <see cref="EnforceAnchorDesktopOnce"/> (OFF) shares the same <see cref="_ineffectiveMoveCount"/>
-    /// field but is event-driven, not timer-driven, and never raises that flag (M1) — it uses
-    /// <see cref="SelfHealMinConsecutiveFailures"/> instead, a lower threshold, to gate its own
-    /// self-heal (see the self-heal comment there).
-    /// </summary>
-    private const int MaxIneffectiveMoves = 3;
-
-    /// <summary>
-    /// Minimum number of consecutive anchor-move failures required before
-    /// <see cref="EnforceAnchorDesktopOnce"/>'s self-heal (§3.3) is allowed to overwrite
-    /// <see cref="SystemIconsPanelModel.AnchorVirtualDesktopId"/> (M3). Deliberately lower than
-    /// <see cref="MaxIneffectiveMoves"/> and requires more than a single failure: a lone refusal or
-    /// no-op is not enough evidence that the anchor desktop was deleted (vs. a transient shell hiccup)
-    /// to justify silently discarding the user's real anchor.
-    /// </summary>
-    private const int SelfHealMinConsecutiveFailures = 2;
-
     private readonly IApplicationStateService _applicationStateService;
     private readonly IDesktopIntegrationService _desktopIntegration;
     private readonly IMonitorService _monitorService;
@@ -90,8 +90,19 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     private int _ineffectiveMoveCount;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="SystemIconsPanelManager"/>.
+    /// Initializes a new instance of the <see cref="SystemIconsPanelManager"/> class.
     /// </summary>
+    /// <param name="applicationStateService">Persists and reloads the system-icons panel's state.</param>
+    /// <param name="desktopIntegration">
+    /// Applies the desktop tool-window styles (never <c>EmbedInDesktop</c> — see ADR-019) and re-sinks
+    /// the window in Z-order on a timer.
+    /// </param>
+    /// <param name="monitorService">Provides monitor topology; changes trigger re-placement.</param>
+    /// <param name="virtualDesktopService">Resolves/enforces which virtual desktop the panel appears on.</param>
+    /// <param name="windowFactory">
+    /// Creates a NEW <see cref="SystemIconsPanelWindow"/> on every (re)open — must not cache; the
+    /// previous instance is closed first.
+    /// </param>
     public SystemIconsPanelManager(
         IApplicationStateService applicationStateService,
         IDesktopIntegrationService desktopIntegration,
@@ -107,6 +118,9 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
 
         _monitorService.MonitorsChanged += OnMonitorsChanged;
     }
+
+    /// <inheritdoc />
+    public SystemIconsPanelModel Model { get; } = new();
 
     /// <summary>
     /// Exposed for tests: whether the virtual desktop poll timer is currently running.
@@ -132,9 +146,6 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     /// silent no-op) — reset to zero by either seam's next success.
     /// </summary>
     internal int IneffectiveMoveCount => _ineffectiveMoveCount;
-
-    /// <inheritdoc />
-    public SystemIconsPanelModel Model { get; } = new();
 
     /// <inheritdoc />
     /// <remarks>
@@ -228,90 +239,10 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     }
 
     // -------------------------------------------------------------------------
-    // Private helpers
+    // Internal helpers (exposed for tests / cross-cutting policy)
     // -------------------------------------------------------------------------
 
-    private void OpenPanel()
-    {
-        // Close any stale instance first (e.g. on monitor change)
-        ClosePanel();
-
-        try
-        {
-            _window = _windowFactory();
-            PositionWindow(_window);
-            _window.Show();
-
-            // ADR-019 §R0.5: the desktop-window styles must be applied strictly AFTER Show(), never
-            // from OnSourceInitialized. A top-level window that already carries WS_EX_TOOLWINDOW or
-            // WS_EX_NOACTIVATE at the moment it is first shown is excluded from the shell's virtual
-            // desktop tracking forever (GetWindowDesktopId -> S_OK + GUID_NULL), which would silently
-            // resurrect the original "setting does nothing" bug. Applying the same bits one
-            // instruction after Show() keeps the window tracked and movable.
-            var hwnd = new WindowInteropHelper(_window).Handle;
-            if (hwnd == IntPtr.Zero)
-            {
-                // No handle to style or place on a desktop — leaving a shown-but-unstyled window
-                // around would surface without TOOLWINDOW/NOACTIVATE (m4), so tear it down instead
-                // of returning with a live, half-configured `_window`.
-                try { _window.Close(); } catch { }
-                _window = null;
-                return;
-            }
-
-            _desktopIntegration.ApplyDesktopWindowStyles(hwnd);
-
-            // Sink the freshly shown window immediately instead of leaving it wherever Show() put it
-            // for up to one Z-order tick. The timer started by Apply() keeps it there afterwards.
-            SendPanelToBackOnce(hwnd);
-
-            // Run the ON/OFF virtual-desktop policy once immediately, rather than waiting up to a
-            // second for the first poll tick (§4.4 "мелочь-улучшение") — before this point the
-            // window was not yet tracked, so calling either seam earlier would have been a no-op.
-            ApplyVirtualDesktopPlacementOnce(hwnd);
-        }
-        catch
-        {
-            // Window creation/style failure — ensure VM is disposed before nulling field.
-            try { _window?.Close(); } catch { }
-            _window = null;
-        }
-    }
-
-    /// <summary>
-    /// Runs the ON/OFF virtual-desktop placement policy (§5) once, against the given panel window
-    /// handle: <see cref="PollVirtualDesktopOnce"/> while "show on all virtual desktops" is on,
-    /// <see cref="EnforceAnchorDesktopOnce"/> while it is off. Both seams degrade silently, so this
-    /// never throws.
-    /// </summary>
-    private void ApplyVirtualDesktopPlacementOnce(IntPtr hwnd)
-    {
-        if (Model.ShowOnAllVirtualDesktops)
-        {
-            PollVirtualDesktopOnce(hwnd);
-        }
-        else
-        {
-            EnforceAnchorDesktopOnce(hwnd);
-        }
-    }
-
-    private void ClosePanel()
-    {
-        // Stopped before the window reference is dropped: the tick handlers need a live window,
-        // and a timer left running against a closed panel is a leak (risk E-R4).
-        StopVirtualDesktopTimer();
-        StopZOrderTimer();
-
-        if (_window is null) return;
-        try { _window.Close(); }
-        catch { /* ignore */ }
-        _window = null;
-    }
-
-    // -------------------------------------------------------------------------
-    // Z-order: keep the panel behind ordinary application windows
-    // -------------------------------------------------------------------------
+    // Z-order: keep the panel behind ordinary application windows (pure policy)
 
     /// <summary>
     /// The Z-order timer policy as a pure function, so its truth table can be unit-tested without a
@@ -326,6 +257,48 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     /// <returns><see langword="true"/> when the Z-order timer should be running.</returns>
     internal static bool ShouldReassertZOrder(bool panelEnabled, bool hasWindow)
         => panelEnabled && hasWindow;
+
+    // Virtual desktop follow-me (Windows Task View, NOT physical monitors) (pure policy)
+
+    /// <summary>
+    /// The poll timer policy as a pure function, so the truth table can be unit-tested without a
+    /// WPF window: the timer runs only when the panel is on, the setting is on, a window exists and
+    /// the shell exposes a virtual desktop manager.
+    /// </summary>
+    /// <param name="panelEnabled">Whether the system icons panel itself is switched on.</param>
+    /// <param name="showOnAllVirtualDesktops">Whether the user asked the panel to follow them.</param>
+    /// <param name="hasWindow">Whether a live panel window exists to follow.</param>
+    /// <param name="virtualDesktopsSupported">Whether the virtual desktop COM object is available.</param>
+    /// <returns><see langword="true"/> when the poll timer should be running.</returns>
+    internal static bool ShouldPollVirtualDesktop(
+        bool panelEnabled,
+        bool showOnAllVirtualDesktops,
+        bool hasWindow,
+        bool virtualDesktopsSupported)
+        => panelEnabled && showOnAllVirtualDesktops && hasWindow && virtualDesktopsSupported;
+
+    // Virtual desktop anchor ("Desktop 1"), used while ShowOnAllVirtualDesktops is off (ADR-019 §3.2) (pure policy)
+
+    /// <summary>
+    /// Pure anchor-resolution policy (ADR-019 §3.2), unit-testable without any Win32/COM dependency.
+    /// </summary>
+    /// <param name="persisted">Last anchor written to settings, or <see langword="null"/>.</param>
+    /// <param name="systemDefault">
+    /// Result of <see cref="IVirtualDesktopService.TryGetDefaultDesktopId"/> — the authoritative
+    /// "Desktop 1" probe (R2). When available it always overrides <paramref name="persisted"/>.
+    /// </param>
+    /// <param name="panelCurrent">
+    /// The panel's own current desktop (R1 heuristic) — used only when neither of the above is
+    /// available, i.e. on the very first capture with R2 unavailable.
+    /// </param>
+    /// <returns>
+    /// The resolved anchor, or <see langword="null"/> when all three sources are
+    /// <see langword="null"/> — callers must not guess in that case.
+    /// </returns>
+    internal static Guid? ResolveAnchorDesktopId(Guid? persisted, Guid? systemDefault, Guid? panelCurrent)
+        => systemDefault ?? persisted ?? panelCurrent;
+
+    // Z-order: keep the panel behind ordinary application windows (tick body + timer core)
 
     /// <summary>
     /// One Z-order step, extracted from the timer so it can be unit-tested against a mocked
@@ -347,12 +320,6 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
             // Degrade silently — a panel that briefly sits too high is cosmetic, a crash is not.
         }
     }
-
-    /// <summary>
-    /// Starts or stops the Z-order timer according to <see cref="ShouldReassertZOrder"/>, reading the
-    /// two inputs off the live state.
-    /// </summary>
-    private void UpdateZOrderTimer() => UpdateZOrderTimerCore(Model.IsEnabled, _window is not null);
 
     /// <summary>
     /// The timer's start/stop lifecycle with its two inputs passed in rather than read off
@@ -382,106 +349,7 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
         _zOrderTimer.Start();
     }
 
-    private void StopZOrderTimer() => _zOrderTimer?.Stop();
-
-    private void DisposeZOrderTimer()
-    {
-        if (_zOrderTimer is null) return;
-
-        _zOrderTimer.Stop();
-        _zOrderTimer.Tick -= OnZOrderTick;
-        _zOrderTimer = null;
-    }
-
-    private void OnZOrderTick(object? sender, EventArgs e)
-    {
-        if (_window is null || !Model.IsEnabled)
-        {
-            StopZOrderTimer();
-            return;
-        }
-
-        SendPanelToBackOnce(new WindowInteropHelper(_window).Handle);
-    }
-
-    // -------------------------------------------------------------------------
-    // Virtual desktop follow-me (Windows Task View, NOT physical monitors)
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// The poll timer policy as a pure function, so the truth table can be unit-tested without a
-    /// WPF window: the timer runs only when the panel is on, the setting is on, a window exists and
-    /// the shell exposes a virtual desktop manager.
-    /// </summary>
-    /// <param name="panelEnabled">Whether the system icons panel itself is switched on.</param>
-    /// <param name="showOnAllVirtualDesktops">Whether the user asked the panel to follow them.</param>
-    /// <param name="hasWindow">Whether a live panel window exists to follow.</param>
-    /// <param name="virtualDesktopsSupported">Whether the virtual desktop COM object is available.</param>
-    /// <returns><see langword="true"/> when the poll timer should be running.</returns>
-    internal static bool ShouldPollVirtualDesktop(
-        bool panelEnabled,
-        bool showOnAllVirtualDesktops,
-        bool hasWindow,
-        bool virtualDesktopsSupported)
-        => panelEnabled && showOnAllVirtualDesktops && hasWindow && virtualDesktopsSupported;
-
-    /// <summary>
-    /// Starts or stops the poll timer according to <see cref="ShouldPollVirtualDesktop"/>.
-    /// Called on every <see cref="Apply"/> / <see cref="ApplyVirtualDesktopSetting"/>, which is what
-    /// the settings UI triggers on each toggle.
-    /// </summary>
-    private void UpdateVirtualDesktopTimer()
-    {
-        var panelEnabled = Model.IsEnabled;
-        var followSetting = Model.ShowOnAllVirtualDesktops;
-        var hasWindow = _window is not null;
-
-        // IsSupported activates the COM object on first use, so it is probed only once the three
-        // cheap flags already allow polling.
-        var supported = panelEnabled
-                        && followSetting
-                        && hasWindow
-                        && _virtualDesktopService.IsSupported;
-
-        var shouldRun = ShouldPollVirtualDesktop(panelEnabled, followSetting, hasWindow, supported);
-
-        if (!shouldRun)
-        {
-            StopVirtualDesktopTimer();
-            return;
-        }
-
-        if (_virtualDesktopTimer is null)
-        {
-            _virtualDesktopTimer = new DispatcherTimer { Interval = VirtualDesktopPollInterval };
-            _virtualDesktopTimer.Tick += OnVirtualDesktopTick;
-        }
-
-        _virtualDesktopTimer.Start();
-    }
-
-    private void StopVirtualDesktopTimer() => _virtualDesktopTimer?.Stop();
-
-    private void DisposeVirtualDesktopTimer()
-    {
-        if (_virtualDesktopTimer is null) return;
-
-        _virtualDesktopTimer.Stop();
-        _virtualDesktopTimer.Tick -= OnVirtualDesktopTick;
-        _virtualDesktopTimer = null;
-    }
-
-    private void OnVirtualDesktopTick(object? sender, EventArgs e)
-    {
-        if (_window is null || !Model.IsEnabled || !Model.ShowOnAllVirtualDesktops)
-        {
-            StopVirtualDesktopTimer();
-            return;
-        }
-
-        var hwnd = new WindowInteropHelper(_window).Handle;
-        PollVirtualDesktopOnce(hwnd);
-    }
+    // Virtual desktop follow-me (Windows Task View, NOT physical monitors) (tick body)
 
     /// <summary>
     /// One poll step, extracted from the timer so it can be unit-tested against mocks:
@@ -535,28 +403,7 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Virtual desktop anchor ("Desktop 1"), used while ShowOnAllVirtualDesktops is off (ADR-019 §3.2)
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Pure anchor-resolution policy (ADR-019 §3.2), unit-testable without any Win32/COM dependency.
-    /// </summary>
-    /// <param name="persisted">Last anchor written to settings, or <see langword="null"/>.</param>
-    /// <param name="systemDefault">
-    /// Result of <see cref="IVirtualDesktopService.TryGetDefaultDesktopId"/> — the authoritative
-    /// "Desktop 1" probe (R2). When available it always overrides <paramref name="persisted"/>.
-    /// </param>
-    /// <param name="panelCurrent">
-    /// The panel's own current desktop (R1 heuristic) — used only when neither of the above is
-    /// available, i.e. on the very first capture with R2 unavailable.
-    /// </param>
-    /// <returns>
-    /// The resolved anchor, or <see langword="null"/> when all three sources are
-    /// <see langword="null"/> — callers must not guess in that case.
-    /// </returns>
-    internal static Guid? ResolveAnchorDesktopId(Guid? persisted, Guid? systemDefault, Guid? panelCurrent)
-        => systemDefault ?? persisted ?? panelCurrent;
+    // Virtual desktop anchor ("Desktop 1"), used while ShowOnAllVirtualDesktops is off (ADR-019 §3.2) (enforcement step)
 
     /// <summary>
     /// Ensures the panel sits on its anchor desktop, resolving/persisting the anchor first if
@@ -661,6 +508,177 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
+    private void OpenPanel()
+    {
+        // Close any stale instance first (e.g. on monitor change)
+        ClosePanel();
+
+        try
+        {
+            _window = _windowFactory();
+            PositionWindow(_window);
+            _window.Show();
+
+            // ADR-019 §R0.5: the desktop-window styles must be applied strictly AFTER Show(), never
+            // from OnSourceInitialized. A top-level window that already carries WS_EX_TOOLWINDOW or
+            // WS_EX_NOACTIVATE at the moment it is first shown is excluded from the shell's virtual
+            // desktop tracking forever (GetWindowDesktopId -> S_OK + GUID_NULL), which would silently
+            // resurrect the original "setting does nothing" bug. Applying the same bits one
+            // instruction after Show() keeps the window tracked and movable.
+            var hwnd = new WindowInteropHelper(_window).Handle;
+            if (hwnd == IntPtr.Zero)
+            {
+                // No handle to style or place on a desktop — leaving a shown-but-unstyled window
+                // around would surface without TOOLWINDOW/NOACTIVATE (m4), so tear it down instead
+                // of returning with a live, half-configured `_window`.
+                try { _window.Close(); } catch { }
+                _window = null;
+                return;
+            }
+
+            _desktopIntegration.ApplyDesktopWindowStyles(hwnd);
+
+            // Sink the freshly shown window immediately instead of leaving it wherever Show() put it
+            // for up to one Z-order tick. The timer started by Apply() keeps it there afterwards.
+            SendPanelToBackOnce(hwnd);
+
+            // Run the ON/OFF virtual-desktop policy once immediately, rather than waiting up to a
+            // second for the first poll tick (§4.4 "мелочь-улучшение") — before this point the
+            // window was not yet tracked, so calling either seam earlier would have been a no-op.
+            ApplyVirtualDesktopPlacementOnce(hwnd);
+        }
+        catch
+        {
+            // Window creation/style failure — ensure VM is disposed before nulling field.
+            try { _window?.Close(); } catch { }
+            _window = null;
+        }
+    }
+
+    /// <summary>
+    /// Runs the ON/OFF virtual-desktop placement policy (§5) once, against the given panel window
+    /// handle: <see cref="PollVirtualDesktopOnce"/> while "show on all virtual desktops" is on,
+    /// <see cref="EnforceAnchorDesktopOnce"/> while it is off. Both seams degrade silently, so this
+    /// never throws.
+    /// </summary>
+    private void ApplyVirtualDesktopPlacementOnce(IntPtr hwnd)
+    {
+        if (Model.ShowOnAllVirtualDesktops)
+        {
+            PollVirtualDesktopOnce(hwnd);
+        }
+        else
+        {
+            EnforceAnchorDesktopOnce(hwnd);
+        }
+    }
+
+    private void ClosePanel()
+    {
+        // Stopped before the window reference is dropped: the tick handlers need a live window,
+        // and a timer left running against a closed panel is a leak (risk E-R4).
+        StopVirtualDesktopTimer();
+        StopZOrderTimer();
+
+        if (_window is null) return;
+        try { _window.Close(); }
+        catch { /* ignore */ }
+        _window = null;
+    }
+
+    // Z-order: keep the panel behind ordinary application windows (timer lifecycle)
+
+    /// <summary>
+    /// Starts or stops the Z-order timer according to <see cref="ShouldReassertZOrder"/>, reading the
+    /// two inputs off the live state.
+    /// </summary>
+    private void UpdateZOrderTimer() => UpdateZOrderTimerCore(Model.IsEnabled, _window is not null);
+
+    private void StopZOrderTimer() => _zOrderTimer?.Stop();
+
+    private void DisposeZOrderTimer()
+    {
+        if (_zOrderTimer is null) return;
+
+        _zOrderTimer.Stop();
+        _zOrderTimer.Tick -= OnZOrderTick;
+        _zOrderTimer = null;
+    }
+
+    private void OnZOrderTick(object? sender, EventArgs e)
+    {
+        if (_window is null || !Model.IsEnabled)
+        {
+            StopZOrderTimer();
+            return;
+        }
+
+        SendPanelToBackOnce(new WindowInteropHelper(_window).Handle);
+    }
+
+    // Virtual desktop follow-me (Windows Task View, NOT physical monitors) (timer lifecycle)
+
+    /// <summary>
+    /// Starts or stops the poll timer according to <see cref="ShouldPollVirtualDesktop"/>.
+    /// Called on every <see cref="Apply"/> / <see cref="ApplyVirtualDesktopSetting"/>, which is what
+    /// the settings UI triggers on each toggle.
+    /// </summary>
+    private void UpdateVirtualDesktopTimer()
+    {
+        var panelEnabled = Model.IsEnabled;
+        var followSetting = Model.ShowOnAllVirtualDesktops;
+        var hasWindow = _window is not null;
+
+        // IsSupported activates the COM object on first use, so it is probed only once the three
+        // cheap flags already allow polling.
+        var supported = panelEnabled
+                        && followSetting
+                        && hasWindow
+                        && _virtualDesktopService.IsSupported;
+
+        var shouldRun = ShouldPollVirtualDesktop(panelEnabled, followSetting, hasWindow, supported);
+
+        if (!shouldRun)
+        {
+            StopVirtualDesktopTimer();
+            return;
+        }
+
+        if (_virtualDesktopTimer is null)
+        {
+            _virtualDesktopTimer = new DispatcherTimer { Interval = VirtualDesktopPollInterval };
+            _virtualDesktopTimer.Tick += OnVirtualDesktopTick;
+        }
+
+        _virtualDesktopTimer.Start();
+    }
+
+    private void StopVirtualDesktopTimer() => _virtualDesktopTimer?.Stop();
+
+    private void DisposeVirtualDesktopTimer()
+    {
+        if (_virtualDesktopTimer is null) return;
+
+        _virtualDesktopTimer.Stop();
+        _virtualDesktopTimer.Tick -= OnVirtualDesktopTick;
+        _virtualDesktopTimer = null;
+    }
+
+    private void OnVirtualDesktopTick(object? sender, EventArgs e)
+    {
+        if (_window is null || !Model.IsEnabled || !Model.ShowOnAllVirtualDesktops)
+        {
+            StopVirtualDesktopTimer();
+            return;
+        }
+
+        var hwnd = new WindowInteropHelper(_window).Handle;
+        PollVirtualDesktopOnce(hwnd);
+    }
+
     /// <summary>
     /// Clears the "this feature does nothing on this system" latch so an explicit user action
     /// (toggling the setting, re-enabling the panel) gets a fresh set of attempts.
@@ -671,6 +689,7 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
         Model.VirtualDesktopFeatureIneffective = false;
     }
 
+    // Window placement / monitor changes
     private void PositionWindow(Window window)
     {
         var primary = _monitorService.GetPrimaryMonitor();

@@ -14,7 +14,7 @@ namespace DesktopOrganizer.Tests.Helpers;
 /// (<see cref="System.Windows.Size"/>/<see cref="System.Windows.Point"/>/<see cref="System.Windows.Rect"/>),
 /// never a full <see cref="System.Windows.FrameworkElement"/>/<see cref="System.Windows.Controls.Panel"/>).
 /// No third-party STA test package (e.g. <c>Xunit.StaFact</c>) is referenced by this project — this class
-/// is a small, dependency-free stand-in: it runs <paramref name="action"/> on a dedicated
+/// is a small, dependency-free stand-in: it runs <c>action</c> on a dedicated
 /// <see cref="ApartmentState.STA"/> thread (the apartment WPF layout/visual code is documented to
 /// require), joins it, and re-throws any exception on the CALLING (xUnit) thread with its original stack
 /// trace preserved (<see cref="ExceptionDispatchInfo"/>) so a failure still surfaces as a normal, readable
@@ -26,10 +26,10 @@ namespace DesktopOrganizer.Tests.Helpers;
 /// (1) the worker thread is now a background thread (<see cref="Thread.IsBackground"/>), so a future test
 /// body that (deliberately or accidentally) starts a <see cref="Dispatcher.Run"/> message pump and never
 /// exits it can no longer keep the ENTIRE test-runner PROCESS alive after the run otherwise finishes; (2)
-/// <see cref="Thread.Join()"/> now has a bounded timeout (<see cref="JoinTimeout"/>) and throws a
+/// <see cref="Thread.Join()"/> now has a bounded timeout (<see cref="CompletionTimeout"/>) and throws a
 /// diagnosable <see cref="TimeoutException"/> instead of blocking the calling (xUnit) thread forever if
 /// the worker thread ever deadlocks; (3) any <see cref="Dispatcher"/> lazily created for the STA thread
-/// during <paramref name="action"/> (every <see cref="System.Windows.DependencyObject"/> touches
+/// during <c>action</c> (every <see cref="System.Windows.DependencyObject"/> touches
 /// <see cref="Dispatcher.CurrentDispatcher"/> on first use, which creates one on demand if none exists
 /// yet for the calling thread) is now explicitly shut down (<see cref="Dispatcher.InvokeShutdown"/>) in a
 /// <see langword="finally"/> block before the thread exits, so its underlying resources (a hidden

@@ -79,8 +79,14 @@ internal interface IActivationServer
 internal interface IActivationClient
 {
     /// <summary>
-    /// Connects, sends <paramref name="request"/>, and waits for a response — all bounded by
-    /// <paramref name="connectTimeout"/>. Never blocks indefinitely and never throws.
+    /// Connects, sends <paramref name="request"/>, and waits for a response. Never blocks indefinitely
+    /// and never throws.
     /// </summary>
+    /// <param name="request">The activation request to send.</param>
+    /// <param name="connectTimeout">
+    /// Upper bound on the connect step. The subsequent write and read are bounded by a separate budget
+    /// of the same duration, so the worst case for the whole call is approximately
+    /// 2 × <paramref name="connectTimeout"/>.
+    /// </param>
     ActivationSendResult TrySend(ActivationRequest request, TimeSpan connectTimeout);
 }

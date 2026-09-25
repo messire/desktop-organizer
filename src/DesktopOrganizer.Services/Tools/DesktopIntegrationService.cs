@@ -5,15 +5,13 @@ namespace DesktopOrganizer.Services.Tools;
 /// <inheritdoc />
 internal class DesktopIntegrationService(INativeApi nativeApi) : IDesktopIntegrationService
 {
-    private const uint ProgmanMsg   = 0x052C;
-    private const int  GwlExStyle   = -20;
+    private const uint ProgmanMsg = 0x052C;
+    private const int GwlExStyle = -20;
     private const uint WsExToolWindow = 0x00000080;
     private const uint WsExNoActivate = 0x08000000;
 
-    // SetWindowPos: place the window just above the shell desktop window, changing nothing else.
-    private static readonly IntPtr HwndBottom = new (1);
-    private const uint SwpNoSize     = 0x0001;
-    private const uint SwpNoMove     = 0x0002;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
     private const uint SwpNoActivate = 0x0010;
 
     /// <summary>
@@ -47,6 +45,9 @@ internal class DesktopIntegrationService(INativeApi nativeApi) : IDesktopIntegra
     /// this timer-driven lookup into an unbounded loop on the UI thread.
     /// </summary>
     private const int MaxDesktopBandWalk = 8;
+
+    // SetWindowPos: place the window just above the shell desktop window, changing nothing else.
+    private static readonly IntPtr HwndBottom = new (1);
 
     /// <inheritdoc />
     public void EmbedInDesktop(IntPtr hwnd)
@@ -241,7 +242,8 @@ internal class DesktopIntegrationService(INativeApi nativeApi) : IDesktopIntegra
 
         IntPtr workerW = IntPtr.Zero;
 
-        nativeApi.EnumWindows((hwnd, _) =>
+        nativeApi.EnumWindows(
+            (hwnd, _) =>
         {
             // WorkerW is the top-level window whose child is SHELLDLL_DefView
             var defView = nativeApi.FindWindowEx(hwnd, IntPtr.Zero, "SHELLDLL_DefView", null);

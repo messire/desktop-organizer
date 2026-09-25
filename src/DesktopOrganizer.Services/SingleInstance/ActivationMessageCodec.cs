@@ -42,6 +42,7 @@ public static class ActivationMessageCodec
     /// <summary>
     /// Encodes an activation request as <c>"DO/&lt;version&gt; ACTIVATE_SETTINGS s=&lt;sessionId&gt;\n"</c>.
     /// </summary>
+    /// <param name="request">The request to encode.</param>
     public static string EncodeRequest(ActivationRequest request)
     {
         var verb = request.Command switch
@@ -114,6 +115,7 @@ public static class ActivationMessageCodec
     }
 
     /// <summary>Encodes a response as <c>"DO/&lt;version&gt; &lt;WORD&gt;\n"</c>.</summary>
+    /// <param name="code">The response code to encode.</param>
     public static string EncodeResponse(ActivationResponseCode code)
     {
         var word = code switch
@@ -134,6 +136,8 @@ public static class ActivationMessageCodec
     /// caller (the handshake client) is expected to map that to
     /// <see cref="ActivationSendResult.ProtocolError"/>.
     /// </summary>
+    /// <param name="line">The raw line, with or without a trailing <c>\n</c>/<c>\r\n</c>.</param>
+    /// <param name="code">The decoded response code when this method returns <see langword="true"/>.</param>
     public static bool TryDecodeResponse(string line, out ActivationResponseCode code)
     {
         ArgumentNullException.ThrowIfNull(line);

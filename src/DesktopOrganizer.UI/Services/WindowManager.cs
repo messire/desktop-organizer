@@ -243,17 +243,6 @@ public class WindowManager : IWindowManager
         model.MonitorDeviceId = monitor.DeviceName;
     }
 
-    /// <summary>
-    /// Every live panel's rectangle — <see cref="CollectOtherPanelBounds"/> with no panel excluded
-    /// (a not-yet-created panel has no id in <see cref="_childWindows"/> to exclude).
-    /// </summary>
-    private List<Rect> CollectAllPanelBounds()
-    {
-        var bounds = new List<Rect>();
-        CollectOtherPanelBounds(excludingId: null, bounds);
-        return bounds;
-    }
-
     /// <inheritdoc />
     public void RemoveChildWindow(Guid windowId) => RemoveChildWindow(windowId, releaseManagedItems: false);
 
@@ -317,6 +306,106 @@ public class WindowManager : IWindowManager
             SaveWindowsStateNow();
     }
 
+    /// <inheritdoc />
+    public IEnumerable<ChildWindowModel> GetAllChildWindows()
+        => _childWindows.Values.Select(entry => entry.Model);
+
+    /// <inheritdoc />
+    public void SaveWindowsState() => _applicationStateService.RequestSave();
+
+    /// <inheritdoc />
+    public void SaveWindowsStateNow() => _applicationStateService.SaveNow();
+
+    /// <inheritdoc />
+    public void SyncAllWindowsToModels() => SyncEachIsolated(_childWindows.Values, e => e.Window.SyncToModel());
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Reads <see cref="IApplicationStateService.Panels"/> — the already-loaded, already-migrated
+    /// panel list from the single <c>ApplicationStateService.Load()</c> call in <c>Program.Main</c>
+    /// (ADR-024 D-11) — rather than parsing JSON off <c>Properties.Settings</c> itself. JSON validity,
+    /// corruption recovery and quarantine are entirely the store's concern now (ADR-024 D-6/D-7); the
+    /// per-item isolation below only ever guards against a well-formed panel failing to <em>construct</em>
+    /// (e.g. <c>ResolveMonitorPlacement</c>/DI throwing), which is a WindowManager-level concern the
+    /// store cannot see.
+    /// </remarks>
+    public void LoadWindowsState()
+    {
+        var states = _applicationStateService.Panels;
+        if (states.Count == 0) return;
+
+        // M1 fix (P08 fix cycle 1, 2026-09-22): resolve stale original->managed remaps across ALL
+        // panels up front, before any of them is constructed — see ResolveStalePanelPaths' remarks for
+        // why this must run here rather than inside each panel's own ChildWindowViewModel.LoadFromModel.
+        ResolveStalePanelPaths(states, _itemStorage);
+
+        var skipped = CreateEachIsolated(states, state => CreateChildWindow(state));
+        if (skipped > 0)
+        {
+            Console.Error.WriteLine($"Skipped {skipped} corrupt saved panel(s) out of {states.Count} while loading window state.");
+
+            // ADR-024 finalization C-1: a skipped panel means whatever gets persisted next reflects
+            // fewer panels than the document ApplicationStateService.Load() actually returned. Without
+            // this, the first Save() after this load (any user action — a single drag) would silently
+            // overwrite the on-disk primary with the reduced set, and the next Save() after that would
+            // overwrite .bak too, permanently losing the skipped panel(s) with nothing but a
+            // Console.Error line as a trace. ReportPartialLoad preserves the still-complete on-disk
+            // document in quarantine before that first overwrite can happen.
+            _applicationStateService.ReportPartialLoad("PartialPanelLoad");
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Not practically unit-testable end-to-end for the same reason as <see cref="OnMonitorsChanged"/>:
+    /// <see cref="_childWindows"/> only gets populated via <see cref="CreateChildWindow"/>, which resolves
+    /// a real WPF <see cref="ChildWindow"/> through DI. The per-panel math itself
+    /// (<see cref="NormalizeLegacyFreeformToGridSize"/>/<see cref="NormalizeGridAlignedToGridSize"/>) is
+    /// covered directly; this loop's own wiring is manual verify (Win10/Win11).
+    /// </remarks>
+    public void NormalizePanelsToGrid()
+    {
+        if (_childWindows.Count == 0) return;
+
+        var gridSize = _appSettings.GridSize;
+        if (gridSize <= 1) return;
+
+        var anyChanged = false;
+
+        foreach (var (window, model) in _childWindows.Values)
+        {
+            var monitor = !string.IsNullOrEmpty(model.MonitorDeviceId)
+                ? _monitorService.FindByDeviceName(model.MonitorDeviceId)
+                : null;
+            monitor ??= _monitorService.FindMonitorAt(new System.Windows.Point(model.Position.X, model.Position.Y))
+                        ?? _monitorService.GetPrimaryMonitor();
+
+            if (ResolveGridAlignedBounds(model, monitor) is { } bounds)
+            {
+                var normalized = NormalizeGridAlignedToGridSize(model, bounds, monitor, gridSize);
+                if (normalized == bounds) continue;
+
+                window.ApplyWorkspaceGridGeometry(normalized, span: null, monitorDeviceId: null);
+                anyChanged = true;
+                continue;
+            }
+
+            if (!NormalizeLegacyFreeformToGridSize(model, monitor, gridSize)) continue;
+
+            anyChanged = true;
+            window.Left = model.Position.X;
+            window.Top = model.Position.Y;
+
+            if (!model.IsRolledUp)
+            {
+                window.Width = model.Size.Width;
+                window.Height = model.Size.Height;
+            }
+        }
+
+        if (anyChanged) SaveWindowsStateNow();
+    }
+
     /// <summary>
     /// Releases every app-managed item copy referenced by <paramref name="model"/>'s
     /// <see cref="ChildWindowModel.FilePaths"/>. Folder Portal panels have no persisted
@@ -326,8 +415,10 @@ public class WindowManager : IWindowManager
     /// <remarks>
     /// Internal (rather than <see langword="private"/>) solely so <c>DesktopOrganizer.Tests</c> can
     /// unit test this pure model+storage logic directly, without needing a real WPF <c>ChildWindow</c>
-    /// (which <see cref="RemoveChildWindow"/> otherwise requires via DI).
+    /// (which <see cref="RemoveChildWindow(Guid, bool)"/> otherwise requires via DI).
     /// </remarks>
+    /// <param name="model">The panel model whose <see cref="ChildWindowModel.FilePaths"/> are released.</param>
+    /// <param name="storage">Releases the app-managed item copies.</param>
     internal static void ReleaseManagedItems(ChildWindowModel model, IPanelItemStorageService storage)
     {
         foreach (var path in model.FilePaths)
@@ -346,6 +437,9 @@ public class WindowManager : IWindowManager
     /// solely so <c>DesktopOrganizer.Tests</c> can directly assert that the flag controls the release
     /// call, without needing a real WPF <c>ChildWindow</c>.
     /// </summary>
+    /// <param name="model">The panel model whose managed items may be released.</param>
+    /// <param name="storage">Releases the app-managed item copies.</param>
+    /// <param name="releaseManagedItems">Whether the caller actually wants the release to happen.</param>
     internal static void ReleaseManagedItemsIfRequested(ChildWindowModel model, IPanelItemStorageService storage, bool releaseManagedItems)
     {
         if (releaseManagedItems)
@@ -399,7 +493,7 @@ public class WindowManager : IWindowManager
     /// candidate; the second applies the remap only for candidates with a tally of exactly one. Every
     /// contested entry is simply left stale — same as an ambiguous manifest or an already-claimed
     /// candidate — which degrades to a visible gray placeholder or generic-by-extension icon
-    /// (<see cref="Providers.IconProvider"/>'s missing-path fallback, UX P1), never a silently wrong one.
+    /// (<c>IconProvider</c>'s missing-path fallback, UX P1), never a silently wrong one.
     /// </remarks>
     internal static void ResolveStalePanelPaths(IEnumerable<ChildWindowModel> states, IPanelItemStorageService storage)
     {
@@ -456,55 +550,6 @@ public class WindowManager : IWindowManager
 
             panel.FilePaths[index] = candidate;
             claimed.Add(candidate);
-        }
-    }
-
-    /// <inheritdoc />
-    public IEnumerable<ChildWindowModel> GetAllChildWindows()
-        => _childWindows.Values.Select(entry => entry.Model);
-
-    /// <inheritdoc />
-    public void SaveWindowsState() => _applicationStateService.RequestSave();
-
-    /// <inheritdoc />
-    public void SaveWindowsStateNow() => _applicationStateService.SaveNow();
-
-    /// <inheritdoc />
-    public void SyncAllWindowsToModels() => SyncEachIsolated(_childWindows.Values, e => e.Window.SyncToModel());
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Reads <see cref="IApplicationStateService.Panels"/> — the already-loaded, already-migrated
-    /// panel list from the single <c>ApplicationStateService.Load()</c> call in <c>Program.Main</c>
-    /// (ADR-024 D-11) — rather than parsing JSON off <c>Properties.Settings</c> itself. JSON validity,
-    /// corruption recovery and quarantine are entirely the store's concern now (ADR-024 D-6/D-7); the
-    /// per-item isolation below only ever guards against a well-formed panel failing to <em>construct</em>
-    /// (e.g. <c>ResolveMonitorPlacement</c>/DI throwing), which is a WindowManager-level concern the
-    /// store cannot see.
-    /// </remarks>
-    public void LoadWindowsState()
-    {
-        var states = _applicationStateService.Panels;
-        if (states.Count == 0) return;
-
-        // M1 fix (P08 fix cycle 1, 2026-09-22): resolve stale original->managed remaps across ALL
-        // panels up front, before any of them is constructed — see ResolveStalePanelPaths' remarks for
-        // why this must run here rather than inside each panel's own ChildWindowViewModel.LoadFromModel.
-        ResolveStalePanelPaths(states, _itemStorage);
-
-        var skipped = CreateEachIsolated(states, state => CreateChildWindow(state));
-        if (skipped > 0)
-        {
-            Console.Error.WriteLine($"Skipped {skipped} corrupt saved panel(s) out of {states.Count} while loading window state.");
-
-            // ADR-024 finalization C-1: a skipped panel means whatever gets persisted next reflects
-            // fewer panels than the document ApplicationStateService.Load() actually returned. Without
-            // this, the first Save() after this load (any user action — a single drag) would silently
-            // overwrite the on-disk primary with the reduced set, and the next Save() after that would
-            // overwrite .bak too, permanently losing the skipped panel(s) with nothing but a
-            // Console.Error line as a trace. ReportPartialLoad preserves the still-complete on-disk
-            // document in quarantine before that first overwrite can happen.
-            _applicationStateService.ReportPartialLoad("PartialPanelLoad");
         }
     }
 
@@ -570,6 +615,252 @@ public class WindowManager : IWindowManager
         }
     }
 
+    /// <summary>
+    /// The <see cref="PanelGeometryMode.GridAligned"/> half of <see cref="ResolveMonitorPlacement"/> and
+    /// <see cref="OnMonitorsChanged"/> (P03-W1/W3): re-derives the panel's bounds from its spans against
+    /// <paramref name="monitor"/>'s CURRENT work area, or returns <see langword="null"/> when this panel
+    /// is not (or cannot currently be treated as) grid-aligned and the caller must fall back to the
+    /// unchanged <see cref="ClampIntoMonitor"/> path.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately routed through <see cref="PanelGridStateResolver.Resolve"/> with a ONE-ELEMENT monitor
+    /// list: that resolver is the single place <see cref="ChildWindowModel.GeometryMode"/> may be read
+    /// (Инвариант В1) and the single place a <see cref="PanelGeometryMode.GridAligned"/> panel with
+    /// missing spans lazily acquires them. Passing only <paramref name="monitor"/> keeps this method's own
+    /// "which monitor" decision authoritative — the resolver's monitor-resolution order (device id →
+    /// center → first) cannot second-guess a caller that has already applied the "stored monitor gone →
+    /// primary" rule (M4, unchanged by ADR-028).
+    /// </para>
+    /// <para>
+    /// The result is idempotent by construction (<c>SpansToBounds</c> is a pure function of the span, and
+    /// <c>SnapPosition</c> + the grid-aware <c>SafeClamp</c> are both idempotent), which matters because
+    /// <c>WM_SETTINGCHANGE</c> raises <c>MonitorsChanged</c> for something as ordinary as a theme change:
+    /// re-running this on an unchanged configuration must move nothing (R-9).
+    /// </para>
+    /// </remarks>
+    /// <param name="model">The panel to place.</param>
+    /// <param name="monitor">The monitor the caller has already decided this panel belongs to.</param>
+    /// <returns>The panel's bounds in <c>Window.Left</c>/<c>Top</c> space, or <see langword="null"/> for the legacy path.</returns>
+    internal static Rect? ResolveGridAlignedBounds(ChildWindowModel model, MonitorInfo monitor)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(monitor);
+
+        var persisted = new Rect(
+            model.Position.X,
+            model.Position.Y,
+            Math.Max(0, model.Size.Width),
+            Math.Max(0, model.Size.Height));
+
+        var state = PanelGridStateResolver.Resolve(
+            model,
+            persisted,
+            [(monitor.DeviceName, monitor.Bounds, monitor.WorkArea)],
+            model.IsRolledUp);
+
+        if (!state.IsGridAligned) return null;
+        if (model.WidthSpanUnits is not { } widthUnits || model.HeightSpanUnits is not { } heightUnits) return null;
+
+        var size = WorkspaceLayoutPolicy.SpansToBounds(new GridSpan(widthUnits, heightUnits), state.UnitSize, state.Gap);
+        var position = WorkspaceLayoutPolicy.SnapPosition(persisted.TopLeft, state.Origin, state.UnitSize);
+
+        return WorkspaceLayoutPolicy.SafeClamp(new Rect(position, size), state.WorkArea, state.UnitSize, state.Gap);
+    }
+
+    /// <summary>
+    /// Keeps the panel's top-left within the monitor's work area so it never lands off-screen.
+    /// </summary>
+    /// <remarks>
+    /// Internal (rather than <see langword="private"/>) solely so <c>DesktopOrganizer.Tests</c> can
+    /// unit test this pure model+monitor clamping logic directly — <see cref="OnMonitorsChanged"/>,
+    /// which drives it in production, also touches real WPF <c>ChildWindow</c> instances held in
+    /// <see cref="_childWindows"/> and isn't practically unit-testable end-to-end (see remarks there).
+    /// </remarks>
+    /// <param name="model">The panel model whose <see cref="ChildWindowModel.Position"/> is clamped in place.</param>
+    /// <param name="monitor">The monitor whose work area the panel must stay within.</param>
+    internal static void ClampIntoMonitor(ChildWindowModel model, MonitorInfo monitor)
+    {
+        var area = monitor.WorkArea;
+        var width = Math.Max(0, model.Size.Width);
+        var height = Math.Max(0, model.Size.Height);
+
+        // If the panel already sits fully within the monitor, leave it untouched. Must check the
+        // whole Position+Size rect, not just the top-left point — otherwise a panel whose top-left
+        // remains inside a shrunk work area (e.g. a taskbar appearing and eating the bottom edge)
+        // would be considered "inside" while its bottom/right edge is actually off-screen.
+        var inside = model.Position.X >= area.Left && model.Position.Y >= area.Top
+                     && model.Position.X + width <= area.Right && model.Position.Y + height <= area.Bottom;
+        if (inside) return;
+
+        var maxX = Math.Max(area.Left, area.Right - width);
+        var maxY = Math.Max(area.Top, area.Bottom - height);
+        var x = Math.Min(Math.Max(model.Position.X, area.Left), maxX);
+        var y = Math.Min(Math.Max(model.Position.Y, area.Top), maxY);
+        model.Position = new Point((int)Math.Round(x), (int)Math.Round(y)); // m-1 fix-cycle 1: see WriteModelGeometry's remarks.
+    }
+
+    /// <summary>
+    /// ADR-011 Amendment (2026-09-24): re-aligns a <see cref="PanelGeometryMode.LegacyFreeform"/> panel's
+    /// persisted <c>Position</c>/<c>Size</c> onto the CURRENT <paramref name="gridSize"/> lattice (global
+    /// origin <c>(0,0)</c>, same as <see cref="GridSnap.SnapAxis"/>) when they have drifted off it — the
+    /// user-reported scenario this closes: a panel dropped at <c>(64,64)</c>/<c>64x64</c> while
+    /// <c>GridSize=32</c> stays a multiple of 32 forever unless something re-quantises it; once
+    /// <c>GridSize</c> changes to <c>48</c>, dragging that panel (which snaps in 48-DIP steps, see
+    /// <c>Behaviors.PanelDragMoveBehavior</c>) never lands it back on a clean 48-multiple, because a
+    /// LegacyFreeform drag only magnetically snaps to the absolute lattice within
+    /// <c>GridSnapDistance</c> (see <see cref="GridSnap.SnapAxis"/>); a persisted off-lattice
+    /// position/size is never re-quantised unless something normalises it. Called once at restore
+    /// (<see cref="ResolveMonitorPlacement"/>) and once whenever the grid changes underneath an already
+    /// open panel (<see cref="OnMonitorsChanged"/>'s LegacyFreeform branch, <see cref="NormalizePanelsToGrid"/>).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ChildWindowModel.Size"/> always holds the panel's EXPANDED extent regardless of roll-up
+    /// state (<c>ChildWindow.OnRenderSizeChanged</c> skips its write while
+    /// <see cref="ChildWindowModel.IsRolledUp"/>) — so mutating it here is always safe, whether or not the
+    /// panel is currently rolled up. A caller that also drives a LIVE <c>ChildWindow</c> must still gate
+    /// its own <c>Window.Width</c>/<c>Height</c> write on <c>!model.IsRolledUp</c> (see
+    /// <see cref="OnMonitorsChanged"/>) — this method itself never touches a <c>Window</c>.
+    /// </remarks>
+    /// <param name="model">The panel to normalize.</param>
+    /// <param name="monitor">The monitor the panel is (or is about to be) placed on — supplies the work-area clamp.</param>
+    /// <param name="gridSize">The current <see cref="IAppSettings.GridSize"/>. Values <c>&lt;= 1</c> are a no-op.</param>
+    /// <returns><see langword="true"/> if <see cref="ChildWindowModel.Position"/> or <see cref="ChildWindowModel.Size"/> changed.</returns>
+    internal static bool NormalizeLegacyFreeformToGridSize(ChildWindowModel model, MonitorInfo monitor, int gridSize)
+    {
+        if (gridSize <= 1) return false;
+
+        var minSize = LegacyFreeformMinSize(model);
+        var current = new Rect(
+            model.Position.X,
+            model.Position.Y,
+            Math.Max(0, model.Size.Width),
+            Math.Max(0, model.Size.Height));
+
+        var normalized = GridSizeNormalizer.Normalize(current, gridSize, minSize, monitor.WorkArea);
+
+        var newPosition = new Point((int)Math.Round(normalized.X), (int)Math.Round(normalized.Y));
+        var newSize = new System.Drawing.Size((int)Math.Round(normalized.Width), (int)Math.Round(normalized.Height));
+
+        if (newPosition == model.Position && newSize == model.Size) return false;
+
+        model.Position = newPosition;
+        model.Size = newSize;
+        return true;
+    }
+
+    /// <summary>
+    /// ADR-011 Amendment (2026-09-24): when the legacy <paramref name="gridSize"/> lattice happens to be
+    /// commensurate with the workspace grid's own unit (<paramref name="gridSize"/> is a whole multiple of
+    /// <see cref="WorkspaceGridMetrics.UnitSize"/>, e.g. <c>48</c>/<c>32</c> against <c>U=8</c>), also
+    /// re-aligns an ALREADY workspace-grid-resolved <see cref="PanelGeometryMode.GridAligned"/> panel's
+    /// <paramref name="bounds"/> onto that coarser lattice — every <paramref name="gridSize"/> multiple is
+    /// then also a <c>U</c> multiple, so the panel never leaves the workspace grid it is locked to. A no-op
+    /// whenever <paramref name="gridSize"/> is not a whole multiple of <c>U</c> (or <c>&lt;= 1</c>): forcing
+    /// the panel onto an incommensurate lattice would pull it OFF the workspace grid it belongs to (ADR-028
+    /// "две сетки намеренно несоизмеримы" — the two grids are deliberately incommensurable in general).
+    /// </summary>
+    /// <param name="model">The panel — <see cref="ChildWindowModel.WidthSpanUnits"/>/<see cref="ChildWindowModel.HeightSpanUnits"/> are updated in place when the size changes.</param>
+    /// <param name="bounds">The panel's already workspace-grid-resolved bounds (<see cref="ResolveGridAlignedBounds"/>'s result), in <c>Window.Left</c>/<c>Top</c> space.</param>
+    /// <param name="monitor">The panel's monitor — supplies the work-area clamp, translated into the same coordinate space as <paramref name="bounds"/>.</param>
+    /// <param name="gridSize">The current <see cref="IAppSettings.GridSize"/>.</param>
+    /// <returns><paramref name="bounds"/> unchanged, or the re-aligned bounds.</returns>
+    internal static Rect NormalizeGridAlignedToGridSize(ChildWindowModel model, Rect bounds, MonitorInfo monitor, int gridSize)
+    {
+        if (gridSize <= 1) return bounds;
+        if (gridSize % (int)WorkspaceGridMetrics.UnitSize != 0) return bounds;
+
+        var minSpan = model.IsRolledUp ? WorkspaceGridMetrics.MinSpanCollapsed : WorkspaceGridMetrics.MinSpanExpanded;
+        var minSize = WorkspaceLayoutPolicy.SpansToBounds(minSpan, WorkspaceGridMetrics.UnitSize, WorkspaceGridMetrics.DefaultGap);
+        var workArea = DesktopCoordinateSpace.ToWindowSpace(monitor.WorkArea);
+
+        var normalized = GridSizeNormalizer.Normalize(bounds, gridSize, minSize, workArea);
+        if (normalized == bounds) return bounds;
+
+        var span = WorkspaceLayoutPolicy.RoundBoundsToSpans(normalized.Size, WorkspaceGridMetrics.UnitSize, WorkspaceGridMetrics.DefaultGap);
+        model.WidthSpanUnits = span.WidthUnits;
+        model.HeightSpanUnits = span.HeightUnits;
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// M-3 fix-cycle 1: whether re-applying <paramref name="bounds"/> onto a panel currently at
+    /// <paramref name="currentWindowSpace"/> would be a genuine visual change, within the same 0.5 DIP
+    /// rounding budget <see cref="WorkspaceLayoutPolicy"/>'s own idempotency guarantees are built against
+    /// (e.g. its <c>SpanQuantizationToleranceDip</c>). Extracted as its own internal static member so
+    /// <see cref="OnMonitorsChanged"/>'s "did anything actually change" decision is unit-testable without
+    /// a live WPF <see cref="Window"/> — see that method's own "not practically unit-testable end-to-end"
+    /// remarks for why the surrounding loop itself stays manual verify (Win10/Win11).
+    /// </summary>
+    /// <param name="currentWindowSpace">The panel's current <c>Window.Left/Top/Width/Height</c>, in window space.</param>
+    /// <param name="bounds">The bounds <see cref="ResolveGridAlignedBounds"/> just computed.</param>
+    /// <param name="isRolledUp">
+    /// Whether the panel is currently rolled up. A rolled-up panel's live <c>Window.Height</c> is the
+    /// collapsed header while <paramref name="bounds"/> carries the EXPANDED span height, and
+    /// <c>ApplyWorkspaceGridGeometry</c> only re-applies the POSITION in that state — so only X/Y are
+    /// compared (P03 fix-cycle 1 final verification, MAJOR-1: comparing heights made the gate never fire
+    /// for rolled-up panels, re-saving on every theme/locale <c>WM_SETTINGCHANGE</c>).
+    /// </param>
+    /// <param name="tolerance">The DIP tolerance, per component. Defaults to <c>0.5</c>.</param>
+    internal static bool GridAlignedBoundsUnchanged(Rect currentWindowSpace, Rect bounds, bool isRolledUp = false, double tolerance = 0.5)
+    {
+        var positionUnchanged = Math.Abs(currentWindowSpace.X - bounds.X) <= tolerance
+                                && Math.Abs(currentWindowSpace.Y - bounds.Y) <= tolerance;
+        if (isRolledUp) return positionUnchanged;
+
+        return positionUnchanged
+               && Math.Abs(currentWindowSpace.Width - bounds.Width) <= tolerance
+               && Math.Abs(currentWindowSpace.Height - bounds.Height) <= tolerance;
+    }
+
+    /// <summary>
+    /// The same width/height floor <c>ResizeConstraintsFactory.BuildConstraints</c> computes for a
+    /// <see cref="PanelGeometryMode.LegacyFreeform"/> panel's live resize gesture: <c>MinWidth</c> is
+    /// icon-grid-derived only in <see cref="PanelViewMode.Grid"/>, <c>MinHeight</c> is always the flat
+    /// <see cref="GridMetrics.MinPanelSize"/> floor in both view modes. Kept in agreement with that
+    /// factory on purpose — a normalized panel's floor must match the floor its own resize gesture would
+    /// enforce, or the very next manual resize could immediately violate what this method just normalized to.
+    /// </summary>
+    private static Size LegacyFreeformMinSize(ChildWindowModel model)
+    {
+        var minWidth = model.ViewMode == PanelViewMode.Grid
+            ? GridMetrics.MinPanelWidth(model.IconSize, model.IconLayoutPolicy, SystemParameters.VerticalScrollBarWidth)
+            : GridMetrics.MinPanelSize;
+
+        return new Size(minWidth, GridMetrics.MinPanelSize);
+    }
+
+    /// <summary>
+    /// Mirrors <paramref name="bounds"/> onto <paramref name="model"/> using the same
+    /// <c>double → int</c> rounding <see cref="ClampIntoMonitor"/> and
+    /// <c>Behaviors.PanelGeometryWriter</c> already use, so a panel's persisted geometry never depends on
+    /// which of the three wrote it last.
+    /// </summary>
+    /// <remarks>
+    /// m-1 fix-cycle 1 (docs/PLANS/workspace-grid-03-04-integration.md §2, code-review): all three writers
+    /// now round via <see cref="Math.Round(double)"/> rather than a truncating <c>(int)</c> cast — a plain
+    /// cast truncates TOWARD ZERO (asymmetric: <c>-0.6</c> becomes <c>0</c>, not <c>-1</c>), unlike
+    /// <see cref="Models.LassoPanelGeometry"/>'s own <c>Math.Round</c>-based conversion (F-7), which this
+    /// method previously disagreed with for negative DIP coordinates (a monitor left of/above the primary).
+    /// </remarks>
+    private static void WriteModelGeometry(ChildWindowModel model, Rect bounds)
+    {
+        model.Position = new Point((int)Math.Round(bounds.X), (int)Math.Round(bounds.Y));
+        model.Size = new System.Drawing.Size((int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height));
+    }
+
+    /// <summary>
+    /// Every live panel's rectangle — <see cref="CollectOtherPanelBounds"/> with no panel excluded
+    /// (a not-yet-created panel has no id in <see cref="_childWindows"/> to exclude).
+    /// </summary>
+    private List<Rect> CollectAllPanelBounds()
+    {
+        var bounds = new List<Rect>();
+        CollectOtherPanelBounds(excludingId: null, bounds);
+        return bounds;
+    }
+
     // MainWindow is a singleton in DI — always returns the same instance
     private MainWindow GetOrCreateMainWindow()
         => _serviceProvider.GetRequiredService<MainWindow>();
@@ -627,254 +918,6 @@ public class WindowManager : IWindowManager
 
         if (NormalizeLegacyFreeformToGridSize(model, target, _appSettings.GridSize))
             SaveWindowsState();
-    }
-
-    /// <summary>
-    /// The <see cref="PanelGeometryMode.GridAligned"/> half of <see cref="ResolveMonitorPlacement"/> and
-    /// <see cref="OnMonitorsChanged"/> (P03-W1/W3): re-derives the panel's bounds from its spans against
-    /// <paramref name="monitor"/>'s CURRENT work area, or returns <see langword="null"/> when this panel
-    /// is not (or cannot currently be treated as) grid-aligned and the caller must fall back to the
-    /// unchanged <see cref="ClampIntoMonitor"/> path.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Deliberately routed through <see cref="PanelGridStateResolver.Resolve"/> with a ONE-ELEMENT monitor
-    /// list: that resolver is the single place <see cref="ChildWindowModel.GeometryMode"/> may be read
-    /// (Инвариант В1) and the single place a <see cref="PanelGeometryMode.GridAligned"/> panel with
-    /// missing spans lazily acquires them. Passing only <paramref name="monitor"/> keeps this method's own
-    /// "which monitor" decision authoritative — the resolver's monitor-resolution order (device id →
-    /// center → first) cannot second-guess a caller that has already applied the "stored monitor gone →
-    /// primary" rule (M4, unchanged by ADR-028).
-    /// </para>
-    /// <para>
-    /// The result is idempotent by construction (<c>SpansToBounds</c> is a pure function of the span, and
-    /// <c>SnapPosition</c> + the grid-aware <c>SafeClamp</c> are both idempotent), which matters because
-    /// <c>WM_SETTINGCHANGE</c> raises <c>MonitorsChanged</c> for something as ordinary as a theme change:
-    /// re-running this on an unchanged configuration must move nothing (R-9).
-    /// </para>
-    /// </remarks>
-    /// <param name="model">The panel to place.</param>
-    /// <param name="monitor">The monitor the caller has already decided this panel belongs to.</param>
-    /// <returns>The panel's bounds in <c>Window.Left</c>/<c>Top</c> space, or <see langword="null"/> for the legacy path.</returns>
-    internal static Rect? ResolveGridAlignedBounds(ChildWindowModel model, MonitorInfo monitor)
-    {
-        ArgumentNullException.ThrowIfNull(model);
-        ArgumentNullException.ThrowIfNull(monitor);
-
-        var persisted = new Rect(
-            model.Position.X, model.Position.Y,
-            Math.Max(0, model.Size.Width), Math.Max(0, model.Size.Height));
-
-        var state = PanelGridStateResolver.Resolve(
-            model,
-            persisted,
-            [(monitor.DeviceName, monitor.Bounds, monitor.WorkArea)],
-            model.IsRolledUp);
-
-        if (!state.IsGridAligned) return null;
-        if (model.WidthSpanUnits is not { } widthUnits || model.HeightSpanUnits is not { } heightUnits) return null;
-
-        var size = WorkspaceLayoutPolicy.SpansToBounds(new GridSpan(widthUnits, heightUnits), state.UnitSize, state.Gap);
-        var position = WorkspaceLayoutPolicy.SnapPosition(persisted.TopLeft, state.Origin, state.UnitSize);
-
-        return WorkspaceLayoutPolicy.SafeClamp(new Rect(position, size), state.WorkArea, state.UnitSize, state.Gap);
-    }
-
-    /// <summary>
-    /// Mirrors <paramref name="bounds"/> onto <paramref name="model"/> using the same
-    /// <c>double → int</c> rounding <see cref="ClampIntoMonitor"/> and
-    /// <c>Behaviors.PanelGeometryWriter</c> already use, so a panel's persisted geometry never depends on
-    /// which of the three wrote it last.
-    /// </summary>
-    /// <remarks>
-    /// m-1 fix-cycle 1 (docs/PLANS/workspace-grid-03-04-integration.md §2, code-review): all three writers
-    /// now round via <see cref="Math.Round(double)"/> rather than a truncating <c>(int)</c> cast — a plain
-    /// cast truncates TOWARD ZERO (asymmetric: <c>-0.6</c> becomes <c>0</c>, not <c>-1</c>), unlike
-    /// <see cref="Models.LassoPanelGeometry"/>'s own <c>Math.Round</c>-based conversion (F-7), which this
-    /// method previously disagreed with for negative DIP coordinates (a monitor left of/above the primary).
-    /// </remarks>
-    private static void WriteModelGeometry(ChildWindowModel model, Rect bounds)
-    {
-        model.Position = new Point((int)Math.Round(bounds.X), (int)Math.Round(bounds.Y));
-        model.Size = new System.Drawing.Size((int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height));
-    }
-
-    /// <summary>
-    /// Keeps the panel's top-left within the monitor's work area so it never lands off-screen.
-    /// </summary>
-    /// <remarks>
-    /// Internal (rather than <see langword="private"/>) solely so <c>DesktopOrganizer.Tests</c> can
-    /// unit test this pure model+monitor clamping logic directly — <see cref="OnMonitorsChanged"/>,
-    /// which drives it in production, also touches real WPF <c>ChildWindow</c> instances held in
-    /// <see cref="_childWindows"/> and isn't practically unit-testable end-to-end (see remarks there).
-    /// </remarks>
-    internal static void ClampIntoMonitor(ChildWindowModel model, MonitorInfo monitor)
-    {
-        var area = monitor.WorkArea;
-        var width = Math.Max(0, model.Size.Width);
-        var height = Math.Max(0, model.Size.Height);
-
-        // If the panel already sits fully within the monitor, leave it untouched. Must check the
-        // whole Position+Size rect, not just the top-left point — otherwise a panel whose top-left
-        // remains inside a shrunk work area (e.g. a taskbar appearing and eating the bottom edge)
-        // would be considered "inside" while its bottom/right edge is actually off-screen.
-        var inside = model.Position.X >= area.Left && model.Position.Y >= area.Top
-                     && model.Position.X + width <= area.Right && model.Position.Y + height <= area.Bottom;
-        if (inside) return;
-
-        var maxX = Math.Max(area.Left, area.Right - width);
-        var maxY = Math.Max(area.Top, area.Bottom - height);
-        var x = Math.Min(Math.Max(model.Position.X, area.Left), maxX);
-        var y = Math.Min(Math.Max(model.Position.Y, area.Top), maxY);
-        model.Position = new Point((int)Math.Round(x), (int)Math.Round(y)); // m-1 fix-cycle 1: see WriteModelGeometry's remarks.
-    }
-
-    /// <summary>
-    /// ADR-011 Amendment (2026-09-24): re-aligns a <see cref="PanelGeometryMode.LegacyFreeform"/> panel's
-    /// persisted <c>Position</c>/<c>Size</c> onto the CURRENT <paramref name="gridSize"/> lattice (global
-    /// origin <c>(0,0)</c>, same as <see cref="GridSnap.SnapAxis"/>) when they have drifted off it — the
-    /// user-reported scenario this closes: a panel dropped at <c>(64,64)</c>/<c>64x64</c> while
-    /// <c>GridSize=32</c> stays a multiple of 32 forever unless something re-quantises it; once
-    /// <c>GridSize</c> changes to <c>48</c>, dragging that panel (which snaps in 48-DIP steps, see
-    /// <see cref="PanelDragMoveBehavior"/>) never lands it back on a clean 48-multiple, because the drag
-    /// only ever nudges the EXISTING (32-multiple) position by whole 48-steps. Called once at restore
-    /// (<see cref="ResolveMonitorPlacement"/>) and once whenever the grid changes underneath an already
-    /// open panel (<see cref="OnMonitorsChanged"/>'s LegacyFreeform branch, <see cref="NormalizePanelsToGrid"/>).
-    /// </summary>
-    /// <remarks>
-    /// <see cref="ChildWindowModel.Size"/> always holds the panel's EXPANDED extent regardless of roll-up
-    /// state (<c>ChildWindow.OnRenderSizeChanged</c> skips its write while
-    /// <see cref="ChildWindowModel.IsRolledUp"/>) — so mutating it here is always safe, whether or not the
-    /// panel is currently rolled up. A caller that also drives a LIVE <c>ChildWindow</c> must still gate
-    /// its own <c>Window.Width</c>/<c>Height</c> write on <c>!model.IsRolledUp</c> (see
-    /// <see cref="OnMonitorsChanged"/>) — this method itself never touches a <c>Window</c>.
-    /// </remarks>
-    /// <param name="model">The panel to normalize.</param>
-    /// <param name="monitor">The monitor the panel is (or is about to be) placed on — supplies the work-area clamp.</param>
-    /// <param name="gridSize">The current <see cref="IAppSettings.GridSize"/>. Values <c>&lt;= 1</c> are a no-op.</param>
-    /// <returns><see langword="true"/> if <see cref="ChildWindowModel.Position"/> or <see cref="ChildWindowModel.Size"/> changed.</returns>
-    internal static bool NormalizeLegacyFreeformToGridSize(ChildWindowModel model, MonitorInfo monitor, int gridSize)
-    {
-        if (gridSize <= 1) return false;
-
-        var minSize = LegacyFreeformMinSize(model);
-        var current = new Rect(
-            model.Position.X, model.Position.Y,
-            Math.Max(0, model.Size.Width), Math.Max(0, model.Size.Height));
-
-        var normalized = GridSizeNormalizer.Normalize(current, gridSize, minSize, monitor.WorkArea);
-
-        var newPosition = new Point((int)Math.Round(normalized.X), (int)Math.Round(normalized.Y));
-        var newSize = new System.Drawing.Size((int)Math.Round(normalized.Width), (int)Math.Round(normalized.Height));
-
-        if (newPosition == model.Position && newSize == model.Size) return false;
-
-        model.Position = newPosition;
-        model.Size = newSize;
-        return true;
-    }
-
-    /// <summary>
-    /// ADR-011 Amendment (2026-09-24): when the legacy <paramref name="gridSize"/> lattice happens to be
-    /// commensurate with the workspace grid's own unit (<paramref name="gridSize"/> is a whole multiple of
-    /// <see cref="WorkspaceGridMetrics.UnitSize"/>, e.g. <c>48</c>/<c>32</c> against <c>U=8</c>), also
-    /// re-aligns an ALREADY workspace-grid-resolved <see cref="PanelGeometryMode.GridAligned"/> panel's
-    /// <paramref name="bounds"/> onto that coarser lattice — every <paramref name="gridSize"/> multiple is
-    /// then also a <c>U</c> multiple, so the panel never leaves the workspace grid it is locked to. A no-op
-    /// whenever <paramref name="gridSize"/> is not a whole multiple of <c>U</c> (or <c>&lt;= 1</c>): forcing
-    /// the panel onto an incommensurate lattice would pull it OFF the workspace grid it belongs to (ADR-028
-    /// "две сетки намеренно несоизмеримы" — the two grids are deliberately incommensurable in general).
-    /// </summary>
-    /// <param name="model">The panel — <see cref="ChildWindowModel.WidthSpanUnits"/>/<see cref="ChildWindowModel.HeightSpanUnits"/> are updated in place when the size changes.</param>
-    /// <param name="bounds">The panel's already workspace-grid-resolved bounds (<see cref="ResolveGridAlignedBounds"/>'s result), in <c>Window.Left</c>/<c>Top</c> space.</param>
-    /// <param name="monitor">The panel's monitor — supplies the work-area clamp, translated into the same coordinate space as <paramref name="bounds"/>.</param>
-    /// <param name="gridSize">The current <see cref="IAppSettings.GridSize"/>.</param>
-    /// <returns><paramref name="bounds"/> unchanged, or the re-aligned bounds.</returns>
-    internal static Rect NormalizeGridAlignedToGridSize(ChildWindowModel model, Rect bounds, MonitorInfo monitor, int gridSize)
-    {
-        if (gridSize <= 1) return bounds;
-        if (gridSize % (int)WorkspaceGridMetrics.UnitSize != 0) return bounds;
-
-        var minSpan = model.IsRolledUp ? WorkspaceGridMetrics.MinSpanCollapsed : WorkspaceGridMetrics.MinSpanExpanded;
-        var minSize = WorkspaceLayoutPolicy.SpansToBounds(minSpan, WorkspaceGridMetrics.UnitSize, WorkspaceGridMetrics.DefaultGap);
-        var workArea = DesktopCoordinateSpace.ToWindowSpace(monitor.WorkArea);
-
-        var normalized = GridSizeNormalizer.Normalize(bounds, gridSize, minSize, workArea);
-        if (normalized == bounds) return bounds;
-
-        var span = WorkspaceLayoutPolicy.RoundBoundsToSpans(normalized.Size, WorkspaceGridMetrics.UnitSize, WorkspaceGridMetrics.DefaultGap);
-        model.WidthSpanUnits = span.WidthUnits;
-        model.HeightSpanUnits = span.HeightUnits;
-
-        return normalized;
-    }
-
-    /// <summary>
-    /// The same width/height floor <c>ResizeConstraintsFactory.BuildConstraints</c> computes for a
-    /// <see cref="PanelGeometryMode.LegacyFreeform"/> panel's live resize gesture: <c>MinWidth</c> is
-    /// icon-grid-derived only in <see cref="PanelViewMode.Grid"/>, <c>MinHeight</c> is always the flat
-    /// <see cref="GridMetrics.MinPanelSize"/> floor in both view modes. Kept in agreement with that
-    /// factory on purpose — a normalized panel's floor must match the floor its own resize gesture would
-    /// enforce, or the very next manual resize could immediately violate what this method just normalized to.
-    /// </summary>
-    private static Size LegacyFreeformMinSize(ChildWindowModel model)
-    {
-        var minWidth = model.ViewMode == PanelViewMode.Grid
-            ? GridMetrics.MinPanelWidth(model.IconSize, model.IconLayoutPolicy, SystemParameters.VerticalScrollBarWidth)
-            : GridMetrics.MinPanelSize;
-
-        return new Size(minWidth, GridMetrics.MinPanelSize);
-    }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Not practically unit-testable end-to-end for the same reason as <see cref="OnMonitorsChanged"/>:
-    /// <see cref="_childWindows"/> only gets populated via <see cref="CreateChildWindow"/>, which resolves
-    /// a real WPF <see cref="ChildWindow"/> through DI. The per-panel math itself
-    /// (<see cref="NormalizeLegacyFreeformToGridSize"/>/<see cref="NormalizeGridAlignedToGridSize"/>) is
-    /// covered directly; this loop's own wiring is manual verify (Win10/Win11).
-    /// </remarks>
-    public void NormalizePanelsToGrid()
-    {
-        if (_childWindows.Count == 0) return;
-
-        var gridSize = _appSettings.GridSize;
-        if (gridSize <= 1) return;
-
-        var anyChanged = false;
-
-        foreach (var (window, model) in _childWindows.Values)
-        {
-            var monitor = !string.IsNullOrEmpty(model.MonitorDeviceId)
-                ? _monitorService.FindByDeviceName(model.MonitorDeviceId)
-                : null;
-            monitor ??= _monitorService.FindMonitorAt(new System.Windows.Point(model.Position.X, model.Position.Y))
-                        ?? _monitorService.GetPrimaryMonitor();
-
-            if (ResolveGridAlignedBounds(model, monitor) is { } bounds)
-            {
-                var normalized = NormalizeGridAlignedToGridSize(model, bounds, monitor, gridSize);
-                if (normalized == bounds) continue;
-
-                window.ApplyWorkspaceGridGeometry(normalized, span: null, monitorDeviceId: null);
-                anyChanged = true;
-                continue;
-            }
-
-            if (!NormalizeLegacyFreeformToGridSize(model, monitor, gridSize)) continue;
-
-            anyChanged = true;
-            window.Left = model.Position.X;
-            window.Top = model.Position.Y;
-
-            if (!model.IsRolledUp)
-            {
-                window.Width = model.Size.Width;
-                window.Height = model.Size.Height;
-            }
-        }
-
-        if (anyChanged) SaveWindowsStateNow();
     }
 
     /// <summary>
@@ -972,36 +1015,6 @@ public class WindowManager : IWindowManager
         }
 
         if (anyChanged) SaveWindowsState();
-    }
-
-    /// <summary>
-    /// M-3 fix-cycle 1: whether re-applying <paramref name="bounds"/> onto a panel currently at
-    /// <paramref name="currentWindowSpace"/> would be a genuine visual change, within the same 0.5 DIP
-    /// rounding budget <see cref="WorkspaceLayoutPolicy"/>'s own idempotency guarantees are built against
-    /// (e.g. its <c>SpanQuantizationToleranceDip</c>). Extracted as its own internal static member so
-    /// <see cref="OnMonitorsChanged"/>'s "did anything actually change" decision is unit-testable without
-    /// a live WPF <see cref="Window"/> — see that method's own "not practically unit-testable end-to-end"
-    /// remarks for why the surrounding loop itself stays manual verify (Win10/Win11).
-    /// </summary>
-    /// <param name="currentWindowSpace">The panel's current <c>Window.Left/Top/Width/Height</c>, in window space.</param>
-    /// <param name="bounds">The bounds <see cref="ResolveGridAlignedBounds"/> just computed.</param>
-    /// <param name="tolerance">The DIP tolerance, per component. Defaults to <c>0.5</c>.</param>
-    /// <param name="isRolledUp">
-    /// Whether the panel is currently rolled up. A rolled-up panel's live <c>Window.Height</c> is the
-    /// collapsed header while <paramref name="bounds"/> carries the EXPANDED span height, and
-    /// <c>ApplyWorkspaceGridGeometry</c> only re-applies the POSITION in that state — so only X/Y are
-    /// compared (P03 fix-cycle 1 final verification, MAJOR-1: comparing heights made the gate never fire
-    /// for rolled-up panels, re-saving on every theme/locale <c>WM_SETTINGCHANGE</c>).
-    /// </param>
-    internal static bool GridAlignedBoundsUnchanged(Rect currentWindowSpace, Rect bounds, bool isRolledUp = false, double tolerance = 0.5)
-    {
-        var positionUnchanged = Math.Abs(currentWindowSpace.X - bounds.X) <= tolerance
-                                && Math.Abs(currentWindowSpace.Y - bounds.Y) <= tolerance;
-        if (isRolledUp) return positionUnchanged;
-
-        return positionUnchanged
-               && Math.Abs(currentWindowSpace.Width - bounds.Width) <= tolerance
-               && Math.Abs(currentWindowSpace.Height - bounds.Height) <= tolerance;
     }
 
     private void ShowWindow(MainWindow mainWindow)

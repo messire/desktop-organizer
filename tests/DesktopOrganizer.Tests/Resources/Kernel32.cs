@@ -14,7 +14,7 @@ public static partial class Kernel32
     /// <c>DuplicateHandle</c> option: the duplicate gets the same access rights as the source handle,
     /// making the <c>dwDesiredAccess</c> argument ignored.
     /// </summary>
-    private const uint DUPLICATE_SAME_ACCESS = 0x00000002;
+    private const uint DuplicateSameAccess = 0x00000002;
 
     /// <summary>
     /// Returns a real, waitable handle to the OS thread that calls this method.
@@ -44,7 +44,7 @@ public static partial class Kernel32
     {
         var process = GetCurrentProcess();
 
-        if (!DuplicateHandle(process, GetCurrentThread(), process, out var duplicate, 0, false, DUPLICATE_SAME_ACCESS))
+        if (!DuplicateHandle(process, GetCurrentThread(), process, out var duplicate, 0, false, DuplicateSameAccess))
         {
             throw new InvalidOperationException(
                 $"DuplicateHandle failed with Win32 error {Marshal.GetLastWin32Error()}.");
@@ -74,7 +74,7 @@ public static partial class Kernel32
     /// <param name="hSourceHandle">The handle to duplicate.</param>
     /// <param name="hTargetProcessHandle">A handle to the process that is to receive the duplicate.</param>
     /// <param name="lpTargetHandle">Receives the duplicated handle.</param>
-    /// <param name="dwDesiredAccess">Access for the new handle; ignored with <see cref="DUPLICATE_SAME_ACCESS"/>.</param>
+    /// <param name="dwDesiredAccess">Access for the new handle; ignored with <see cref="DuplicateSameAccess"/>.</param>
     /// <param name="bInheritHandle">Whether the duplicate is inheritable.</param>
     /// <param name="dwOptions">Duplication options.</param>
     /// <returns>

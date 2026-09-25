@@ -44,6 +44,11 @@ public class SingleInstanceDiagnosticsTests
     private readonly List<RecordedWrite> _writes = [];
     private readonly Mock<IDiagnosticsLog> _logMock = new();
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SingleInstanceDiagnosticsTests"/> class, wiring the
+    /// mocked <see cref="IDiagnosticsLog"/> to record every <c>Write</c> call into <see cref="_writes"/>
+    /// for later assertion.
+    /// </summary>
     public SingleInstanceDiagnosticsTests()
     {
         _logMock.SetupGet(l => l.IsEnabled).Returns(true);
@@ -58,6 +63,12 @@ public class SingleInstanceDiagnosticsTests
     }
 
     // ── SingleInstancePrimaryAcquired ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that becoming primary writes a <c>SingleInstancePrimaryAcquired</c> event with the
+    /// expected handshake-shaped payload (<c>attempts</c>/<c>elapsedMs</c>/<c>wasAbandoned</c>/
+    /// <c>serverStarted</c>).
+    /// </summary>
     [Fact]
     public void Start_AsPrimary_WritesPrimaryAcquired_WithHandshakeShape()
     {
@@ -152,6 +163,11 @@ public class SingleInstanceDiagnosticsTests
         AssertServerUnavailableSequence_StaysDegradedPrimary(ActivationServerUnavailableReason.Faulted);
 
     // ── ActivationRequestReceived ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that an activation request arriving before any subscriber has attached reports
+    /// <c>bufferedAtArrival: true</c> in the <c>ActivationRequestReceived</c> event.
+    /// </summary>
     [Fact]
     public void ActivationRequest_ArrivingBeforeUiIsReady_IsReportedAsBufferedAtArrival()
     {
@@ -173,6 +189,10 @@ public class SingleInstanceDiagnosticsTests
         Assert.Equal(true, write.Value("bufferedAtArrival"));
     }
 
+    /// <summary>
+    /// Verifies that an activation request arriving after a subscriber has attached reports
+    /// <c>bufferedAtArrival: false</c> in the <c>ActivationRequestReceived</c> event.
+    /// </summary>
     [Fact]
     public void ActivationRequest_ArrivingAfterSubscription_IsReportedAsNotBuffered()
     {
@@ -187,6 +207,10 @@ public class SingleInstanceDiagnosticsTests
         Assert.Equal(false, write.Value("bufferedAtArrival"));
     }
 
+    /// <summary>
+    /// Verifies that an activation request whose session id differs from the coordinator's own session
+    /// reports <c>sameSession: false</c> in the <c>ActivationRequestReceived</c> event.
+    /// </summary>
     [Fact]
     public void ActivationRequest_FromAnotherWindowsSession_IsReportedAsNotSameSession()
     {

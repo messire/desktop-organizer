@@ -37,6 +37,7 @@ public static class IconLayoutPolicyParser
     /// rationale, including why the comma must be rejected explicitly rather than relying on
     /// <see cref="Enum.IsDefined(Type,object)"/> alone.
     /// </summary>
+    /// <param name="value">The candidate string to parse, e.g. from persisted panel state.</param>
     public static IconLayoutPolicy ParseOrLegacyStretch(string? value) =>
         value is not null
         && !value.Contains(',')

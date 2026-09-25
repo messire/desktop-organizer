@@ -30,24 +30,10 @@ public class StateMigrationRunnerTests
         public JsonObject Migrate(JsonObject document) => _transform(document);
     }
 
-    private static FakeMigration StepMarker(int from, int to) =>
-        new(from, to, doc =>
-        {
-            var steps = doc["steps"] as JsonArray ?? new JsonArray();
-            steps.Add($"{from}to{to}");
-            doc["steps"] = steps;
-            return doc;
-        });
-
-    private static JsonObject DocumentAtVersion(int schemaVersion) =>
-        new()
-        {
-            ["schemaVersion"] = schemaVersion,
-            ["writtenAtUtc"] = "2026-01-01T00:00:00.0000000+00:00",
-            ["appVersion"] = "1.2.3",
-            ["marker"] = "unchanged",
-        };
-
+    /// <summary>
+    /// Verifies that <see cref="StateMigrationRunner.MigrateToCurrent"/> applies a chain of registered
+    /// migrations in order, reporting the correct applied count and final schema version.
+    /// </summary>
     [Fact]
     public void MigrateToCurrent_AppliesChainInOrder()
     {
@@ -67,6 +53,10 @@ public class StateMigrationRunnerTests
         Assert.Equal(["1to2", "2to3"], steps.Select(n => n!.GetValue<string>()));
     }
 
+    /// <summary>
+    /// Verifies that migrations registered out of order are still applied sorted by
+    /// <see cref="ISettingsMigration.FromVersion"/>, not registration order.
+    /// </summary>
     [Fact]
     public void MigrateToCurrent_RegistrationOrderDoesNotMatter_StillAppliesByFromVersion()
     {
@@ -84,6 +74,10 @@ public class StateMigrationRunnerTests
         Assert.Equal(["1to2", "2to3"], steps.Select(n => n!.GetValue<string>()));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="StateMigrationRunner.MigrateToCurrent"/> preserves the envelope's
+    /// <c>writtenAtUtc</c> and <c>appVersion</c> fields verbatim, untouched by the migration chain.
+    /// </summary>
     [Fact]
     public void MigrateToCurrent_PreservesWrittenAtUtcAndAppVersionVerbatim()
     {
@@ -95,6 +89,10 @@ public class StateMigrationRunnerTests
         Assert.Equal("1.2.3", migrated["appVersion"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that a document already at the current schema version applies zero migrations and
+    /// returns the exact same document instance, unchanged.
+    /// </summary>
     [Fact]
     public void MigrateToCurrent_Idempotent_AlreadyAtCurrent_ReturnsZeroAppliedAndUnchangedDocument()
     {
@@ -109,6 +107,10 @@ public class StateMigrationRunnerTests
         Assert.Equal("unchanged", result["marker"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that asking to migrate to a target schema version for which no continuous chain of
+    /// registered migrations exists throws <see cref="InvalidOperationException"/> (fail-closed) at run time.
+    /// </summary>
     [Fact]
     public void MigrateToCurrent_GapInChain_AtRuntime_ThrowsFailClosed()
     {
@@ -119,6 +121,10 @@ public class StateMigrationRunnerTests
         Assert.Contains("2", ex.Message);
     }
 
+    /// <summary>
+    /// Verifies that registering migrations with a gap between their from/to versions (e.g. 1-&gt;2 and
+    /// 3-&gt;4, never connecting at 2/3) is caught eagerly at construction, not deferred to runtime.
+    /// </summary>
     [Fact]
     public void Constructor_GapBetweenRegisteredMigrations_ThrowsFailClosed()
     {
@@ -130,6 +136,10 @@ public class StateMigrationRunnerTests
         }));
     }
 
+    /// <summary>
+    /// Verifies that registering two migrations with the same <see cref="ISettingsMigration.FromVersion"/>
+    /// throws <see cref="InvalidOperationException"/> at construction.
+    /// </summary>
     [Fact]
     public void Constructor_DuplicateFromVersion_Throws()
     {
@@ -140,6 +150,10 @@ public class StateMigrationRunnerTests
         }));
     }
 
+    /// <summary>
+    /// Verifies that a migration claiming to skip a schema version
+    /// (<c>ToVersion</c> not exactly <c>FromVersion + 1</c>) is rejected at construction.
+    /// </summary>
     [Fact]
     public void Constructor_NonSingleStepMigration_Throws()
     {
@@ -150,6 +164,10 @@ public class StateMigrationRunnerTests
         }));
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown by a migration step propagates out of
+    /// <see cref="StateMigrationRunner.MigrateToCurrent"/> unchanged, rather than being swallowed.
+    /// </summary>
     [Fact]
     public void MigrateToCurrent_ExceptionInsideMigration_PropagatesAndIsNotSwallowed()
     {
@@ -160,6 +178,10 @@ public class StateMigrationRunnerTests
         Assert.Equal("boom", ex.Message);
     }
 
+    /// <summary>
+    /// Verifies that a document already at a schema version newer than the requested target throws
+    /// <see cref="InvalidOperationException"/> (defensive downgrade guard) rather than silently downgrading.
+    /// </summary>
     [Fact]
     public void MigrateToCurrent_Downgrade_NewerThanCurrent_ThrowsDefensive()
     {
@@ -169,6 +191,10 @@ public class StateMigrationRunnerTests
         Assert.Contains("newer", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Verifies that a document with no <c>schemaVersion</c> field throws
+    /// <see cref="InvalidOperationException"/> rather than being treated as some implicit default version.
+    /// </summary>
     [Fact]
     public void MigrateToCurrent_MissingSchemaVersion_Throws()
     {
@@ -177,4 +203,22 @@ public class StateMigrationRunnerTests
 
         Assert.Throws<InvalidOperationException>(() => runner.MigrateToCurrent(document, 3));
     }
+
+    private static FakeMigration StepMarker(int from, int to) =>
+        new(from, to, doc =>
+        {
+            var steps = doc["steps"] as JsonArray ?? new JsonArray();
+            steps.Add($"{from}to{to}");
+            doc["steps"] = steps;
+            return doc;
+        });
+
+    private static JsonObject DocumentAtVersion(int schemaVersion) =>
+        new()
+        {
+            ["schemaVersion"] = schemaVersion,
+            ["writtenAtUtc"] = "2026-01-01T00:00:00.0000000+00:00",
+            ["appVersion"] = "1.2.3",
+            ["marker"] = "unchanged",
+        };
 }

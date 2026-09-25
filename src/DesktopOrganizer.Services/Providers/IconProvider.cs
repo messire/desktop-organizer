@@ -15,6 +15,11 @@ internal class IconProvider : IIconProvider
     // covers several large panels while still capping worst-case growth. Kept internal (with the
     // explicit-capacity constructor below) so tests can exercise eviction without allocating
     // thousands of icons.
+
+    /// <summary>
+    /// The default maximum number of icons kept in the cache before least-recently-used eviction
+    /// kicks in. See the remarks above for why this bound exists.
+    /// </summary>
     internal const int DefaultMaxCachedIcons = 1024;
 
     private const FileFlag IconFlags = FileFlag.Icon | ShellIconSize | UseFileAttributes;

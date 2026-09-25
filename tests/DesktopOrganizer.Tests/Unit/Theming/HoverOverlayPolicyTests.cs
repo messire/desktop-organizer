@@ -8,7 +8,7 @@ namespace DesktopOrganizer.Tests.Unit.Theming;
 /// <summary>
 /// Unit tests for <see cref="HoverOverlayPolicy"/> (MAJOR-3, docs/PLANS/workspace-grid-07-visual.md
 /// fix-cycle 1) — pure direction-selection logic, no <see cref="System.Windows.Media.Color"/> compositing
-/// of its own (see <see cref="HoverOverlayBrushConverterTests"/> and
+/// of its own (see <c>HoverOverlayBrushConverterTests</c> and
 /// <see cref="AmbientAccentContrastAuditTests"/> for the end-to-end contrast claim).
 /// </summary>
 [Trait(UnitTests, "UI")]
@@ -29,6 +29,10 @@ public class HoverOverlayPolicyTests
 
     private static readonly Color HighlightTop = LoadColorChromeHighlightTop();
 
+    /// <summary>
+    /// Provides every combination of accent hex value (Neutral plus all presets) and
+    /// <see cref="PanelSurfaceStyle"/> as theory data for the surface-highlight direction sweep below.
+    /// </summary>
     public static IEnumerable<object[]> AccentStyleCombinations()
     {
         var accents = new List<string> { AccentPalette.Neutral };
@@ -41,6 +45,11 @@ public class HoverOverlayPolicyTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a relative luminance below the dark-surface threshold returns
+    /// <see cref="HoverOverlayPolicy.DarkenWash"/>.
+    /// </summary>
+    /// <param name="luminance">The relative luminance value under test.</param>
     [Theory]
     [InlineData(0.0)]
     [InlineData(0.1)]
@@ -50,6 +59,11 @@ public class HoverOverlayPolicyTests
         Assert.Equal(HoverOverlayPolicy.DarkenWash, HoverOverlayPolicy.For(luminance));
     }
 
+    /// <summary>
+    /// Verifies that a relative luminance at or above the dark-surface threshold returns
+    /// <see cref="HoverOverlayPolicy.LightenWash"/>.
+    /// </summary>
+    /// <param name="luminance">The relative luminance value under test.</param>
     [Theory]
     [InlineData(0.5)]
     [InlineData(0.5001)]
@@ -60,12 +74,20 @@ public class HoverOverlayPolicyTests
         Assert.Equal(HoverOverlayPolicy.LightenWash, HoverOverlayPolicy.For(luminance));
     }
 
+    /// <summary>
+    /// Verifies that a NaN luminance value is treated as dark, returning
+    /// <see cref="HoverOverlayPolicy.DarkenWash"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void For_NaN_TreatsAsDark_DoesNotThrow()
     {
         Assert.Equal(HoverOverlayPolicy.DarkenWash, HoverOverlayPolicy.For(double.NaN));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="HoverOverlayPolicy.DarkenWash"/> and <see cref="HoverOverlayPolicy.LightenWash"/>
+    /// share the same alpha, so switching direction never also changes the wash's overall strength.
+    /// </summary>
     [Fact]
     public void DarkenWash_AndLightenWash_ShareTheSameAlpha()
     {
@@ -74,6 +96,10 @@ public class HoverOverlayPolicyTests
         Assert.Equal(HoverOverlayPolicy.DarkenWash.A, HoverOverlayPolicy.LightenWash.A);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="HoverOverlayPolicy.LightenWash"/> still matches the pre-fix-cycle-1
+    /// <c>Color.Overlay.Hover</c> XAML token value.
+    /// </summary>
     [Fact]
     public void LightenWash_MatchesThePreFixCycleOneColorOverlayHoverToken()
     {
@@ -92,6 +118,8 @@ public class HoverOverlayPolicyTests
     /// own remarks document) must not flip the darken/lighten decision <see cref="HoverOverlayPolicy.For"/>
     /// returns.
     /// </summary>
+    /// <param name="accentHex">The accent hex value under test.</param>
+    /// <param name="style">The surface style under test.</param>
     [Theory]
     [MemberData(nameof(AccentStyleCombinations))]
     public void HoverOverlayDirection_IsUnaffectedBySurfaceHighlight(string accentHex, PanelSurfaceStyle style)

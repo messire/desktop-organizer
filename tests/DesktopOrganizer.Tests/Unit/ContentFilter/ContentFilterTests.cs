@@ -12,15 +12,30 @@ namespace DesktopOrganizer.Tests.Unit.ContentFilter;
 // Test-only ViewModel stub that mirrors ChildWindowViewModel's filter logic
 // without any WPF dependency (no DataTemplate, no Application.Current).
 // ---------------------------------------------------------------------------
-file sealed class FilterViewModel : BaseViewModel
+
+/// <summary>
+/// WPF-free stub of <see cref="BaseViewModel"/> that mirrors <c>ChildWindowViewModel.ApplyFilterAndSort</c>'s
+/// filter predicate logic, so filter behaviour can be exercised without a <c>DataTemplate</c> or
+/// <c>Application.Current</c>.
+/// </summary>
+internal sealed class FilterViewModel : BaseViewModel
 {
     private ChildWindowModel _model = new();
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FilterViewModel"/> class.
+    /// </summary>
+    /// <param name="iconProvider">The icon provider forwarded to the base <see cref="BaseViewModel"/>.</param>
     public FilterViewModel(IIconProvider iconProvider)
         : base(iconProvider)
     {
     }
 
+    /// <summary>
+    /// Attaches the given model as the source of truth and rebuilds <see cref="BaseViewModel.FileItems"/>
+    /// using the model's current <see cref="ChildWindowModel.ContentFilter"/>.
+    /// </summary>
+    /// <param name="model">The panel model to load and subscribe to.</param>
     public void LoadModel(ChildWindowModel model)
     {
         _model = model;
@@ -28,7 +43,19 @@ file sealed class FilterViewModel : BaseViewModel
         ApplyFilter();
     }
 
+    /// <summary>
+    /// Re-applies the active content filter whenever the underlying source collection changes.
+    /// </summary>
     protected override void OnSourceChanged() => ApplyFilter();
+
+    private static Func<FileItem, bool> BuildFilterPredicate(PanelContentFilter filter) =>
+        filter switch
+        {
+            PanelContentFilter.HideAll => _ => false,
+            PanelContentFilter.HideShortcuts => item => !item.IsShortcut,
+            PanelContentFilter.FoldersOnly => item => item.IsDirectory,
+            _ => _ => true,
+        };
 
     private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -43,15 +70,6 @@ file sealed class FilterViewModel : BaseViewModel
         foreach (var item in AllItems.Where(predicate))
             FileItems.Add(item);
     }
-
-    private static Func<FileItem, bool> BuildFilterPredicate(PanelContentFilter filter) =>
-        filter switch
-        {
-            PanelContentFilter.HideAll => _ => false,
-            PanelContentFilter.HideShortcuts => item => !item.IsShortcut,
-            PanelContentFilter.FoldersOnly => item => item.IsDirectory,
-            _ => _ => true,
-        };
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +84,9 @@ public class FileItemContentFilterTests
 {
     // ── IsShortcut ───────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that a path ending in <c>.lnk</c> is recognized as a shortcut.
+    /// </summary>
     [Fact]
     public void IsShortcut_LnkExtension_ReturnsTrue()
     {
@@ -73,6 +94,9 @@ public class FileItemContentFilterTests
         Assert.True(item.IsShortcut);
     }
 
+    /// <summary>
+    /// Verifies that an executable path is not recognized as a shortcut.
+    /// </summary>
     [Fact]
     public void IsShortcut_ExeExtension_ReturnsFalse()
     {
@@ -80,6 +104,9 @@ public class FileItemContentFilterTests
         Assert.False(item.IsShortcut);
     }
 
+    /// <summary>
+    /// Verifies that a plain text file path is not recognized as a shortcut.
+    /// </summary>
     [Fact]
     public void IsShortcut_TxtExtension_ReturnsFalse()
     {
@@ -87,6 +114,9 @@ public class FileItemContentFilterTests
         Assert.False(item.IsShortcut);
     }
 
+    /// <summary>
+    /// Verifies that shortcut detection is case-insensitive for an all-uppercase extension.
+    /// </summary>
     [Fact]
     public void IsShortcut_UpperCaseLnk_ReturnsTrue()
     {
@@ -94,6 +124,9 @@ public class FileItemContentFilterTests
         Assert.True(item.IsShortcut);
     }
 
+    /// <summary>
+    /// Verifies that shortcut detection is case-insensitive for a mixed-case extension.
+    /// </summary>
     [Fact]
     public void IsShortcut_MixedCaseLnk_ReturnsTrue()
     {
@@ -101,6 +134,9 @@ public class FileItemContentFilterTests
         Assert.True(item.IsShortcut);
     }
 
+    /// <summary>
+    /// Verifies that a path without any extension is not recognized as a shortcut.
+    /// </summary>
     [Fact]
     public void IsShortcut_NoExtension_ReturnsFalse()
     {
@@ -110,6 +146,9 @@ public class FileItemContentFilterTests
 
     // ── IsDirectory ──────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that an existing temporary directory is recognized as a directory.
+    /// </summary>
     [Fact]
     public void IsDirectory_ExistingTempDir_ReturnsTrue()
     {
@@ -126,6 +165,9 @@ public class FileItemContentFilterTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a path that does not exist on disk is not recognized as a directory.
+    /// </summary>
     [Fact]
     public void IsDirectory_NonExistentPath_ReturnsFalse()
     {
@@ -133,10 +175,14 @@ public class FileItemContentFilterTests
         Assert.False(item.IsDirectory);
     }
 
+    /// <summary>
+    /// Verifies that an existing regular file is not recognized as a directory.
+    /// </summary>
     [Fact]
     public void IsDirectory_FilePath_ReturnsFalse()
     {
         var item = new FileItem(@"C:\Windows\System32\notepad.exe", null);
+
         // notepad.exe exists but is a file, not a directory
         Assert.False(item.IsDirectory);
     }
@@ -152,6 +198,9 @@ public class FileItemContentFilterTests
 [Trait(UnitTests, "UI")]
 public class ChildWindowModelContentFilterTests
 {
+    /// <summary>
+    /// Verifies that a freshly constructed <see cref="ChildWindowModel"/> defaults to <see cref="PanelContentFilter.ShowAll"/>.
+    /// </summary>
     [Fact]
     public void ContentFilter_DefaultValue_IsShowAll()
     {
@@ -159,6 +208,9 @@ public class ChildWindowModelContentFilterTests
         Assert.Equal(PanelContentFilter.ShowAll, model.ContentFilter);
     }
 
+    /// <summary>
+    /// Verifies that assigning a different <see cref="PanelContentFilter"/> value raises <see cref="INotifyPropertyChanged.PropertyChanged"/>.
+    /// </summary>
     [Fact]
     public void ContentFilter_WhenChanged_RaisesPropertyChanged()
     {
@@ -171,6 +223,9 @@ public class ChildWindowModelContentFilterTests
         Assert.Equal(nameof(ChildWindowModel.ContentFilter), raisedProperty);
     }
 
+    /// <summary>
+    /// Verifies that re-assigning the same <see cref="PanelContentFilter"/> value does not raise <see cref="INotifyPropertyChanged.PropertyChanged"/>.
+    /// </summary>
     [Fact]
     public void ContentFilter_WhenSetToSameValue_DoesNotRaisePropertyChanged()
     {
@@ -194,17 +249,17 @@ public class ChildWindowModelContentFilterTests
 /// <summary>
 /// Unit tests for filter predicate application in the panel ViewModel.
 /// Uses <see cref="FilterViewModel"/> — a WPF-free stub that mirrors the real
-/// <see cref="ChildWindowViewModel.ApplyFilter"/> logic.
+/// <c>ChildWindowViewModel.ApplyFilterAndSort</c> logic.
 /// </summary>
 [Trait(UnitTests, "UI")]
 public class PanelFilterViewModelTests
 {
-    private static readonly string TempDir = Path.Combine(Path.GetTempPath(), $"DOrgFilter_{Guid.NewGuid():N}");
-
     // Paths used across tests
     private const string ShortcutPath = @"C:\fake\MyShortcut.lnk";
     private const string ExePath = @"C:\fake\MyApp.exe";
     private const string TxtPath = @"C:\fake\readme.txt";
+
+    private static readonly string TempDir = Path.Combine(Path.GetTempPath(), $"DOrgFilter_{Guid.NewGuid():N}");
 
     private static BaseViewModel BuildVm(PanelContentFilter filter = PanelContentFilter.ShowAll)
     {
@@ -218,11 +273,18 @@ public class PanelFilterViewModelTests
         return vm;
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PanelFilterViewModelTests"/> class.
+    /// </summary>
     public PanelFilterViewModelTests()
     {
         Directory.CreateDirectory(TempDir);
     }
 
+    /// <summary>
+    /// Finalizes an instance of the <see cref="PanelFilterViewModelTests"/> class.
+    /// Removes the shared temporary directory used by the fixture.
+    /// </summary>
     ~PanelFilterViewModelTests()
     {
         if (Directory.Exists(TempDir))
@@ -231,6 +293,9 @@ public class PanelFilterViewModelTests
 
     // ── ShowAll ──────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the <see cref="PanelContentFilter.ShowAll"/> filter keeps every added item visible.
+    /// </summary>
     [Fact]
     public void ShowAll_AllItemsVisible()
     {
@@ -242,6 +307,9 @@ public class PanelFilterViewModelTests
 
     // ── HideAll ──────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the <see cref="PanelContentFilter.HideAll"/> filter leaves <see cref="BaseViewModel.FileItems"/> empty.
+    /// </summary>
     [Fact]
     public void HideAll_FileItemsIsEmpty()
     {
@@ -253,6 +321,9 @@ public class PanelFilterViewModelTests
 
     // ── HideShortcuts ────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the <see cref="PanelContentFilter.HideShortcuts"/> filter excludes shortcut items.
+    /// </summary>
     [Fact]
     public void HideShortcuts_ShortcutsNotVisible()
     {
@@ -262,6 +333,9 @@ public class PanelFilterViewModelTests
         Assert.DoesNotContain(vm.FileItems, f => f.IsShortcut);
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="PanelContentFilter.HideShortcuts"/> filter keeps non-shortcut items visible.
+    /// </summary>
     [Fact]
     public void HideShortcuts_NonShortcutsRemainVisible()
     {
@@ -274,6 +348,9 @@ public class PanelFilterViewModelTests
 
     // ── FoldersOnly ──────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the <see cref="PanelContentFilter.FoldersOnly"/> filter shows only directory items.
+    /// </summary>
     [Fact]
     public void FoldersOnly_OnlyDirectoriesVisible()
     {
@@ -283,6 +360,9 @@ public class PanelFilterViewModelTests
         Assert.All(vm.FileItems, f => Assert.True(f.IsDirectory));
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="PanelContentFilter.FoldersOnly"/> filter excludes non-directory items.
+    /// </summary>
     [Fact]
     public void FoldersOnly_FilesNotVisible()
     {
@@ -295,6 +375,10 @@ public class PanelFilterViewModelTests
 
     // ── Regression: ShowAll → HideShortcuts → ShowAll restores items ─────────
 
+    /// <summary>
+    /// Verifies that switching back to <see cref="PanelContentFilter.ShowAll"/> after
+    /// <see cref="PanelContentFilter.HideShortcuts"/> restores the previously hidden shortcut item.
+    /// </summary>
     [Fact]
     public void ShowAll_AfterHideShortcuts_RestoredItemsVisible()
     {
@@ -322,6 +406,10 @@ public class PanelFilterViewModelTests
 
     // ── Model.ContentFilter change → FileItems updates automatically ─────────
 
+    /// <summary>
+    /// Verifies that changing <see cref="ChildWindowModel.ContentFilter"/> directly on the model
+    /// automatically re-applies the filter and updates <see cref="BaseViewModel.FileItems"/>.
+    /// </summary>
     [Fact]
     public void ModelContentFilterChange_TriggersFileItemsUpdate()
     {
@@ -356,37 +444,17 @@ public class PanelFilterViewModelTests
 [Trait(UnitTests, "UI")]
 public class SyncToModelPersistenceRegressionTests
 {
-    private static readonly string TempDir =
-        Path.Combine(Path.GetTempPath(), $"DOrgSync_{Guid.NewGuid():N}");
-
     private const string ShortcutPath = @"C:\fake\MyShortcut.lnk";
     private const string ExePath = @"C:\fake\MyApp.exe";
     private const string TxtPath = @"C:\fake\readme.txt";
 
-    private static BaseViewModel BuildVm(PanelContentFilter filter)
-    {
-        Directory.CreateDirectory(TempDir);
-        var iconMock = new Mock<IIconProvider>();
-        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
+    private static readonly string TempDir =
+        Path.Combine(Path.GetTempPath(), $"DOrgSync_{Guid.NewGuid():N}");
 
-        var model = new ChildWindowModel { ContentFilter = filter };
-        var vm = new FilterViewModel(iconMock.Object);
-        vm.LoadModel(model);
-        return vm;
-    }
-
-    private static (BaseViewModel vm, ChildWindowModel model) BuildVmWithModel(PanelContentFilter filter)
-    {
-        Directory.CreateDirectory(TempDir);
-        var iconMock = new Mock<IIconProvider>();
-        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
-
-        var model = new ChildWindowModel { ContentFilter = filter };
-        var fvm = new FilterViewModel(iconMock.Object);
-        fvm.LoadModel(model);
-        return (fvm, model);
-    }
-
+    /// <summary>
+    /// Finalizes an instance of the <see cref="SyncToModelPersistenceRegressionTests"/> class.
+    /// Removes the shared temporary directory used by the fixture.
+    /// </summary>
     ~SyncToModelPersistenceRegressionTests()
     {
         if (Directory.Exists(TempDir))
@@ -464,5 +532,29 @@ public class SyncToModelPersistenceRegressionTests
         Assert.Equal(added.Length, persisted.Count);
         foreach (var path in added)
             Assert.Contains(path, persisted);
+    }
+
+    private static BaseViewModel BuildVm(PanelContentFilter filter)
+    {
+        Directory.CreateDirectory(TempDir);
+        var iconMock = new Mock<IIconProvider>();
+        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
+
+        var model = new ChildWindowModel { ContentFilter = filter };
+        var vm = new FilterViewModel(iconMock.Object);
+        vm.LoadModel(model);
+        return vm;
+    }
+
+    private static (BaseViewModel vm, ChildWindowModel model) BuildVmWithModel(PanelContentFilter filter)
+    {
+        Directory.CreateDirectory(TempDir);
+        var iconMock = new Mock<IIconProvider>();
+        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
+
+        var model = new ChildWindowModel { ContentFilter = filter };
+        var fvm = new FilterViewModel(iconMock.Object);
+        fvm.LoadModel(model);
+        return (fvm, model);
     }
 }

@@ -39,7 +39,7 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="SystemIconsPanelViewModel"/>.
+    /// Initializes a new instance of the <see cref="SystemIconsPanelViewModel"/> class.
     /// </summary>
     /// <param name="model">The panel's persisted state and item list.</param>
     /// <param name="shellService">Native shell integration (icons, context menu, Recycle Bin).</param>
@@ -140,6 +140,10 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     /// <summary>
     /// Shows the native shell context menu for <paramref name="kind"/> at the given screen coordinates.
     /// </summary>
+    /// <param name="kind">Which system icon the context menu is for.</param>
+    /// <param name="ownerHwnd">The owning window handle, used to parent the native menu.</param>
+    /// <param name="screenX">The menu's screen X position, in physical pixels.</param>
+    /// <param name="screenY">The menu's screen Y position, in physical pixels.</param>
     public void ShowContextMenu(SystemIconKind kind, IntPtr ownerHwnd, int screenX, int screenY)
     {
         try
@@ -175,6 +179,8 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     /// Moves <paramref name="kind"/> to <paramref name="newOrder"/>, shifting other items
     /// to keep all Order values unique and contiguous. Rebuilds VisibleItems afterwards.
     /// </summary>
+    /// <param name="kind">Which system icon to reorder.</param>
+    /// <param name="newOrder">The target order index, clamped to the valid range.</param>
     public void Reorder(SystemIconKind kind, int newOrder)
     {
         var target = _model.Items.FirstOrDefault(i => i.Kind == kind);
@@ -206,6 +212,12 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     /// <summary>
     /// Sends <paramref name="paths"/> to the Recycle Bin and refreshes the bin icon.
     /// </summary>
+    /// <param name="paths">The file paths to send to the Recycle Bin.</param>
+    /// <param name="ownerHwnd">
+    /// The owning window handle, passed as the owner of the native <c>SHFileOperation</c> call; the
+    /// operation itself runs silently (<c>FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT</c>), so no
+    /// UI is ever shown.
+    /// </param>
     public void SendToRecycleBin(string[] paths, IntPtr ownerHwnd)
     {
         try
@@ -316,7 +328,7 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     /// unchanged.
     /// <para>
     /// NIT (P08 fix cycle 2 UiDispatch review): the marshal itself now goes through
-    /// <see cref="UiDispatch.TryBeginInvoke"/> rather than a bare <see cref="Dispatcher.BeginInvoke(Delegate, object[])"/>
+    /// <see cref="UiDispatch.TryBeginInvoke"/> rather than a bare <c>Dispatcher.BeginInvoke</c>
     /// — behaviorally equivalent today (a raw <c>BeginInvoke</c> on an already shut-down dispatcher
     /// already degrades to a dropped, <c>Aborted</c> operation rather than throwing, per
     /// <c>docs/Refactoring/Testing/sta-test-conventions.md</c>'s comparison table), but this keeps every

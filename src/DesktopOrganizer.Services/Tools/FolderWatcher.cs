@@ -26,10 +26,10 @@ internal sealed class FolderWatcher : IFolderWatcher
     };
 
     private readonly IDiagnosticsLog _diagnosticsLog;
+    private readonly object _debounceLock = new();
     private FileSystemWatcher? _watcher;
     private System.Threading.Timer? _debounceTimer;
     private FolderChangeEventArgs? _pendingArgs;
-    private readonly object _debounceLock = new();
     private bool _disposed;
 
     /// <summary>
@@ -46,6 +46,7 @@ internal sealed class FolderWatcher : IFolderWatcher
     /// Initializes a new instance of the <see cref="FolderWatcher"/> class. Called by
     /// <see cref="FolderWatcherFactory"/>, which owns the real <see cref="IDiagnosticsLog"/> from DI.
     /// </summary>
+    /// <param name="diagnosticsLog">The diagnostics sink to write watcher lifecycle/error events to.</param>
     internal FolderWatcher(IDiagnosticsLog diagnosticsLog)
     {
         _diagnosticsLog = diagnosticsLog ?? NullDiagnosticsLog.Instance;
@@ -117,6 +118,7 @@ internal sealed class FolderWatcher : IFolderWatcher
     /// Returns <see langword="true"/> when the file at <paramref name="fullPath"/> should be
     /// ignored (service files such as desktop.ini, Thumbs.db, or hidden files).
     /// </summary>
+    /// <param name="fullPath">Full path of the file or directory the change event refers to.</param>
     internal static bool ShouldIgnore(string fullPath)
     {
         var fileName = System.IO.Path.GetFileName(fullPath);

@@ -16,6 +16,12 @@ namespace DesktopOrganizer.Tests.Unit.Diagnostics;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class IconDiagnosticsTests
 {
+    /// <summary>
+    /// Verifies that <see cref="IconDiagnostics.SafeExtension"/> returns the real, lower-cased
+    /// extension for a path whose fragment after the last dot is a recognized file extension.
+    /// </summary>
+    /// <param name="path">The path passed to <c>SafeExtension</c>.</param>
+    /// <param name="expected">The expected lower-cased extension.</param>
     [Theory]
     [InlineData(@"C:\Windows\notepad.exe", ".exe")]
     [InlineData(@"C:\Users\me\Desktop\shortcut.lnk", ".lnk")]
@@ -26,12 +32,20 @@ public class IconDiagnosticsTests
         Assert.Equal(expected, IconDiagnostics.SafeExtension(path));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconDiagnostics.SafeExtension"/> returns an empty string for a path
+    /// with no extension at all.
+    /// </summary>
     [Fact]
     public void SafeExtension_NoExtension_ReturnsEmpty()
     {
         Assert.Equal(string.Empty, IconDiagnostics.SafeExtension(@"C:\Users\me\Desktop\README"));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconDiagnostics.SafeExtension"/> returns an empty string for an empty
+    /// path.
+    /// </summary>
     [Fact]
     public void SafeExtension_EmptyPath_ReturnsEmpty()
     {
@@ -46,6 +60,13 @@ public class IconDiagnosticsTests
     // class's own remarks. The DIRECTORY case below (ivan.petrov as a folder's own name) is the one
     // the original finding's exact example maps to, and IS fully closed — see
     // SafeExtension_DirectoryWithDotInOwnName_ReturnsEmpty_NeverTheNameFragment.
+
+    /// <summary>
+    /// Verifies that <see cref="IconDiagnostics.SafeExtension"/> maps a dotted fragment that does not
+    /// structurally look like a real extension (punctuation, non-ASCII, or implausibly long) to
+    /// <see cref="IconDiagnostics.OtherExtension"/> instead of leaking it verbatim.
+    /// </summary>
+    /// <param name="path">The path whose trailing dotted fragment is not a plausible real extension.</param>
     [Theory]
     [InlineData(@"C:\Users\me\Desktop\file.a-b")]
     [InlineData(@"C:\Users\me\Desktop\file.日本語")]
@@ -57,6 +78,11 @@ public class IconDiagnosticsTests
         Assert.Equal(IconDiagnostics.OtherExtension, result);
     }
 
+    /// <summary>
+    /// Documents the residual, accepted limitation of <see cref="IconDiagnostics.SafeExtension"/>: a
+    /// short, alphanumeric fragment structurally indistinguishable from a real extension is accepted
+    /// as if it were one.
+    /// </summary>
     [Fact]
     public void SafeExtension_ShortAlphanumericFileNameFragment_IsAcceptedAsIfItWereARealExtension()
     {
@@ -66,6 +92,11 @@ public class IconDiagnosticsTests
         Assert.Equal(".smith", IconDiagnostics.SafeExtension(@"report.smith"));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconDiagnostics.SafeExtension"/> returns an empty string for a
+    /// directory whose own name contains a dot (e.g. a Windows username folder like
+    /// <c>ivan.petrov</c>), never leaking the name fragment as if it were an extension.
+    /// </summary>
     [Fact]
     public void SafeExtension_DirectoryWithDotInOwnName_ReturnsEmpty_NeverTheNameFragment()
     {
@@ -86,6 +117,10 @@ public class IconDiagnosticsTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconDiagnostics.SafeExtension"/> matches the real-extension allow list
+    /// case-insensitively.
+    /// </summary>
     [Fact]
     public void SafeExtension_RealExtensionIsCaseInsensitive_MatchesAllowList()
     {

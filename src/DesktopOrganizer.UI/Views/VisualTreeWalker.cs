@@ -13,6 +13,8 @@ internal static class VisualTreeWalker
     /// Walks up the visual tree from <paramref name="obj"/> (inclusive) looking for the nearest
     /// ancestor of type <typeparamref name="T"/>.
     /// </summary>
+    /// <typeparam name="T">The ancestor type to look for.</typeparam>
+    /// <param name="obj">The visual-tree element to start searching from (inclusive).</param>
     public static T? FindAncestorOrSelf<T>(DependencyObject obj)
         where T : DependencyObject
     {
@@ -29,6 +31,8 @@ internal static class VisualTreeWalker
     /// Walks the visual tree looking for the first descendant of type <typeparamref name="T"/>
     /// (breadth doesn't matter here — there is exactly one match per <c>DataTemplate</c> instance).
     /// </summary>
+    /// <typeparam name="T">The descendant type to look for.</typeparam>
+    /// <param name="parent">The visual-tree element to search under.</param>
     public static T? FindVisualChild<T>(DependencyObject parent)
         where T : DependencyObject
     {

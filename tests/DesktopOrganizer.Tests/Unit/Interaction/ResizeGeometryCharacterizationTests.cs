@@ -43,6 +43,15 @@ public class ResizeGeometryCharacterizationTests
     // (c) the sign convention of the raw accumulator (T-GEO-24): Right/Bottom ADD the delta,
     // Left/Top SUBTRACT it (PanelResizeController.cs:136-154).
     // Corner edges (T-GEO-09..12) exercise both axes and both anchors simultaneously.
+
+    /// <summary>Verifies that applying one delta to each of the eight edges through <see cref="ResizeMathHarness"/> matches the pinned pre-C2 production formula.</summary>
+    /// <param name="direction">The edge direction string (e.g. <c>"Right"</c>, <c>"TopLeft"</c>).</param>
+    /// <param name="horizontalChange">The raw horizontal delta.</param>
+    /// <param name="verticalChange">The raw vertical delta.</param>
+    /// <param name="expectedLeft">The expected resulting Left.</param>
+    /// <param name="expectedTop">The expected resulting Top.</param>
+    /// <param name="expectedWidth">The expected resulting width.</param>
+    /// <param name="expectedHeight">The expected resulting height.</param>
     [Theory]
     [InlineData("Right", 40d, 0d, 100d, 200d, 340d, 250d)] // right edge grows; left (anchor) unchanged
     [InlineData("Left", 40d, 0d, 140d, 200d, 260d, 250d)] // left edge shrinks inward; right edge (100+300=400) preserved via left=rawRight-newWidth
@@ -53,8 +62,13 @@ public class ResizeGeometryCharacterizationTests
     [InlineData("BottomLeft", 40d, 25d, 140d, 200d, 260d, 275d)] // right anchor (400) + top anchor (200) preserved
     [InlineData("BottomRight", 40d, 25d, 100d, 200d, 340d, 275d)] // left anchor (100) + top anchor (200) preserved
     public void ApplyDelta_FreeMode_AllEightEdges_MatchesCurrentFormula(
-        string direction, double horizontalChange, double verticalChange,
-        double expectedLeft, double expectedTop, double expectedWidth, double expectedHeight)
+        string direction,
+        double horizontalChange,
+        double verticalChange,
+        double expectedLeft,
+        double expectedTop,
+        double expectedWidth,
+        double expectedHeight)
     {
         var harness = new ResizeMathHarness(StartBounds, snapCellWidth: 0d, snapCellHeight: 0d, minWidth: GridMetrics.MinPanelSize);
 
@@ -66,14 +80,28 @@ public class ResizeGeometryCharacterizationTests
     // ── T-GEO-13..16: min-size clamp — shrink far past the minimum on each edge ─────────────────────
     // The opposite (anchor) edge must stay exactly where it was even though the dragged edge's own
     // travel is clamped by GridMetrics.MinPanelSize (List mode's flat floor) — PanelResizeController.cs:173-183.
+
+    /// <summary>Verifies that shrinking far past the minimum on each edge clamps the result to <c>GridMetrics.MinPanelSize</c> while the anchor edge stays unaffected.</summary>
+    /// <param name="direction">The edge direction string (e.g. <c>"Left"</c>, <c>"Bottom"</c>).</param>
+    /// <param name="horizontalChange">The raw horizontal delta.</param>
+    /// <param name="verticalChange">The raw vertical delta.</param>
+    /// <param name="expectedLeft">The expected resulting Left.</param>
+    /// <param name="expectedTop">The expected resulting Top.</param>
+    /// <param name="expectedWidth">The expected resulting width.</param>
+    /// <param name="expectedHeight">The expected resulting height.</param>
     [Theory]
     [InlineData("Left", 250d, 0d, 280d, 200d, 120d, 250d)] // rawWidth = 300-250=50 < 120 -> clamped to 120; right edge (400) preserved
     [InlineData("Right", -250d, 0d, 100d, 200d, 120d, 250d)] // rawWidth = 300+(-250)=50 < 120 -> clamped; left (anchor) unchanged
     [InlineData("Top", 0d, 200d, 100d, 330d, 300d, 120d)] // rawHeight = 250-200=50 < 120 -> clamped; bottom edge (450) preserved
     [InlineData("Bottom", 0d, -200d, 100d, 200d, 300d, 120d)] // rawHeight = 250+(-200)=50 < 120 -> clamped; top (anchor) unchanged
     public void ApplyDelta_FreeMode_MinSizeClamp_AnchorEdgeUnaffected(
-        string direction, double horizontalChange, double verticalChange,
-        double expectedLeft, double expectedTop, double expectedWidth, double expectedHeight)
+        string direction,
+        double horizontalChange,
+        double verticalChange,
+        double expectedLeft,
+        double expectedTop,
+        double expectedWidth,
+        double expectedHeight)
     {
         var harness = new ResizeMathHarness(StartBounds, snapCellWidth: 0d, snapCellHeight: 0d, minWidth: GridMetrics.MinPanelSize);
 
@@ -86,6 +114,8 @@ public class ResizeGeometryCharacterizationTests
     // Math.Ceiling (PanelResizeController.cs:177-183). Golden values are computed by calling the exact
     // same already-tested AdaptiveGridLayout.SnapExtent/EdgePadding building blocks production calls —
     // never a literal that could hide a formula drift.
+
+    /// <summary>Verifies that with Grid+snap on, the harness's width quantises to a whole column via <see cref="Math.Ceiling(double)"/>.</summary>
     [Fact]
     public void ApplyDelta_GridSnapOn_Width_CeilsToSnappedColumnExtent()
     {
@@ -107,6 +137,7 @@ public class ResizeGeometryCharacterizationTests
         Assert.Equal(Math.Ceiling(expectedWidth), expectedWidth, precision: 6); // sanity: Ceiling really was applied (whole pixel)
     }
 
+    /// <summary>Verifies that with Grid+snap on, the harness's height quantises to a whole row via <see cref="Math.Ceiling(double)"/>.</summary>
     [Fact]
     public void ApplyDelta_GridSnapOn_Height_CeilsToSnappedRowExtent()
     {
@@ -127,6 +158,8 @@ public class ResizeGeometryCharacterizationTests
 
     // ── T-GEO-20: Grid mode but snap disabled (snapCellWidth/Height == 0) -> pixel-accurate, no
     // Math.Ceiling/SnapExtent quantization at all, even though minWidth still uses the Grid-mode floor.
+
+    /// <summary>Verifies that Grid mode with snap disabled leaves the harness's width pixel-accurate, with no quantisation applied.</summary>
     [Fact]
     public void ApplyDelta_GridModeSnapOff_IsPixelAccurate()
     {
@@ -141,6 +174,12 @@ public class ResizeGeometryCharacterizationTests
 
     // ── T-GEO-21: List mode is free on BOTH axes even when SnapResizeToIconGrid == true — the
     // OnResizeDragStarted branch decision (PanelResizeController.cs:100-117), not the Delta formula.
+
+    /// <summary>Verifies that <see cref="ResizeMathHarness.SelectSnapCells"/> stays free on both axes for List mode, or when icon-grid snap is disabled.</summary>
+    /// <param name="snapResizeToIconGrid">Whether icon-grid snap is enabled.</param>
+    /// <param name="viewMode">The panel's view mode.</param>
+    /// <param name="expectedSnapWidth">The expected snap cell width.</param>
+    /// <param name="expectedSnapHeight">The expected snap cell height.</param>
     [Theory]
     [InlineData(true, PanelViewMode.List, 0d, 0d)]
     [InlineData(false, PanelViewMode.List, 0d, 0d)]
@@ -153,6 +192,7 @@ public class ResizeGeometryCharacterizationTests
         Assert.Equal(expectedSnapHeight, snapCellHeight);
     }
 
+    /// <summary>Verifies that <see cref="ResizeMathHarness.SelectSnapCells"/> in Grid mode with snap enabled uses the icon cell size and row height.</summary>
     [Fact]
     public void SelectSnapCells_GridModeWithSnapEnabled_UsesCellSizeAndRowHeight()
     {
@@ -168,6 +208,8 @@ public class ResizeGeometryCharacterizationTests
     // floor (PanelResizeController.cs:173-175). Height's floor is always GridMetrics.MinPanelSize in
     // BOTH modes (no selection at all) — already exercised implicitly by every test above using the
     // constant directly for height.
+
+    /// <summary>Verifies that <see cref="ResizeMathHarness.SelectMinWidth"/> uses the icon-grid-derived floor for Grid mode and the flat floor for List mode.</summary>
     [Fact]
     public void SelectMinWidth_GridVsList_UsesDifferentFloors()
     {
@@ -184,6 +226,8 @@ public class ResizeGeometryCharacterizationTests
     // pin for the "single row of icons reported double height" bug (AdaptiveGridLayout.DefaultVerticalEdgePaddingRatio's
     // doc comment). The second assertion proves the test is not vacuous: swapping in the WRONG
     // (horizontal) ratio for the height branch would have produced a different number.
+
+    /// <summary>Verifies that the harness's height snapping uses the vertical edge-padding ratio while width snapping uses the horizontal one, and that the two genuinely diverge — regression guard for a "row reported double height" bug.</summary>
     [Fact]
     public void ApplyDelta_GridSnapOn_HeightUsesVerticalRatio_WidthUsesHorizontalRatio_AndTheyDiffer()
     {
@@ -212,6 +256,8 @@ public class ResizeGeometryCharacterizationTests
     // harness (and therefore the future ResizeGeometryCalculator, commit C2) must keep: do NOT "clean up"
     // this branch to read `Math.Max(GridMetrics.MinPanelSize, contentH + TitleBarHeight + FileListVPadding)`
     // even though it looks equivalent — plan §2.5 explicitly forbids that "tidying".
+
+    /// <summary>Verifies that the free-height branch uses the raw accumulated height directly, rather than re-deriving it from content — the deliberate asymmetry with the free-width branch.</summary>
     [Fact]
     public void ApplyDelta_FreeMode_Height_UsesRawHeightDirectly_NotRecomputedFromContent()
     {
@@ -225,6 +271,8 @@ public class ResizeGeometryCharacterizationTests
     }
 
     // ── SnapWidthToGrid — separate, standalone drop-time snap entry point (PanelResizeController.cs:243-258).
+
+    /// <summary>Verifies that <see cref="ResizeMathHarness.SnapWidthToGrid"/> quantises the width to a snapped column extent via <see cref="Math.Ceiling(double)"/>.</summary>
     [Fact]
     public void SnapWidthToGrid_GridMode_CeilsToSnappedColumnExtent()
     {
@@ -241,6 +289,7 @@ public class ResizeGeometryCharacterizationTests
         Assert.Equal(expected, result, precision: 6);
     }
 
+    /// <summary>Verifies that <see cref="ResizeMathHarness.SnapWidthToGrid"/> clamps a width below the minimum up to <c>MinPanelWidth</c>.</summary>
     [Fact]
     public void SnapWidthToGrid_BelowMinimum_ClampsToMinPanelWidth()
     {
@@ -250,6 +299,8 @@ public class ResizeGeometryCharacterizationTests
 
         Assert.Equal(GridMetrics.MinPanelWidth(iconSize), result, precision: 6);
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Window-free, line-for-line copy of <see cref="PanelResizeController.OnResizeDragStarted"/>'s
@@ -300,7 +351,8 @@ public class ResizeGeometryCharacterizationTests
             var cell = GridMetrics.CellSize(iconSize);
             var content = Math.Max(0d, currentWidth - GridMetrics.FileListHPadding);
 
-            return Math.Ceiling(Math.Max(GridMetrics.MinPanelWidth(iconSize),
+            return Math.Ceiling(Math.Max(
+                GridMetrics.MinPanelWidth(iconSize),
                 AdaptiveGridLayout.SnapExtent(content, cell, AdaptiveGridLayout.DefaultMinGap, AdaptiveGridLayout.EdgePadding(cell, AdaptiveGridLayout.DefaultEdgePaddingRatio)) + GridMetrics.FileListHPadding));
         }
 

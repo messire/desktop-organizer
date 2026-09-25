@@ -85,6 +85,7 @@ public class GridMetricsTests
     /// (AdaptiveGridLayout, fed by RowHeight as x_v) never silently desyncs from the actual rendered
     /// GridViewTemplate row footprint.
     /// </summary>
+    /// <param name="iconSize">The icon size passed to <see cref="GridMetrics.RowHeight"/>.</param>
     [Theory]
     [InlineData(16)]
     [InlineData(32)]
@@ -107,6 +108,7 @@ public class GridMetricsTests
     /// Regressing this desyncs GridMetrics.CellSize from the actual per-item footprint rendered by
     /// GridViewTemplate, which breaks resize-quantisation math (Resize_DragDelta/SnapWidthToGrid).
     /// </summary>
+    /// <param name="iconSize">The icon size passed to <see cref="GridMetrics.CellSize"/>.</param>
     [Theory]
     [InlineData(16)]
     [InlineData(32)]
@@ -190,6 +192,7 @@ public class GridMetricsTests
     /// math for the LEFT resize handle (finalization MAJOR M-1): at IconSize 16/20/24/28 the unclamped
     /// icon-grid formula (2 * CellSize(iconSize) = 72/84/96/108) undershoots 120.
     /// </summary>
+    /// <param name="iconSize">The icon size passed to <see cref="GridMetrics.MinPanelWidth(double)"/>.</param>
     [Theory]
     [InlineData(16d)]
     [InlineData(20d)]
@@ -226,6 +229,7 @@ public class GridMetricsTests
     /// from the pre-F-3 expectation of a bare `2 * cell`, which pinned FileListHPadding as a numeric
     /// no-op that is no longer true (see GridMetrics.MinPanelWidth's remarks).
     /// </summary>
+    /// <param name="iconSize">The icon size passed to <see cref="GridMetrics.MinPanelWidth(double)"/>.</param>
     [Theory]
     [InlineData(64d)]
     [InlineData(96d)]
@@ -242,6 +246,7 @@ public class GridMetricsTests
     /// LegacyStretch never reserves scrollbar width, for any injected width — M-2's fix is scoped to
     /// FixedGap only; LegacyStretch keeps ADR-018's original (accepted, documented) trade-off.
     /// </summary>
+    /// <param name="scrollBarWidth">The scrollbar width injected into <c>ReservedVerticalScrollBarWidth</c>.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(17d)]
@@ -256,6 +261,7 @@ public class GridMetricsTests
     /// reads a real system metric itself (kept WPF-free/pure/unit-testable), it only decides WHETHER the
     /// caller-supplied value applies to this policy.
     /// </summary>
+    /// <param name="scrollBarWidth">The scrollbar width injected into <c>ReservedVerticalScrollBarWidth</c>.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(17d)]
@@ -270,6 +276,7 @@ public class GridMetricsTests
     /// width — LegacyStretch's snap-code behavior must be completely unaffected by M-2 (decision: "для
     /// LegacyStretch поведение без изменений").
     /// </summary>
+    /// <param name="scrollBarWidth">The scrollbar width injected into <c>ContentHorizontalChrome</c>.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(17d)]
@@ -283,6 +290,7 @@ public class GridMetricsTests
     /// specifies, exercised with a realistic SystemParameters.VerticalScrollBarWidth-shaped value (17
     /// DIP, the common Windows default at 100% scale) as well as a boundary 0.
     /// </summary>
+    /// <param name="scrollBarWidth">The scrollbar width injected into <c>ContentHorizontalChrome</c>.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(17d)]
@@ -300,6 +308,7 @@ public class GridMetricsTests
     /// LegacyStretch and 0 — the existing MinPanelWidth(double) call sites (and every test above this
     /// section) must keep observing byte-for-byte the same values after this overload was added.
     /// </summary>
+    /// <param name="iconSize">The icon size passed to both <c>MinPanelWidth</c> overloads.</param>
     [Theory]
     [InlineData(16d)]
     [InlineData(48d)]
@@ -330,6 +339,8 @@ public class GridMetricsTests
     /// MinPanelSize (so the Math.Max clamp doesn't absorb the difference) — i.e. it genuinely reserves
     /// the scrollbar width in the floor too, consistent with SnapWidthToGrid/ResizeConstraintsFactory.
     /// </summary>
+    /// <param name="iconSize">The icon size passed to <see cref="GridMetrics.MinPanelWidth(double, IconLayoutPolicy, double)"/>.</param>
+    /// <param name="scrollBarWidth">The scrollbar width passed to <see cref="GridMetrics.MinPanelWidth(double, IconLayoutPolicy, double)"/>.</param>
     [Theory]
     [InlineData(64d, 17d)]
     [InlineData(96d, 23.5d)]

@@ -63,12 +63,18 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
     }
 
     /// <summary>
-    /// Test-only overload with an explicit storage root and migration runner — lets
+    /// Initializes a new instance of the <see cref="JsonApplicationStateStore"/> class. Test-only
+    /// overload with an explicit storage root and migration runner — lets
     /// <c>JsonApplicationStateStoreTests</c> point at a disposable temp folder and supply a
     /// <see cref="StateMigrationRunner"/> built from fake/minimal <see cref="ISettingsMigration"/>
     /// steps, so the recovery-ladder tests stay independent of the real production migration chain
     /// (<c>V1ToV2Migration</c>/<c>V2ToV3Migration</c>) and its own dedicated golden-fixture coverage.
     /// </summary>
+    /// <param name="paths">The storage root to use instead of the real per-user app-data folder.</param>
+    /// <param name="storageLock">The process-lifetime advisory lock (ADR-024 D-8).</param>
+    /// <param name="legacyImporter">Reads the five legacy <c>user.config</c> structural keys (D-7 rung 5).</param>
+    /// <param name="migrationRunner">The migration runner to use instead of building one from the production migration chain.</param>
+    /// <param name="diagnostics">Lazily-resolved diagnostics sink.</param>
     internal JsonApplicationStateStore(
         StateStorePaths paths,
         IStorageLock storageLock,
@@ -80,10 +86,20 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
     }
 
     /// <summary>
-    /// Test-only overload additionally exposing <see cref="AtomicJsonFileWriter"/>'s crash-injection
-    /// seam, so a test can assert that a write failing at any given <see cref="StateWriteStage"/>
-    /// never moves this store's committed state.
+    /// Initializes a new instance of the <see cref="JsonApplicationStateStore"/> class. Test-only
+    /// overload additionally exposing <see cref="AtomicJsonFileWriter"/>'s crash-injection seam, so a
+    /// test can assert that a write failing at any given <see cref="StateWriteStage"/> never moves
+    /// this store's committed state.
     /// </summary>
+    /// <param name="paths">The storage root to use instead of the real per-user app-data folder.</param>
+    /// <param name="storageLock">The process-lifetime advisory lock (ADR-024 D-8).</param>
+    /// <param name="legacyImporter">Reads the five legacy <c>user.config</c> structural keys (D-7 rung 5).</param>
+    /// <param name="migrationRunner">The migration runner to use instead of building one from the production migration chain.</param>
+    /// <param name="diagnostics">Lazily-resolved diagnostics sink.</param>
+    /// <param name="testForceWriteFailureAt">
+    /// When non-<see langword="null"/>, forwarded to <see cref="AtomicJsonFileWriter"/> to inject a
+    /// write failure at the given <see cref="StateWriteStage"/>.
+    /// </param>
     internal JsonApplicationStateStore(
         StateStorePaths paths,
         IStorageLock storageLock,
@@ -178,6 +194,42 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
                 new KeyValuePair<string, object?>("schemaVersion", StateEnvelope.CurrentSchemaVersion),
                 new KeyValuePair<string, object?>("trigger", "immediate"));
             return new StateSaveOutcome(StateSaveResult.Saved, null);
+        }
+    }
+
+    /// <inheritdoc />
+    public void QuarantineLoadedDocument(string reason)
+    {
+        lock (_stateLock)
+        {
+            if (!_loaded || _partialLoadQuarantined) return;
+            _partialLoadQuarantined = true;
+
+            // Nothing committed to disk yet (FirstRun) — there is no pre-loss primary to preserve.
+            if (!File.Exists(_paths.PrimaryFilePath)) return;
+
+            try
+            {
+                Directory.CreateDirectory(_paths.StateDirectory);
+                var quarantinePath = _paths.NewQuarantinePath();
+
+                // Copy, not move (unlike QuarantineFile's recovery-ladder use): the primary is not
+                // corrupt and must remain the committed state until Save() actually runs — this is a
+                // safety-net snapshot of it, taken before a reduced payload can overwrite it.
+                File.Copy(_paths.PrimaryFilePath, quarantinePath, overwrite: false);
+                Diag(
+                    "StateQuarantined",
+                    null,
+                    new KeyValuePair<string, object?>("reason", reason),
+                    new KeyValuePair<string, object?>("bytes", SafeFileLength(quarantinePath)));
+            }
+            catch (Exception ex)
+            {
+                // Best effort — same degraded-but-safe posture as QuarantineFile: if the copy fails
+                // (permissions, held handle), the primary is simply left as the only surviving copy,
+                // same as before this method existed.
+                Console.Error.WriteLine($"JsonApplicationStateStore: failed to quarantine loaded document ('{reason}'): {ex.GetType().Name}");
+            }
         }
     }
 
@@ -518,7 +570,7 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
     /// those two calls left a truncated file permanently under the final, deterministic target path —
     /// and because the very next <see cref="Load"/> call's <c>File.Exists</c> check would then see that
     /// truncated file and skip ever rewriting it, the corruption was unrecoverable for the lifetime of
-    /// the installation (this deterministic path, unlike <see cref="NewQuarantinePath"/>, is never
+    /// the installation (this deterministic path, unlike <see cref="StateStorePaths.NewQuarantinePath"/>, is never
     /// retried under a new name). Fixed: the document is written to a fresh, uniquely-named temp file
     /// first (<see cref="StateStorePaths.NewTempFilePath"/> — the SAME naming convention
     /// <see cref="AtomicJsonFileWriter"/>'s own temp files use, so an orphaned temp file left behind by a
@@ -596,42 +648,6 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
         {
             // Diagnostics must never affect the store's own outcome — IDiagnosticsLog.Write already
             // promises never to throw, but the lazily-resolved Func<IDiagnosticsLog> itself could.
-        }
-    }
-
-    /// <inheritdoc />
-    public void QuarantineLoadedDocument(string reason)
-    {
-        lock (_stateLock)
-        {
-            if (!_loaded || _partialLoadQuarantined) return;
-            _partialLoadQuarantined = true;
-
-            // Nothing committed to disk yet (FirstRun) — there is no pre-loss primary to preserve.
-            if (!File.Exists(_paths.PrimaryFilePath)) return;
-
-            try
-            {
-                Directory.CreateDirectory(_paths.StateDirectory);
-                var quarantinePath = _paths.NewQuarantinePath();
-
-                // Copy, not move (unlike QuarantineFile's recovery-ladder use): the primary is not
-                // corrupt and must remain the committed state until Save() actually runs — this is a
-                // safety-net snapshot of it, taken before a reduced payload can overwrite it.
-                File.Copy(_paths.PrimaryFilePath, quarantinePath, overwrite: false);
-                Diag(
-                    "StateQuarantined",
-                    null,
-                    new KeyValuePair<string, object?>("reason", reason),
-                    new KeyValuePair<string, object?>("bytes", SafeFileLength(quarantinePath)));
-            }
-            catch (Exception ex)
-            {
-                // Best effort — same degraded-but-safe posture as QuarantineFile: if the copy fails
-                // (permissions, held handle), the primary is simply left as the only surviving copy,
-                // same as before this method existed.
-                Console.Error.WriteLine($"JsonApplicationStateStore: failed to quarantine loaded document ('{reason}'): {ex.GetType().Name}");
-            }
         }
     }
 }

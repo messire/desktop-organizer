@@ -18,6 +18,7 @@ public class ResizeGestureSessionFixCycleTests
     private const double U = WorkspaceGridMetrics.UnitSize;
     private const double G = WorkspaceGridMetrics.DefaultGap;
 
+    /// <summary>Gets the eight <see cref="ResizeEdge"/> values under test.</summary>
     public static TheoryData<ResizeEdge> EightEdges => new()
     {
         ResizeEdge.Left, ResizeEdge.Right, ResizeEdge.Top, ResizeEdge.Bottom,
@@ -28,6 +29,8 @@ public class ResizeGestureSessionFixCycleTests
     // edge +200. Pre-fix: the live frame grew to 480 (Right = 2080), and the mouse-up snap
     // (SnapToGrid -> ResolveGridDrop -> SafeClamp, "never shrink, move instead") pulled the panel back by
     // TRANSLATING it to Left = 1440 — a 160 DIP jump of the anchor edge the user never touched. ────────
+
+    /// <summary>Verifies MAJOR-1's exact repro: growing past the right work-area wall stops the panel at the wall, and the drop-time snap does not translate it afterward.</summary>
     [Fact]
     public void GrowingPastTheRightWall_StopsAtTheWall_AndTheDropTimeSnapDoesNotTranslateThePanel()
     {
@@ -47,6 +50,9 @@ public class ResizeGestureSessionFixCycleTests
     }
 
     // ── All 8 edges against their own wall(s): inside the work area, anchor fixed, whole span. ───────
+
+    /// <summary>Verifies that for every edge, growing outward against its own work-area wall stops the panel at that wall, keeping the opposite edge fixed and the size on a whole span.</summary>
+    /// <param name="edge">The edge being dragged against its own wall.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void EveryEdge_StopsAtItsWall_KeepingTheOppositeEdgeFixed(ResizeEdge edge)
@@ -83,6 +89,9 @@ public class ResizeGestureSessionFixCycleTests
 
     // ── Alt (variant B), live frames: the edge tracks the cursor 1:1 — byte-for-byte what
     // ResizeGeometryCalculator.Apply alone produces, i.e. exactly the LegacyFreeform behaviour. ───────
+
+    /// <summary>Verifies that holding Alt suppresses grid quantisation for that live frame only — the very next frame with Alt released is quantised again.</summary>
+    /// <param name="edge">The edge being dragged.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void AltHeld_SuppressesQuantisation_ForThatFrameOnly(ResizeEdge edge)
@@ -110,6 +119,9 @@ public class ResizeGestureSessionFixCycleTests
 
     // ── Alt (variant B), commit: however free the frames were, the panel comes to REST on the grid —
     // ADR-028's absolute rule, enforced by PanelSizingGridSupport.PersistSpans, not by the frames. ────
+
+    /// <summary>Verifies that even with Alt held for the whole gesture, the panel still comes to rest on the grid at commit time, since <see cref="PanelSizingGridSupport.PersistSpans"/> enforces it, not the live frames.</summary>
+    /// <param name="edge">The edge being dragged.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void AltHeldForTheWholeGesture_StillCommitsOnTheGrid(ResizeEdge edge)
@@ -133,6 +145,8 @@ public class ResizeGestureSessionFixCycleTests
 
     // ── Alt is only ever consulted for a GridAligned gesture (a legacy one is free anyway, and paying
     // for a keyboard read on every WM_SIZING frame of every legacy panel would be pure waste). ───────
+
+    /// <summary>Verifies that a LegacyFreeform gesture never consults the free-resize modifier delegate, since a legacy panel is free regardless.</summary>
     [Fact]
     public void ALegacyGesture_NeverAsksForTheModifier()
     {

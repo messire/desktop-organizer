@@ -15,6 +15,9 @@ public class SortModeTooltipConverterTests
     private static readonly SortModeTooltipConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSortMode.Name"/> converts to the "Sorted by name" tooltip text.
+    /// </summary>
     [Fact]
     public void Convert_Name_ReturnsSortedByNameTooltip()
     {
@@ -23,6 +26,9 @@ public class SortModeTooltipConverterTests
         Assert.Equal("Sorted by name — click to arrange manually", tooltip);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSortMode.Manual"/> converts to the "Manual order" tooltip text.
+    /// </summary>
     [Fact]
     public void Convert_Manual_ReturnsManualOrderTooltip()
     {
@@ -31,6 +37,10 @@ public class SortModeTooltipConverterTests
         Assert.Equal("Manual order — click to sort by name", tooltip);
     }
 
+    /// <summary>
+    /// Verifies that the converter parameter no longer affects the output, since the glyph/tooltip branching
+    /// was removed and the converter always returns tooltip text.
+    /// </summary>
     [Fact]
     public void Convert_IgnoresConverterParameter()
     {
@@ -41,6 +51,10 @@ public class SortModeTooltipConverterTests
         Assert.Equal(withoutParameter, withParameter);
     }
 
+    /// <summary>
+    /// Verifies that an unrecognized value (such as <see langword="null"/>) is treated as
+    /// <see cref="PanelSortMode.Manual"/> rather than throwing.
+    /// </summary>
     [Fact]
     public void Convert_UnrecognizedValue_TreatedAsManual()
     {
@@ -49,6 +63,10 @@ public class SortModeTooltipConverterTests
         Assert.Equal("Manual order — click to sort by name", tooltip);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SortModeTooltipConverter.ConvertBack"/> always throws
+    /// <see cref="NotSupportedException"/> because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_Always_ThrowsNotSupportedException()
     {

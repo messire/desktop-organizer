@@ -5,6 +5,8 @@ namespace DesktopOrganizer.Services.Interfaces;
 /// <summary>
 /// Callback delegate for <see cref="INativeApi.EnumWindows"/>.
 /// </summary>
+/// <param name="hwnd">Handle of the enumerated top-level window.</param>
+/// <param name="lParam">The application-defined value passed through from <see cref="INativeApi.EnumWindows"/>.</param>
 internal delegate bool EnumWindowsCallback(IntPtr hwnd, IntPtr lParam);
 
 /// <summary>
@@ -16,6 +18,9 @@ internal delegate bool EnumWindowsCallback(IntPtr hwnd, IntPtr lParam);
 /// field) by the caller for the whole lifetime of the hook — the native side holds only an unmanaged
 /// thunk, which the GC does not track.
 /// </remarks>
+/// <param name="nCode">Hook code identifying how to process the message (<c>HC_ACTION</c> when non-negative).</param>
+/// <param name="wParam">Identifier of the mouse message being processed.</param>
+/// <param name="lParam">Pointer to an <c>MSLLHOOKSTRUCT</c> with the message details.</param>
 internal delegate IntPtr LowLevelMouseCallback(int nCode, IntPtr wParam, IntPtr lParam);
 
 /// <summary>
@@ -23,6 +28,10 @@ internal delegate IntPtr LowLevelMouseCallback(int nCode, IntPtr wParam, IntPtr 
 /// <see cref="INativeApi.CreateMessageWindow"/> (<c>WNDPROC</c>).
 /// </summary>
 /// <remarks>Must be kept alive by the caller for the whole lifetime of the window.</remarks>
+/// <param name="hwnd">Handle of the window receiving the message.</param>
+/// <param name="msg">The message identifier.</param>
+/// <param name="wParam">The first message-specific parameter (<c>wParam</c>).</param>
+/// <param name="lParam">The second message-specific parameter (<c>lParam</c>).</param>
 internal delegate IntPtr NativeWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
 
 /// <summary>
@@ -31,49 +40,75 @@ internal delegate IntPtr NativeWindowProc(IntPtr hwnd, int msg, IntPtr wParam, I
 internal interface INativeApi
 {
     /// <summary>
-    /// Retrieves file information, including its icon, using Shell API.
+    /// Retrieves file information, including its icon, using Shell API (<c>SHGetFileInfo</c>).
     /// </summary>
+    /// <param name="filePath">Full path of the file or folder to query.</param>
+    /// <param name="fileAttributes">File attributes to assume, used together with <c>SHGFI_USEFILEATTRIBUTES</c>.</param>
+    /// <param name="fileInfo">Receives the queried shell file information.</param>
+    /// <param name="fileInfoSize">Size, in bytes, of <paramref name="fileInfo"/>.</param>
+    /// <param name="flags">Combination of the <c>SHGFI_*</c> flags controlling what is retrieved.</param>
     IntPtr GetFileInfo(string filePath, uint fileAttributes, ref ShellFileInfo fileInfo, uint fileInfoSize, uint flags);
 
     /// <summary>
-    /// Destroys icon and releases its resources.
+    /// Destroys icon and releases its resources (<c>DestroyIcon</c>).
     /// </summary>
+    /// <param name="iconHandle">Handle of the icon to destroy.</param>
     bool DestroyIcon(IntPtr iconHandle);
 
     /// <summary>
-    /// Finds a top-level window by class name and/or window name.
+    /// Finds a top-level window by class name and/or window name (<c>FindWindow</c>).
     /// </summary>
+    /// <param name="className">Class name to match.</param>
+    /// <param name="windowName">Window title to match, or <see langword="null"/> to match any title.</param>
     IntPtr FindWindow(string className, string? windowName);
 
     /// <summary>
-    /// Finds a child window by class name, starting the search after <paramref name="childAfter"/>.
+    /// Finds a child window by class name, starting the search after <paramref name="childAfter"/>
+    /// (<c>FindWindowEx</c>).
     /// </summary>
+    /// <param name="parent">
+    /// Parent whose children are searched, or <see cref="IntPtr.Zero"/> to search top-level windows
+    /// (used for the WorkerW lookup).
+    /// </param>
+    /// <param name="childAfter">Child window to start the search after, or <see cref="IntPtr.Zero"/> to start from the first child.</param>
+    /// <param name="className">Class name to match.</param>
+    /// <param name="windowName">Window title to match, or <see langword="null"/> to match any title.</param>
     IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string? windowName);
 
     /// <summary>
-    /// Sends a message to a window.
+    /// Sends a message to a window (<c>SendMessage</c>).
     /// </summary>
+    /// <param name="hwnd">Handle of the destination window.</param>
+    /// <param name="msg">The message to send.</param>
+    /// <param name="wParam">The first message-specific parameter (<c>wParam</c>).</param>
+    /// <param name="lParam">The second message-specific parameter (<c>lParam</c>).</param>
     IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     /// <summary>
-    /// Enumerates all top-level windows, invoking <paramref name="callback"/> for each.
+    /// Enumerates all top-level windows, invoking <paramref name="callback"/> for each (<c>EnumWindows</c>).
     /// </summary>
+    /// <param name="callback">Invoked once per top-level window; return <see langword="false"/> to stop enumeration early.</param>
+    /// <param name="lParam">Application-defined value passed through unchanged to <paramref name="callback"/>.</param>
     bool EnumWindows(EnumWindowsCallback callback, IntPtr lParam);
 
     /// <summary>
-    /// Changes the parent window of the specified child window.
+    /// Changes the parent window of the specified child window (<c>SetParent</c>).
     /// </summary>
+    /// <param name="child">Handle of the window whose parent is changed.</param>
+    /// <param name="newParent">Handle of the new parent window, or <see cref="IntPtr.Zero"/> for the desktop window.</param>
     IntPtr SetParent(IntPtr child, IntPtr newParent);
 
     /// <summary>
     /// Returns the parent window of <paramref name="hwnd"/>, or <see cref="IntPtr.Zero"/> when the
     /// window is top-level (or the handle is invalid).
     /// </summary>
+    /// <param name="hwnd">Window whose parent is requested.</param>
     IntPtr GetParent(IntPtr hwnd);
 
     /// <summary>
     /// Returns the window class name of <paramref name="hwnd"/>, or an empty string on failure.
     /// </summary>
+    /// <param name="hwnd">Window whose class name is requested.</param>
     string GetWindowClassName(IntPtr hwnd);
 
     /// <summary>
@@ -94,13 +129,20 @@ internal interface INativeApi
     IntPtr GetWindow(IntPtr hwnd, int command);
 
     /// <summary>
-    /// Retrieves extended window style flags.
+    /// Retrieves a value associated with the specified window, e.g. its style or extended style
+    /// (<c>GetWindowLongPtr</c>).
     /// </summary>
+    /// <param name="hwnd">Window whose value is retrieved.</param>
+    /// <param name="index">Zero-based offset, or one of the <c>GWL_*</c> constants, identifying the value to retrieve.</param>
     IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
 
     /// <summary>
-    /// Sets extended window style flags.
+    /// Sets a value associated with the specified window, e.g. its style or extended style
+    /// (<c>SetWindowLongPtr</c>).
     /// </summary>
+    /// <param name="hwnd">Window whose value is set.</param>
+    /// <param name="index">Zero-based offset, or one of the <c>GWL_*</c> constants, identifying the value to set.</param>
+    /// <param name="newLong">The replacement value.</param>
     IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr newLong);
 
     /// <summary>
@@ -142,6 +184,7 @@ internal interface INativeApi
     /// <summary>
     /// Returns whether the specified window is currently visible.
     /// </summary>
+    /// <param name="hwnd">Window to query.</param>
     bool IsWindowVisible(IntPtr hwnd);
 
     /// <summary>
@@ -174,27 +217,40 @@ internal interface INativeApi
     /// Returns the absolute PIDL for the given known-folder / CLSID GUID, or <see cref="IntPtr.Zero"/> on failure.
     /// Caller must release it via <see cref="FreePidl"/>.
     /// </summary>
+    /// <param name="knownFolderId">The known-folder or CLSID GUID to resolve.</param>
     IntPtr GetKnownFolderPidl(Guid knownFolderId);
 
     /// <summary>
     /// Frees a PIDL previously obtained from <see cref="GetKnownFolderPidl"/> (CoTaskMemFree).
     /// </summary>
+    /// <param name="pidl">The PIDL to free.</param>
     void FreePidl(IntPtr pidl);
 
     /// <summary>
     /// Returns the native shell icon for the given absolute PIDL, or <see langword="null"/> on failure.
     /// The underlying HICON is destroyed before returning.
     /// </summary>
+    /// <param name="pidl">Absolute PIDL of the shell item whose icon is requested.</param>
+    /// <param name="sizePx">
+    /// Size hint: 16 or less selects the system small icon, anything larger the system large icon; the
+    /// returned image is not scaled to this value.
+    /// </param>
     System.Windows.Media.ImageSource? GetShellIconByPidl(IntPtr pidl, int sizePx);
 
     /// <summary>
     /// Shell-executes the item identified by the given absolute PIDL. Returns <see langword="false"/> on failure.
     /// </summary>
+    /// <param name="pidl">Absolute PIDL of the shell item to execute.</param>
+    /// <param name="ownerHwnd">Owner window for any UI the shell may show (e.g. an elevation prompt).</param>
     bool ShellExecutePidl(IntPtr pidl, IntPtr ownerHwnd);
 
     /// <summary>
     /// Shows the native shell context menu for the given absolute PIDL at the supplied screen coordinates.
     /// </summary>
+    /// <param name="pidl">Absolute PIDL of the shell item the menu is shown for.</param>
+    /// <param name="ownerHwnd">Owner window for the menu.</param>
+    /// <param name="screenX">Horizontal screen coordinate, in physical pixels, where the menu is shown.</param>
+    /// <param name="screenY">Vertical screen coordinate, in physical pixels, where the menu is shown.</param>
     void ShowShellContextMenu(IntPtr pidl, IntPtr ownerHwnd, int screenX, int screenY);
 
     /// <summary>
@@ -205,6 +261,11 @@ internal interface INativeApi
     /// <summary>
     /// Moves the given paths to the Recycle Bin (FO_DELETE | FOF_ALLOWUNDO).
     /// </summary>
+    /// <param name="paths">Full paths of the files/folders to move to the Recycle Bin.</param>
+    /// <param name="ownerHwnd">
+    /// Owner window for <c>SHFileOperation</c>. The operation runs fully silent
+    /// (<c>FOF_NOCONFIRMATION</c>/<c>FOF_NOERRORUI</c>/<c>FOF_SILENT</c>), so no UI is normally shown.
+    /// </param>
     bool SendToRecycleBin(string[] paths, IntPtr ownerHwnd);
 
     // ── Low-level mouse hook (WH_MOUSE_LL), see ADR-003 / ADR-012 ────────────────────────────────
@@ -213,6 +274,7 @@ internal interface INativeApi
     /// Returns the module handle of <paramref name="moduleName"/>, or of the current process when
     /// <see langword="null"/> is passed.
     /// </summary>
+    /// <param name="moduleName">Name of the module to look up, or <see langword="null"/> for the current process.</param>
     IntPtr GetModuleHandle(string? moduleName);
 
     /// <summary>
@@ -229,22 +291,30 @@ internal interface INativeApi
     /// <summary>
     /// Removes a hook previously installed with <see cref="SetWindowsHookEx"/>.
     /// </summary>
+    /// <param name="hookHandle">Handle of the hook to remove.</param>
     bool UnhookWindowsHookEx(IntPtr hookHandle);
 
     /// <summary>
     /// Passes the hook information to the next hook procedure in the chain.
     /// </summary>
+    /// <param name="hookHandle">The handle returned by <c>SetWindowsHookEx</c> (ignored by modern Windows).</param>
+    /// <param name="nCode">Hook code passed to the current hook procedure.</param>
+    /// <param name="wParam">Identifier of the message being processed.</param>
+    /// <param name="lParam">Pointer to the message-specific data, forwarded unchanged.</param>
     IntPtr CallNextHookEx(IntPtr hookHandle, int nCode, IntPtr wParam, IntPtr lParam);
 
     /// <summary>
     /// Reads the cursor position out of an <c>MSLLHOOKSTRUCT</c> pointed to by the hook's
     /// <c>lParam</c>. Screen coordinates, physical pixels.
     /// </summary>
+    /// <param name="lParam">The hook's <c>lParam</c>; a pointer to an <c>MSLLHOOKSTRUCT</c>.</param>
     System.Drawing.Point ReadMouseHookPoint(IntPtr lParam);
 
     /// <summary>
     /// Returns the window at the given screen point, or <see cref="IntPtr.Zero"/>.
     /// </summary>
+    /// <param name="screenX">Horizontal screen coordinate, in physical pixels.</param>
+    /// <param name="screenY">Vertical screen coordinate, in physical pixels.</param>
     IntPtr WindowFromPoint(int screenX, int screenY);
 
     /// <summary>
@@ -262,6 +332,9 @@ internal interface INativeApi
     /// is sent with a short timeout and <c>SMTO_ABORTIFHUNG</c>, because this runs inside the global
     /// mouse hook where a blocking call would stall input for the whole OS.
     /// </remarks>
+    /// <param name="listView"><c>SysListView32</c> handle of Explorer's desktop list view.</param>
+    /// <param name="screenX">Horizontal screen coordinate, in physical pixels, to test.</param>
+    /// <param name="screenY">Vertical screen coordinate, in physical pixels, to test.</param>
     bool IsListViewPointEmpty(IntPtr listView, int screenX, int screenY);
 
     // ── Monitors & hidden broadcast window ──────────────────────────────────────────────────────
@@ -298,11 +371,16 @@ internal interface INativeApi
     /// Destroys a window created by <see cref="CreateMessageWindow"/> and unregisters its class.
     /// Safe to call with a default/invalid value.
     /// </summary>
+    /// <param name="window">The window (and class atom) to destroy/unregister.</param>
     void DestroyMessageWindow(NativeMessageWindow window);
 
     /// <summary>
     /// Default window procedure (<c>DefWindowProc</c>) for messages the caller does not handle.
     /// </summary>
+    /// <param name="hwnd">Handle of the window receiving the message.</param>
+    /// <param name="msg">The message identifier.</param>
+    /// <param name="wParam">The first message-specific parameter (<c>wParam</c>).</param>
+    /// <param name="lParam">The second message-specific parameter (<c>lParam</c>).</param>
     IntPtr DefaultWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
 
     // ── Native panel sizing primitives (ADR-022 / Phase 2) ──────────────────────────────────────

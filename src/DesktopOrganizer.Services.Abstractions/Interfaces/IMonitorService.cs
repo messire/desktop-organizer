@@ -35,12 +35,14 @@ public interface IMonitorService : IDisposable
     /// Finds the monitor that contains <paramref name="point"/> (DIP coordinates), or
     /// <see langword="null"/> if the point lies outside every monitor.
     /// </summary>
+    /// <param name="point">The point to test, in DIP coordinates.</param>
     MonitorInfo? FindMonitorAt(Point point);
 
     /// <summary>
     /// Finds a monitor by its <see cref="MonitorInfo.DeviceName"/>, or <see langword="null"/>
     /// if no monitor with that name currently exists.
     /// </summary>
+    /// <param name="deviceName">The monitor's device name, as reported by <see cref="MonitorInfo.DeviceName"/>.</param>
     MonitorInfo? FindByDeviceName(string deviceName);
 
     /// <summary>

@@ -7,7 +7,7 @@ namespace DesktopOrganizer.Tests.Resources;
 /// Creates real Windows shortcut (<c>.lnk</c>) files for icon-extraction integration tests, via
 /// late-bound <c>WScript.Shell</c> COM automation — the same mechanism the P00 baseline audit's icon
 /// experiment used (there via PowerShell) to build realistic <c>.lnk</c> fixtures. Reflection-based
-/// (<see cref="Type.InvokeMember(string, BindingFlags, Binder?, object?, object?[]?)"/>) rather than
+/// (<see cref="Type.InvokeMember(string, BindingFlags, Binder, object, object[])"/>) rather than
 /// the C# <c>dynamic</c> keyword specifically to avoid adding a <c>Microsoft.CSharp</c> package
 /// reference to the test project for a single helper. This is scripting automation against a
 /// pre-existing Windows shell object, not new P/Invoke surface — <c>NativeApi</c>/<c>INativeApi</c>
@@ -21,6 +21,8 @@ internal static class ShellLinkTestHelper
     /// what lets callers build a "shortcut with a missing target" fixture (see
     /// <c>IconExtractionIntegrationTests</c>'s broken-target case).
     /// </summary>
+    /// <param name="shortcutPath">The full path, including <c>.lnk</c> extension, of the shortcut file to create.</param>
+    /// <param name="targetPath">The path the shortcut should point at; not validated or required to exist.</param>
     public static void CreateShortcut(string shortcutPath, string targetPath)
     {
         var shellType = Type.GetTypeFromProgID("WScript.Shell")

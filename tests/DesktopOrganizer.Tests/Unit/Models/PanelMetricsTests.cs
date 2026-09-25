@@ -86,7 +86,7 @@ public class PanelMetricsTests
     /// <summary>
     /// MAJOR-A: the corner square must stay wider than (or, at minimum, as wide as) the straight-edge
     /// strip — a corner narrower than the edge it is meant to widen past would be a nonsensical shape (see
-    /// <see cref="Interaction.Native.NativeHitTestMapper.Map"/>'s own <c>cornerDip</c> remarks).
+    /// <see cref="DesktopOrganizer.UI.Interaction.Native.NativeHitTestMapper.Map"/>'s own <c>cornerDip</c> remarks).
     /// </summary>
     [Fact]
     public void ResizeCornerThickness_IsAtLeastResizeEdgeThickness()
@@ -102,7 +102,7 @@ public class PanelMetricsTests
     /// <c>ResizeOverlay</c> Grid columns/rows read this, not a raw double. There is no equivalent wrapper
     /// for <see cref="PanelMetrics.ResizeCornerThickness"/>: the corner <c>Thumb</c>s consume it directly
     /// as a plain <see langword="double"/> <c>Width</c>/<c>Height</c>, never through a
-    /// <see cref="ColumnDefinition"/>/<see cref="RowDefinition"/>.
+    /// <see cref="System.Windows.Controls.ColumnDefinition"/>/<see cref="System.Windows.Controls.RowDefinition"/>.
     /// </summary>
     [Fact]
     public void ResizeEdgeThicknessLength_WrapsResizeEdgeThickness()
@@ -306,6 +306,7 @@ public class PanelMetricsTests
         Assert.Equal(new Thickness(PanelMetrics.ChromeOuterInset), PanelMetrics.ChromeOuterInsetThickness);
     }
 
+    /// <summary>T-M6: <see cref="PanelMetrics.ContentSidePaddingLength"/> wraps <see cref="PanelMetrics.ContentSidePadding"/> as a pixel <see cref="GridLength"/> exactly.</summary>
     [Fact]
     public void ContentSidePaddingLength_WrapsContentSidePadding()
     {
@@ -313,6 +314,7 @@ public class PanelMetricsTests
         Assert.Equal(GridUnitType.Pixel, PanelMetrics.ContentSidePaddingLength.GridUnitType);
     }
 
+    /// <summary>T-M6: <see cref="PanelMetrics.HeaderInnerRowHeight"/> wraps <see cref="PanelMetrics.HeaderInnerHeight"/> as a pixel <see cref="GridLength"/> exactly.</summary>
     [Fact]
     public void HeaderInnerRowHeight_WrapsHeaderInnerHeight()
     {
@@ -320,6 +322,7 @@ public class PanelMetricsTests
         Assert.Equal(GridUnitType.Pixel, PanelMetrics.HeaderInnerRowHeight.GridUnitType);
     }
 
+    /// <summary>T-M6: <see cref="PanelMetrics.HeaderContentGapLength"/> wraps <see cref="PanelMetrics.HeaderContentGap"/> as a pixel <see cref="GridLength"/> exactly.</summary>
     [Fact]
     public void HeaderContentGapLength_WrapsHeaderContentGap()
     {
@@ -327,6 +330,7 @@ public class PanelMetricsTests
         Assert.Equal(GridUnitType.Pixel, PanelMetrics.HeaderContentGapLength.GridUnitType);
     }
 
+    /// <summary>T-M6: <see cref="PanelMetrics.GlowFallbackMarginThickness"/> wraps <see cref="PanelMetrics.ChromeOuterInset"/> minus <see cref="PanelMetrics.GlowFallbackRingOffset"/> as a uniform <see cref="Thickness"/> exactly.</summary>
     [Fact]
     public void GlowFallbackMarginThickness_WrapsChromeOuterInsetMinusGlowFallbackRingOffset()
     {

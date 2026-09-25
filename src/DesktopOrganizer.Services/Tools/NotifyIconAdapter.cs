@@ -2,6 +2,9 @@
 
 namespace DesktopOrganizer.Services.Tools;
 
+/// <summary>
+/// Windows Forms <see cref="NotifyIcon"/>-backed <see cref="INotifyIconAdapter"/>.
+/// </summary>
 internal class NotifyIconAdapter : INotifyIconAdapter
 {
     private readonly NotifyIcon _notifyIcon = new () { Visible = true, };
@@ -12,12 +15,14 @@ internal class NotifyIconAdapter : INotifyIconAdapter
     private Icon? _currentIcon;
     private bool _disposed;
 
+    /// <inheritdoc/>
     public event EventHandler DoubleClick
     {
         add => _notifyIcon.DoubleClick += value;
         remove => _notifyIcon.DoubleClick -= value;
     }
 
+    /// <inheritdoc/>
     public void SetIcon(string iconPath)
     {
         if (string.IsNullOrEmpty(iconPath) || !File.Exists(iconPath))
@@ -48,12 +53,15 @@ internal class NotifyIconAdapter : INotifyIconAdapter
         previousIcon?.Dispose();
     }
 
+    /// <inheritdoc/>
     public void ShowBalloonTip(int timeout, string title, string text, ToolTipIcon icon)
         => _notifyIcon.ShowBalloonTip(timeout, title, text, icon);
 
+    /// <inheritdoc/>
     public void SetContextMenu(ContextMenuStrip menu)
         => _notifyIcon.ContextMenuStrip = menu;
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed)

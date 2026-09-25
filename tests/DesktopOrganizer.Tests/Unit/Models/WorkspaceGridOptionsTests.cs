@@ -11,6 +11,10 @@ namespace DesktopOrganizer.Tests.Unit.Models;
 [Trait(UnitTests, "UI")]
 public class WorkspaceGridOptionsTests
 {
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Default"/>'s field values match the
+    /// corresponding <see cref="WorkspaceGridMetrics"/> constants.
+    /// </summary>
     [Fact]
     public void Default_MatchesWorkspaceGridMetricsConstants()
     {
@@ -24,10 +28,18 @@ public class WorkspaceGridOptionsTests
         Assert.Same(WorkspaceGridMetrics.DefaultPresetSpans, options.PresetSpans);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Default"/> itself passes
+    /// <see cref="WorkspaceGridOptions.Validate"/> without throwing.
+    /// </summary>
     [Fact]
     public void Default_PassesValidate()
         => WorkspaceGridOptions.Default.Validate(); // does not throw
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.MinSpanExpanded"/> is composed exactly from the
+    /// record's own <c>MinWidthSpanExpanded</c>/<c>MinHeightSpanExpanded</c> fields.
+    /// </summary>
     [Fact]
     public void MinSpanExpanded_ComposedFromFields()
     {
@@ -45,6 +57,10 @@ public class WorkspaceGridOptionsTests
         Assert.Equal(new GridSpan(10, 4), options.MinSpanCollapsed);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Validate"/> throws when <c>Gap</c> is not a
+    /// whole multiple of <c>UnitSize</c>.
+    /// </summary>
     [Fact]
     public void Validate_GapNotWholeMultipleOfUnitSize_Throws()
     {
@@ -53,6 +69,11 @@ public class WorkspaceGridOptionsTests
         Assert.Throws<ArgumentException>(options.Validate);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Validate"/> throws when
+    /// <c>MinWidthSpanExpanded</c> is zero or negative.
+    /// </summary>
+    /// <param name="minWidth">A non-positive value for <c>MinWidthSpanExpanded</c>.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -63,6 +84,11 @@ public class WorkspaceGridOptionsTests
         Assert.Throws<ArgumentException>(options.Validate);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Validate"/> throws when
+    /// <c>MinHeightSpanExpanded</c> is zero or negative.
+    /// </summary>
+    /// <param name="minHeight">A non-positive value for <c>MinHeightSpanExpanded</c>.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -73,6 +99,11 @@ public class WorkspaceGridOptionsTests
         Assert.Throws<ArgumentException>(options.Validate);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Validate"/> throws when
+    /// <c>CollapsedHeaderSpan</c> is zero or negative.
+    /// </summary>
+    /// <param name="collapsedHeaderSpan">A non-positive value for <c>CollapsedHeaderSpan</c>.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -92,6 +123,10 @@ public class WorkspaceGridOptionsTests
         Assert.Throws<ArgumentException>(options.Validate);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Validate"/> throws when <c>PresetSpans</c> is
+    /// an empty dictionary.
+    /// </summary>
     [Fact]
     public void Validate_EmptyPresetSpans_Throws()
     {
@@ -100,6 +135,10 @@ public class WorkspaceGridOptionsTests
         Assert.Throws<ArgumentException>(options.Validate);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Validate"/> throws when a present preset's own
+    /// span value falls below the minimum expanded span, even though every enum member is present.
+    /// </summary>
     [Fact]
     public void Validate_PresetBelowMinimumExpandedSpan_Throws()
     {
@@ -117,6 +156,10 @@ public class WorkspaceGridOptionsTests
         Assert.Throws<ArgumentException>(options.Validate);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Validate"/> throws
+    /// <see cref="ArgumentNullException"/> when <c>PresetSpans</c> is null.
+    /// </summary>
     [Fact]
     public void Validate_NullPresetSpans_Throws()
     {
@@ -165,6 +208,10 @@ public class WorkspaceGridOptionsTests
         Assert.Throws<ArgumentException>(options.Validate);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridOptions.Validate"/> does not throw when the gap is
+    /// strictly less than the smallest span's own DIP extent.
+    /// </summary>
     [Fact]
     public void Validate_GapLessThanSmallestSpanExtent_DoesNotThrow()
     {

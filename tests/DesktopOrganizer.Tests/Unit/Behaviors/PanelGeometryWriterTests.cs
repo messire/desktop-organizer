@@ -9,7 +9,7 @@ namespace DesktopOrganizer.Tests.Unit.Behaviors;
 /// Unit tests for <see cref="PanelGeometryWriter"/> — the single atomic Window+model geometry write
 /// (docs/PLANS/workspace-grid-03-04-integration.md §1.5, baseline risk 17). Runs on a dedicated STA
 /// thread (<see cref="StaTestRunner"/>) because it touches a real <see cref="Window"/>'s
-/// <see cref="Window.Left"/>/<see cref="Window.Top"/>/<see cref="Window.Width"/>/<see cref="Window.Height"/>
+/// <see cref="Window.Left"/>/<see cref="Window.Top"/>/<see cref="FrameworkElement.Width"/>/<see cref="FrameworkElement.Height"/>
 /// — the same convention <see cref="RollUpBehaviorMotionTests"/> uses for a plain, never-shown
 /// <see cref="Window"/> instance.
 /// </summary>
@@ -19,6 +19,7 @@ public class PanelGeometryWriterTests
     private static readonly FieldInfo ApplyingField =
         typeof(PanelGeometryWriter).GetField("_applying", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.Apply"/> with no model attached does not throw and leaves the window's position untouched.</summary>
     [Fact]
     public void Apply_NoModelAttached_DoesNotThrow_AndLeavesWindowUntouched()
     {
@@ -36,6 +37,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.Apply"/> writes both the window's bounds and the model's position and size.</summary>
     [Fact]
     public void Apply_WritesWindowBoundsAndModelPositionAndSize()
     {
@@ -59,6 +61,7 @@ public class PanelGeometryWriterTests
     // ── m-1 fix-cycle 1: Math.Round, not a truncating (int) cast (docs/PLANS/workspace-grid-03-04-
     //    integration.md §2, code-review) ─────────────────────────────────────────────────────────────
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.Apply"/> rounds a negative fractional coordinate to the nearest integer instead of truncating toward zero.</summary>
     [Fact]
     public void Apply_NegativeFractionalCoordinate_RoundsToNearest_NotTowardZero()
     {
@@ -78,6 +81,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.ApplyPosition"/> rounds a negative fractional coordinate using banker's rounding, not truncation toward zero.</summary>
     [Fact]
     public void ApplyPosition_NegativeFractionalCoordinate_RoundsToNearest_NotTowardZero()
     {
@@ -95,6 +99,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.Apply"/> writes a supplied <see cref="GridSpan"/> into the model's span units.</summary>
     [Fact]
     public void Apply_WithSpan_WritesModelSpanUnits()
     {
@@ -111,6 +116,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.Apply"/> with a <see langword="null"/> span leaves the model's existing span units untouched.</summary>
     [Fact]
     public void Apply_NullSpan_LeavesExistingModelSpanUnitsUntouched()
     {
@@ -127,6 +133,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.Apply"/> writes a supplied monitor device ID into the model.</summary>
     [Fact]
     public void Apply_WithMonitorDeviceId_WritesModelMonitorDeviceId()
     {
@@ -142,6 +149,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.Apply"/> with a <see langword="null"/> monitor device ID leaves the model's existing monitor device ID untouched.</summary>
     [Fact]
     public void Apply_NullMonitorDeviceId_LeavesExistingModelMonitorDeviceIdUntouched()
     {
@@ -157,6 +165,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.IsApplying"/> is false both before and after a call to <see cref="PanelGeometryWriter.Apply"/> completes.</summary>
     [Fact]
     public void IsApplying_IsFalse_BeforeAndAfterApply()
     {
@@ -212,6 +221,7 @@ public class PanelGeometryWriterTests
 
     // ── ApplyPosition (P03): move-only writes ─────────────────────────────────────────────────────
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.ApplyPosition"/> writes the window's Left/Top and the model's position while leaving both sizes untouched.</summary>
     [Fact]
     public void ApplyPosition_WritesLeftTopAndModelPosition_LeavingSizeUntouched()
     {
@@ -234,6 +244,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.ApplyPosition"/> on a rolled-up panel keeps the model's persisted expanded size, without overwriting it with the collapsed window height.</summary>
     [Fact]
     public void ApplyPosition_RolledUpPanel_KeepsThePersistedExpandedSize()
     {
@@ -252,6 +263,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.ApplyPosition"/> writes both the span and the monitor device ID into the model when supplied.</summary>
     [Fact]
     public void ApplyPosition_WritesSpanAndMonitorDeviceIdWhenSupplied()
     {
@@ -269,6 +281,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.ApplyPosition"/> with no model attached is a complete no-op, leaving the window's position untouched.</summary>
     [Fact]
     public void ApplyPosition_NoModelAttached_IsANoOp()
     {
@@ -284,6 +297,7 @@ public class PanelGeometryWriterTests
         });
     }
 
+    /// <summary>Verifies that <see cref="PanelGeometryWriter.IsApplying"/> is true for the whole duration of an <see cref="PanelGeometryWriter.ApplyPosition"/> write, observed from inside <see cref="Window.LocationChanged"/>, and false again once it returns.</summary>
     [Fact]
     public void ApplyPosition_SetsIsApplyingForTheDurationOfTheWrite()
     {

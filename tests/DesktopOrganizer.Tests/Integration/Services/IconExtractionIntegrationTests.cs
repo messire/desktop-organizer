@@ -39,6 +39,11 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     private readonly string _tempDir;
     private readonly IconProvider _iconProvider;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IconExtractionIntegrationTests"/> class, creating a
+    /// throwaway temp directory and a real (non-mocked) <see cref="IconProvider"/> backed by the real
+    /// <see cref="NativeApi"/>.
+    /// </summary>
     public IconExtractionIntegrationTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"DOrgIconExtraction_{Guid.NewGuid():N}");
@@ -49,6 +54,9 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         _iconProvider = new IconProvider(new IconHandler(nativeApi, diagnosticsLog), new IconFactory(), diagnosticsLog);
     }
 
+    /// <summary>
+    /// Deletes the temp directory created for this test instance, best-effort.
+    /// </summary>
     public void Dispose()
     {
         try
@@ -62,6 +70,10 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> for a real, existing executable returns a
+    /// frozen, non-transparent bitmap that is distinct from the pipeline's own placeholder icon.
+    /// </summary>
     [Fact]
     public void GetIcon_RealExecutable_ReturnsOpaqueFrozenIcon()
     {
@@ -71,11 +83,16 @@ public sealed class IconExtractionIntegrationTests : IDisposable
 
         Assert.True(icon.IsFrozen, "Icons leaving the icon pipeline must be Freeze()-d (ADR-012 Decision 3).");
         Assert.True(CountOpaquePixels(icon) > 0, "A real executable's icon must not be blank/placeholder.");
+
         // M4 fix (P08 fix cycle 1): opaque>0 alone also passes for our OWN opaque placeholder (since
         // aa6760c) — assert it's not that reference at all, not just "some opaque bitmap".
         Assert.NotSame(PlaceholderFactory.CreateBitmap(), icon);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> for a real, existing folder returns a frozen,
+    /// non-transparent bitmap that is distinct from the pipeline's own placeholder icon.
+    /// </summary>
     [Fact]
     public void GetIcon_RealFolder_ReturnsOpaqueFrozenIcon()
     {
@@ -86,6 +103,10 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         Assert.NotSame(PlaceholderFactory.CreateBitmap(), icon);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> for a <c>.lnk</c> shortcut pointing at a real
+    /// existing target returns a frozen, non-transparent bitmap, distinct from the placeholder icon.
+    /// </summary>
     [Fact]
     public void GetIcon_ShortcutToRealTarget_ReturnsOpaqueFrozenIcon()
     {
@@ -102,6 +123,11 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         Assert.NotSame(PlaceholderFactory.CreateBitmap(), icon);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> for a <c>.lnk</c> shortcut whose target no
+    /// longer exists returns the shell's own opaque fallback icon, never this pipeline's placeholder
+    /// (P00 baseline H12).
+    /// </summary>
     [Fact]
     public void GetIcon_ShortcutToMissingTarget_ReturnsOsFallbackIcon_NotPlaceholder()
     {
@@ -117,11 +143,16 @@ public sealed class IconExtractionIntegrationTests : IDisposable
 
         Assert.True(icon.IsFrozen);
         Assert.True(CountOpaquePixels(icon) > 0);
+
         // M4 fix: the test's own name promises "not placeholder" but never actually asserted it —
         // opaque>0 also holds for our placeholder (since aa6760c). This is the assertion that was missing.
         Assert.NotSame(PlaceholderFactory.CreateBitmap(), icon);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> for an <c>.url</c> internet shortcut file
+    /// returns a frozen, non-transparent bitmap, distinct from the placeholder icon.
+    /// </summary>
     [Fact]
     public void GetIcon_UrlFile_ReturnsOpaqueFrozenIcon()
     {
@@ -135,6 +166,11 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         Assert.NotSame(PlaceholderFactory.CreateBitmap(), icon);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> for a nonexistent path never returns a fully
+    /// transparent bitmap (regression for the P00 baseline defect where the placeholder rendered
+    /// before its <c>DrawingContext</c> closed).
+    /// </summary>
     [Fact]
     public void GetIcon_MissingPath_ReturnsOpaquePlaceholder_NotTransparent()
     {
@@ -154,6 +190,10 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         Assert.True(CountOpaquePixels(icon) > 0, "Placeholder for a missing path must not be fully transparent.");
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> returns the exact same cached bitmap instance
+    /// when called twice for the same existing file path.
+    /// </summary>
     [Fact]
     public void GetIcon_SamePathTwice_ReturnsCachedInstance()
     {
@@ -165,6 +205,12 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         Assert.Same(first, second);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> never caches the result for a still-missing
+    /// path: two successive calls re-resolve independently, and both must still be valid, frozen,
+    /// non-transparent bitmaps even though they are not required to be the same instance (MINOR-1 fix,
+    /// P08 fix cycle 2).
+    /// </summary>
     [Fact]
     public void GetIcon_MissingPathTwice_NeverCachesTheFallback_BothCallsStillValid()
     {
@@ -192,6 +238,11 @@ public sealed class IconExtractionIntegrationTests : IDisposable
 
     // ── UX P1 (P08 fix cycle 1, 2026-09-22): generic-by-extension fallback for a missing path ───────
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> for a missing path with a recognized extension
+    /// resolves a real, type-specific shell icon via <c>SHGFI_USEFILEATTRIBUTES</c> rather than falling
+    /// back to this pipeline's own placeholder (UX P1, P08 fix cycle 1).
+    /// </summary>
     [Fact]
     public void GetIcon_MissingPath_RecognizedExtension_ReturnsGenericIcon_NotOwnPlaceholder()
     {
@@ -208,6 +259,11 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         Assert.NotSame(PlaceholderFactory.CreateBitmap(), icon);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> for a missing path with an unrecognized
+    /// extension never throws and always returns a valid, frozen, non-transparent bitmap, regardless
+    /// of whether Windows synthesizes a generic icon or the pipeline falls back to its own placeholder.
+    /// </summary>
     [Fact]
     public void GetIcon_MissingPath_UnrecognizedExtension_StillReturnsValidFrozenIcon()
     {
@@ -225,6 +281,10 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         Assert.True(CountOpaquePixels(icon) > 0);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> for a missing, extension-less path treats it as
+    /// a folder (best-effort heuristic) and still returns a valid, frozen, non-transparent bitmap.
+    /// </summary>
     [Fact]
     public void GetIcon_MissingFolderLikePath_NoExtension_AttemptsGenericFolderIcon()
     {
@@ -241,6 +301,11 @@ public sealed class IconExtractionIntegrationTests : IDisposable
 
     // ── M4 (P08 fix cycle 1, 2026-09-22): prove distinct executables actually get distinct icons ─────
 
+    /// <summary>
+    /// Verifies that <see cref="IconProvider.GetIcon"/> returns pixel-distinct bitmaps for two
+    /// different executables, ruling out an accidental "same generic icon for every <c>.exe</c>"
+    /// regression (M4, P08 fix cycle 1).
+    /// </summary>
     [Fact]
     public void GetIcon_DifferentExecutables_ReturnPixelDistinctIcons()
     {
@@ -256,6 +321,8 @@ public sealed class IconExtractionIntegrationTests : IDisposable
             GetPbgra32Pixels(notepadIcon).SequenceEqual(GetPbgra32Pixels(explorerIcon)),
             "notepad.exe and explorer.exe must not resolve to pixel-identical icons.");
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Converts <paramref name="bitmap"/> to a known-layout (Pbgra32) byte buffer so pixel content can

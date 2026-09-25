@@ -13,12 +13,20 @@ public class FileNameValidationTests
 {
     // ── Empty / whitespace ───────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects an empty string.
+    /// </summary>
     [Fact]
     public void IsValid_EmptyString_ReturnsFalse()
     {
         Assert.False(FileNameValidation.IsValid(string.Empty));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects a name consisting only of
+    /// whitespace, whatever the whitespace character.
+    /// </summary>
+    /// <param name="name">The whitespace-only candidate name.</param>
     [Theory]
     [InlineData(" ")]
     [InlineData("   ")]
@@ -30,6 +38,10 @@ public class FileNameValidationTests
 
     // ── Invalid characters, including path separators (traversal defense) ──
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects a name containing any character
+    /// from <see cref="Path.GetInvalidFileNameChars"/>.
+    /// </summary>
     [Fact]
     public void IsValid_EveryInvalidFileNameChar_ReturnsFalse()
     {
@@ -40,6 +52,12 @@ public class FileNameValidationTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects names containing directory
+    /// separators or traversal segments — this is what stops a rename from smuggling a directory
+    /// component or escaping the target directory.
+    /// </summary>
+    /// <param name="name">The candidate name containing path separators.</param>
     [Theory]
     [InlineData(@"..\..\evil.txt")]
     [InlineData(@"a\b")]
@@ -54,12 +72,18 @@ public class FileNameValidationTests
 
     // ── "." and ".." ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects the single-dot name <c>"."</c>.
+    /// </summary>
     [Fact]
     public void IsValid_SingleDot_ReturnsFalse()
     {
         Assert.False(FileNameValidation.IsValid("."));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects the double-dot name <c>".."</c>.
+    /// </summary>
     [Fact]
     public void IsValid_DoubleDot_ReturnsFalse()
     {
@@ -68,18 +92,30 @@ public class FileNameValidationTests
 
     // ── Trailing space / trailing dot ────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects a name with a trailing space,
+    /// since Windows silently strips it.
+    /// </summary>
     [Fact]
     public void IsValid_TrailingSpace_ReturnsFalse()
     {
         Assert.False(FileNameValidation.IsValid("Report.txt "));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects a name with a trailing dot after
+    /// an extension, since Windows silently strips it.
+    /// </summary>
     [Fact]
     public void IsValid_TrailingDot_ReturnsFalse()
     {
         Assert.False(FileNameValidation.IsValid("Report.txt."));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects a name with a trailing dot and no
+    /// extension, since Windows silently strips it.
+    /// </summary>
     [Fact]
     public void IsValid_TrailingDotNoExtension_ReturnsFalse()
     {
@@ -88,6 +124,11 @@ public class FileNameValidationTests
 
     // ── Reserved Windows device names, case-insensitive, with/without extension ─
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects every reserved Windows device
+    /// name (CON/PRN/AUX/NUL/COM1-9/LPT1-9) given bare, with no extension.
+    /// </summary>
+    /// <param name="reserved">The bare reserved device name.</param>
     [Theory]
     [InlineData("CON")]
     [InlineData("PRN")]
@@ -116,6 +157,11 @@ public class FileNameValidationTests
         Assert.False(FileNameValidation.IsValid(reserved));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects reserved Windows device names
+    /// regardless of letter casing.
+    /// </summary>
+    /// <param name="reserved">The reserved device name in a non-canonical casing.</param>
     [Theory]
     [InlineData("con")]
     [InlineData("Con")]
@@ -127,6 +173,11 @@ public class FileNameValidationTests
         Assert.False(FileNameValidation.IsValid(reserved));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> rejects a reserved Windows device name
+    /// even when it carries a file extension.
+    /// </summary>
+    /// <param name="reserved">The reserved device name with an extension appended.</param>
     [Theory]
     [InlineData("CON.txt")]
     [InlineData("con.txt")]
@@ -137,6 +188,10 @@ public class FileNameValidationTests
         Assert.False(FileNameValidation.IsValid(reserved));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> accepts a name that merely starts with a
+    /// reserved device name's letters (e.g. "CONTACT") without being an exact match.
+    /// </summary>
     [Fact]
     public void IsValid_NotAReservedNameButLooksSimilar_ReturnsTrue()
     {
@@ -147,24 +202,40 @@ public class FileNameValidationTests
 
     // ── Valid names — with and without extension ─────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> accepts an ordinary name with an
+    /// extension.
+    /// </summary>
     [Fact]
     public void IsValid_PlainNameWithExtension_ReturnsTrue()
     {
         Assert.True(FileNameValidation.IsValid("Report.docx"));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> accepts an ordinary folder-style name
+    /// with no extension.
+    /// </summary>
     [Fact]
     public void IsValid_PlainNameNoExtension_ReturnsTrue()
     {
         Assert.True(FileNameValidation.IsValid("MyFolder"));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> accepts a name containing interior
+    /// spaces.
+    /// </summary>
     [Fact]
     public void IsValid_NameWithSpacesInMiddle_ReturnsTrue()
     {
         Assert.True(FileNameValidation.IsValid("My Report Final.docx"));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FileNameValidation.IsValid"/> accepts a name with a leading space —
+    /// only a trailing space/dot is rejected, since only those are silently stripped by Windows.
+    /// </summary>
     [Fact]
     public void IsValid_NameWithLeadingSpace_ReturnsTrue()
     {

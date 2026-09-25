@@ -51,6 +51,9 @@ public class NativePanelSizingServiceTests
     private HwndSourceHook? _hook;
     private int _installCount;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="NativePanelSizingServiceTests"/> class.
+    /// </summary>
     public NativePanelSizingServiceTests()
     {
         var windowRect = new NativeRectPx(100, 200, 500, 600);
@@ -61,6 +64,12 @@ public class NativePanelSizingServiceTests
     }
 
     // ── Attach / Dispose lifecycle ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="NativePanelSizingService.Attach"/> installs the sizing hook exactly once
+    /// per HWND, and that a second <c>Attach</c> for the same handle is a no-op that returns a distinct,
+    /// separately disposable token without touching the underlying hook removal.
+    /// </summary>
     [Fact]
     public void Attach_InstallsHookOnce_AndSecondAttachIsNoOp()
     {
@@ -79,6 +88,11 @@ public class NativePanelSizingServiceTests
         _hookRemovalMock.Verify(d => d.Dispose(), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that disposing the token returned by <see cref="NativePanelSizingService.Attach"/>
+    /// removes the hook exactly once even when disposed twice, and that the HWND is free for a fresh
+    /// attach afterwards.
+    /// </summary>
     [Fact]
     public void Dispose_RemovesHook_AndIsIdempotent()
     {
@@ -99,6 +113,11 @@ public class NativePanelSizingServiceTests
     }
 
     // ── WM_NCHITTEST ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <c>WM_NCHITTEST</c> is answered with the hit-test code matching the sizing edge the
+    /// client reports for the hit point.
+    /// </summary>
     [Fact]
     public void WmNcHitTest_MapsClientEdge_ToSizingHitTestCode()
     {
@@ -121,6 +140,10 @@ public class NativePanelSizingServiceTests
             Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that <c>WM_NCHITTEST</c> is left unhandled when the client reports
+    /// <see cref="NativeSizingEdge.None"/>, so WPF/<c>DefWindowProc</c> keep their own hit testing.
+    /// </summary>
     [Fact]
     public void WmNcHitTest_LeavesMessageUnhandled_WhenClientReportsNoEdge()
     {
@@ -140,6 +163,10 @@ public class NativePanelSizingServiceTests
         Assert.Equal(IntPtr.Zero, result);
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown by the client's hit-test callback never escapes the window
+    /// procedure.
+    /// </summary>
     [Fact]
     public void WmNcHitTest_DoesNotThrow_WhenClientThrows()
     {
@@ -160,6 +187,10 @@ public class NativePanelSizingServiceTests
     }
 
     // ── WM_MOUSEACTIVATE (R-2) ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <c>WM_MOUSEACTIVATE</c> is always answered with <c>MA_NOACTIVATE</c>, per R-2.
+    /// </summary>
     [Fact]
     public void WmMouseActivate_AlwaysAnswersNoActivate()
     {
@@ -177,6 +208,11 @@ public class NativePanelSizingServiceTests
     }
 
     // ── WM_SIZING outside a gesture ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that a <c>WM_SIZING</c> message received without a preceding <c>WM_ENTERSIZEMOVE</c> is
+    /// ignored outright: not even the proposed rectangle is read.
+    /// </summary>
     [Fact]
     public void WmSizing_IsIgnored_WithoutEnterSizeMove()
     {
@@ -198,6 +234,13 @@ public class NativePanelSizingServiceTests
     }
 
     // ── WM_NCHITTEST — full 8-edge mapping ──────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that every <see cref="NativeSizingEdge"/> value the client can report maps to its own,
+    /// distinct <c>WM_NCHITTEST</c> result code.
+    /// </summary>
+    /// <param name="edge">The sizing edge the mocked client is set up to report.</param>
+    /// <param name="expectedHitTestCode">The hit-test code expected for that edge.</param>
     [Theory]
     [InlineData(NativeSizingEdge.Left, HtLeft)]
     [InlineData(NativeSizingEdge.Top, HtTop)]
@@ -226,6 +269,11 @@ public class NativePanelSizingServiceTests
     }
 
     // ── WM_ENTERSIZEMOVE lifecycle ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <c>WM_ENTERSIZEMOVE</c> seeds the sizing edge from the most recent
+    /// <c>WM_NCHITTEST</c> result and notifies the client with the current window rectangle and DPI.
+    /// </summary>
     [Fact]
     public void WmEnterSizeMove_SeedsEdgeFromLastHitTest_AndCallsClientWithWindowRectAndDpi()
     {
@@ -250,6 +298,10 @@ public class NativePanelSizingServiceTests
             Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that once the client rejects <c>WM_ENTERSIZEMOVE</c>, subsequent <c>WM_SIZING</c>
+    /// messages in the same cycle never reach the client — the rectangle is not even read.
+    /// </summary>
     [Fact]
     public void WmEnterSizeMove_ClientRejects_SubsequentWmSizingInSameCycleNeverReachesClient()
     {
@@ -273,6 +325,11 @@ public class NativePanelSizingServiceTests
     }
 
     // ── WM_SIZING — accepted cycle ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that within an accepted sizing cycle, <c>WM_SIZING</c> reads the proposed rectangle,
+    /// passes it to the client for adjustment, and writes the adjusted rectangle back.
+    /// </summary>
     [Fact]
     public void WmSizing_AcceptedCycle_ReadsProposedRect_CallsClient_AndWritesAdjustedRectBack()
     {
@@ -299,6 +356,10 @@ public class NativePanelSizingServiceTests
         _nativeApiMock.Verify(api => api.WriteRect(lParam, adjusted), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that a <c>WMSZ_*</c> wParam value outside the documented 1..8 range falls back to the
+    /// edge the cycle was seeded with at <c>WM_ENTERSIZEMOVE</c>, instead of <c>None</c>.
+    /// </summary>
     [Fact]
     public void WmSizing_UnmappedWmszValue_FallsBackToTheCyclesSeededEdge()
     {
@@ -322,6 +383,10 @@ public class NativePanelSizingServiceTests
         _clientMock.Verify(c => c.ProposeBounds(NativeSizingEdge.Bottom, proposed), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown by the client's <c>ProposeBounds</c> callback never escapes the
+    /// window procedure.
+    /// </summary>
     [Fact]
     public void WmSizing_ClientThrows_DoesNotEscapeTheHook()
     {
@@ -344,6 +409,11 @@ public class NativePanelSizingServiceTests
     }
 
     // ── WM_EXITSIZEMOVE ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that ending an accepted sizing cycle with <c>WM_EXITSIZEMOVE</c> reports the final window
+    /// rectangle to the client via <c>SizeMoveExited</c>, without ever calling <c>SizeMoveAborted</c>.
+    /// </summary>
     [Fact]
     public void WmExitSizeMove_AcceptedCycle_ReportsFinalWindowRectToClient()
     {
@@ -361,6 +431,10 @@ public class NativePanelSizingServiceTests
         _clientMock.Verify(c => c.SizeMoveAborted(), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that ending a cycle the client had rejected never notifies the client — neither
+    /// <c>SizeMoveExited</c> nor <c>SizeMoveAborted</c> fires.
+    /// </summary>
     [Fact]
     public void WmExitSizeMove_RejectedCycle_NeverNotifiesTheClient()
     {
@@ -378,6 +452,10 @@ public class NativePanelSizingServiceTests
         _clientMock.Verify(c => c.SizeMoveAborted(), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that when the native <c>GetWindowRect</c> call fails at <c>WM_EXITSIZEMOVE</c> time, the
+    /// service reports <c>SizeMoveAborted</c> instead of a bogus <c>SizeMoveExited</c> rectangle.
+    /// </summary>
     [Fact]
     public void WmExitSizeMove_GetWindowRectFails_ReportsAbortedInsteadOfExited()
     {
@@ -398,6 +476,11 @@ public class NativePanelSizingServiceTests
     }
 
     // ── WM_CAPTURECHANGED ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <c>WM_CAPTURECHANGED</c> with an lParam identifying a foreign window aborts the
+    /// active sizing cycle.
+    /// </summary>
     [Fact]
     public void WmCaptureChanged_ForeignWindowTakesCapture_AbortsTheActiveCycle()
     {
@@ -415,6 +498,10 @@ public class NativePanelSizingServiceTests
         _clientMock.Verify(c => c.SizeMoveAborted(), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that a zero-lParam <c>WM_CAPTURECHANGED</c> — the system's ordinary release of capture
+    /// right before <c>WM_EXITSIZEMOVE</c> — does not abort the cycle.
+    /// </summary>
     [Fact]
     public void WmCaptureChanged_ZeroLParam_IsTheOrdinaryEndOfLoop_DoesNotAbort()
     {
@@ -431,6 +518,10 @@ public class NativePanelSizingServiceTests
         _clientMock.Verify(c => c.SizeMoveAborted(), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that <c>WM_CAPTURECHANGED</c> with an lParam identifying the panel's own HWND does not
+    /// abort the cycle, since the system may legitimately capture on the panel's own behalf.
+    /// </summary>
     [Fact]
     public void WmCaptureChanged_OwnHwndTakesCapture_DoesNotAbort()
     {
@@ -448,6 +539,11 @@ public class NativePanelSizingServiceTests
     }
 
     // ── WM_DPICHANGED / WM_DPICHANGED_AFTERPARENT (D-6, observational only) ──────
+
+    /// <summary>
+    /// Verifies that <c>WM_DPICHANGED</c> reads the new DPI from the wParam high word and the suggested
+    /// rectangle from the lParam payload, forwarding both to the client.
+    /// </summary>
     [Fact]
     public void WmDpiChanged_ReadsScaleFromWParamHiword_AndRectFromLParam()
     {
@@ -468,6 +564,10 @@ public class NativePanelSizingServiceTests
         _clientMock.Verify(c => c.DpiChanged(1.5, suggestedRect), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that <c>WM_DPICHANGED_AFTERPARENT</c>, which carries no RECT payload, asks the native API
+    /// directly for both the current DPI scale and the window rectangle instead of reading the message.
+    /// </summary>
     [Fact]
     public void WmDpiChangedAfterParent_HasNoPayload_AsksNativeApiForScaleAndRectInstead()
     {

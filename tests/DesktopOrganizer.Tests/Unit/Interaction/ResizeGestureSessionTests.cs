@@ -36,6 +36,8 @@ public class ResizeGestureSessionTests
     ];
 
     // T-SES-01: TryBegin from Idle -> true, tracker claims Resizing.
+
+    /// <summary>Verifies that <see cref="ResizeGestureSession.TryBegin"/> from Idle succeeds and claims <see cref="PanelInteractionState.Resizing"/> on the tracker.</summary>
     [Fact]
     public void TryBegin_FromIdle_SucceedsAndClaimsResizingOnTracker()
     {
@@ -54,6 +56,8 @@ public class ResizeGestureSessionTests
     }
 
     // T-SES-02: double TryBegin -> second false, first gesture untouched.
+
+    /// <summary>Verifies that calling <see cref="ResizeGestureSession.TryBegin"/> twice fails the second time and leaves the first gesture untouched.</summary>
     [Fact]
     public void TryBegin_CalledTwice_SecondFailsAndFirstGestureUntouched()
     {
@@ -70,6 +74,8 @@ public class ResizeGestureSessionTests
     }
 
     // T-SES-03: TryBegin while the tracker already owns Dragging -> false.
+
+    /// <summary>Verifies that <see cref="ResizeGestureSession.TryBegin"/> fails while the tracker already owns <see cref="PanelInteractionState.Dragging"/>.</summary>
     [Fact]
     public void TryBegin_WhileTrackerIsDragging_Fails()
     {
@@ -85,6 +91,8 @@ public class ResizeGestureSessionTests
     }
 
     // T-SES-04: TryUpdate before Begin -> false, `applied` echoes `current` unchanged.
+
+    /// <summary>Verifies that calling <see cref="ResizeGestureSession.TryUpdate"/> before <see cref="ResizeGestureSession.TryBegin"/> fails and echoes <c>current</c> unchanged.</summary>
     [Fact]
     public void TryUpdate_BeforeBegin_FailsAndEchoesCurrent()
     {
@@ -99,6 +107,8 @@ public class ResizeGestureSessionTests
     }
 
     // T-SES-05: TryUpdate with a different edge than TryBegin -> false (unexpected source change).
+
+    /// <summary>Verifies that calling <see cref="ResizeGestureSession.TryUpdate"/> with a different edge than the one passed to <see cref="ResizeGestureSession.TryBegin"/> fails, without ending the gesture.</summary>
     [Fact]
     public void TryUpdate_WithUnexpectedEdge_Fails()
     {
@@ -114,6 +124,8 @@ public class ResizeGestureSessionTests
     }
 
     // T-SES-06: End(Completed) after N deltas -> ShouldPersist = true, tracker back to Idle.
+
+    /// <summary>Verifies that ending with <see cref="ResizeEndReason.Completed"/> after applying deltas sets <c>ShouldPersist</c> and returns the tracker to Idle.</summary>
     [Fact]
     public void End_Completed_AfterDeltas_PersistsAndReturnsTrackerToIdle()
     {
@@ -135,6 +147,8 @@ public class ResizeGestureSessionTests
 
     // T-SES-07: End(Canceled) after N deltas -> ShouldPersist = true (WPF does not roll back geometry
     // already applied to the window).
+
+    /// <summary>Verifies that ending with <see cref="ResizeEndReason.Canceled"/> after applying deltas still sets <c>ShouldPersist</c>, since WPF does not roll back geometry already applied to the window.</summary>
     [Fact]
     public void End_Canceled_AfterDeltas_StillPersists()
     {
@@ -149,6 +163,8 @@ public class ResizeGestureSessionTests
     }
 
     // T-SES-08: End(CaptureLost) with ZERO deltas -> ShouldPersist = false.
+
+    /// <summary>Verifies that ending with <see cref="ResizeEndReason.CaptureLost"/> after zero deltas leaves <c>ShouldPersist</c> false.</summary>
     [Fact]
     public void End_CaptureLost_WithoutAnyDelta_DoesNotPersist()
     {
@@ -163,6 +179,8 @@ public class ResizeGestureSessionTests
     }
 
     // T-SES-09: repeated End -> second call WasActive = false (idempotency).
+
+    /// <summary>Verifies that calling <see cref="ResizeGestureSession.End"/> twice makes the second call a no-op (<c>WasActive</c> false), formalizing idempotency.</summary>
     [Fact]
     public void End_CalledTwice_SecondCallIsNoOp()
     {
@@ -179,6 +197,8 @@ public class ResizeGestureSessionTests
     }
 
     // T-SES-10: End without a preceding Begin -> WasActive = false, no exception.
+
+    /// <summary>Verifies that calling <see cref="ResizeGestureSession.End"/> without a preceding <see cref="ResizeGestureSession.TryBegin"/> is a no-op and does not throw.</summary>
     [Fact]
     public void End_WithoutBegin_IsNoOpAndDoesNotThrow()
     {
@@ -197,6 +217,8 @@ public class ResizeGestureSessionTests
     // a second copy of T-SES-09's idempotency guarantee (code-quality-reviewer minor m-1); kept as-is to
     // avoid removing existing coverage, but T-SES-19 is the test that actually exercises the `_ending`
     // reentrancy guard from inside the first call's own unwind.
+
+    /// <summary>Verifies that a sequential (not true re-entrant) second call to <see cref="ResizeGestureSession.End"/> does not double-release the tracker and leaves it Idle.</summary>
     [Fact]
     public void End_Reentrant_DoesNotDoubleReleaseTrackerAndLeavesIdle()
     {
@@ -222,6 +244,8 @@ public class ResizeGestureSessionTests
 
     // T-SES-12: End(Failed) -> ShouldPersist = false even after deltas were applied (partially-applied
     // geometry must never be persisted).
+
+    /// <summary>Verifies that ending with <see cref="ResizeEndReason.Failed"/> never sets <c>ShouldPersist</c>, even after deltas were applied.</summary>
     [Fact]
     public void End_Failed_NeverPersists_EvenAfterDeltas()
     {
@@ -239,6 +263,9 @@ public class ResizeGestureSessionTests
 
     // T-SES-13..17: End(<reason>) for EVERY ResizeEndReason -> tracker is ALWAYS Idle afterwards — the
     // direct formalization of the DoD "LostMouseCapture ALWAYS leads to Idle".
+
+    /// <summary>Verifies that ending for every possible <see cref="ResizeEndReason"/> always returns the tracker to <see cref="PanelInteractionState.Idle"/>.</summary>
+    /// <param name="reason">The end reason under test.</param>
     [Theory]
     [InlineData(ResizeEndReason.Completed)]
     [InlineData(ResizeEndReason.Canceled)]
@@ -263,6 +290,8 @@ public class ResizeGestureSessionTests
     // TryUpdate -> End(random reason from the full set); invariants after EVERY iteration:
     // tracker.State == Idle, session.IsActive == false, the NEXT TryBegin returns true. Also sweeps
     // every ResizeEdge. Deterministic seed so the test is reproducible.
+
+    /// <summary>Verifies the DoD "100 consecutive resizes without hanging": 100 randomized begin/update/end cycles across every edge always end Idle and always allow the next <c>TryBegin</c>.</summary>
     [Fact]
     public void HundredConsecutiveGestures_AlwaysEndIdleAndAlwaysAllowTheNextBegin()
     {
@@ -303,6 +332,8 @@ public class ResizeGestureSessionTests
     // the M-3 fix (nulling it before EndResize in the self-heal branch) precisely because the session
     // itself never blocks same-edge reuse. This test makes that guarantee explicit instead of leaving it
     // as an untested implication of T-SES-01/T-SES-18.
+
+    /// <summary>Verifies that ending a gesture on a given edge and immediately beginning again on that SAME edge always succeeds with fresh state, matching the M-3 stale-drag-recovery scenario.</summary>
     [Fact]
     public void SameEdge_EndThenImmediateTryBegin_AlwaysSucceedsWithFreshState()
     {
@@ -338,6 +369,8 @@ public class ResizeGestureSessionTests
     // `DragCompleted` into the same call stack as an in-progress `EndResize`. The `_ending` guard (and,
     // by then, `_isActive` already being false) must make the nested call a no-op: no recursion, no
     // double release of the tracker, no corruption of the outer call's own result.
+
+    /// <summary>Verifies that a TRUE re-entrant call to <see cref="ResizeGestureSession.End"/>, made from inside the tracker's own <c>StateChanged</c> handler while the outer call is still unwinding, is safely rejected as a no-op without corrupting the outer call's result.</summary>
     [Fact]
     public void End_TrueReentrant_CalledFromInsideTrackerStateChangedHandler_IsSafeAndConsistent()
     {

@@ -13,6 +13,10 @@ namespace DesktopOrganizer.Tests.Unit.SingleInstance;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class InstallerShutdownRequestListenerTests
 {
+    /// <summary>
+    /// Verifies that signaling the named event from a separate handle (simulating the installer's own
+    /// process) raises <see cref="InstallerShutdownRequestListener.ShutdownRequested"/>.
+    /// </summary>
     [Fact]
     public void Start_SignaledFromAnotherHandle_RaisesShutdownRequested()
     {
@@ -69,7 +73,7 @@ public class InstallerShutdownRequestListenerTests
     }
 
     /// <summary>
-    /// R-5: <paramref name="signalHandle"/>'s underlying kernel object must be opened BEFORE
+    /// R-5: <c>signalHandle</c>'s underlying kernel object must be opened BEFORE
     /// <see cref="InstallerShutdownRequestListener.Start"/>/<see cref="InstallerShutdownRequestListener.Dispose"/>
     /// run, not after. The listener's own <see cref="EventWaitHandle"/> is the only handle keeping the
     /// named kernel object alive until this test opens its own — opening this test's handle only AFTER
@@ -97,6 +101,10 @@ public class InstallerShutdownRequestListenerTests
         Assert.False(raised.Wait(TimeSpan.FromSeconds(1)), "ShutdownRequested fired after Dispose().");
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="InstallerShutdownRequestListener.Dispose"/> twice does not
+    /// throw.
+    /// </summary>
     [Fact]
     public void Dispose_CalledTwice_DoesNotThrow()
     {
@@ -127,6 +135,10 @@ public class InstallerShutdownRequestListenerTests
         Assert.False(raised.Wait(TimeSpan.FromSeconds(1)), "Start() after Dispose() must not begin listening.");
     }
 
+    /// <summary>
+    /// Verifies that <see cref="InstallerShutdownRequestListener.Start"/> never throws even when the
+    /// underlying named event cannot be created, logging the failure instead.
+    /// </summary>
     [Fact]
     public void Start_NeverThrows_EvenWhenTheNamedEventCannotBeCreated()
     {

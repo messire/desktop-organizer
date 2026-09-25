@@ -23,6 +23,10 @@ public class ResizeConstraintsFactoryGridAlignedTests
 
     // ── P04-C2: BOTH axes take Apply's FREE branch — AdaptiveGridLayout.SnapExtent (System C) must
     // never quantise a System-B panel extent, regardless of ViewMode/SnapResizeToIconGrid. ───────────
+
+    /// <summary>Verifies that for a <see cref="PanelGeometryMode.GridAligned"/> panel, both axes take the free branch regardless of <paramref name="viewMode"/> or <paramref name="snapEnabled"/>.</summary>
+    /// <param name="viewMode">The panel's view mode.</param>
+    /// <param name="snapEnabled">Whether icon-grid snap is enabled.</param>
     [Theory]
     [InlineData(PanelViewMode.Grid, true)]
     [InlineData(PanelViewMode.Grid, false)]
@@ -39,6 +43,8 @@ public class ResizeConstraintsFactoryGridAlignedTests
     }
 
     // ── P04-C3: the floors are the MINIMUM SPAN in DIP, not GridMetrics' icon-derived floors. ────────
+
+    /// <summary>Verifies that for a <see cref="PanelGeometryMode.GridAligned"/> panel, <c>MinWidth</c>/<c>MinHeight</c> come from the grid state's minimum span in DIP, not from the icon-derived floors.</summary>
     [Fact]
     public void GridAligned_MinWidthAndMinHeight_ComeFromTheMinimumSpan()
     {
@@ -54,6 +60,8 @@ public class ResizeConstraintsFactoryGridAlignedTests
 
     // ── DoD D4-2, the rule ADR-028 calls absolute: NOTHING about a GridAligned panel's bounds may be a
     // function of IconSize — including the floor the resize gesture clamps against. ──────────────────
+
+    /// <summary>Verifies that for a <see cref="PanelGeometryMode.GridAligned"/> panel, <c>MinWidth</c> is identical across every icon size, unlike the legacy icon-derived floor.</summary>
     [Fact]
     public void GridAligned_MinWidth_IsIdenticalAcrossEveryIconSize()
     {
@@ -76,6 +84,8 @@ public class ResizeConstraintsFactoryGridAlignedTests
 
     // ── A rolled-up panel resolves to MinSpanCollapsed (PanelGridStateResolver rule 4) — the floor must
     // follow it, otherwise a collapsed panel could not stay collapsed through a width resize. ────────
+
+    /// <summary>Verifies that a rolled-up <see cref="PanelGeometryMode.GridAligned"/> panel's floor follows the collapsed minimum span, not the expanded one.</summary>
     [Fact]
     public void GridAligned_RolledUp_UsesTheCollapsedMinimumSpan()
     {
@@ -91,6 +101,9 @@ public class ResizeConstraintsFactoryGridAlignedTests
 
     // ── P04-C4: the chrome fields stay exactly what P05's policy-aware code computes — P04 adds a
     // branch NEXT TO them, it does not touch them (plan §0.2). ───────────────────────────────────────
+
+    /// <summary>Verifies that the chrome fields (<c>HorizontalChrome</c>/<c>VerticalChrome</c>/<c>TitleBarHeight</c>) are unchanged between the <see cref="PanelGeometryMode.GridAligned"/> branch and the legacy computation, for a given <paramref name="policy"/>.</summary>
+    /// <param name="policy">The icon layout policy applied to the panel.</param>
     [Theory]
     [InlineData(IconLayoutPolicy.LegacyStretch)]
     [InlineData(IconLayoutPolicy.FixedGap)]
@@ -108,6 +121,10 @@ public class ResizeConstraintsFactoryGridAlignedTests
 
     // ── The new parameter's default is PanelGridState.Legacy: every pre-P04 call site keeps producing
     // byte-identical constraints (this is what lets the existing characterization suite stay untouched). ──
+
+    /// <summary>Verifies that omitting the grid-state argument produces exactly the same constraints as passing an explicit <see cref="PanelGridState.Legacy"/>.</summary>
+    /// <param name="viewMode">The panel's view mode.</param>
+    /// <param name="snapEnabled">Whether icon-grid snap is enabled.</param>
     [Theory]
     [InlineData(PanelViewMode.Grid, true)]
     [InlineData(PanelViewMode.Grid, false)]
@@ -125,6 +142,9 @@ public class ResizeConstraintsFactoryGridAlignedTests
 
     // ── Defence in depth: a hand-built "grid-aligned" state with a degenerate unit size can only come
     // from outside PanelGridStateResolver — fall back to the legacy shape rather than emit a 0/NaN floor. ──
+
+    /// <summary>Verifies that a hand-built "grid-aligned" state with a degenerate <paramref name="unitSize"/> falls back to the legacy constraints shape rather than emitting a 0/NaN floor.</summary>
+    /// <param name="unitSize">The degenerate unit size to inject into the grid state.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(-8d)]

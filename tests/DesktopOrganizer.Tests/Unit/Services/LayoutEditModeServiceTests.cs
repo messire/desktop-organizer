@@ -18,20 +18,12 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class LayoutEditModeServiceTests
 {
-    private static (LayoutEditModeService Sut, Mock<IAppSettings> AppSettings, Mock<IGestureDiagnostics> Diagnostics) CreateSut(
-        bool isLayoutLockedInitially = false)
-    {
-        var appSettings = new Mock<IAppSettings>();
-        appSettings.SetupProperty(s => s.IsLayoutLocked, isLayoutLockedInitially);
-        appSettings.SetupProperty(s => s.NormalModeLayoutGestures, "MoveOnly");
-        var diagnostics = new Mock<IGestureDiagnostics>();
-
-        var sut = new LayoutEditModeService(appSettings.Object, diagnostics.Object);
-        return (sut, appSettings, diagnostics);
-    }
-
     // ----- R-11: Mode is transient, never persisted -----
 
+    /// <summary>
+    /// Verifies that a freshly constructed <see cref="LayoutEditModeService"/> always starts in
+    /// <see cref="LayoutInteractionMode.Normal"/>.
+    /// </summary>
     [Fact]
     public void Construct_AlwaysStartsInNormalMode()
     {
@@ -40,6 +32,11 @@ public class LayoutEditModeServiceTests
         Assert.Equal(LayoutInteractionMode.Normal, sut.Mode);
     }
 
+    /// <summary>
+    /// Verifies that Mode starts as <see cref="LayoutInteractionMode.Normal"/> even when
+    /// <see cref="ILayoutEditModeService.IsLayoutLocked"/> was already <see langword="true"/> at
+    /// construction — there is no persisted "previous Mode" to restore.
+    /// </summary>
     [Fact]
     public void Construct_StartsInNormalMode_EvenWhenLayoutIsLocked()
     {
@@ -50,6 +47,9 @@ public class LayoutEditModeServiceTests
         Assert.Equal(LayoutInteractionMode.Normal, sut.Mode);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.IsEditing"/> is <see langword="false"/> at construction.
+    /// </summary>
     [Fact]
     public void Construct_IsEditing_IsFalse()
     {
@@ -60,6 +60,11 @@ public class LayoutEditModeServiceTests
 
     // ----- IsLayoutLocked: read from / persisted through IAppSettings (D-8) -----
 
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.IsLayoutLocked"/> reflects the
+    /// <see cref="IAppSettings"/> value it was constructed with, and that
+    /// <see cref="ILayoutEditModeService.CanEnterEditLayout"/> is correspondingly <see langword="false"/>.
+    /// </summary>
     [Fact]
     public void IsLayoutLocked_Getter_ReflectsAppSettingsValueAtConstruction()
     {
@@ -69,6 +74,10 @@ public class LayoutEditModeServiceTests
         Assert.False(sut.CanEnterEditLayout);
     }
 
+    /// <summary>
+    /// Verifies that setting <see cref="ILayoutEditModeService.IsLayoutLocked"/> writes the new value
+    /// through to the underlying <see cref="IAppSettings"/> instance.
+    /// </summary>
     [Fact]
     public void IsLayoutLocked_Setter_PersistsThroughAppSettings()
     {
@@ -79,6 +88,10 @@ public class LayoutEditModeServiceTests
         Assert.True(appSettings.Object.IsLayoutLocked);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.CanEnterEditLayout"/> always tracks the logical
+    /// inverse of <see cref="ILayoutEditModeService.IsLayoutLocked"/>.
+    /// </summary>
     [Fact]
     public void CanEnterEditLayout_IsInverseOfIsLayoutLocked()
     {
@@ -93,6 +106,10 @@ public class LayoutEditModeServiceTests
 
     // ----- D-3/R-9: locking while editing forces an immediate exit to Normal -----
 
+    /// <summary>
+    /// Verifies that locking the layout while in <see cref="LayoutInteractionMode.EditLayout"/> forces an
+    /// immediate exit back to <see cref="LayoutInteractionMode.Normal"/>.
+    /// </summary>
     [Fact]
     public void IsLayoutLocked_SetTrue_WhileEditing_ForcesExitToNormal()
     {
@@ -106,6 +123,10 @@ public class LayoutEditModeServiceTests
         Assert.False(sut.IsEditing);
     }
 
+    /// <summary>
+    /// Verifies that the forced exit to Normal triggered by locking the layout while editing raises
+    /// <see cref="ILayoutEditModeService.ModeChanged"/> with the correct From/To values.
+    /// </summary>
     [Fact]
     public void IsLayoutLocked_SetTrue_WhileEditing_RaisesModeChanged()
     {
@@ -121,6 +142,10 @@ public class LayoutEditModeServiceTests
         Assert.Equal(LayoutInteractionMode.Normal, raised.To);
     }
 
+    /// <summary>
+    /// Verifies that locking the layout while already in <see cref="LayoutInteractionMode.Normal"/> does
+    /// not raise <see cref="ILayoutEditModeService.ModeChanged"/>, since there is no real transition.
+    /// </summary>
     [Fact]
     public void IsLayoutLocked_SetTrue_WhileAlreadyNormal_DoesNotRaiseModeChanged()
     {
@@ -135,6 +160,10 @@ public class LayoutEditModeServiceTests
 
     // ----- TryEnterEditLayout -----
 
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.TryEnterEditLayout"/> succeeds and transitions to
+    /// <see cref="LayoutInteractionMode.EditLayout"/> when the layout is not locked.
+    /// </summary>
     [Fact]
     public void TryEnterEditLayout_WhenUnlocked_ReturnsTrueAndEntersEditLayout()
     {
@@ -147,6 +176,10 @@ public class LayoutEditModeServiceTests
         Assert.True(sut.IsEditing);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.TryEnterEditLayout"/> fails and leaves the mode at
+    /// <see cref="LayoutInteractionMode.Normal"/> when the layout is locked.
+    /// </summary>
     [Fact]
     public void TryEnterEditLayout_WhenLocked_ReturnsFalseAndStaysNormal()
     {
@@ -158,6 +191,10 @@ public class LayoutEditModeServiceTests
         Assert.Equal(LayoutInteractionMode.Normal, sut.Mode);
     }
 
+    /// <summary>
+    /// Verifies that a rejected <see cref="ILayoutEditModeService.TryEnterEditLayout"/> call (layout
+    /// locked) does not raise <see cref="ILayoutEditModeService.ModeChanged"/>.
+    /// </summary>
     [Fact]
     public void TryEnterEditLayout_WhenLocked_DoesNotRaiseModeChanged()
     {
@@ -170,6 +207,11 @@ public class LayoutEditModeServiceTests
         Assert.Equal(0, raisedCount);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="ILayoutEditModeService.TryEnterEditLayout"/> while already in
+    /// <see cref="LayoutInteractionMode.EditLayout"/> is a no-op: it still reports success but raises no
+    /// <see cref="ILayoutEditModeService.ModeChanged"/> event.
+    /// </summary>
     [Fact]
     public void TryEnterEditLayout_WhenAlreadyEditLayout_IsNoOp_ReturnsTrueWithoutRaisingModeChanged()
     {
@@ -187,6 +229,10 @@ public class LayoutEditModeServiceTests
 
     // ----- ExitEditLayout -----
 
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.ExitEditLayout"/> returns the mode to
+    /// <see cref="LayoutInteractionMode.Normal"/> from <see cref="LayoutInteractionMode.EditLayout"/>.
+    /// </summary>
     [Fact]
     public void ExitEditLayout_FromEditLayout_ReturnsToNormal()
     {
@@ -199,6 +245,11 @@ public class LayoutEditModeServiceTests
         Assert.False(sut.IsEditing);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="ILayoutEditModeService.ExitEditLayout"/> while already in
+    /// <see cref="LayoutInteractionMode.Normal"/> is a no-op that raises no
+    /// <see cref="ILayoutEditModeService.ModeChanged"/> event.
+    /// </summary>
     [Fact]
     public void ExitEditLayout_WhenAlreadyNormal_IsNoOp_DoesNotRaiseModeChanged()
     {
@@ -214,6 +265,10 @@ public class LayoutEditModeServiceTests
 
     // ----- ModeChanged: exactly once per real transition (T-TRK-07 precedent) -----
 
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.ModeChanged"/> fires exactly once per real mode
+    /// transition and never for a call that is a no-op because the mode is already at its target.
+    /// </summary>
     [Fact]
     public void ModeChanged_RaisedExactlyOncePerRealTransition_NeverOnNoOps()
     {
@@ -229,6 +284,10 @@ public class LayoutEditModeServiceTests
         Assert.Equal(2, raisedCount);
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="LayoutModeChangedEventArgs"/> raised on a real transition carries the
+    /// correct From, To, and Source values.
+    /// </summary>
     [Fact]
     public void ModeChanged_CarriesFromToAndSource()
     {
@@ -246,6 +305,10 @@ public class LayoutEditModeServiceTests
 
     // ----- Toggle -----
 
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.Toggle"/> enters
+    /// <see cref="LayoutInteractionMode.EditLayout"/> and reports success when starting from Normal.
+    /// </summary>
     [Fact]
     public void Toggle_FromNormal_EntersEditLayout_ReturnsTrue()
     {
@@ -257,6 +320,10 @@ public class LayoutEditModeServiceTests
         Assert.Equal(LayoutInteractionMode.EditLayout, sut.Mode);
     }
 
+    /// <summary>
+    /// Verifies that two consecutive <see cref="ILayoutEditModeService.Toggle"/> calls flip the mode there
+    /// and back, ending at <see cref="LayoutInteractionMode.Normal"/> again.
+    /// </summary>
     [Fact]
     public void Toggle_IsIdempotentAcrossTwoCalls_ReturnsToNormal()
     {
@@ -269,6 +336,10 @@ public class LayoutEditModeServiceTests
         Assert.Equal(LayoutInteractionMode.Normal, sut.Mode);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.Toggle"/> fails and leaves the mode unchanged when
+    /// the layout is locked.
+    /// </summary>
     [Fact]
     public void Toggle_WhenLocked_ReturnsFalse_DoesNotChangeMode()
     {
@@ -282,6 +353,10 @@ public class LayoutEditModeServiceTests
 
     // ----- INotifyPropertyChanged -----
 
+    /// <summary>
+    /// Verifies that a real mode transition raises <see cref="INotifyPropertyChanged.PropertyChanged"/>
+    /// for <see cref="ILayoutEditModeService.Mode"/>.
+    /// </summary>
     [Fact]
     public void PropertyChanged_RaisedForMode_OnRealTransition()
     {
@@ -294,6 +369,10 @@ public class LayoutEditModeServiceTests
         Assert.Contains(nameof(ILayoutEditModeService.Mode), raisedProperties);
     }
 
+    /// <summary>
+    /// Verifies that a real mode transition raises <see cref="INotifyPropertyChanged.PropertyChanged"/>
+    /// for <see cref="ILayoutEditModeService.IsEditing"/>.
+    /// </summary>
     [Fact]
     public void PropertyChanged_RaisedForIsEditing_OnRealTransition()
     {
@@ -306,6 +385,12 @@ public class LayoutEditModeServiceTests
         Assert.Contains(nameof(ILayoutEditModeService.IsEditing), raisedProperties);
     }
 
+    /// <summary>
+    /// Verifies that changing <see cref="ILayoutEditModeService.IsLayoutLocked"/> raises
+    /// <see cref="INotifyPropertyChanged.PropertyChanged"/> for both
+    /// <see cref="ILayoutEditModeService.CanEnterEditLayout"/> and
+    /// <see cref="ILayoutEditModeService.IsLayoutLocked"/> itself.
+    /// </summary>
     [Fact]
     public void PropertyChanged_RaisedForCanEnterEditLayout_WhenIsLayoutLockedChanges()
     {
@@ -319,6 +404,10 @@ public class LayoutEditModeServiceTests
         Assert.Contains(nameof(ILayoutEditModeService.IsLayoutLocked), raisedProperties);
     }
 
+    /// <summary>
+    /// Verifies that a no-op transition (already at the target mode) raises no
+    /// <see cref="INotifyPropertyChanged.PropertyChanged"/> events at all.
+    /// </summary>
     [Fact]
     public void PropertyChanged_NotRaised_OnNoOpTransition()
     {
@@ -334,6 +423,10 @@ public class LayoutEditModeServiceTests
 
     // ----- D-11: IGestureDiagnostics.LayoutModeChanged -----
 
+    /// <summary>
+    /// Verifies that a real mode transition calls <see cref="IGestureDiagnostics.LayoutModeChanged"/>
+    /// with the correct from/to modes, the triggering source, and the current lock state.
+    /// </summary>
     [Fact]
     public void RealTransition_CallsDiagnosticsLayoutModeChanged_WithFromToSourceAndLockState()
     {
@@ -350,6 +443,9 @@ public class LayoutEditModeServiceTests
             Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that a no-op transition never calls <see cref="IGestureDiagnostics.LayoutModeChanged"/>.
+    /// </summary>
     [Fact]
     public void NoOpTransition_DoesNotCallDiagnosticsLayoutModeChanged()
     {
@@ -366,5 +462,18 @@ public class LayoutEditModeServiceTests
                 It.IsAny<LayoutModeChangeSource>(),
                 It.IsAny<bool>()),
             Times.Never);
+    }
+
+    // ----- helpers -----
+    private static (LayoutEditModeService Sut, Mock<IAppSettings> AppSettings, Mock<IGestureDiagnostics> Diagnostics) CreateSut(
+        bool isLayoutLockedInitially = false)
+    {
+        var appSettings = new Mock<IAppSettings>();
+        appSettings.SetupProperty(s => s.IsLayoutLocked, isLayoutLockedInitially);
+        appSettings.SetupProperty(s => s.NormalModeLayoutGestures, "MoveOnly");
+        var diagnostics = new Mock<IGestureDiagnostics>();
+
+        var sut = new LayoutEditModeService(appSettings.Object, diagnostics.Object);
+        return (sut, appSettings, diagnostics);
     }
 }

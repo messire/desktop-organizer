@@ -16,6 +16,9 @@ public class EnumDisplayNameConverterTests
     private static readonly EnumDisplayNameConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that <see cref="PanelGeometryMode.GridAligned"/> converts to the "Grid aligned" display text.
+    /// </summary>
     [Fact]
     public void Convert_PanelGeometryMode_GridAligned_ReturnsGridAligned()
     {
@@ -24,6 +27,9 @@ public class EnumDisplayNameConverterTests
         Assert.Equal("Grid aligned", text);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelGeometryMode.LegacyFreeform"/> converts to the "Free-form (legacy)" display text.
+    /// </summary>
     [Fact]
     public void Convert_PanelGeometryMode_LegacyFreeform_ReturnsFreeFormLegacy()
     {
@@ -32,6 +38,9 @@ public class EnumDisplayNameConverterTests
         Assert.Equal("Free-form (legacy)", text);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconLayoutPolicy.FixedGap"/> converts to the "Fixed spacing" display text.
+    /// </summary>
     [Fact]
     public void Convert_IconLayoutPolicy_FixedGap_ReturnsFixedSpacing()
     {
@@ -40,6 +49,10 @@ public class EnumDisplayNameConverterTests
         Assert.Equal("Fixed spacing", text);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IconLayoutPolicy.LegacyStretch"/> converts to the "Adaptive stretch (legacy)"
+    /// display text.
+    /// </summary>
     [Fact]
     public void Convert_IconLayoutPolicy_LegacyStretch_ReturnsAdaptiveStretchLegacy()
     {
@@ -48,6 +61,9 @@ public class EnumDisplayNameConverterTests
         Assert.Equal("Adaptive stretch (legacy)", text);
     }
 
+    /// <summary>
+    /// Verifies that an unrecognized value falls back to its <see cref="object.ToString"/> representation.
+    /// </summary>
     [Fact]
     public void Convert_UnrecognizedValue_FallsBackToToString()
     {
@@ -56,6 +72,9 @@ public class EnumDisplayNameConverterTests
         Assert.Equal("42", text);
     }
 
+    /// <summary>
+    /// Verifies that a <see langword="null"/> value converts to an empty string.
+    /// </summary>
     [Fact]
     public void Convert_Null_ReturnsEmptyString()
     {
@@ -64,6 +83,10 @@ public class EnumDisplayNameConverterTests
         Assert.Equal(string.Empty, text);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="EnumDisplayNameConverter.ConvertBack"/> always throws
+    /// <see cref="NotSupportedException"/> because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_Always_ThrowsNotSupportedException()
     {

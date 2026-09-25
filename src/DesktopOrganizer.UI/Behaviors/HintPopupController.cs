@@ -74,6 +74,7 @@ public sealed class HintPopupController
     /// re-focuses the inline-rename editor so the user can immediately correct the name. The combined
     /// entry point for <see cref="ChildWindowViewModel.RenameError"/> becoming non-null.
     /// </summary>
+    /// <param name="outcome">The failure reason, used to select the message shown in the hint popup.</param>
     public void ShowRenameError(RenameOutcome outcome)
     {
         _renameErrorText.Text = outcome switch
@@ -96,35 +97,6 @@ public sealed class HintPopupController
     {
         _moveHintTimer?.Stop();
         _renameErrorTimer?.Stop();
-    }
-
-    /// <summary>
-    /// Re-focuses the inline-rename <see cref="TextBox"/> after a failed
-    /// <see cref="ChildWindowViewModel.CommitRenameCommand"/>. <see cref="ChildWindowViewModel.CommitRename"/>
-    /// deliberately leaves <see cref="ChildWindowViewModel.EditingItem"/> set on failure "so the user can
-    /// correct the name" — but the commit itself was triggered by <see cref="RenameEditBehavior"/>'s
-    /// <c>LostKeyboardFocus</c> handler, so by the time this runs the editor is visible again but no
-    /// longer holds keyboard focus. Without re-focusing it here, a second click into empty space would
-    /// never raise <c>LostKeyboardFocus</c> again (focus already left the TextBox) and the editor would
-    /// appear permanently stuck. Mirrors the same focus+select-all path <see cref="RenameEditBehavior"/>
-    /// uses when the editor first becomes visible.
-    /// </summary>
-    private void RefocusRenameEditor()
-    {
-        if (_getEditingItem() is null) return;
-
-        _dispatcher.BeginInvoke(
-            DispatcherPriority.Input,
-            new Action(() =>
-            {
-                // Re-check: by the time this runs (deferred), the edit may already have been
-                // committed/cancelled (e.g. Escape pressed before the dispatcher callback ran).
-                if (_getEditingItem() is null) return;
-                if (FindVisibleRenameEditor(_renameEditorSearchRoot) is not { } textBox) return;
-
-                textBox.Focus();
-                textBox.SelectAll();
-            }));
     }
 
     /// <summary>
@@ -166,5 +138,34 @@ public sealed class HintPopupController
         };
         timer.Start();
         return timer;
+    }
+
+    /// <summary>
+    /// Re-focuses the inline-rename <see cref="TextBox"/> after a failed
+    /// <see cref="ChildWindowViewModel.CommitRenameCommand"/>. <see cref="ChildWindowViewModel.CommitRename"/>
+    /// deliberately leaves <see cref="ChildWindowViewModel.EditingItem"/> set on failure "so the user can
+    /// correct the name" — but the commit itself was triggered by <see cref="RenameEditBehavior"/>'s
+    /// <c>LostKeyboardFocus</c> handler, so by the time this runs the editor is visible again but no
+    /// longer holds keyboard focus. Without re-focusing it here, a second click into empty space would
+    /// never raise <c>LostKeyboardFocus</c> again (focus already left the TextBox) and the editor would
+    /// appear permanently stuck. Mirrors the same focus+select-all path <see cref="RenameEditBehavior"/>
+    /// uses when the editor first becomes visible.
+    /// </summary>
+    private void RefocusRenameEditor()
+    {
+        if (_getEditingItem() is null) return;
+
+        _dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            new Action(() =>
+            {
+                // Re-check: by the time this runs (deferred), the edit may already have been
+                // committed/cancelled (e.g. Escape pressed before the dispatcher callback ran).
+                if (_getEditingItem() is null) return;
+                if (FindVisibleRenameEditor(_renameEditorSearchRoot) is not { } textBox) return;
+
+                textBox.Focus();
+                textBox.SelectAll();
+            }));
     }
 }

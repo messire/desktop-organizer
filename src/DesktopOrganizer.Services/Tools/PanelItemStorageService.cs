@@ -16,6 +16,12 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
 
     private const string ManifestFileName = ".manifest.json";
 
+    // Soft cap on the full destination path length. Windows' legacy MAX_PATH (260) is the hard
+    // constraint; 240 leaves headroom for Restore's own path composition (parent directory,
+    // Explorer-style " (2)" collision suffix) without itself running the guid-directory scheme's
+    // hard limits. See ADR-013 Decision 2, trade-off.
+    private const int MaxDestinationPathLength = 240;
+
     private readonly string _storageRoot;
     private readonly string _manifestPath;
     private readonly object _manifestLock = new();
@@ -64,322 +70,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     /// <inheritdoc />
     public string? MoveIn(string sourcePath) => MoveIn(sourcePath, forceCrossVolume: false);
 
-    /// <summary>
-    /// Same as <see cref="MoveIn(string)"/>, but with an internal-only escape hatch for tests: when
-    /// <paramref name="forceCrossVolume"/> is <see langword="true"/>, the same-volume fast path is
-    /// skipped even if source and storage root are on the same drive, forcing the
-    /// copy-then-delete-after-verified-success branch. Real callers always go through the
-    /// single-argument overload; this only exists because cross-volume behavior can't be
-    /// deterministically reproduced in CI (which typically has a single volume).
-    /// </summary>
-    internal string? MoveIn(string sourcePath, bool forceCrossVolume)
-    {
-        if (string.IsNullOrWhiteSpace(sourcePath)) return null;
-
-        // Directories are handled by MoveInDirectory — see IPanelItemStorageService remarks.
-        if (Directory.Exists(sourcePath)) return null;
-        if (!File.Exists(sourcePath)) return null;
-
-        string? destPath = null;
-        try
-        {
-            Directory.CreateDirectory(_storageRoot);
-
-            var fullSource = Path.GetFullPath(sourcePath);
-            destPath = BuildDestinationPath(fullSource);
-
-            // The manifest entry is written before the destructive step (File.Move / File.Delete
-            // of the original) rather than after: destPath is already known at this point, and a
-            // crash between "the file is moved" and "the manifest records where it came from"
-            // would otherwise silently lose the original path — by ADR-009 that turns a later
-            // "Remove from panel" into a permanent delete instead of a restore. If the move/copy
-            // below fails, the entry is rolled back (see the catch below and the copy-failure
-            // branch), so on any non-success outcome the manifest ends up exactly as it would
-            // have with the old after-the-fact write. If the manifest write itself fails (or the
-            // cache is currently untrusted — see EnsureManifestCacheUnlocked), the destructive
-            // step below must never run: abort here and leave the source untouched.
-            if (!WriteManifestEntry(destPath, fullSource))
-            {
-                RemoveManifestEntry(destPath);
-                Console.Error.WriteLine($"PanelItemStorageService.MoveIn: manifest write failed, aborting move of '{sourcePath}'");
-                return null;
-            }
-
-            if (!forceCrossVolume && SameVolume(fullSource, _storageRoot))
-            {
-                // destPath now lives under a per-item GUID directory (root\{guid}\{originalName}) —
-                // that directory doesn't exist yet, and File.Move requires its parent to. Nothing is
-                // copied here, so creating an empty directory ahead of an atomic rename is safe (no
-                // partial-copy window to guard).
-                Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-                File.Move(fullSource, destPath);
-            }
-            else
-            {
-                if (!TryCopyFileVerified(fullSource, destPath))
-                {
-                    TryDeletePartialFile(destPath);
-                    RemoveManifestEntry(destPath);
-                    TryCleanupEmptyItemDirectory(destPath);
-                    return null;
-                }
-
-                // Copy verified complete — only now is it safe to remove the original.
-                File.Delete(fullSource);
-            }
-
-            return destPath;
-        }
-        catch (Exception ex)
-        {
-            if (destPath is not null)
-            {
-                RemoveManifestEntry(destPath);
-                TryCleanupEmptyItemDirectory(destPath);
-            }
-
-            Console.Error.WriteLine($"PanelItemStorageService.MoveIn failed for '{sourcePath}': {ex.Message}");
-            return null;
-        }
-    }
-
     /// <inheritdoc />
     public string? MoveInDirectory(string sourcePath) => MoveInDirectory(sourcePath, forceCrossVolume: false);
 
-    /// <summary>
-    /// Same as <see cref="MoveInDirectory(string)"/>, but with an internal-only escape hatch for
-    /// tests — see <see cref="MoveIn(string, bool)"/> remarks.
-    /// </summary>
-    internal string? MoveInDirectory(string sourcePath, bool forceCrossVolume)
-    {
-        if (string.IsNullOrWhiteSpace(sourcePath)) return null;
-        if (!Directory.Exists(sourcePath)) return null;
-
-        string? destRoot = null;
-        try
-        {
-            var fullSource = Path.GetFullPath(sourcePath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            destRoot = BuildDestinationDirectoryPath(fullSource);
-
-            if (!forceCrossVolume && SameVolume(fullSource, _storageRoot))
-            {
-                // Atomic rename — no safety cap: nothing is copied, so there's no disk-bloat or
-                // slowness concern regardless of folder size.
-                Directory.CreateDirectory(_storageRoot);
-
-                // See MoveIn remarks: the manifest entry is written before the destructive move so
-                // a crash between "move" and "record origin" can't lose the original path. Rolled
-                // back by the catch below if the move itself fails; if the manifest write itself
-                // fails, abort before the destructive Directory.Move ever runs.
-                if (!WriteManifestEntry(destRoot, fullSource))
-                {
-                    RemoveManifestEntry(destRoot);
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory: manifest write failed, aborting move of '{sourcePath}'");
-                    return null;
-                }
-
-                // destRoot now lives under a per-item GUID directory (root\{guid}\{originalName}).
-                // Directory.Move requires the parent to exist but the destination itself to NOT
-                // exist (it performs the rename) — so only the GUID directory is created here, never
-                // destRoot itself.
-                Directory.CreateDirectory(Path.GetDirectoryName(destRoot)!);
-                Directory.Move(fullSource, destRoot);
-            }
-            else
-            {
-                string[] files;
-                try
-                {
-                    files = Directory.GetFiles(fullSource, "*", SearchOption.AllDirectories);
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to enumerate '{sourcePath}': {ex.Message}");
-                    return null;
-                }
-
-                if (files.Length > MaxDirectoryImportFileCount) return null;
-
-                long totalBytes = 0;
-                try
-                {
-                    foreach (var file in files)
-                    {
-                        totalBytes += new FileInfo(file).Length;
-                        if (totalBytes > MaxDirectoryImportBytes) return null;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // A file vanished/became inaccessible mid-scan — bail out rather than move a partial view.
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to size '{sourcePath}': {ex.Message}");
-                    return null;
-                }
-
-                // Manifest entry recorded before any copying starts — see MoveIn remarks. Rolled
-                // back below on any failure to complete the verified copy. If the manifest write
-                // itself fails, abort before any copying (and the eventual source deletion) starts.
-                if (!WriteManifestEntry(destRoot, fullSource))
-                {
-                    RemoveManifestEntry(destRoot);
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory: manifest write failed, aborting move of '{sourcePath}'");
-                    return null;
-                }
-
-                try
-                {
-                    Directory.CreateDirectory(destRoot);
-
-                    foreach (var file in files)
-                    {
-                        var relative = Path.GetRelativePath(fullSource, file);
-                        var destFile = Path.Combine(destRoot, relative);
-
-                        // Per-file verify (size check against source) before any deletion is allowed —
-                        // same discipline as MoveIn/Restore, see TryCopyFileVerified remarks.
-                        if (!TryCopyFileVerified(file, destFile))
-                        {
-                            Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory verified copy failed for '{file}' while copying '{sourcePath}'");
-                            TryDeletePartialDirectory(destRoot);
-                            RemoveManifestEntry(destRoot);
-                            TryCleanupEmptyItemDirectory(destRoot);
-                            return null;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to copy '{sourcePath}': {ex.Message}");
-                    TryDeletePartialDirectory(destRoot);
-                    RemoveManifestEntry(destRoot);
-                    TryCleanupEmptyItemDirectory(destRoot);
-                    return null;
-                }
-
-                // Copy verified complete (every file above either copied or the whole operation
-                // bailed out) — only now is it safe to remove the original tree.
-                Directory.Delete(fullSource, recursive: true);
-            }
-
-            return destRoot;
-        }
-        catch (Exception ex)
-        {
-            if (destRoot is not null)
-            {
-                RemoveManifestEntry(destRoot);
-                TryCleanupEmptyItemDirectory(destRoot);
-            }
-
-            Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed for '{sourcePath}': {ex.Message}");
-            return null;
-        }
-    }
-
     /// <inheritdoc />
     public RestoreOutcome Restore(string storedPath) => Restore(storedPath, forceCrossVolume: false);
-
-    /// <summary>
-    /// Same as <see cref="Restore(string)"/>, but with an internal-only escape hatch for tests: when
-    /// <paramref name="forceCrossVolume"/> is <see langword="true"/>, the same-volume fast path
-    /// (<see cref="File.Move(string, string)"/>/<see cref="Directory.Move(string, string)"/>) is
-    /// skipped entirely and the copy-then-delete-after-verified-success branch runs directly —
-    /// see <see cref="MoveIn(string, bool)"/> remarks for why this exists.
-    /// </summary>
-    internal RestoreOutcome Restore(string storedPath, bool forceCrossVolume)
-    {
-        if (!IsManaged(storedPath)) return RestoreOutcome.NotManaged;
-
-        var fullStored = Path.GetFullPath(storedPath)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        var original = ReadManifestEntry(fullStored);
-        if (original is null) return RestoreOutcome.OriginalPathUnknown;
-
-        try
-        {
-            var targetDir = Path.GetDirectoryName(original);
-            if (!string.IsNullOrEmpty(targetDir)) Directory.CreateDirectory(targetDir);
-
-            var finalTarget = ResolveCollisionFreeName(original);
-            var isDirectory = Directory.Exists(fullStored);
-
-            // Cross-volume Move isn't supported by the OS — fall back to the same
-            // copy-then-delete-after-verified-success discipline used by MoveInDirectory/MoveIn.
-            // Shared by both the real cross-volume path (IOException from Move) and the
-            // forceCrossVolume test hook, so the fallback logic itself is never duplicated.
-            bool CopyThenDeleteDirectory()
-            {
-                if (!TryCopyDirectoryVerified(fullStored, finalTarget))
-                {
-                    TryDeletePartialDirectory(finalTarget);
-                    return false;
-                }
-
-                Directory.Delete(fullStored, recursive: true);
-                return true;
-            }
-
-            bool CopyThenDeleteFile()
-            {
-                if (!TryCopyFileVerified(fullStored, finalTarget))
-                {
-                    TryDeletePartialFile(finalTarget);
-                    return false;
-                }
-
-                File.Delete(fullStored);
-                return true;
-            }
-
-            if (isDirectory)
-            {
-                if (forceCrossVolume)
-                {
-                    if (!CopyThenDeleteDirectory()) return RestoreOutcome.Failed;
-                }
-                else
-                {
-                    try
-                    {
-                        Directory.Move(fullStored, finalTarget);
-                    }
-                    catch (IOException)
-                    {
-                        if (!CopyThenDeleteDirectory()) return RestoreOutcome.Failed;
-                    }
-                }
-            }
-            else
-            {
-                if (forceCrossVolume)
-                {
-                    if (!CopyThenDeleteFile()) return RestoreOutcome.Failed;
-                }
-                else
-                {
-                    try
-                    {
-                        File.Move(fullStored, finalTarget);
-                    }
-                    catch (IOException)
-                    {
-                        if (!CopyThenDeleteFile()) return RestoreOutcome.Failed;
-                    }
-                }
-            }
-
-            RemoveManifestEntry(fullStored);
-            TryCleanupEmptyItemDirectory(fullStored);
-            return RestoreOutcome.Restored;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"PanelItemStorageService.Restore failed for '{storedPath}': {ex.Message}");
-            return RestoreOutcome.Failed;
-        }
-    }
 
     /// <inheritdoc />
     public void Release(string storedPath)
@@ -400,51 +95,6 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         catch (Exception ex)
         {
             Console.Error.WriteLine($"PanelItemStorageService.Release failed for '{storedPath}': {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Deletes the per-item GUID directory a moved-in file/folder lived under (see
-    /// <see cref="BuildDestinationPath"/>/<see cref="BuildDestinationDirectoryPath"/>) once it's
-    /// orphaned by a successful <see cref="Restore(string)"/>/<see cref="Release"/> — <b>only</b> if
-    /// that directory is a direct child of <see cref="_storageRoot"/> and is now empty. Never deletes
-    /// <see cref="_storageRoot"/> itself, and never deletes a non-empty directory. A legacy flat-layout
-    /// item (pre-GUID-directory) has no per-item directory to clean up — its parent already IS the
-    /// storage root, which this deliberately never touches, so it's a safe no-op for those.
-    /// </summary>
-    /// <param name="fullStoredPath">
-    /// The full, already-normalized path of the item that was just moved away/deleted (whether the
-    /// item was a file or a directory — either way, its parent is the per-item GUID directory).
-    /// </param>
-    private void TryCleanupEmptyItemDirectory(string fullStoredPath)
-    {
-        try
-        {
-            var itemDir = Path.GetDirectoryName(fullStoredPath);
-            if (string.IsNullOrEmpty(itemDir) || !Directory.Exists(itemDir)) return;
-
-            var itemDirFull = Path.GetFullPath(itemDir)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var root = Path.GetFullPath(_storageRoot)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-            // Guard against ever deleting the storage root: only a directory whose OWN parent is the
-            // root qualifies (i.e. itemDir must be exactly one level below root). This also correctly
-            // skips legacy flat items, whose "item directory" as computed above already IS the root.
-            var parentOfItemDir = Path.GetDirectoryName(itemDirFull);
-            if (parentOfItemDir is null) return;
-
-            var parentOfItemDirFull = Path.GetFullPath(parentOfItemDir)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (!string.Equals(parentOfItemDirFull, root, StringComparison.OrdinalIgnoreCase)) return;
-
-            if (Directory.EnumerateFileSystemEntries(itemDirFull).Any()) return; // not empty — leave it
-
-            Directory.Delete(itemDirFull);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"PanelItemStorageService: failed to clean up item directory for '{fullStoredPath}': {ex.Message}");
         }
     }
 
@@ -656,48 +306,324 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         return candidates ?? (IReadOnlyList<string>)[];
     }
 
-    // ── Destination naming ──────────────────────────────────────────────────
-
-    // Soft cap on the full destination path length. Windows' legacy MAX_PATH (260) is the hard
-    // constraint; 240 leaves headroom for Restore's own path composition (parent directory,
-    // Explorer-style " (2)" collision suffix) without itself running the guid-directory scheme's
-    // hard limits. See ADR-013 Decision 2, trade-off.
-    private const int MaxDestinationPathLength = 240;
-
     /// <summary>
-    /// Builds a collision-free destination for a moved-in file: a per-item GUID directory holding
-    /// the file under its <b>original</b> name — <c>{storageRoot}\{guid}\{originalName}{ext}</c>.
-    /// The GUID guarantees collision-free placement in one shot (no racy check-then-create loop, no
-    /// "(2)"-style counter) while leaving the file's own name untouched, so
-    /// <see cref="System.IO.Path.GetFileName(string)"/> on the result is exactly the original name
-    /// (see ADR-013 Decision 2). The base name is truncated — keeping the extension intact — only if
-    /// the resulting full path would exceed <see cref="MaxDestinationPathLength"/>; otherwise it is
-    /// never shortened.
+    /// Same as <see cref="MoveIn(string)"/>, but with an internal-only escape hatch for tests: when
+    /// <paramref name="forceCrossVolume"/> is <see langword="true"/>, the same-volume fast path is
+    /// skipped even if source and storage root are on the same drive, forcing the
+    /// copy-then-delete-after-verified-success branch. Real callers always go through the
+    /// single-argument overload; this only exists because cross-volume behavior can't be
+    /// deterministically reproduced in CI (which typically has a single volume).
     /// </summary>
-    private string BuildDestinationPath(string fullSourcePath)
+    /// <param name="sourcePath">Full path of the file to move into managed storage.</param>
+    /// <param name="forceCrossVolume">When <see langword="true"/>, forces the copy-then-delete path even if source and storage root are on the same volume.</param>
+    internal string? MoveIn(string sourcePath, bool forceCrossVolume)
     {
-        var name = Path.GetFileNameWithoutExtension(fullSourcePath);
-        var ext = Path.GetExtension(fullSourcePath);
-        var guid = Guid.NewGuid().ToString("N");
-        var itemDir = Path.Combine(_storageRoot, guid);
+        if (string.IsNullOrWhiteSpace(sourcePath)) return null;
 
-        var candidate = Path.Combine(itemDir, name + ext);
-        return TruncateNameIfPathTooLong(candidate, itemDir, name, ext);
+        // Directories are handled by MoveInDirectory — see IPanelItemStorageService remarks.
+        if (Directory.Exists(sourcePath)) return null;
+        if (!File.Exists(sourcePath)) return null;
+
+        string? destPath = null;
+        try
+        {
+            Directory.CreateDirectory(_storageRoot);
+
+            var fullSource = Path.GetFullPath(sourcePath);
+            destPath = BuildDestinationPath(fullSource);
+
+            // The manifest entry is written before the destructive step (File.Move / File.Delete
+            // of the original) rather than after: destPath is already known at this point, and a
+            // crash between "the file is moved" and "the manifest records where it came from"
+            // would otherwise silently lose the original path — by ADR-009 that turns a later
+            // "Remove from panel" into a permanent delete instead of a restore. If the move/copy
+            // below fails, the entry is rolled back (see the catch below and the copy-failure
+            // branch), so on any non-success outcome the manifest ends up exactly as it would
+            // have with the old after-the-fact write. If the manifest write itself fails (or the
+            // cache is currently untrusted — see EnsureManifestCacheUnlocked), the destructive
+            // step below must never run: abort here and leave the source untouched.
+            if (!WriteManifestEntry(destPath, fullSource))
+            {
+                RemoveManifestEntry(destPath);
+                Console.Error.WriteLine($"PanelItemStorageService.MoveIn: manifest write failed, aborting move of '{sourcePath}'");
+                return null;
+            }
+
+            if (!forceCrossVolume && SameVolume(fullSource, _storageRoot))
+            {
+                // destPath now lives under a per-item GUID directory (root\{guid}\{originalName}) —
+                // that directory doesn't exist yet, and File.Move requires its parent to. Nothing is
+                // copied here, so creating an empty directory ahead of an atomic rename is safe (no
+                // partial-copy window to guard).
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                File.Move(fullSource, destPath);
+            }
+            else
+            {
+                if (!TryCopyFileVerified(fullSource, destPath))
+                {
+                    TryDeletePartialFile(destPath);
+                    RemoveManifestEntry(destPath);
+                    TryCleanupEmptyItemDirectory(destPath);
+                    return null;
+                }
+
+                // Copy verified complete — only now is it safe to remove the original.
+                File.Delete(fullSource);
+            }
+
+            return destPath;
+        }
+        catch (Exception ex)
+        {
+            if (destPath is not null)
+            {
+                RemoveManifestEntry(destPath);
+                TryCleanupEmptyItemDirectory(destPath);
+            }
+
+            Console.Error.WriteLine($"PanelItemStorageService.MoveIn failed for '{sourcePath}': {ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>
-    /// Directory counterpart of <see cref="BuildDestinationPath"/>: <c>{storageRoot}\{guid}\{originalFolderName}</c>.
+    /// Same as <see cref="MoveInDirectory(string)"/>, but with an internal-only escape hatch for
+    /// tests — see <see cref="MoveIn(string, bool)"/> remarks.
     /// </summary>
-    private string BuildDestinationDirectoryPath(string fullSourcePath)
+    /// <param name="sourcePath">Full path of the directory to move into managed storage.</param>
+    /// <param name="forceCrossVolume">When <see langword="true"/>, forces the copy-then-delete path even if source and storage root are on the same volume.</param>
+    internal string? MoveInDirectory(string sourcePath, bool forceCrossVolume)
     {
-        var name = Path.GetFileName(fullSourcePath);
-        if (string.IsNullOrEmpty(name)) name = "folder";
-        var guid = Guid.NewGuid().ToString("N");
-        var itemDir = Path.Combine(_storageRoot, guid);
+        if (string.IsNullOrWhiteSpace(sourcePath)) return null;
+        if (!Directory.Exists(sourcePath)) return null;
 
-        var candidate = Path.Combine(itemDir, name);
-        return TruncateNameIfPathTooLong(candidate, itemDir, name, ext: string.Empty);
+        string? destRoot = null;
+        try
+        {
+            var fullSource = Path.GetFullPath(sourcePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            destRoot = BuildDestinationDirectoryPath(fullSource);
+
+            if (!forceCrossVolume && SameVolume(fullSource, _storageRoot))
+            {
+                // Atomic rename — no safety cap: nothing is copied, so there's no disk-bloat or
+                // slowness concern regardless of folder size.
+                Directory.CreateDirectory(_storageRoot);
+
+                // See MoveIn remarks: the manifest entry is written before the destructive move so
+                // a crash between "move" and "record origin" can't lose the original path. Rolled
+                // back by the catch below if the move itself fails; if the manifest write itself
+                // fails, abort before the destructive Directory.Move ever runs.
+                if (!WriteManifestEntry(destRoot, fullSource))
+                {
+                    RemoveManifestEntry(destRoot);
+                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory: manifest write failed, aborting move of '{sourcePath}'");
+                    return null;
+                }
+
+                // destRoot now lives under a per-item GUID directory (root\{guid}\{originalName}).
+                // Directory.Move requires the parent to exist but the destination itself to NOT
+                // exist (it performs the rename) — so only the GUID directory is created here, never
+                // destRoot itself.
+                Directory.CreateDirectory(Path.GetDirectoryName(destRoot)!);
+                Directory.Move(fullSource, destRoot);
+            }
+            else
+            {
+                string[] files;
+                try
+                {
+                    files = Directory.GetFiles(fullSource, "*", SearchOption.AllDirectories);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to enumerate '{sourcePath}': {ex.Message}");
+                    return null;
+                }
+
+                if (files.Length > MaxDirectoryImportFileCount) return null;
+
+                long totalBytes = 0;
+                try
+                {
+                    foreach (var file in files)
+                    {
+                        totalBytes += new FileInfo(file).Length;
+                        if (totalBytes > MaxDirectoryImportBytes) return null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // A file vanished/became inaccessible mid-scan — bail out rather than move a partial view.
+                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to size '{sourcePath}': {ex.Message}");
+                    return null;
+                }
+
+                // Manifest entry recorded before any copying starts — see MoveIn remarks. Rolled
+                // back below on any failure to complete the verified copy. If the manifest write
+                // itself fails, abort before any copying (and the eventual source deletion) starts.
+                if (!WriteManifestEntry(destRoot, fullSource))
+                {
+                    RemoveManifestEntry(destRoot);
+                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory: manifest write failed, aborting move of '{sourcePath}'");
+                    return null;
+                }
+
+                try
+                {
+                    Directory.CreateDirectory(destRoot);
+
+                    foreach (var file in files)
+                    {
+                        var relative = Path.GetRelativePath(fullSource, file);
+                        var destFile = Path.Combine(destRoot, relative);
+
+                        // Per-file verify (size check against source) before any deletion is allowed —
+                        // same discipline as MoveIn/Restore, see TryCopyFileVerified remarks.
+                        if (!TryCopyFileVerified(file, destFile))
+                        {
+                            Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory verified copy failed for '{file}' while copying '{sourcePath}'");
+                            TryDeletePartialDirectory(destRoot);
+                            RemoveManifestEntry(destRoot);
+                            TryCleanupEmptyItemDirectory(destRoot);
+                            return null;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to copy '{sourcePath}': {ex.Message}");
+                    TryDeletePartialDirectory(destRoot);
+                    RemoveManifestEntry(destRoot);
+                    TryCleanupEmptyItemDirectory(destRoot);
+                    return null;
+                }
+
+                // Copy verified complete (every file above either copied or the whole operation
+                // bailed out) — only now is it safe to remove the original tree.
+                Directory.Delete(fullSource, recursive: true);
+            }
+
+            return destRoot;
+        }
+        catch (Exception ex)
+        {
+            if (destRoot is not null)
+            {
+                RemoveManifestEntry(destRoot);
+                TryCleanupEmptyItemDirectory(destRoot);
+            }
+
+            Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed for '{sourcePath}': {ex.Message}");
+            return null;
+        }
     }
+
+    /// <summary>
+    /// Same as <see cref="Restore(string)"/>, but with an internal-only escape hatch for tests: when
+    /// <paramref name="forceCrossVolume"/> is <see langword="true"/>, the same-volume fast path
+    /// (<see cref="File.Move(string, string)"/>/<see cref="Directory.Move(string, string)"/>) is
+    /// skipped entirely and the copy-then-delete-after-verified-success branch runs directly —
+    /// see <see cref="MoveIn(string, bool)"/> remarks for why this exists.
+    /// </summary>
+    /// <param name="storedPath">Full path of the managed item to restore, inside managed storage.</param>
+    /// <param name="forceCrossVolume">When <see langword="true"/>, forces the copy-then-delete path even if the original location and storage root are on the same volume.</param>
+    internal RestoreOutcome Restore(string storedPath, bool forceCrossVolume)
+    {
+        if (!IsManaged(storedPath)) return RestoreOutcome.NotManaged;
+
+        var fullStored = Path.GetFullPath(storedPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        var original = ReadManifestEntry(fullStored);
+        if (original is null) return RestoreOutcome.OriginalPathUnknown;
+
+        try
+        {
+            var targetDir = Path.GetDirectoryName(original);
+            if (!string.IsNullOrEmpty(targetDir)) Directory.CreateDirectory(targetDir);
+
+            var finalTarget = ResolveCollisionFreeName(original);
+            var isDirectory = Directory.Exists(fullStored);
+
+            // Cross-volume Move isn't supported by the OS — fall back to the same
+            // copy-then-delete-after-verified-success discipline used by MoveInDirectory/MoveIn.
+            // Shared by both the real cross-volume path (IOException from Move) and the
+            // forceCrossVolume test hook, so the fallback logic itself is never duplicated.
+            bool CopyThenDeleteDirectory()
+            {
+                if (!TryCopyDirectoryVerified(fullStored, finalTarget))
+                {
+                    TryDeletePartialDirectory(finalTarget);
+                    return false;
+                }
+
+                Directory.Delete(fullStored, recursive: true);
+                return true;
+            }
+
+            bool CopyThenDeleteFile()
+            {
+                if (!TryCopyFileVerified(fullStored, finalTarget))
+                {
+                    TryDeletePartialFile(finalTarget);
+                    return false;
+                }
+
+                File.Delete(fullStored);
+                return true;
+            }
+
+            if (isDirectory)
+            {
+                if (forceCrossVolume)
+                {
+                    if (!CopyThenDeleteDirectory()) return RestoreOutcome.Failed;
+                }
+                else
+                {
+                    try
+                    {
+                        Directory.Move(fullStored, finalTarget);
+                    }
+                    catch (IOException)
+                    {
+                        if (!CopyThenDeleteDirectory()) return RestoreOutcome.Failed;
+                    }
+                }
+            }
+            else
+            {
+                if (forceCrossVolume)
+                {
+                    if (!CopyThenDeleteFile()) return RestoreOutcome.Failed;
+                }
+                else
+                {
+                    try
+                    {
+                        File.Move(fullStored, finalTarget);
+                    }
+                    catch (IOException)
+                    {
+                        if (!CopyThenDeleteFile()) return RestoreOutcome.Failed;
+                    }
+                }
+            }
+
+            RemoveManifestEntry(fullStored);
+            TryCleanupEmptyItemDirectory(fullStored);
+            return RestoreOutcome.Restored;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"PanelItemStorageService.Restore failed for '{storedPath}': {ex.Message}");
+            return RestoreOutcome.Failed;
+        }
+    }
+
+    // ── Destination naming (static helpers) ─────────────────────────────────
 
     /// <summary>
     /// If <paramref name="candidate"/> exceeds <see cref="MaxDestinationPathLength"/>, truncates only
@@ -771,7 +697,6 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     }
 
     // ── Volume detection ────────────────────────────────────────────────────
-
     private static bool SameVolume(string fullSourcePath, string storageRoot)
     {
         try
@@ -903,6 +828,94 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
     }
 
+    // ── Manifest (managed path -> original path): static helper ─────────────
+    private static Dictionary<string, string> CreateEmptyManifest() =>
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // ── Per-item GUID directory cleanup ─────────────────────────────────────
+
+    /// <summary>
+    /// Deletes the per-item GUID directory a moved-in file/folder lived under (see
+    /// <see cref="BuildDestinationPath"/>/<see cref="BuildDestinationDirectoryPath"/>) once it's
+    /// orphaned by a successful <see cref="Restore(string)"/>/<see cref="Release"/> — <b>only</b> if
+    /// that directory is a direct child of <see cref="_storageRoot"/> and is now empty. Never deletes
+    /// <see cref="_storageRoot"/> itself, and never deletes a non-empty directory. A legacy flat-layout
+    /// item (pre-GUID-directory) has no per-item directory to clean up — its parent already IS the
+    /// storage root, which this deliberately never touches, so it's a safe no-op for those.
+    /// </summary>
+    /// <param name="fullStoredPath">
+    /// The full, already-normalized path of the item that was just moved away/deleted (whether the
+    /// item was a file or a directory — either way, its parent is the per-item GUID directory).
+    /// </param>
+    private void TryCleanupEmptyItemDirectory(string fullStoredPath)
+    {
+        try
+        {
+            var itemDir = Path.GetDirectoryName(fullStoredPath);
+            if (string.IsNullOrEmpty(itemDir) || !Directory.Exists(itemDir)) return;
+
+            var itemDirFull = Path.GetFullPath(itemDir)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var root = Path.GetFullPath(_storageRoot)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // Guard against ever deleting the storage root: only a directory whose OWN parent is the
+            // root qualifies (i.e. itemDir must be exactly one level below root). This also correctly
+            // skips legacy flat items, whose "item directory" as computed above already IS the root.
+            var parentOfItemDir = Path.GetDirectoryName(itemDirFull);
+            if (parentOfItemDir is null) return;
+
+            var parentOfItemDirFull = Path.GetFullPath(parentOfItemDir)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (!string.Equals(parentOfItemDirFull, root, StringComparison.OrdinalIgnoreCase)) return;
+
+            if (Directory.EnumerateFileSystemEntries(itemDirFull).Any()) return; // not empty — leave it
+
+            Directory.Delete(itemDirFull);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"PanelItemStorageService: failed to clean up item directory for '{fullStoredPath}': {ex.Message}");
+        }
+    }
+
+    // ── Destination naming ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds a collision-free destination for a moved-in file: a per-item GUID directory holding
+    /// the file under its <b>original</b> name — <c>{storageRoot}\{guid}\{originalName}{ext}</c>.
+    /// The GUID guarantees collision-free placement in one shot (no racy check-then-create loop, no
+    /// "(2)"-style counter) while leaving the file's own name untouched, so
+    /// <see cref="System.IO.Path.GetFileName(string)"/> on the result is exactly the original name
+    /// (see ADR-013 Decision 2). The base name is truncated — keeping the extension intact — only if
+    /// the resulting full path would exceed <see cref="MaxDestinationPathLength"/>; otherwise it is
+    /// never shortened.
+    /// </summary>
+    private string BuildDestinationPath(string fullSourcePath)
+    {
+        var name = Path.GetFileNameWithoutExtension(fullSourcePath);
+        var ext = Path.GetExtension(fullSourcePath);
+        var guid = Guid.NewGuid().ToString("N");
+        var itemDir = Path.Combine(_storageRoot, guid);
+
+        var candidate = Path.Combine(itemDir, name + ext);
+        return TruncateNameIfPathTooLong(candidate, itemDir, name, ext);
+    }
+
+    /// <summary>
+    /// Directory counterpart of <see cref="BuildDestinationPath"/>: <c>{storageRoot}\{guid}\{originalFolderName}</c>.
+    /// </summary>
+    private string BuildDestinationDirectoryPath(string fullSourcePath)
+    {
+        var name = Path.GetFileName(fullSourcePath);
+        if (string.IsNullOrEmpty(name)) name = "folder";
+        var guid = Guid.NewGuid().ToString("N");
+        var itemDir = Path.Combine(_storageRoot, guid);
+
+        var candidate = Path.Combine(itemDir, name);
+        return TruncateNameIfPathTooLong(candidate, itemDir, name, ext: string.Empty);
+    }
+
     // ── Manifest (managed path -> original path) ────────────────────────────
 
     /// <summary>
@@ -956,10 +969,10 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     /// removes the old key and adds the new one) exists specifically so a physical move that fails
     /// AFTER this method returns can never strand the manifest without a valid entry for the item's
     /// current (still physically present, unchanged) path: the old key is simply still there, so
-    /// <see cref="Restore"/> against <paramref name="oldManagedPath"/> keeps working exactly as
+    /// <see cref="Restore(string)"/> against <paramref name="oldManagedPath"/> keeps working exactly as
     /// before, with no rollback logic needed at all. The "extra" new key this leaves behind in that
     /// failure case is harmless garbage: it maps a managed path that was never actually created
-    /// (the move never happened) to an original path, and <see cref="Restore"/> is only ever invoked
+    /// (the move never happened) to an original path, and <see cref="Restore(string)"/> is only ever invoked
     /// by callers holding a managed path that actually exists on disk — that stray key can never be
     /// looked up. <see cref="RenameManaged"/> still makes a best-effort attempt to remove it anyway
     /// so it doesn't linger, but a failure to do so is not itself a data-loss risk (see ADR-012
@@ -1072,9 +1085,6 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             return (CreateEmptyManifest(), false);
         }
     }
-
-    private static Dictionary<string, string> CreateEmptyManifest() =>
-        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Writes <paramref name="manifest"/> to disk (write-through). <paramref name="manifest"/> is

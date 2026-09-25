@@ -15,12 +15,19 @@ public class PanelSizePresetCalculatorTests
 
     private static readonly Rect OnGridCurrent = new(96d, 200d, 320d, 240d);
 
+    /// <summary>Supplies every <see cref="PanelSizePreset"/> value for theories exercised across all presets.</summary>
     public static TheoryData<PanelSizePreset> AllPresets =>
     [
         PanelSizePreset.Small, PanelSizePreset.Medium, PanelSizePreset.Large, PanelSizePreset.ExtraLarge,
     ];
 
     // ── GridAligned: the result is exactly the preset's span, anchored at the (quantised) top-left. ──
+
+    /// <summary>
+    /// Verifies that in <see cref="PanelGeometryMode.GridAligned"/> mode, applying a size preset
+    /// produces exactly that preset's span, anchored at the panel's own (already on-grid) top-left.
+    /// </summary>
+    /// <param name="preset">The size preset applied, drawn from <see cref="AllPresets"/>.</param>
     [Theory]
     [MemberData(nameof(AllPresets))]
     public void GridAligned_ProducesThePresetSpan_AnchoredAtTheTopLeft(PanelSizePreset preset)
@@ -36,6 +43,11 @@ public class PanelSizePresetCalculatorTests
     }
 
     // ── An off-grid panel is quantised by the same command (it is a resize on the grid, after all). ──
+
+    /// <summary>
+    /// Verifies that applying a size preset to a panel currently off-grid also snaps its position to
+    /// the grid, since a preset resize is a resize on the grid like any other.
+    /// </summary>
     [Fact]
     public void GridAligned_OffGridPanel_SnapsThePositionToTheGrid()
     {
@@ -50,6 +62,11 @@ public class PanelSizePresetCalculatorTests
     }
 
     // ── A negative-origin monitor quantises against ITS origin, not absolute zero. ───────────────────
+
+    /// <summary>
+    /// Verifies that on a monitor with a negative-coordinate origin, the preset result is quantised
+    /// relative to that monitor's own origin, not absolute zero.
+    /// </summary>
     [Fact]
     public void GridAligned_NegativeOrigin_QuantisesAgainstThatOrigin()
     {
@@ -63,6 +80,11 @@ public class PanelSizePresetCalculatorTests
     }
 
     // ── The work-area clamp keeps a large preset on screen without shrinking it. ─────────────────────
+
+    /// <summary>
+    /// Verifies that applying a preset near the work-area edge pulls the panel back fully inside the
+    /// work area by repositioning it, without shrinking the preset's size.
+    /// </summary>
     [Fact]
     public void GridAligned_NearTheWorkAreaEdge_PullsThePanelBackInside_WithoutChangingTheSize()
     {
@@ -78,6 +100,12 @@ public class PanelSizePresetCalculatorTests
     }
 
     // ── Anti-overlap: only the colliding axis shrinks, and the anchor never moves. ───────────────────
+
+    /// <summary>
+    /// Verifies that a neighbour blocking only the horizontal axis shrinks the preset's width to
+    /// leave exactly one gap of clearance, while the height stays at the preset's own value and the
+    /// anchor never moves.
+    /// </summary>
     [Fact]
     public void GridAligned_WithANeighbourToTheRight_ShrinksOnlyTheWidth()
     {
@@ -95,6 +123,12 @@ public class PanelSizePresetCalculatorTests
 
     // ── A neighbour that a bottom-right resize can never clear (it straddles the anchor on both axes)
     // leaves the preset alone rather than destroying it down to the minimum (fix-cycle 2 MAJOR-B). ───
+
+    /// <summary>
+    /// Verifies the fix-cycle 2 MAJOR-B guard: a neighbour that straddles the anchor corner on both
+    /// axes, so no anti-overlap shrink can clear it, leaves the preset's size exactly as computed
+    /// without obstacles, rather than collapsing it toward the minimum span.
+    /// </summary>
     [Fact]
     public void GridAligned_WithAnUnclearableNeighbour_KeepsThePresetSize()
     {
@@ -108,6 +142,11 @@ public class PanelSizePresetCalculatorTests
     }
 
     // ── The minimum span still wins over a (hypothetically smaller) preset. ─────────────────────────
+
+    /// <summary>
+    /// Verifies that when the host's minimum span is larger than a preset's own span, the result is
+    /// clamped up to the minimum span rather than shrinking below it.
+    /// </summary>
     [Fact]
     public void GridAligned_PresetBelowTheMinimumSpan_IsClampedUpToIt()
     {
@@ -123,6 +162,13 @@ public class PanelSizePresetCalculatorTests
 
     // ── LegacyFreeform: size only. The position is untouched (not even quantised) and the mode is not
     // the calculator's business at all — see ComputeFreeform's remarks for the decision. ─────────────
+
+    /// <summary>
+    /// Verifies that in <see cref="PanelGeometryMode.LegacyFreeform"/> mode, applying a size preset
+    /// resizes the panel to that preset's extent while leaving the current position — including its
+    /// off-grid, fractional coordinates — completely untouched.
+    /// </summary>
+    /// <param name="preset">The size preset applied, drawn from <see cref="AllPresets"/>.</param>
     [Theory]
     [MemberData(nameof(AllPresets))]
     public void Freeform_AppliesThePresetExtentAtTheCurrentPosition(PanelSizePreset preset)
@@ -137,6 +183,10 @@ public class PanelSizePresetCalculatorTests
         Assert.Equal(expectedSize.Height, result.Height);
     }
 
+    /// <summary>
+    /// Verifies that in freeform mode, applying a preset near the work-area edge still pulls the
+    /// panel back fully inside the work area.
+    /// </summary>
     [Fact]
     public void Freeform_NearTheWorkAreaEdge_IsPulledBackInside()
     {
@@ -148,6 +198,11 @@ public class PanelSizePresetCalculatorTests
 
     // ── No monitor information available (IMonitorService returned nothing): resize in place, never
     // teleport to (0,0). ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that when no monitor work area is available (an empty <see cref="Rect"/>), applying a
+    /// preset resizes in place and leaves the position untouched, rather than teleporting to (0,0).
+    /// </summary>
     [Fact]
     public void Freeform_WithNoWorkArea_LeavesThePositionUntouched()
     {

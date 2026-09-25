@@ -28,6 +28,10 @@ public class AdaptiveGridLayoutTests
 
     // ----- EdgePadding -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.EdgePadding(double, double)"/> returns half of the
+    /// cell size when the ratio is 0.5.
+    /// </summary>
     [Fact]
     public void EdgePadding_Cell84_Ratio0_5_Returns42()
     {
@@ -36,6 +40,10 @@ public class AdaptiveGridLayoutTests
 
     // ----- RowCapacity -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> returns
+    /// exactly <c>k</c> when the available width equals the exact-fit extent for <c>k</c> columns.
+    /// </summary>
     [Fact]
     public void RowCapacity_ExactlyExtentOfK_ReturnsK()
     {
@@ -46,6 +54,10 @@ public class AdaptiveGridLayoutTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> drops
+    /// to <c>k - 1</c> when the available width is one pixel below the exact-fit extent for <c>k</c>.
+    /// </summary>
     [Fact]
     public void RowCapacity_OnePixelBelowExtentOfK_ReturnsKMinusOne()
     {
@@ -56,6 +68,10 @@ public class AdaptiveGridLayoutTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> still
+    /// returns <c>k</c> when the available width is up to one pixel short of fitting an extra column.
+    /// </summary>
     [Fact]
     public void RowCapacity_ExtentOfKPlusCellMinusOne_ReturnsK()
     {
@@ -66,6 +82,11 @@ public class AdaptiveGridLayoutTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> clamps
+    /// to a minimum of one column even when the available width is less than two edge paddings plus one
+    /// cell.
+    /// </summary>
     [Fact]
     public void RowCapacity_LessThanTwoEdgesPlusOneCell_ClampsToOne()
     {
@@ -73,6 +94,12 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(1, AdaptiveGridLayout.RowCapacity(l, Cell, MinGap, EdgeM));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> clamps
+    /// to one column, without throwing, for degenerate zero/negative available width or cell size inputs.
+    /// </summary>
+    /// <param name="available">The available width passed to <c>RowCapacity</c>.</param>
+    /// <param name="cell">The cell size passed to <c>RowCapacity</c>.</param>
     [Theory]
     [InlineData(0d, 84d)]
     [InlineData(-100d, 84d)]
@@ -84,6 +111,10 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(1, result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> clamps
+    /// to one column, without throwing, when the available width is <see cref="double.NaN"/>.
+    /// </summary>
     [Fact]
     public void RowCapacity_NaNAvailable_ReturnsOneWithoutThrowing()
     {
@@ -99,6 +130,12 @@ public class AdaptiveGridLayoutTests
     // tests pin the tolerance window: anything up to (but not including) 1px short of Extent(k) must
     // still report k; a full 1px short (or more) must still correctly drop to k-1.
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> still
+    /// returns <c>k</c> when the available width falls short of <c>Extent(k)</c> by less than one pixel
+    /// (within <c>LayoutTolerance</c>).
+    /// </summary>
+    /// <param name="shortfall">The sub-pixel amount subtracted from the exact-fit extent.</param>
     [Theory]
     [InlineData(0.1d)]
     [InlineData(0.4d)]
@@ -112,6 +149,12 @@ public class AdaptiveGridLayoutTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> drops
+    /// to <c>k - 1</c> once the shortfall from <c>Extent(k)</c> reaches or exceeds one pixel (outside
+    /// <c>LayoutTolerance</c>).
+    /// </summary>
+    /// <param name="shortfall">The amount subtracted from the exact-fit extent.</param>
     [Theory]
     [InlineData(0.51d)]
     [InlineData(0.9d)]
@@ -127,6 +170,10 @@ public class AdaptiveGridLayoutTests
 
     // ----- RowGap / full & partial rows -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowGap(int, int, double, double, double, double)"/>
+    /// stretches the gap of a full row to absorb all leftover space beyond the exact-fit extent.
+    /// </summary>
     [Fact]
     public void RowGap_FullRow_StretchesToFillLeftoverSpace()
     {
@@ -138,6 +185,10 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(expected, gap, 1e-9);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowGap(int, int, double, double, double, double)"/>
+    /// returns <c>MinGap</c> for a full row whose available width is an exact fit (no leftover slack).
+    /// </summary>
     [Fact]
     public void RowGap_FullRow_ExactFit_ReturnsMinGap()
     {
@@ -148,6 +199,11 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(MinGap, gap);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowGap(int, int, double, double, double, double)"/>
+    /// never returns a gap below the configured minimum gap for a full row, even with a custom
+    /// non-default <c>MinGap</c>.
+    /// </summary>
     [Fact]
     public void RowGap_FullRow_NeverBelowMinGap()
     {
@@ -159,6 +215,10 @@ public class AdaptiveGridLayoutTests
         Assert.True(gap >= customMinGap);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowGap(int, int, double, double, double, double)"/>
+    /// always returns <c>MinGap</c> for a partial (non-full) row, regardless of available slack.
+    /// </summary>
     [Fact]
     public void RowGap_PartialRow_ReturnsMinGap()
     {
@@ -166,6 +226,10 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(MinGap, gap);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowGap(int, int, double, double, double, double)"/>
+    /// returns <c>MinGap</c> for a row with a single item at full row capacity.
+    /// </summary>
     [Fact]
     public void RowGap_SingleItem_ReturnsMinGap()
     {
@@ -175,12 +239,20 @@ public class AdaptiveGridLayoutTests
 
     // ----- Offset / Extent -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.Offset(int, double, double, double)"/> places the
+    /// first item's origin exactly at the edge padding.
+    /// </summary>
     [Fact]
     public void Offset_FirstItem_EqualsEdgePadding()
     {
         Assert.Equal(EdgeM, AdaptiveGridLayout.Offset(0, Cell, MinGap, EdgeM));
     }
 
+    /// <summary>
+    /// Verifies that successive <see cref="AdaptiveGridLayout.Offset(int, double, double, double)"/>
+    /// results are strictly increasing and leave no overlap between adjacent cells.
+    /// </summary>
     [Fact]
     public void Offset_IsMonotonicAndNonOverlapping()
     {
@@ -193,12 +265,21 @@ public class AdaptiveGridLayoutTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.Extent(int, double, double, double)"/> returns zero
+    /// for an item count of zero.
+    /// </summary>
     [Fact]
     public void Extent_ZeroCount_ReturnsZero()
     {
         Assert.Equal(0d, AdaptiveGridLayout.Extent(0, Cell, MinGap, EdgeM));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.Extent(int, double, double, double)"/> matches the
+    /// closed-form extent formula for several item counts.
+    /// </summary>
+    /// <param name="count">The item count passed to <c>Extent</c>.</param>
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -210,6 +291,11 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(expected, AdaptiveGridLayout.Extent(count, Cell, MinGap, EdgeM));
     }
 
+    /// <summary>
+    /// Verifies the algebraic property that, with a zero gap and the default 0.5 edge-padding ratio,
+    /// <see cref="AdaptiveGridLayout.Extent(int, double, double, double)"/> equals <c>Cell * (k + 1)</c>.
+    /// </summary>
+    /// <param name="k">The item count passed to <c>Extent</c>.</param>
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -230,6 +316,12 @@ public class AdaptiveGridLayoutTests
 
     // ----- MinPanelWidth (polishing/ui-1): Extent(1) == 2 * CellSize(iconSize), any gap -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.Extent(int, double, double, double)"/> for a single
+    /// item equals twice the cell size, independent of the gap value (the gap term's multiplier is zero
+    /// when count == 1), which <c>GridMetrics.MinPanelWidth</c> relies on.
+    /// </summary>
+    /// <param name="iconSize">The icon size used to derive the cell size under test.</param>
     [Theory]
     [InlineData(16d)]
     [InlineData(48d)]
@@ -254,12 +346,21 @@ public class AdaptiveGridLayoutTests
 
     // ----- Vertical axis (Offset/Extent are axis-agnostic) -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.Offset(int, double, double, double)"/> places the
+    /// first row's origin exactly at the vertical edge padding.
+    /// </summary>
     [Fact]
     public void Offset_Vertical_FirstRow_EqualsVerticalEdgePadding()
     {
         Assert.Equal(EdgeMv, AdaptiveGridLayout.Offset(0, RowCell, MinGap, EdgeMv));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.Extent(int, double, double, double)"/> matches the
+    /// closed-form extent formula on the vertical (row) axis.
+    /// </summary>
+    /// <param name="rows">The row count passed to <c>Extent</c>.</param>
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -283,18 +384,31 @@ public class AdaptiveGridLayoutTests
 
     // ----- RowCount / ItemsInRow (wrap) -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCount(int, int)"/> returns zero for an item count
+    /// of zero.
+    /// </summary>
     [Fact]
     public void RowCount_ZeroItems_ReturnsZero()
     {
         Assert.Equal(0, AdaptiveGridLayout.RowCount(0, 4));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCount(int, int)"/> returns zero for a negative
+    /// item count.
+    /// </summary>
     [Fact]
     public void RowCount_NegativeItemCount_ReturnsZero()
     {
         Assert.Equal(0, AdaptiveGridLayout.RowCount(-3, 4));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.ItemsInRow(int, int, int)"/> returns zero for a row
+    /// index outside the range of rows actually produced by the layout.
+    /// </summary>
+    /// <param name="rowIndex">The out-of-range row index passed to <c>ItemsInRow</c>.</param>
     [Theory]
     [InlineData(-1)]
     [InlineData(2)]
@@ -305,12 +419,21 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(0, AdaptiveGridLayout.ItemsInRow(5, 4, rowIndex));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCount(int, int)"/> returns one when the item count
+    /// exactly equals the row capacity.
+    /// </summary>
     [Fact]
     public void RowCount_ExactlyOneCapacity_ReturnsOne()
     {
         Assert.Equal(1, AdaptiveGridLayout.RowCount(4, 4));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCount(int, int)"/> wraps into two rows, with
+    /// <see cref="AdaptiveGridLayout.ItemsInRow(int, int, int)"/> splitting a full first row and a
+    /// single-item second row, when the item count is one more than capacity.
+    /// </summary>
     [Fact]
     public void RowCount_OneMoreThanCapacity_ReturnsTwoWithCorrectSplit()
     {
@@ -320,6 +443,11 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(1, AdaptiveGridLayout.ItemsInRow(capacity + 1, capacity, 1));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.RowCount(int, int)"/> and
+    /// <see cref="AdaptiveGridLayout.ItemsInRow(int, int, int)"/> agree that both rows are full when the
+    /// item count is exactly twice the row capacity.
+    /// </summary>
     [Fact]
     public void RowCount_TwoFullRows_BothRowsFull()
     {
@@ -331,6 +459,11 @@ public class AdaptiveGridLayoutTests
 
     // ----- SnapExtent / CountForExtent -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/> is
+    /// idempotent when the input is already an exact-fit extent for <c>k</c> columns.
+    /// </summary>
+    /// <param name="k">The column count whose exact-fit extent is snapped.</param>
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -344,6 +477,11 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(extent, AdaptiveGridLayout.SnapExtent(extent, Cell, MinGap, EdgeM));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/> rounds
+    /// down to the current column count's extent below the midpoint step and up to the next column
+    /// count's extent above it.
+    /// </summary>
     [Fact]
     public void SnapExtent_RoundsToNearestColumnCount()
     {
@@ -358,6 +496,10 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(AdaptiveGridLayout.Extent(k + 1, Cell, MinGap, EdgeM), AdaptiveGridLayout.SnapExtent(above, Cell, MinGap, EdgeM));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/> snaps
+    /// zero or negative extents up to the extent of a single cell.
+    /// </summary>
     [Fact]
     public void SnapExtent_ZeroOrNegative_SnapsToOneCell()
     {
@@ -367,6 +509,12 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(extentOfOne, AdaptiveGridLayout.SnapExtent(-50, Cell, MinGap, EdgeM));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.CountForExtent(double, double, double, double)"/>
+    /// clamps to one when <c>cell + gap</c> is non-positive, rather than dividing by a zero or negative
+    /// denominator.
+    /// </summary>
+    /// <param name="cellPlusGap">The degenerate cell-plus-gap value passed to <c>CountForExtent</c>.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(-10d)]
@@ -377,6 +525,11 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(1, AdaptiveGridLayout.CountForExtent(500d, cellPlusGap, 0d, EdgeM));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.CountForExtent(double, double, double, double)"/>
+    /// yields the same column count before and after routing an extent through
+    /// <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/>.
+    /// </summary>
     [Fact]
     public void CountForExtent_RoundTripsThroughSnapExtent()
     {
@@ -391,6 +544,11 @@ public class AdaptiveGridLayoutTests
 
     // ----- RowCapacity with non-zero pmin (plan §10 item 1/2, "серия с pmin = 12") -----
 
+    /// <summary>
+    /// Verifies that with a non-zero <c>MinGap</c> (<see cref="CustomGap"/>),
+    /// <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> still returns
+    /// exactly <c>k</c> when the available width equals the exact-fit extent for <c>k</c> columns.
+    /// </summary>
     [Fact]
     public void RowCapacity_NonZeroMinGap_ExactlyExtentOfK_ReturnsK()
     {
@@ -401,6 +559,11 @@ public class AdaptiveGridLayoutTests
         }
     }
 
+    /// <summary>
+    /// Verifies that with a non-zero <c>MinGap</c> (<see cref="CustomGap"/>),
+    /// <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> drops to <c>k - 1</c>
+    /// when the available width is one pixel below the exact-fit extent for <c>k</c>.
+    /// </summary>
     [Fact]
     public void RowCapacity_NonZeroMinGap_OnePixelBelowExtentOfK_ReturnsKMinusOne()
     {
@@ -411,6 +574,11 @@ public class AdaptiveGridLayoutTests
         }
     }
 
+    /// <summary>
+    /// Verifies that with a non-zero <c>MinGap</c> (<see cref="CustomGap"/>),
+    /// <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> still returns
+    /// <c>k</c> when the available width is up to one pixel short of fitting an extra column.
+    /// </summary>
     [Fact]
     public void RowCapacity_NonZeroMinGap_ExtentOfKPlusCellMinusOne_ReturnsK()
     {
@@ -421,6 +589,11 @@ public class AdaptiveGridLayoutTests
         }
     }
 
+    /// <summary>
+    /// Verifies that with a non-zero <c>MinGap</c> (<see cref="CustomGap"/>),
+    /// <see cref="AdaptiveGridLayout.RowCapacity(double, double, double, double)"/> still clamps to a
+    /// minimum of one column when the available width is less than two edge paddings plus one cell.
+    /// </summary>
     [Fact]
     public void RowCapacity_NonZeroMinGap_LessThanTwoEdgesPlusOneCell_ClampsToOne()
     {
@@ -430,6 +603,11 @@ public class AdaptiveGridLayoutTests
 
     // ----- Full row: right edge of last element (plan §10 item 4) -----
 
+    /// <summary>
+    /// Verifies that a stretched full row's last item's right edge lands exactly at
+    /// <c>available - EdgePadding</c>, for both zero and non-zero base gaps.
+    /// </summary>
+    /// <param name="gap">The base gap fed into <c>Extent</c>/<c>RowGap</c> before stretching.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(12d)]
@@ -445,6 +623,12 @@ public class AdaptiveGridLayoutTests
 
     // ----- Full row: p >= pmin invariant across slack values (plan §10 item 6) -----
 
+    /// <summary>
+    /// Verifies the invariant that a full row's stretched gap never falls below the configured base
+    /// gap, across a matrix of base gaps and extra slack amounts.
+    /// </summary>
+    /// <param name="gap">The base gap fed into <c>Extent</c>/<c>RowGap</c>.</param>
+    /// <param name="extraSlack">Extra width added beyond the row's exact-fit extent.</param>
     [Theory]
     [InlineData(0d, 0d)]
     [InlineData(0d, 37d)]
@@ -461,6 +645,11 @@ public class AdaptiveGridLayoutTests
 
     // ----- Partial row: gap == pmin, first offset == m, positive tail (plan §10 item 7) -----
 
+    /// <summary>
+    /// Verifies that a partial row keeps <c>gap == MinGap</c>, starts its first item at the edge
+    /// padding, and leaves a positive tail of unused space, for both zero and non-zero base gaps.
+    /// </summary>
+    /// <param name="gap">The base gap fed into <c>Extent</c>/<c>RowGap</c>.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(12d)]
@@ -481,6 +670,10 @@ public class AdaptiveGridLayoutTests
 
     // ----- n == 1 in a row that is NOT at capacity (plan §10 item 8, partial-capacity case) -----
 
+    /// <summary>
+    /// Verifies that a lone item in a row whose capacity is greater than one still gets
+    /// <c>MinGap</c> and an offset equal to the edge padding.
+    /// </summary>
     [Fact]
     public void RowGap_SingleItem_InRowOfLargerCapacity_StillReturnsMinGapAndOffsetEqualsEdgePadding()
     {
@@ -493,6 +686,11 @@ public class AdaptiveGridLayoutTests
 
     // ----- Vertical Offset general formula (plan §10 item 11) -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.Offset(int, double, double, double)"/> on the
+    /// vertical axis matches the general offset formula at the default <c>MinGap</c>.
+    /// </summary>
+    /// <param name="i">The row index passed to <c>Offset</c>.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -504,6 +702,11 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(expected, AdaptiveGridLayout.Offset(i, RowCell, MinGap, EdgeMv));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.Offset(int, double, double, double)"/> on the
+    /// vertical axis matches the general offset formula with a non-zero gap.
+    /// </summary>
+    /// <param name="i">The row index passed to <c>Offset</c>.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -531,6 +734,11 @@ public class AdaptiveGridLayoutTests
 
     // ----- SnapExtent/CountForExtent, vertical axis (plan §10 items 16-19) -----
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/> is
+    /// idempotent on the vertical axis when the input is already an exact-fit extent for <c>r</c> rows.
+    /// </summary>
+    /// <param name="r">The row count whose exact-fit extent is snapped.</param>
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -544,6 +752,11 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(extent, AdaptiveGridLayout.SnapExtent(extent, RowCell, MinGap, EdgeMv));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/> rounds
+    /// down to the current row count's extent below the midpoint step and up to the next row count's
+    /// extent above it, on the vertical axis.
+    /// </summary>
     [Fact]
     public void SnapExtent_Vertical_RoundsToNearestRowCount()
     {
@@ -558,6 +771,10 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(AdaptiveGridLayout.Extent(r + 1, RowCell, MinGap, EdgeMv), AdaptiveGridLayout.SnapExtent(above, RowCell, MinGap, EdgeMv));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/> snaps
+    /// zero or negative extents up to the extent of a single row.
+    /// </summary>
     [Fact]
     public void SnapExtent_Vertical_ZeroOrNegative_SnapsToOneRow()
     {
@@ -567,6 +784,11 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(extentOfOne, AdaptiveGridLayout.SnapExtent(-50, RowCell, MinGap, EdgeMv));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="AdaptiveGridLayout.CountForExtent(double, double, double, double)"/>
+    /// yields the same row count before and after routing an extent through
+    /// <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/>, on the vertical axis.
+    /// </summary>
     [Fact]
     public void CountForExtent_Vertical_RoundTripsThroughSnapExtent()
     {
@@ -581,6 +803,11 @@ public class AdaptiveGridLayoutTests
 
     // ----- SnapExtent with non-zero pmin (plan §10 intro: "серия с pmin = 12") -----
 
+    /// <summary>
+    /// Verifies that with a non-zero <c>MinGap</c> (<see cref="CustomGap"/>),
+    /// <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/> still rounds down
+    /// below the midpoint step and up above it.
+    /// </summary>
     [Fact]
     public void SnapExtent_NonZeroMinGap_RoundsToNearestColumnCount()
     {
@@ -595,6 +822,12 @@ public class AdaptiveGridLayoutTests
         Assert.Equal(AdaptiveGridLayout.Extent(k + 1, Cell, CustomGap, EdgeM), AdaptiveGridLayout.SnapExtent(above, Cell, CustomGap, EdgeM));
     }
 
+    /// <summary>
+    /// Verifies that with a non-zero <c>MinGap</c> (<see cref="CustomGap"/>),
+    /// <see cref="AdaptiveGridLayout.SnapExtent(double, double, double, double)"/> is still idempotent
+    /// when the input is already an exact-fit extent for <c>k</c> columns.
+    /// </summary>
+    /// <param name="k">The column count whose exact-fit extent is snapped.</param>
     [Theory]
     [InlineData(1)]
     [InlineData(2)]

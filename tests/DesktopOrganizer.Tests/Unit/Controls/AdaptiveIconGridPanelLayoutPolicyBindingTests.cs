@@ -16,10 +16,10 @@ namespace DesktopOrganizer.Tests.Unit.Controls;
 /// <see cref="IconLayoutPolicy.LegacyStretch"/> default, by design, before P02b merged — see this
 /// fix-cycle's Templates.xaml comment update). Uses <see cref="BindingOperations.SetBinding"/> directly
 /// against a real <see cref="AdaptiveIconGridPanel"/> instance with the SAME path/RelativeSource, hosted
-/// as a real <see cref="Window"/>'s <see cref="Window.Content"/>.
+/// as a real <see cref="Window"/>'s <c>Content</c>.
 /// </summary>
 /// <remarks>
-/// <c>RelativeSource AncestorType=Window</c> walks the VISUAL tree, which for <see cref="Window.Content"/>
+/// <c>RelativeSource AncestorType=Window</c> walks the VISUAL tree, which for <see cref="Window"/>'s <c>Content</c>
 /// only actually connects once the <see cref="Window"/>'s own template applies a real
 /// <see cref="System.Windows.Controls.ContentPresenter"/> — a plain <c>Measure</c>/<c>Arrange</c> call
 /// pair on an unshown <see cref="Window"/> was tried first and did NOT reliably establish that
@@ -32,31 +32,12 @@ namespace DesktopOrganizer.Tests.Unit.Controls;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class AdaptiveIconGridPanelLayoutPolicyBindingTests
 {
-    private sealed class StubModelHost(ChildWindowModel model)
-    {
-        public ChildWindowModel Model { get; } = model;
-    }
-
-    private static Binding BuildTemplatesXamlLayoutPolicyBinding() => new("DataContext.Model.IconLayoutPolicy")
-    {
-        RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Window), 1),
-    };
-
-    private static Window BuildOffscreenWindow(object dataContext, UIElement content) => new()
-    {
-        DataContext = dataContext,
-        Content = content,
-        WindowStyle = WindowStyle.None,
-        ShowInTaskbar = false,
-        ShowActivated = false,
-        AllowsTransparency = true,
-        Background = System.Windows.Media.Brushes.Transparent,
-        Width = 500,
-        Height = 500,
-        Left = -32000,
-        Top = -32000,
-    };
-
+    /// <summary>
+    /// Verifies that the exact <c>Templates.xaml</c> binding path resolves <see cref="AdaptiveIconGridPanel.LayoutPolicy"/>
+    /// from a real <see cref="ChildWindowModel.IconLayoutPolicy"/> value hosted on a shown <see cref="Window"/>, for
+    /// both <see cref="IconLayoutPolicy"/> values.
+    /// </summary>
+    /// <param name="policy">The <see cref="IconLayoutPolicy"/> value the model is seeded with.</param>
     [Theory]
     [InlineData(IconLayoutPolicy.FixedGap)]
     [InlineData(IconLayoutPolicy.LegacyStretch)]
@@ -109,5 +90,30 @@ public class AdaptiveIconGridPanelLayoutPolicyBindingTests
                 window.Close();
             }
         });
+    }
+
+    private static Binding BuildTemplatesXamlLayoutPolicyBinding() => new("DataContext.Model.IconLayoutPolicy")
+    {
+        RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(Window), 1),
+    };
+
+    private static Window BuildOffscreenWindow(object dataContext, UIElement content) => new()
+    {
+        DataContext = dataContext,
+        Content = content,
+        WindowStyle = WindowStyle.None,
+        ShowInTaskbar = false,
+        ShowActivated = false,
+        AllowsTransparency = true,
+        Background = System.Windows.Media.Brushes.Transparent,
+        Width = 500,
+        Height = 500,
+        Left = -32000,
+        Top = -32000,
+    };
+
+    private sealed class StubModelHost(ChildWindowModel model)
+    {
+        public ChildWindowModel Model { get; } = model;
     }
 }

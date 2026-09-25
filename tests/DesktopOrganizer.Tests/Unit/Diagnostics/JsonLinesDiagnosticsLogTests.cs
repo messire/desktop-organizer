@@ -15,69 +15,12 @@ namespace DesktopOrganizer.Tests.Unit.Diagnostics;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class JsonLinesDiagnosticsLogTests
 {
-    private static string NewTempDirectory() => Path.Combine(Path.GetTempPath(), $"DOrgDiagLog_{Guid.NewGuid():N}");
-
-    private static void SafeDeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup; a still-locked handle shouldn't mask the real assertion failure.
-        }
-    }
-
-    /// <summary>
-    /// Reads and parses every JSONL line from the (single) session file in <paramref name="directory"/>
-    /// — while <c>JsonLinesDiagnosticsLog</c>'s own writer thread may still have the file open for
-    /// append. Opens with <see cref="FileShare.ReadWrite"/> rather than <see cref="File.ReadAllLines"/>'s
-    /// default <see cref="FileShare.Read"/>-only request, matching how any tool that tails an
-    /// actively-written log file should open it. Retries transient <see cref="IOException"/>s with a
-    /// short backoff on top, as a safety net against antivirus/indexing briefly locking a freshly
-    /// created file under %TEMP% (the same class of transient lock <c>PanelItemStorageServiceTests</c>'
-    /// C1 regression test documents).
-    /// </summary>
-    private static List<JsonElement> ReadSessionFileLines(string directory)
-    {
-        var file = Assert.Single(Directory.GetFiles(directory, "gestures-*.jsonl"));
-        return ReadJsonLines(file);
-    }
-
-    /// <summary>
-    /// Same retry/sharing semantics as <see cref="ReadSessionFileLines"/>, but for an explicit file
-    /// path — used once rotation is involved and more than one <c>gestures-*.jsonl</c> file can exist
-    /// in the directory at once.
-    /// </summary>
-    private static List<JsonElement> ReadJsonLines(string file)
-    {
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                using var reader = new StreamReader(stream);
-
-                var lines = new List<JsonElement>();
-                string? line;
-                while ((line = reader.ReadLine()) is not null)
-                {
-                    if (!string.IsNullOrWhiteSpace(line))
-                        lines.Add(JsonDocument.Parse(line).RootElement.Clone());
-                }
-
-                return lines;
-            }
-            catch (IOException) when (attempt < 10)
-            {
-                Thread.Sleep(50);
-            }
-        }
-    }
-
     // ── IsEnabled ─────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="JsonLinesDiagnosticsLog.IsEnabled"/> always returns
+    /// <see langword="true"/> for the real (non-null) sink.
+    /// </summary>
     [Fact]
     public void IsEnabled_AlwaysReturnsTrue()
     {
@@ -91,6 +34,11 @@ public class JsonLinesDiagnosticsLogTests
 
     // ── One line per event, valid JSON shape ────────────────────────────────
 
+    /// <summary>
+    /// Verifies that each <see cref="JsonLinesDiagnosticsLog.Write"/> call produces exactly one JSON
+    /// line on disk, with the expected <c>timestamp</c>/<c>seq</c>/<c>category</c>/<c>name</c>/
+    /// <c>scope</c>/<c>payload</c> fields.
+    /// </summary>
     [Fact]
     public void Write_OneEventPerLine_EachLineIsValidJsonWithExpectedFields()
     {
@@ -126,7 +74,7 @@ public class JsonLinesDiagnosticsLogTests
                 Assert.Equal("SessionExiting", second.GetProperty("name").GetString());
                 Assert.Equal(JsonValueKind.Null, second.GetProperty("scope").ValueKind);
                 Assert.Equal(JsonValueKind.Object, second.GetProperty("payload").ValueKind);
-                Assert.Equal(0, second.GetProperty("payload").EnumerateObject().Count());
+                Assert.Empty(second.GetProperty("payload").EnumerateObject());
             }
         }
         finally
@@ -137,6 +85,10 @@ public class JsonLinesDiagnosticsLogTests
 
     // ── Sequence monotonicity ───────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the <c>seq</c> field written by <see cref="JsonLinesDiagnosticsLog.Write"/>
+    /// strictly increases across many successive events.
+    /// </summary>
     [Fact]
     public void Write_MultipleEvents_SequenceIsMonotonicallyIncreasing()
     {
@@ -165,6 +117,10 @@ public class JsonLinesDiagnosticsLogTests
 
     // ── Flush makes writes readable ──────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="JsonLinesDiagnosticsLog.Flush"/> makes every prior
+    /// <see cref="JsonLinesDiagnosticsLog.Write"/> call readable on disk.
+    /// </summary>
     [Fact]
     public void Flush_MakesAllPriorWritesReadableOnDisk()
     {
@@ -189,6 +145,10 @@ public class JsonLinesDiagnosticsLogTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="JsonLinesDiagnosticsLog.Flush"/> does not throw and completes quickly
+    /// when there is nothing pending to flush.
+    /// </summary>
     [Fact]
     public void Flush_CalledWithNothingPending_DoesNotThrow_AndCompletesQuickly()
     {
@@ -211,6 +171,10 @@ public class JsonLinesDiagnosticsLogTests
 
     // ── Dispose ───────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that calling <see cref="JsonLinesDiagnosticsLog.Dispose"/> twice is idempotent and
+    /// never throws.
+    /// </summary>
     [Fact]
     public void Dispose_CalledTwice_IsIdempotent_DoesNotThrow()
     {
@@ -231,6 +195,10 @@ public class JsonLinesDiagnosticsLogTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="JsonLinesDiagnosticsLog.Dispose"/> completes within a bounded time and
+    /// never hangs, even with a backlog of pending writes.
+    /// </summary>
     [Fact]
     public void Dispose_CompletesWithinABoundedTime_NeverHangs()
     {
@@ -254,6 +222,10 @@ public class JsonLinesDiagnosticsLogTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="JsonLinesDiagnosticsLog.Write"/> called after
+    /// <see cref="JsonLinesDiagnosticsLog.Dispose"/> does not throw and does not grow the log file.
+    /// </summary>
     [Fact]
     public void Write_AfterDispose_DoesNotThrow_AndDoesNotGrowTheFile()
     {
@@ -279,6 +251,10 @@ public class JsonLinesDiagnosticsLogTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="JsonLinesDiagnosticsLog.Flush"/> called after
+    /// <see cref="JsonLinesDiagnosticsLog.Dispose"/> does not throw.
+    /// </summary>
     [Fact]
     public void Flush_AfterDispose_DoesNotThrow()
     {
@@ -300,6 +276,10 @@ public class JsonLinesDiagnosticsLogTests
 
     // ── Directory creation ───────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the background writer thread creates the target directory if it does not already
+    /// exist at construction time.
+    /// </summary>
     [Fact]
     public void Construction_TargetDirectoryDoesNotExist_IsCreatedByTheWriterThread()
     {
@@ -320,6 +300,10 @@ public class JsonLinesDiagnosticsLogTests
 
     // ── Retention ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that construction enforces retention against pre-existing log files, deleting the
+    /// oldest ones beyond <c>maxFiles</c>.
+    /// </summary>
     [Fact]
     public void Construction_EnforcesRetention_DeletesOldestPreExistingFilesBeyondMaxFiles()
     {
@@ -409,6 +393,10 @@ public class JsonLinesDiagnosticsLogTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="JsonLinesDiagnosticsLog.DroppedCount"/> stays zero when the queue never
+    /// overflows.
+    /// </summary>
     [Fact]
     public void DroppedCount_NoOverflow_StaysZero()
     {
@@ -429,24 +417,40 @@ public class JsonLinesDiagnosticsLogTests
 
     // ── Argument validation ──────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that the <see cref="JsonLinesDiagnosticsLog"/> constructor throws
+    /// <see cref="ArgumentNullException"/> for a <see langword="null"/> directory.
+    /// </summary>
     [Fact]
     public void Constructor_NullDirectory_Throws()
     {
         Assert.Throws<ArgumentNullException>(() => new JsonLinesDiagnosticsLog(null!));
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="JsonLinesDiagnosticsLog"/> constructor throws
+    /// <see cref="ArgumentOutOfRangeException"/> for a non-positive <c>maxFiles</c>.
+    /// </summary>
     [Fact]
     public void Constructor_NonPositiveMaxFiles_Throws()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new JsonLinesDiagnosticsLog(NewTempDirectory(), maxFiles: 0));
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="JsonLinesDiagnosticsLog"/> constructor throws
+    /// <see cref="ArgumentOutOfRangeException"/> for a non-positive <c>maxBytes</c>.
+    /// </summary>
     [Fact]
     public void Constructor_NonPositiveMaxBytes_Throws()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new JsonLinesDiagnosticsLog(NewTempDirectory(), maxBytes: 0));
     }
 
+    /// <summary>
+    /// Verifies that the <see cref="JsonLinesDiagnosticsLog"/> constructor throws
+    /// <see cref="ArgumentOutOfRangeException"/> for a non-positive <c>queueCapacity</c>.
+    /// </summary>
     [Fact]
     public void Constructor_NonPositiveQueueCapacity_Throws()
     {
@@ -708,6 +712,68 @@ public class JsonLinesDiagnosticsLogTests
         finally
         {
             SafeDeleteDirectory(dir);
+        }
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static string NewTempDirectory() => Path.Combine(Path.GetTempPath(), $"DOrgDiagLog_{Guid.NewGuid():N}");
+
+    private static void SafeDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a still-locked handle shouldn't mask the real assertion failure.
+        }
+    }
+
+    /// <summary>
+    /// Reads and parses every JSONL line from the (single) session file in <paramref name="directory"/>
+    /// — while <c>JsonLinesDiagnosticsLog</c>'s own writer thread may still have the file open for
+    /// append. Opens with <see cref="FileShare.ReadWrite"/> rather than <see cref="File.ReadAllLines(string)"/>'s
+    /// default <see cref="FileShare.Read"/>-only request, matching how any tool that tails an
+    /// actively-written log file should open it. Retries transient <see cref="IOException"/>s with a
+    /// short backoff on top, as a safety net against antivirus/indexing briefly locking a freshly
+    /// created file under %TEMP% (the same class of transient lock <c>PanelItemStorageServiceTests</c>'
+    /// C1 regression test documents).
+    /// </summary>
+    private static List<JsonElement> ReadSessionFileLines(string directory)
+    {
+        var file = Assert.Single(Directory.GetFiles(directory, "gestures-*.jsonl"));
+        return ReadJsonLines(file);
+    }
+
+    /// <summary>
+    /// Same retry/sharing semantics as <see cref="ReadSessionFileLines"/>, but for an explicit file
+    /// path — used once rotation is involved and more than one <c>gestures-*.jsonl</c> file can exist
+    /// in the directory at once.
+    /// </summary>
+    private static List<JsonElement> ReadJsonLines(string file)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var reader = new StreamReader(stream);
+
+                var lines = new List<JsonElement>();
+                string? line;
+                while ((line = reader.ReadLine()) is not null)
+                {
+                    if (!string.IsNullOrWhiteSpace(line))
+                        lines.Add(JsonDocument.Parse(line).RootElement.Clone());
+                }
+
+                return lines;
+            }
+            catch (IOException) when (attempt < 10)
+            {
+                Thread.Sleep(50);
+            }
         }
     }
 }

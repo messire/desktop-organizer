@@ -44,7 +44,7 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
     /// when the app is started from its install folder (installer's post-install launch, Start-menu
     /// shortcut). Started from anywhere else — the HKCU <c>Run</c> autostart entry at logon, a
     /// terminal, Win+R — the file was "not found" and startup aborted with
-    /// "DesktopOrganizer failed to start: Icon file not found."
+    /// "DesktopOrganizer failed to start: Icon file not found".
     /// </summary>
     internal static string TrayIconPath { get; } = Path.Combine(AppContext.BaseDirectory, "Resources", "app.ico");
 

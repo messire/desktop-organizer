@@ -11,6 +11,7 @@ namespace DesktopOrganizer.Tests.Unit.Interaction.Native;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class NativeSizingOriginResolverTests
 {
+    /// <summary>Verifies that when the <c>WM_SIZING</c> rect and <c>GetWindowRect</c> agree exactly, <see cref="NativeSizingOriginResolver.Resolve"/> returns a zero offset.</summary>
     [Fact]
     public void Resolve_TopLevelWindow_SameCoordinateSpace_ReturnsZeroOffset()
     {
@@ -22,6 +23,7 @@ public class NativeSizingOriginResolverTests
         Assert.Equal(new NativeVectorPx(0, 0), offset);
     }
 
+    /// <summary>Verifies that for a panel reparented into <c>WorkerW</c>, whose <c>WM_SIZING</c> rect is reported in parent-relative coordinates, <see cref="NativeSizingOriginResolver.Resolve"/> returns the correct non-zero offset.</summary>
     [Fact]
     public void Resolve_ChildWorkerWWindow_ParentRelativeCoordinates_ReturnsNonZeroOffset()
     {
@@ -36,6 +38,7 @@ public class NativeSizingOriginResolverTests
         Assert.Equal(new NativeVectorPx(50, 50), offset);
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingOriginResolver.Resolve"/> is a pure function of its two arguments, recalculating independently on each call rather than remembering a previous offset.</summary>
     [Fact]
     public void Resolve_CalledAgainWithDifferentInputs_RecalculatesIndependently()
     {

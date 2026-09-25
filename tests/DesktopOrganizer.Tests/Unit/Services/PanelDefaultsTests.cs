@@ -17,27 +17,12 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class PanelDefaultsTests
 {
-    private static Mock<IAppSettings> BuildSettings(
-        string backgroundColor = "#112233",
-        string textColor = "#EEEEEE",
-        double opacity = 0.7,
-        string surfaceStyle = "Ambient",
-        double iconSize = 48,
-        string geometryMode = "LegacyFreeform",
-        string iconLayoutPolicy = "LegacyStretch")
-    {
-        var settings = new Mock<IAppSettings>();
-        settings.SetupProperty(s => s.DefaultBackgroundColor, backgroundColor);
-        settings.SetupProperty(s => s.DefaultTextColor, textColor);
-        settings.SetupProperty(s => s.DefaultOpacity, opacity);
-        settings.SetupProperty(s => s.DefaultSurfaceStyle, surfaceStyle);
-        settings.SetupProperty(s => s.DefaultIconSize, iconSize);
-        settings.SetupProperty(s => s.DefaultPanelGeometryMode, geometryMode);
-        settings.SetupProperty(s => s.DefaultIconLayoutPolicy, iconLayoutPolicy);
-        return settings;
-    }
-
     // ── Apply ────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="PanelDefaults.Apply"/> seeds the model's accent, text color, opacity,
+    /// surface style, and icon size from the given <see cref="IAppSettings"/>.
+    /// </summary>
     [Fact]
     public void Apply_SeedsAppearanceFromSettings()
     {
@@ -53,6 +38,10 @@ public class PanelDefaultsTests
         Assert.Equal(40, model.IconSize);
     }
 
+    /// <summary>
+    /// Verifies the ADR-025 D-10/DO-014 regression guard: a legacy near-black background color resolves
+    /// to <see cref="AccentPalette.Neutral"/> instead of that near-black value.
+    /// </summary>
     [Fact]
     public void Apply_LegacyNearBlackBackgroundColor_ResolvesToNeutralAccentInstead()
     {
@@ -65,6 +54,10 @@ public class PanelDefaultsTests
         Assert.Equal(AccentPalette.Neutral, model.AccentColor);
     }
 
+    /// <summary>
+    /// Verifies that a <c>"GridAligned"</c> default geometry mode setting seeds
+    /// <see cref="PanelGeometryMode.GridAligned"/> on the model.
+    /// </summary>
     [Fact]
     public void Apply_GeometryModeGridAligned_SeedsGridAligned()
     {
@@ -76,6 +69,10 @@ public class PanelDefaultsTests
         Assert.Equal(PanelGeometryMode.GridAligned, model.GeometryMode);
     }
 
+    /// <summary>
+    /// Verifies that an unrecognized default geometry mode setting falls back to
+    /// <see cref="PanelGeometryMode.LegacyFreeform"/>.
+    /// </summary>
     [Fact]
     public void Apply_UnrecognisedGeometryMode_FallsBackToLegacyFreeform()
     {
@@ -87,6 +84,10 @@ public class PanelDefaultsTests
         Assert.Equal(PanelGeometryMode.LegacyFreeform, model.GeometryMode);
     }
 
+    /// <summary>
+    /// Verifies that a <c>"FixedGap"</c> default icon-layout-policy setting seeds
+    /// <see cref="IconLayoutPolicy.FixedGap"/> on the model.
+    /// </summary>
     [Fact]
     public void Apply_IconLayoutPolicyFixedGap_SeedsFixedGap()
     {
@@ -98,6 +99,10 @@ public class PanelDefaultsTests
         Assert.Equal(IconLayoutPolicy.FixedGap, model.IconLayoutPolicy);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelDefaults.Apply"/> never modifies the model's existing
+    /// <c>Position</c>/<c>Size</c> — appearance and geometry-mode seeding only.
+    /// </summary>
     [Fact]
     public void Apply_NeverTouchesPositionOrSize()
     {
@@ -111,6 +116,11 @@ public class PanelDefaultsTests
     }
 
     // ── ReconcileGridAlignedSpans — MAJOR-1(b) ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="PanelDefaults.ReconcileGridAlignedSpans"/> is a no-op for a
+    /// <see cref="PanelGeometryMode.LegacyFreeform"/> panel: no spans are seeded and size is untouched.
+    /// </summary>
     [Fact]
     public void ReconcileGridAlignedSpans_LegacyFreeform_IsNoOp()
     {
@@ -123,6 +133,10 @@ public class PanelDefaultsTests
         Assert.Equal(new DrawingSize(300, 200), model.Size);
     }
 
+    /// <summary>
+    /// Verifies that reconciling a <see cref="PanelGeometryMode.GridAligned"/> panel that already has an
+    /// explicit size (the lasso-gesture shape) seeds non-null, positive width/height span units.
+    /// </summary>
     [Fact]
     public void ReconcileGridAlignedSpans_GridAlignedWithExplicitSize_SeedsNonNullPositiveSpans()
     {
@@ -138,6 +152,10 @@ public class PanelDefaultsTests
         Assert.True(model.HeightSpanUnits >= 1);
     }
 
+    /// <summary>
+    /// Verifies the ADR-028 px/DIP ceiling rule: reconciling never shrinks the panel's size below the
+    /// explicitly requested size, since span quantization must round up, not down.
+    /// </summary>
     [Fact]
     public void ReconcileGridAlignedSpans_GridAlignedWithExplicitSize_NeverShrinksBelowRequestedSize()
     {
@@ -150,6 +168,10 @@ public class PanelDefaultsTests
         Assert.True(model.Size.Height >= 173);
     }
 
+    /// <summary>
+    /// Verifies that the size written back after reconciliation exactly matches
+    /// <see cref="WorkspaceLayoutPolicy.SpansToBounds"/> for the spans it just seeded.
+    /// </summary>
     [Fact]
     public void ReconcileGridAlignedSpans_GridAlignedWithExplicitSize_SizeExactlyMatchesSpans()
     {
@@ -166,6 +188,11 @@ public class PanelDefaultsTests
         Assert.Equal((int)Math.Round(expected.Height), model.Size.Height);
     }
 
+    /// <summary>
+    /// Verifies the N-6 fix-cycle-2 regression: a <see cref="PanelGeometryMode.GridAligned"/> panel with
+    /// a degenerate (CLR-default, 0x0) size seeds <c>PanelMetrics.DefaultPanelSize</c> instead of the
+    /// smaller <c>PanelSizePreset.Medium</c>, and never quantises to a degenerate 1x1 span.
+    /// </summary>
     [Fact]
     public void ReconcileGridAlignedSpans_GridAlignedWithDegenerateSize_SeedsDefaultPanelSizeInstead()
     {
@@ -192,6 +219,11 @@ public class PanelDefaultsTests
         Assert.Equal(304, model.Size.Height);
     }
 
+    /// <summary>
+    /// Verifies the N-5 fix-cycle-2 regression: a tiny explicit size (e.g. a very small lasso rectangle)
+    /// is clamped to <see cref="WorkspaceGridMetrics.MinSpanExpanded"/> rather than left below the
+    /// documented minimum.
+    /// </summary>
     [Fact]
     public void ReconcileGridAlignedSpans_TinyExplicitSize_ClampsToMinSpanExpanded()
     {
@@ -212,6 +244,10 @@ public class PanelDefaultsTests
         Assert.Equal((int)Math.Round(expectedSize.Height), model.Size.Height);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelDefaults.ReconcileGridAlignedSpans"/> never modifies the model's
+    /// existing <c>Position</c> — span/size reconciliation only.
+    /// </summary>
     [Fact]
     public void ReconcileGridAlignedSpans_NeverTouchesPosition()
     {
@@ -225,5 +261,26 @@ public class PanelDefaultsTests
         PanelDefaults.ReconcileGridAlignedSpans(model);
 
         Assert.Equal(new System.Drawing.Point(413, 291), model.Position);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static Mock<IAppSettings> BuildSettings(
+        string backgroundColor = "#112233",
+        string textColor = "#EEEEEE",
+        double opacity = 0.7,
+        string surfaceStyle = "Ambient",
+        double iconSize = 48,
+        string geometryMode = "LegacyFreeform",
+        string iconLayoutPolicy = "LegacyStretch")
+    {
+        var settings = new Mock<IAppSettings>();
+        settings.SetupProperty(s => s.DefaultBackgroundColor, backgroundColor);
+        settings.SetupProperty(s => s.DefaultTextColor, textColor);
+        settings.SetupProperty(s => s.DefaultOpacity, opacity);
+        settings.SetupProperty(s => s.DefaultSurfaceStyle, surfaceStyle);
+        settings.SetupProperty(s => s.DefaultIconSize, iconSize);
+        settings.SetupProperty(s => s.DefaultPanelGeometryMode, geometryMode);
+        settings.SetupProperty(s => s.DefaultIconLayoutPolicy, iconLayoutPolicy);
+        return settings;
     }
 }

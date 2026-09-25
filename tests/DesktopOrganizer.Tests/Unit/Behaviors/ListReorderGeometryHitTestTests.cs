@@ -26,57 +26,6 @@ public class ListReorderGeometryHitTestTests
     private const double RowHeightValue = 92d; // GridMetrics.RowHeight(48)
 
     /// <summary>
-    /// Builds a real <see cref="ListBox"/> hosting a real <see cref="AdaptiveIconGridPanel"/> (via
-    /// <see cref="ItemsPanelTemplate"/>, mirroring <c>GridViewTemplate</c>'s own
-    /// <c>ListBox.ItemsPanel</c>), with <paramref name="itemCount"/> plain items whose generated
-    /// <see cref="ListBoxItem"/> containers are sized to the canonical <c>IconSize = 48</c> cell
-    /// footprint via <see cref="ListBox.ItemContainerStyle"/> — the same technique
-    /// <c>AdaptiveIconGridPanelTests.BuildPanel</c> uses directly on <see cref="FrameworkElement"/>
-    /// children, one level up (through a real <see cref="ListBoxItem"/> container this time, since
-    /// <see cref="ListReorderGeometry.HitTestReorderContainer(ListBox, Point)"/> needs real containers
-    /// to walk up to, not bare children).
-    /// </summary>
-    private static ListBox BuildFixedGapListBox(int itemCount)
-    {
-        var factory = new FrameworkElementFactory(typeof(AdaptiveIconGridPanel));
-        factory.SetValue(AdaptiveIconGridPanel.LayoutPolicyProperty, IconLayoutPolicy.FixedGap);
-
-        var itemContainerStyle = new Style(typeof(ListBoxItem));
-        itemContainerStyle.Setters.Add(new Setter(FrameworkElement.WidthProperty, Cell));
-        itemContainerStyle.Setters.Add(new Setter(FrameworkElement.HeightProperty, RowHeightValue));
-
-        var listBox = new ListBox
-        {
-            ItemsPanel = new ItemsPanelTemplate(factory),
-            ItemContainerStyle = itemContainerStyle,
-
-            // Bypasses the OS/theme default ControlTemplate (which — without a running Application/theme
-            // dictionaries loaded — does not reliably apply an ItemsPresenter far enough for
-            // ItemContainerGenerator to actually realize containers in this headless test host) with the
-            // minimal template every ItemsControl needs: just an ItemsPresenter, hosting our
-            // AdaptiveIconGridPanel via ItemsPanel above. Same "give it the smallest real template it
-            // needs, skip the theme" approach as ResourceDictionaryMergeTests.MaterializePanelChromeTemplate,
-            // one level up (Control template vs. that one applying an app-resource Style).
-            Template = new ControlTemplate(typeof(ListBox))
-            {
-                VisualTree = new FrameworkElementFactory(typeof(ItemsPresenter)),
-            },
-        };
-
-        for (var i = 0; i < itemCount; i++)
-            listBox.Items.Add(i);
-
-        return listBox;
-    }
-
-    private static void MeasureAndArrange(ListBox listBox, double width)
-    {
-        listBox.Measure(new Size(width, double.PositiveInfinity));
-        listBox.Arrange(new Rect(0, 0, width, listBox.DesiredSize.Height));
-        listBox.UpdateLayout();
-    }
-
-    /// <summary>
     /// Core P05 fix: a cursor in row 0's FixedGap surplus space (to the right of the row's last item,
     /// but still within row 0's own vertical band) resolves to the RIGHT-MOST container in that row —
     /// row 0's last item — not <see langword="null"/>. Panel width (500) is deliberately wider than
@@ -267,10 +216,11 @@ public class ListReorderGeometryHitTestTests
 
     /// <summary>
     /// Below every row (already covered by <see cref="HitTestReorderContainer_BelowEveryRow_StillReturnsNull"/>
-    /// as a single case) plus, as a <see cref="Theory"/>, a few X positions across that same "genuinely
+    /// as a single case) plus, as a <c>Theory</c>, a few X positions across that same "genuinely
     /// past the end" vertical band — none of the horizontal-distance fallback logic should ever
     /// accidentally resolve a Y position below every row to a container, regardless of X.
     /// </summary>
+    /// <param name="probeX">The horizontal coordinate of the probe point, in DIPs relative to the <see cref="ListBox"/>.</param>
     [Theory]
     [InlineData(-50d)]
     [InlineData(0d)]
@@ -291,5 +241,56 @@ public class ListReorderGeometryHitTestTests
 
             Assert.Null(container);
         });
+    }
+
+    /// <summary>
+    /// Builds a real <see cref="ListBox"/> hosting a real <see cref="AdaptiveIconGridPanel"/> (via
+    /// <see cref="ItemsPanelTemplate"/>, mirroring <c>GridViewTemplate</c>'s own
+    /// <c>ListBox.ItemsPanel</c>), with <paramref name="itemCount"/> plain items whose generated
+    /// <see cref="ListBoxItem"/> containers are sized to the canonical <c>IconSize = 48</c> cell
+    /// footprint via <see cref="ItemsControl.ItemContainerStyle"/> — the same technique
+    /// <c>AdaptiveIconGridPanelTests.BuildPanel</c> uses directly on <see cref="FrameworkElement"/>
+    /// children, one level up (through a real <see cref="ListBoxItem"/> container this time, since
+    /// <see cref="ListReorderGeometry.HitTestReorderContainer(ListBox, Point)"/> needs real containers
+    /// to walk up to, not bare children).
+    /// </summary>
+    private static ListBox BuildFixedGapListBox(int itemCount)
+    {
+        var factory = new FrameworkElementFactory(typeof(AdaptiveIconGridPanel));
+        factory.SetValue(AdaptiveIconGridPanel.LayoutPolicyProperty, IconLayoutPolicy.FixedGap);
+
+        var itemContainerStyle = new Style(typeof(ListBoxItem));
+        itemContainerStyle.Setters.Add(new Setter(FrameworkElement.WidthProperty, Cell));
+        itemContainerStyle.Setters.Add(new Setter(FrameworkElement.HeightProperty, RowHeightValue));
+
+        var listBox = new ListBox
+        {
+            ItemsPanel = new ItemsPanelTemplate(factory),
+            ItemContainerStyle = itemContainerStyle,
+
+            // Bypasses the OS/theme default ControlTemplate (which — without a running Application/theme
+            // dictionaries loaded — does not reliably apply an ItemsPresenter far enough for
+            // ItemContainerGenerator to actually realize containers in this headless test host) with the
+            // minimal template every ItemsControl needs: just an ItemsPresenter, hosting our
+            // AdaptiveIconGridPanel via ItemsPanel above. Same "give it the smallest real template it
+            // needs, skip the theme" approach as ResourceDictionaryMergeTests.MaterializePanelChromeTemplate,
+            // one level up (Control template vs. that one applying an app-resource Style).
+            Template = new ControlTemplate(typeof(ListBox))
+            {
+                VisualTree = new FrameworkElementFactory(typeof(ItemsPresenter)),
+            },
+        };
+
+        for (var i = 0; i < itemCount; i++)
+            listBox.Items.Add(i);
+
+        return listBox;
+    }
+
+    private static void MeasureAndArrange(ListBox listBox, double width)
+    {
+        listBox.Measure(new Size(width, double.PositiveInfinity));
+        listBox.Arrange(new Rect(0, 0, width, listBox.DesiredSize.Height));
+        listBox.UpdateLayout();
     }
 }

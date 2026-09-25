@@ -311,7 +311,7 @@ public class PanelCollisionTests
     }
 
     /// <summary>
-    /// Test 20b (finalization MINOR m-2): a NaN <paramref name="current"/> coordinate must hit the early
+    /// Test 20b (finalization MINOR m-2): a NaN <c>current</c> coordinate must hit the early
     /// exit and never propagate NaN into the returned rectangle (which would otherwise get assigned
     /// straight to <c>Window.Left</c>/<c>Top</c>).
     /// </summary>
@@ -430,6 +430,7 @@ public class PanelCollisionTests
     }
 
     /// <summary>Test 29: non-finite/negative gap degrades to the zero-gap overload's behavior, no exception.</summary>
+    /// <param name="gap">A non-finite or negative gap value that must not change the clamp result or throw.</param>
     [Theory]
     [InlineData(double.NaN)]
     [InlineData(-8d)]

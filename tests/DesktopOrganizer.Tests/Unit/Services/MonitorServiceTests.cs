@@ -12,23 +12,12 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class MonitorServiceTests
 {
-    private static MonitorInfo MakeMonitor(string device, double x, double y, double w, double h, bool primary = false)
-        => new(device, new Rect(x, y, w, h), new Rect(x, y, w, h), primary);
-
-    private static Mock<IMonitorService> BuildMock(IReadOnlyList<MonitorInfo> monitors)
-    {
-        var mock = new Mock<IMonitorService>();
-        mock.Setup(s => s.GetMonitors()).Returns(monitors);
-        mock.Setup(s => s.FindMonitorAt(It.IsAny<Point>()))
-            .Returns<Point>(p => monitors.FirstOrDefault(m => m.Bounds.Contains(p)));
-        mock.Setup(s => s.FindByDeviceName(It.IsAny<string>()))
-            .Returns<string>(name => monitors.FirstOrDefault(m =>
-                string.Equals(m.DeviceName, name, StringComparison.OrdinalIgnoreCase)));
-        return mock;
-    }
-
     // ── FindMonitorAt ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="IMonitorService.FindMonitorAt"/> returns the specific monitor whose
+    /// bounds contain the given point, out of several candidates.
+    /// </summary>
     [Fact]
     public void FindMonitorAt_PointInsideBounds_ReturnsCorrectMonitor()
     {
@@ -45,6 +34,10 @@ public class MonitorServiceTests
         Assert.Equal(@"\\.\DISPLAY2", result.DeviceName);
     }
 
+    /// <summary>
+    /// Verifies that a point inside the primary monitor's bounds resolves to a monitor whose
+    /// <see cref="MonitorInfo.IsPrimary"/> flag is set.
+    /// </summary>
     [Fact]
     public void FindMonitorAt_PointOnPrimaryMonitor_ReturnsPrimary()
     {
@@ -60,6 +53,10 @@ public class MonitorServiceTests
         Assert.True(result.IsPrimary);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IMonitorService.FindMonitorAt"/> returns <see langword="null"/> for a
+    /// point that lies outside every known monitor's bounds.
+    /// </summary>
     [Fact]
     public void FindMonitorAt_PointOutsideAllMonitors_ReturnsNull()
     {
@@ -76,6 +73,10 @@ public class MonitorServiceTests
 
     // ── FindByDeviceName ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="IMonitorService.FindByDeviceName"/> returns the matching monitor for an
+    /// existing device name.
+    /// </summary>
     [Fact]
     public void FindByDeviceName_ExistingDevice_ReturnsMonitor()
     {
@@ -91,6 +92,10 @@ public class MonitorServiceTests
         Assert.Equal(@"\\.\DISPLAY1", result.DeviceName);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IMonitorService.FindByDeviceName"/> matches the device name
+    /// case-insensitively.
+    /// </summary>
     [Fact]
     public void FindByDeviceName_CaseInsensitive_ReturnsMonitor()
     {
@@ -105,6 +110,10 @@ public class MonitorServiceTests
         Assert.NotNull(result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IMonitorService.FindByDeviceName"/> returns <see langword="null"/> for a
+    /// device name that does not match any known monitor.
+    /// </summary>
     [Fact]
     public void FindByDeviceName_UnknownDevice_ReturnsNull()
     {
@@ -117,5 +126,21 @@ public class MonitorServiceTests
 
         // Assert
         Assert.Null(result);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static MonitorInfo MakeMonitor(string device, double x, double y, double w, double h, bool primary = false)
+        => new(device, new Rect(x, y, w, h), new Rect(x, y, w, h), primary);
+
+    private static Mock<IMonitorService> BuildMock(IReadOnlyList<MonitorInfo> monitors)
+    {
+        var mock = new Mock<IMonitorService>();
+        mock.Setup(s => s.GetMonitors()).Returns(monitors);
+        mock.Setup(s => s.FindMonitorAt(It.IsAny<Point>()))
+            .Returns<Point>(p => monitors.FirstOrDefault(m => m.Bounds.Contains(p)));
+        mock.Setup(s => s.FindByDeviceName(It.IsAny<string>()))
+            .Returns<string>(name => monitors.FirstOrDefault(m =>
+                string.Equals(m.DeviceName, name, StringComparison.OrdinalIgnoreCase)));
+        return mock;
     }
 }

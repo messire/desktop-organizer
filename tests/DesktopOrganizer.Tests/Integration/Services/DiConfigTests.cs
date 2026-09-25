@@ -19,6 +19,11 @@ public class DiConfigTests
 {
     private readonly ServiceProvider _serviceProvider;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DiConfigTests"/> class, building a service provider
+    /// from <see cref="DiConfig.RegisterServices(IServiceCollection)"/> shared by the tests below that do not need their own
+    /// isolated diagnostics/storage directories.
+    /// </summary>
     public DiConfigTests()
     {
         var services = new ServiceCollection();
@@ -74,24 +79,6 @@ public class DiConfigTests
     // throwaway temp directory rather than the real per-user log directory, so running this test
     // repeatedly never touches (or retention-cleans) an actual user's diagnostics logs.
 
-    private static string NewTempDiagnosticsDirectory() =>
-        Path.Combine(Path.GetTempPath(), $"DOrgDiConfigDiag_{Guid.NewGuid():N}");
-
-    private static string NewTempStorageRoot() =>
-        Path.Combine(Path.GetTempPath(), $"DOrgDiConfigStorage_{Guid.NewGuid():N}");
-
-    private static void SafeDeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup; a still-locked handle shouldn't mask the real assertion failure.
-        }
-    }
-
     /// <summary>
     /// Build-configuration-agnostic: whichever concrete <see cref="IDiagnosticsLog"/> the switch
     /// selects, it must be registered as a singleton — resolving twice must never construct two
@@ -121,9 +108,10 @@ public class DiConfigTests
 
 #if DEBUG
     /// <summary>
-    /// Debug-build counterpart of <see cref="RegisterServices_NoExplicitDiagFlags_ResolvesToNullDiagnosticsLog"/>:
-    /// proves end-to-end through DI (not just DiagnosticsSwitch in isolation) that a Debug build always
-    /// resolves the real sink, matching <c>DiagnosticsSwitch</c>'s "always on in Debug" contract.
+    /// Debug-build counterpart of <c>RegisterServices_NoExplicitDiagFlags_ResolvesToNullDiagnosticsLog</c>
+    /// (Release-only): proves end-to-end through DI (not just DiagnosticsSwitch in isolation) that a
+    /// Debug build always resolves the real sink, matching <c>DiagnosticsSwitch</c>'s "always on in
+    /// Debug" contract.
     /// </summary>
     [Fact]
     public void RegisterServices_DebugBuild_ResolvesToJsonLinesDiagnosticsLog()
@@ -146,7 +134,7 @@ public class DiConfigTests
     }
 #else
     /// <summary>
-    /// Release-build counterpart of <see cref="RegisterServices_DebugBuild_ResolvesToJsonLinesDiagnosticsLog"/>:
+    /// Release-build counterpart of <c>RegisterServices_DebugBuild_ResolvesToJsonLinesDiagnosticsLog</c>:
     /// without <c>--diag</c> on the command line or <c>DESKTOPORGANIZER_DIAG=1</c> in the environment,
     /// a Release build must resolve the zero-cost no-op sink.
     /// </summary>
@@ -178,7 +166,8 @@ public class DiConfigTests
     /// <see cref="ServiceProvider"/> that owns it must never throw, even though the coordinator was
     /// never explicitly told to shut down first (<see cref="ISingleInstanceCoordinator.CompleteShutdown"/>
     /// is the host's job — see <c>App.OnExit</c> — and is not called here on purpose: this test pins
-    /// that <see cref="ISingleInstanceCoordinator.Dispose"/> itself must be safe regardless).
+    /// that <see cref="ISingleInstanceCoordinator"/>'s inherited <c>Dispose</c> itself must be safe
+    /// regardless).
     /// </summary>
     [Fact]
     public void RegisterServices_SingleInstanceCoordinator_ProviderDisposal_DoesNotThrow()
@@ -263,6 +252,11 @@ public class DiConfigTests
     // so resolving IApplicationStateStore/IStorageLock/IApplicationStateService here never touches the
     // real per-user %LOCALAPPDATA%\DesktopOrganizer\State or its .storage-lock file.
 
+    /// <summary>
+    /// Verifies that <see cref="IApplicationStateStore"/>, <see cref="IStorageLock"/>,
+    /// <see cref="IApplicationStateService"/>, and <see cref="ILegacyStateImporter"/> all resolve
+    /// without throwing when the UI service collection is configured against a temp storage root.
+    /// </summary>
     [Fact]
     public void UiConfigureServices_ApplicationStateRegistrations_ResolveCorrectly()
     {
@@ -291,6 +285,10 @@ public class DiConfigTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IApplicationStateStore"/> resolves as a singleton: two resolutions from
+    /// the same provider must return the same instance.
+    /// </summary>
     [Fact]
     public void UiConfigureServices_IApplicationStateStore_ResolvesAsSingleton()
     {
@@ -314,6 +312,10 @@ public class DiConfigTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="IApplicationStateService"/> resolves as a singleton: two resolutions
+    /// from the same provider must return the same instance.
+    /// </summary>
     [Fact]
     public void UiConfigureServices_IApplicationStateService_ResolvesAsSingleton()
     {
@@ -340,7 +342,7 @@ public class DiConfigTests
     /// <summary>
     /// Proves the <c>storageRoot</c> override actually takes effect (rather than silently falling
     /// back to the real per-user location): acquiring the advisory lock through the overridden
-    /// registration must create <c>.storage-lock</c> under the temp <paramref name="storageRoot"/>
+    /// registration must create <c>.storage-lock</c> under the temp <c>storageRoot</c>
     /// this test owns and cleans up, never under the real <c>%LOCALAPPDATA%\DesktopOrganizer</c>.
     /// </summary>
     [Fact]
@@ -364,6 +366,25 @@ public class DiConfigTests
         {
             SafeDeleteDirectory(tempDir);
             SafeDeleteDirectory(storageRoot);
+        }
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static string NewTempDiagnosticsDirectory() =>
+        Path.Combine(Path.GetTempPath(), $"DOrgDiConfigDiag_{Guid.NewGuid():N}");
+
+    private static string NewTempStorageRoot() =>
+        Path.Combine(Path.GetTempPath(), $"DOrgDiConfigStorage_{Guid.NewGuid():N}");
+
+    private static void SafeDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a still-locked handle shouldn't mask the real assertion failure.
         }
     }
 }

@@ -16,6 +16,8 @@ public static class JsonAssert
     /// per <see cref="JsonNode.DeepEquals(JsonNode?, JsonNode?)"/> — object key order does not matter,
     /// array element order does. On failure, both sides are printed indented for a readable diff.
     /// </summary>
+    /// <param name="expected">The JSON document the test expects to see.</param>
+    /// <param name="actual">The JSON document produced by the code under test.</param>
     public static void Equal(JsonNode? expected, JsonNode? actual)
     {
         if (JsonNode.DeepEquals(expected, actual))

@@ -15,30 +15,11 @@ public class V2ToV3MigrationTests
 {
     private static readonly V2ToV3Migration Migration = new();
 
-    private static JsonObject Parse(string json) => JsonNode.Parse(json)!.AsObject();
-
-    private static JsonObject FullPanel(string id) => new()
-    {
-        ["id"] = id,
-        ["title"] = "Downloads",
-        ["backgroundColor"] = "#1E1E1E",
-        ["backgroundOpacity"] = 0.8,
-        ["textColor"] = "#DDDDDD",
-        ["iconSize"] = 48,
-        ["viewMode"] = "Grid",
-        ["contentFilter"] = "HideShortcuts",
-        ["sortMode"] = "Name",
-        ["monitorDeviceId"] = "\\\\.\\DISPLAY1",
-        ["position"] = new JsonObject { ["x"] = 100, ["y"] = 200, ["isEmpty"] = false },
-        ["size"] = new JsonObject { ["width"] = 300, ["height"] = 400, ["isEmpty"] = false },
-        ["isVisible"] = true,
-        ["windowState"] = 2,
-        ["isRolledUp"] = false,
-        ["pageId"] = "default",
-        ["sourceFolderPath"] = "C:\\Downloads",
-        ["filePaths"] = new JsonArray("a.txt"),
-    };
-
+    /// <summary>
+    /// Verifies that <see cref="V2ToV3Migration"/> groups a fully-populated flat v2 panel's fields into
+    /// the v3 <c>geometry</c>/<c>appearance</c>/<c>content</c> sub-objects, dropping the transient
+    /// <c>isEmpty</c> flag along the way.
+    /// </summary>
     [Fact]
     public void Migrate_FullPanel_GroupsIntoGeometryAppearanceContent()
     {
@@ -76,6 +57,12 @@ public class V2ToV3MigrationTests
         Assert.Equal(["a.txt"], content["filePaths"]!.AsArray().Select(n => n!.GetValue<string>()));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="V2ToV3Migration"/> maps a numeric legacy <c>windowState</c> value to its
+    /// enum name inside the new <c>geometry</c> sub-object.
+    /// </summary>
+    /// <param name="numeric">The legacy numeric <c>windowState</c> value.</param>
+    /// <param name="expectedName">The enum name it must map to.</param>
     [Theory]
     [InlineData(0, "Normal")]
     [InlineData(1, "Minimized")]
@@ -91,6 +78,9 @@ public class V2ToV3MigrationTests
         Assert.Equal(expectedName, v3["panels"]![0]!["geometry"]!["windowState"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that an out-of-range numeric <c>windowState</c> value defaults to "Normal" rather than throwing.
+    /// </summary>
     [Fact]
     public void Migrate_UnknownWindowStateValue_DefaultsToNormal()
     {
@@ -103,6 +93,10 @@ public class V2ToV3MigrationTests
         Assert.Equal("Normal", v3["panels"]![0]!["geometry"]!["windowState"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that a v2 panel missing every optional field migrates using the same default values as
+    /// <c>ChildWindowModel</c>'s own field initializers.
+    /// </summary>
     [Fact]
     public void Migrate_PanelMissingEveryOptionalField_UsesChildWindowModelDefaults()
     {
@@ -140,6 +134,10 @@ public class V2ToV3MigrationTests
         Assert.Empty(content["filePaths"]!.AsArray());
     }
 
+    /// <summary>
+    /// Verifies that migrating the same panel content produces an identical shape whether it appears at
+    /// the top-level <c>panels</c> array or nested inside a <c>layoutSnapshots[].panels</c> entry.
+    /// </summary>
     [Fact]
     public void Migrate_PanelInsideLayoutSnapshot_GetsIdenticalShapeToTopLevelPanel()
     {
@@ -163,6 +161,9 @@ public class V2ToV3MigrationTests
         JsonAssert.Equal(topLevelResult, snapshotResult);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="V2ToV3Migration"/> passes the <c>pages</c> section through unchanged.
+    /// </summary>
     [Fact]
     public void Migrate_Pages_PassesThroughUnchanged()
     {
@@ -174,6 +175,9 @@ public class V2ToV3MigrationTests
         JsonAssert.Equal(pages, v3["pages"]);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="V2ToV3Migration"/> passes the <c>systemIconsPanel</c> section through unchanged.
+    /// </summary>
     [Fact]
     public void Migrate_SystemIconsPanel_PassesThroughUnchanged()
     {
@@ -185,6 +189,9 @@ public class V2ToV3MigrationTests
         JsonAssert.Equal(sip, v3["systemIconsPanel"]);
     }
 
+    /// <summary>
+    /// Verifies that a v2 document with no <c>panels</c> array migrates to an empty <c>panels</c> array.
+    /// </summary>
     [Fact]
     public void Migrate_MissingPanelsArray_ProducesEmptyPanelsArray()
     {
@@ -192,4 +199,28 @@ public class V2ToV3MigrationTests
 
         Assert.Empty(v3["panels"]!.AsArray());
     }
+
+    private static JsonObject Parse(string json) => JsonNode.Parse(json)!.AsObject();
+
+    private static JsonObject FullPanel(string id) => new()
+    {
+        ["id"] = id,
+        ["title"] = "Downloads",
+        ["backgroundColor"] = "#1E1E1E",
+        ["backgroundOpacity"] = 0.8,
+        ["textColor"] = "#DDDDDD",
+        ["iconSize"] = 48,
+        ["viewMode"] = "Grid",
+        ["contentFilter"] = "HideShortcuts",
+        ["sortMode"] = "Name",
+        ["monitorDeviceId"] = "\\\\.\\DISPLAY1",
+        ["position"] = new JsonObject { ["x"] = 100, ["y"] = 200, ["isEmpty"] = false },
+        ["size"] = new JsonObject { ["width"] = 300, ["height"] = 400, ["isEmpty"] = false },
+        ["isVisible"] = true,
+        ["windowState"] = 2,
+        ["isRolledUp"] = false,
+        ["pageId"] = "default",
+        ["sourceFolderPath"] = "C:\\Downloads",
+        ["filePaths"] = new JsonArray("a.txt"),
+    };
 }

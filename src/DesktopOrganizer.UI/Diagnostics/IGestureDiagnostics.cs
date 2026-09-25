@@ -17,12 +17,26 @@ namespace DesktopOrganizer.UI.Diagnostics;
 public interface IGestureDiagnostics
 {
     /// <summary>Recorded once, early in application startup, after panels have loaded.</summary>
+    /// <param name="appVersion">The running application's version string.</param>
+    /// <param name="osVersion">The host OS version string.</param>
+    /// <param name="dpiScale">The primary monitor's DPI scale factor at startup.</param>
+    /// <param name="monitorCount">The number of monitors detected at startup.</param>
+    /// <param name="panelCount">The number of panels loaded at startup.</param>
     void SessionStarted(string appVersion, string osVersion, double dpiScale, int monitorCount, int panelCount);
 
     /// <summary>Recorded once, during application shutdown, before the diagnostics log is disposed.</summary>
     void SessionExiting();
 
     /// <summary>Recorded when a resize-thumb drag gesture begins (<c>Thumb.DragStarted</c>).</summary>
+    /// <param name="panelId">The panel's id.</param>
+    /// <param name="direction"><c>Interaction.ResizeEdge.ToString()</c> — the edge/corner being resized.</param>
+    /// <param name="bounds">The panel's geometry when the gesture began.</param>
+    /// <param name="viewMode">The panel's current view mode at gesture start.</param>
+    /// <param name="iconSize">The panel's current icon size at gesture start.</param>
+    /// <param name="snapEnabled">Whether grid-snapping is enabled for this resize.</param>
+    /// <param name="snapCellWidth">The resolved grid cell width used to quantise this gesture.</param>
+    /// <param name="snapCellHeight">The resolved grid cell height used to quantise this gesture.</param>
+    /// <param name="captureOwner">The type name of the element that owns mouse capture, or <see langword="null"/> if nothing holds capture.</param>
     void ResizeStarted(
         Guid? panelId,
         string direction,
@@ -41,6 +55,13 @@ public interface IGestureDiagnostics
     /// accumulators; <paramref name="applied"/> is the actual (possibly grid-snapped) window geometry
     /// after this delta was applied.
     /// </summary>
+    /// <param name="panelId">The panel's id.</param>
+    /// <param name="direction"><c>Interaction.ResizeEdge.ToString()</c> — the edge/corner being resized.</param>
+    /// <param name="hChange">The horizontal delta reported by this <c>Thumb.DragDelta</c>.</param>
+    /// <param name="vChange">The vertical delta reported by this <c>Thumb.DragDelta</c>.</param>
+    /// <param name="rawWidth">The unquantised accumulated width for this gesture.</param>
+    /// <param name="rawHeight">The unquantised accumulated height for this gesture.</param>
+    /// <param name="applied">The actual (possibly grid-snapped) window geometry after this delta was applied.</param>
     void ResizeDelta(
         Guid? panelId,
         string direction,
@@ -74,25 +95,35 @@ public interface IGestureDiagnostics
     /// </param>
     /// <param name="exceptionType">
     /// When <paramref name="endReason"/> is <c>Failed</c>, the failing exception's
-    /// <see cref="Type.Name"/> — NEVER its <see cref="Exception.Message"/>, which may contain a file
+    /// <c>Type.Name</c> — NEVER its <see cref="Exception.Message"/>, which may contain a file
     /// path (privacy invariant, diagnostics-log-events.md). <see langword="null"/> for every other
     /// <paramref name="endReason"/>.
     /// </param>
     void ResizeCompleted(Guid? panelId, string direction, bool canceled, Rect bounds, string endReason, string? exceptionType);
 
     /// <summary>Recorded when a title-bar drag-to-move gesture begins.</summary>
+    /// <param name="panelId">The panel's id.</param>
+    /// <param name="startCursor">The cursor's screen position when the gesture began, in physical pixels (<see cref="System.Windows.Media.Visual.PointToScreen(Point)"/>).</param>
+    /// <param name="bounds">The panel's geometry when the gesture began, in DIP.</param>
     void DragStarted(Guid? panelId, Point startCursor, Rect bounds);
 
     /// <summary>Recorded on every title-bar mouse-move while dragging, throttled like <see cref="ResizeDelta"/>.</summary>
+    /// <param name="panelId">The panel's id.</param>
+    /// <param name="applied">The panel's geometry after this move delta was applied.</param>
     void DragDelta(Guid? panelId, Rect applied);
 
     /// <summary>Recorded once a title-bar drag-to-move gesture ends (mouse-up or lost capture).</summary>
+    /// <param name="panelId">The panel's id.</param>
+    /// <param name="bounds">The panel's geometry when the gesture ended.</param>
     void DragCompleted(Guid? panelId, Rect bounds);
 
     /// <summary>
     /// Recorded from the <c>ResizeOverlay</c>'s bubbling <c>Mouse.GotMouseCapture</c> handler — observes
     /// which element/source actually obtained capture for a resize-thumb gesture.
     /// </summary>
+    /// <param name="panelId">The panel's id.</param>
+    /// <param name="sourceName">The type name of the element that raised the capture event.</param>
+    /// <param name="captureOwner">The type name of the element that now owns mouse capture, or <see langword="null"/> if nothing holds capture.</param>
     void CaptureGot(Guid? panelId, string sourceName, string? captureOwner);
 
     /// <summary>
@@ -101,12 +132,18 @@ public interface IGestureDiagnostics
     /// still considered itself mid-drag at the moment capture was lost — a canceled-gesture signal, not
     /// acted on here.
     /// </summary>
+    /// <param name="panelId">The panel's id.</param>
+    /// <param name="sourceName">The type name of the element that raised the lost-capture event.</param>
+    /// <param name="captureOwner">The type name of the element that now owns mouse capture, or <see langword="null"/> if none.</param>
+    /// <param name="thumbIsDragging">Whether the originating <see cref="System.Windows.Controls.Primitives.Thumb"/> still considered itself mid-drag.</param>
     void CaptureLost(Guid? panelId, string sourceName, string? captureOwner, bool thumbIsDragging);
 
     /// <summary>
     /// Recorded from <see cref="Views.ChildWindow.OnClosing"/>. <paramref name="thumbIsDragging"/>
     /// observes whether the panel is closing while a resize-thumb gesture is still (apparently) active.
     /// </summary>
+    /// <param name="panelId">The panel's id.</param>
+    /// <param name="thumbIsDragging">Whether a resize-thumb gesture still (apparently) considers itself in progress.</param>
     void PanelClosing(Guid? panelId, bool thumbIsDragging);
 
     /// <summary>
@@ -118,7 +155,7 @@ public interface IGestureDiagnostics
     /// </summary>
     /// <param name="panelId">The panel's id.</param>
     /// <param name="exceptionType">
-    /// The failing exception's <see cref="Type.Name"/> only — NEVER <see cref="Exception.Message"/>,
+    /// The failing exception's <c>Type.Name</c> only — NEVER <see cref="Exception.Message"/>,
     /// which may embed a file path (privacy invariant, diagnostics-log-events.md).
     /// </param>
     void ExistenceRefreshFailed(Guid? panelId, string exceptionType);

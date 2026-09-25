@@ -97,4 +97,19 @@
         around every panel visibly colored in High Contrast mode — a real regression, not a fix.
         Pinned by a dedicated test asserting Color.A == 1 in BOTH merge orders.
     -->
+<!--
+        Overlay scrollbar (Controls.xaml's Control.ScrollBar.Overlay) — MAJOR-A rule, "every chrome
+        color gets an HC override": the normal-mode translucent greys would read as a faint smear on a
+        SystemColors.WindowColor surface, so the thumb takes the system's own scrollbar-ish tones (GrayText
+        fill, ControlText hairline) and its hover/pressed steps take the same Highlight the other
+        interactive chrome in this file already uses. The track stays fully transparent — there is no
+        readability concern for an intentionally invisible surface (same reasoning as Color.Chrome.Highlight.*
+        above), and an opaque ScrollBarColor strip would turn a deliberately overlay-style bar back into a
+        boxed system control.
+    -->
+    <Color x:Key="Color.ScrollBar.Track">Transparent</Color>
+    <x:Static x:Key="Color.ScrollBar.Thumb" Member="sysc:SystemColors.GrayTextColor"/>
+    <x:Static x:Key="Color.ScrollBar.ThumbBorder" Member="sysc:SystemColors.ControlTextColor"/>
+    <x:Static x:Key="Color.ScrollBar.ThumbHover" Member="sysc:SystemColors.HighlightColor"/>
+    <x:Static x:Key="Color.ScrollBar.ThumbPressed" Member="sysc:SystemColors.HighlightColor"/>
 </ResourceDictionary>

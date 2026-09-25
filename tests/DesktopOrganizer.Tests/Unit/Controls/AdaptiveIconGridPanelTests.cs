@@ -9,7 +9,7 @@ namespace DesktopOrganizer.Tests.Unit.Controls;
 /// <c>Measure</c>/<c>Arrange</c> unit tests for the REAL <see cref="AdaptiveIconGridPanel"/> — closes the
 /// P00-identified gap (docs/PLANS/workspace-grid-00-baseline.md, part D): every other test of this
 /// panel's geometry (<c>AdaptiveGridLayoutTests</c>, <c>AdaptiveGridLayoutIconLayoutPolicyTests</c>)
-/// exercises the pure <see cref="AdaptiveGridLayout"/> math directly, never the WPF <see cref="Controls.AdaptiveIconGridPanel"/>
+/// exercises the pure <see cref="AdaptiveGridLayout"/> math directly, never the WPF <see cref="AdaptiveIconGridPanel"/>
 /// class itself end-to-end. Runs on a dedicated STA thread via <see cref="StaTestRunner"/> (this
 /// project's own minimal STA-thread convention — see that class's remarks for why, and why no existing
 /// convention/package covered this before).
@@ -32,32 +32,10 @@ public class AdaptiveIconGridPanelTests
     private const double EdgeM = 42d; // AdaptiveGridLayout.EdgePadding(84, DefaultEdgePaddingRatio)
     private const double MinGap = AdaptiveGridLayout.DefaultMinGap;
 
-    private static AdaptiveIconGridPanel BuildPanel(int itemCount, IconLayoutPolicy policy)
-    {
-        var panel = new AdaptiveIconGridPanel { LayoutPolicy = policy };
-        for (var i = 0; i < itemCount; i++)
-            panel.Children.Add(new FrameworkElement { Width = Cell, Height = RowHeightValue });
-
-        return panel;
-    }
-
-    private static void MeasureAndArrange(AdaptiveIconGridPanel panel, double availableWidth)
-    {
-        // Mirrors GridViewTemplate's real host: HorizontalScrollBarVisibility="Disabled" (finite width)
-        // + VerticalScrollBarVisibility="Auto" (infinite height) — see AdaptiveIconGridPanel.MeasureOverride's
-        // own remarks on why it never reads availableSize.Height.
-        panel.Measure(new Size(availableWidth, double.PositiveInfinity));
-        panel.Arrange(new Rect(0, 0, availableWidth, panel.DesiredSize.Height));
-    }
-
     /// <summary>
-    /// The child's actual on-screen origin relative to <paramref name="panel"/>, read back from the REAL
-    /// arrange result via the visual-tree transform — not a value this test computed itself, so it
-    /// genuinely exercises <see cref="AdaptiveIconGridPanel.ArrangeOverride"/>'s own arithmetic.
+    /// Verifies that a freshly constructed <see cref="AdaptiveIconGridPanel"/> defaults to
+    /// <see cref="IconLayoutPolicy.LegacyStretch"/>.
     /// </summary>
-    private static Point ChildOrigin(AdaptiveIconGridPanel panel, int index)
-        => panel.Children[index].TranslatePoint(new Point(0, 0), panel);
-
     [Fact]
     public void LayoutPolicy_DefaultsToLegacyStretch()
     {
@@ -69,6 +47,10 @@ public class AdaptiveIconGridPanelTests
         });
     }
 
+    /// <summary>
+    /// Verifies that under <see cref="IconLayoutPolicy.FixedGap"/>, three icons in a row that has extra
+    /// slack keep their fixed cell pitch and leave the surplus space unabsorbed on the right edge.
+    /// </summary>
     [Fact]
     public void FixedGap_ThreeIcons_FullRowWithSlack_DoesNotStretch_MatchesAnalyticFormula()
     {
@@ -93,6 +75,10 @@ public class AdaptiveIconGridPanelTests
         });
     }
 
+    /// <summary>
+    /// Verifies that under <see cref="IconLayoutPolicy.LegacyStretch"/>, three icons in a row that has
+    /// extra slack stretch to fill the panel width exactly, unlike <see cref="IconLayoutPolicy.FixedGap"/>.
+    /// </summary>
     [Fact]
     public void LegacyStretch_ThreeIcons_FullRowWithSlack_StretchesToFillWidth()
     {
@@ -118,6 +104,11 @@ public class AdaptiveIconGridPanelTests
         });
     }
 
+    /// <summary>
+    /// Verifies that seven icons under <see cref="IconLayoutPolicy.FixedGap"/> wrap into two rows, with the
+    /// second row's vertical offset equal to one row height plus the minimum gap and the same X origin as
+    /// the first row's column 0.
+    /// </summary>
     [Fact]
     public void SevenIcons_WrapsIntoTwoRows_FixedGap_SecondRowStartsAtCorrectOffsetAndSameXOrigin()
     {
@@ -151,6 +142,10 @@ public class AdaptiveIconGridPanelTests
         });
     }
 
+    /// <summary>
+    /// Verifies that measuring and arranging an <see cref="AdaptiveIconGridPanel"/> with no children
+    /// neither throws nor sizes the panel.
+    /// </summary>
     [Fact]
     public void EmptyPanel_MeasureAndArrange_DoNotThrow()
     {
@@ -165,6 +160,10 @@ public class AdaptiveIconGridPanelTests
         });
     }
 
+    /// <summary>
+    /// Verifies that a single icon lands at the same origin under both <see cref="IconLayoutPolicy.FixedGap"/>
+    /// and <see cref="IconLayoutPolicy.LegacyStretch"/>, since a lone item is never treated as a full row.
+    /// </summary>
     [Fact]
     public void SingleIcon_BothPolicies_SamePosition()
     {
@@ -217,8 +216,8 @@ public class AdaptiveIconGridPanelTests
     /// FixedGap DOES reserve <see cref="SystemParameters.VerticalScrollBarWidth"/> — WHEN
     /// <see cref="AdaptiveIconGridPanel.CapacityWidth"/> is bound (fix-cycle 2 CRITICAL-1: the
     /// reservation is now resolved against <see cref="AdaptiveIconGridPanel.CapacityWidth"/>, not the
-    /// raw <c>availableSize</c>/<c>finalSize</c> this test measures/arranges with — see
-    /// <see cref="AdaptiveIconGridPanel.ResolveAvailableForCapacity"/>'s doc comment). Binding
+    /// raw <c>availableSize</c>/<c>finalSize</c> this test measures/arranges with — see the private
+    /// <c>ResolveAvailableForCapacity</c> method's doc comment). Binding
     /// <see cref="AdaptiveIconGridPanel.CapacityWidth"/> to the SAME width used for
     /// <c>Measure</c>/<c>Arrange</c> below simulates the real <c>Templates.xaml</c> wiring at the
     /// specific moment its vertical scrollbar is NOT yet visible (the <c>ScrollViewer</c>'s own
@@ -329,8 +328,8 @@ public class AdaptiveIconGridPanelTests
     /// <summary>
     /// Fix-cycle 2 CRITICAL-1 safety-net: binding <see cref="AdaptiveIconGridPanel.CapacityWidth"/> must
     /// have ZERO effect under <see cref="IconLayoutPolicy.LegacyStretch"/> — its
-    /// <see cref="GridMetrics.ReservedVerticalScrollBarWidth"/> is always <c>0</c>, so
-    /// <see cref="AdaptiveIconGridPanel.ResolveAvailableForCapacity"/> must keep reading the REAL, raw
+    /// <see cref="GridMetrics.ReservedVerticalScrollBarWidth"/> is always <c>0</c>, so the private
+    /// <c>ResolveAvailableForCapacity</c> method must keep reading the REAL, raw
     /// <c>availableSize</c>/<c>finalSize</c>.Width for it — never the (deliberately wildly different,
     /// here) <see cref="AdaptiveIconGridPanel.CapacityWidth"/> value — preserving ADR-018's own accepted
     /// M-2 trade-off (variant (c): RowCapacity fluctuates with the real, possibly scrollbar-narrowed
@@ -350,4 +349,30 @@ public class AdaptiveIconGridPanelTests
             Assert.True(ChildOrigin(panel, 3).Y > 0d); // ...not CapacityWidth's 1000.
         });
     }
+
+    private static AdaptiveIconGridPanel BuildPanel(int itemCount, IconLayoutPolicy policy)
+    {
+        var panel = new AdaptiveIconGridPanel { LayoutPolicy = policy };
+        for (var i = 0; i < itemCount; i++)
+            panel.Children.Add(new FrameworkElement { Width = Cell, Height = RowHeightValue });
+
+        return panel;
+    }
+
+    private static void MeasureAndArrange(AdaptiveIconGridPanel panel, double availableWidth)
+    {
+        // Mirrors GridViewTemplate's real host: HorizontalScrollBarVisibility="Disabled" (finite width)
+        // + VerticalScrollBarVisibility="Auto" (infinite height) — see AdaptiveIconGridPanel.MeasureOverride's
+        // own remarks on why it never reads availableSize.Height.
+        panel.Measure(new Size(availableWidth, double.PositiveInfinity));
+        panel.Arrange(new Rect(0, 0, availableWidth, panel.DesiredSize.Height));
+    }
+
+    /// <summary>
+    /// The child's actual on-screen origin relative to <paramref name="panel"/>, read back from the REAL
+    /// arrange result via the visual-tree transform — not a value this test computed itself, so it
+    /// genuinely exercises <see cref="AdaptiveIconGridPanel.ArrangeOverride"/>'s own arithmetic.
+    /// </summary>
+    private static Point ChildOrigin(AdaptiveIconGridPanel panel, int index)
+        => panel.Children[index].TranslatePoint(new Point(0, 0), panel);
 }

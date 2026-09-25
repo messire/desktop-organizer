@@ -9,7 +9,7 @@ public enum RestoreOutcome
     Restored,
 
     /// <summary>
-    /// <paramref name="storedPath"/> (see <see cref="IPanelItemStorageService.Restore"/>) is inside managed
+    /// <c>storedPath</c> (see <see cref="IPanelItemStorageService.Restore"/>) is inside managed
     /// storage, but no original-path manifest entry exists for it (e.g. a legacy item imported before Move
     /// semantics existed). The managed copy is left untouched — callers should degrade to
     /// <see cref="IPanelItemStorageService.Release"/> for legacy behavior.

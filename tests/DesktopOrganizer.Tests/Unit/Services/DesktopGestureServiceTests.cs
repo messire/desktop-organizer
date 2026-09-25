@@ -12,7 +12,7 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 /// </summary>
 /// <remarks>
 /// The gesture-recognition logic itself (drag threshold, double-click slop, normalisation) is already covered by
-/// <see cref="DesktopGestureStateMachineTests"/> against a fake environment — these tests only verify that
+/// <c>DesktopGestureStateMachineTests</c> against a fake environment — these tests only verify that
 /// <see cref="DesktopGestureService"/> correctly translates <see cref="INativeApi"/> calls/results into that
 /// machine's inputs and back into its public events. There is no real hook or message loop here: the hook
 /// procedure passed to <c>SetWindowsHookEx</c> is captured via the mock and invoked directly, per ADR-003.
@@ -32,28 +32,21 @@ public class DesktopGestureServiceTests
     private readonly Mock<INativeApi> _nativeApiMock = new();
     private readonly DesktopGestureService _service;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DesktopGestureServiceTests"/> class.
+    /// </summary>
     public DesktopGestureServiceTests()
     {
         _nativeApiMock.Setup(api => api.GetModuleHandle(null)).Returns(ModuleHandle);
         _service = new DesktopGestureService(_nativeApiMock.Object);
     }
 
-    private LowLevelMouseCallback CaptureHookProc(IntPtr? hookHandleResult = null)
-    {
-        LowLevelMouseCallback? captured = null;
-        _nativeApiMock
-            .Setup(api => api.SetWindowsHookEx(WhMouseLl, It.IsAny<LowLevelMouseCallback>(), ModuleHandle, 0))
-            .Callback<int, LowLevelMouseCallback, IntPtr, uint>((_, proc, _, _) => captured = proc)
-            .Returns(hookHandleResult ?? HookHandle);
-
-        _service.Start();
-
-        Assert.NotNull(captured);
-        return captured!;
-    }
-
     // ── Start/Dispose lifecycle ─────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="DesktopGestureService.Start"/> installs the low-level mouse hook via
+    /// <c>SetWindowsHookEx</c> for the module handle returned by <see cref="INativeApi.GetModuleHandle(string?)"/>.
+    /// </summary>
     [Fact]
     public void Start_InstallsHook_ViaSetWindowsHookEx()
     {
@@ -71,6 +64,10 @@ public class DesktopGestureServiceTests
             Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="DesktopGestureService.Start"/> a second time is a no-op and does not
+    /// install a second hook.
+    /// </summary>
     [Fact]
     public void Start_CalledTwice_InstallsHookOnlyOnce()
     {
@@ -120,6 +117,9 @@ public class DesktopGestureServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DesktopGestureService.Dispose"/> does nothing when the hook was never installed.
+    /// </summary>
     [Fact]
     public void Dispose_WithoutStart_DoesNotCallUnhook()
     {
@@ -130,6 +130,10 @@ public class DesktopGestureServiceTests
         _nativeApiMock.Verify(api => api.UnhookWindowsHookEx(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DesktopGestureService.Dispose"/> uninstalls the hook that was installed by
+    /// a preceding <see cref="DesktopGestureService.Start"/> call.
+    /// </summary>
     [Fact]
     public void Dispose_AfterSuccessfulStart_UninstallsHook()
     {
@@ -147,6 +151,9 @@ public class DesktopGestureServiceTests
         _nativeApiMock.Verify(api => api.UnhookWindowsHookEx(HookHandle), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="DesktopGestureService.Dispose"/> twice uninstalls the hook only once.
+    /// </summary>
     [Fact]
     public void Dispose_CalledTwice_UninstallsOnlyOnce()
     {
@@ -164,6 +171,10 @@ public class DesktopGestureServiceTests
         _nativeApiMock.Verify(api => api.UnhookWindowsHookEx(HookHandle), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="DesktopGestureService.Dispose"/> does not attempt to uninstall the hook when
+    /// the earlier <see cref="DesktopGestureService.Start"/> call failed to install one.
+    /// </summary>
     [Fact]
     public void Dispose_WhenHookInstallFailed_DoesNotCallUnhook()
     {
@@ -182,6 +193,10 @@ public class DesktopGestureServiceTests
 
     // ── IDesktopGestureEnvironment: explicit-interface members delegating to INativeApi ────────
 
+    /// <summary>
+    /// Verifies that the explicit <c>IDesktopGestureEnvironment.DoubleClickTime</c> property delegates to
+    /// <see cref="INativeApi.GetDoubleClickTime"/>.
+    /// </summary>
     [Fact]
     public void Environment_DoubleClickTime_DelegatesToNativeApi()
     {
@@ -193,6 +208,10 @@ public class DesktopGestureServiceTests
         Assert.Equal(777u, env.DoubleClickTime);
     }
 
+    /// <summary>
+    /// Verifies that the explicit <c>IDesktopGestureEnvironment.TickCount</c> property returns the current
+    /// <see cref="Environment.TickCount"/> value rather than a value derived from <see cref="INativeApi"/>.
+    /// </summary>
     [Fact]
     public void Environment_TickCount_ReturnsEnvironmentTickCount()
     {
@@ -208,6 +227,12 @@ public class DesktopGestureServiceTests
         Assert.InRange(actual, before, after);
     }
 
+    /// <summary>
+    /// Verifies that <c>IDesktopGestureEnvironment.IsDesktopPoint</c> classifies a point as desktop-owned
+    /// based on the window class of the window found at that point.
+    /// </summary>
+    /// <param name="className">The window class name reported for the window under the point.</param>
+    /// <param name="expected">The expected classification result for that class name.</param>
     [Theory]
     [InlineData("SysListView32", true)]
     [InlineData("SHELLDLL_DefView", true)]
@@ -227,6 +252,11 @@ public class DesktopGestureServiceTests
         Assert.Equal(expected, env.IsDesktopPoint(10, 20));
     }
 
+    /// <summary>
+    /// Verifies that <c>IDesktopGestureEnvironment.IsEmptyDesktopPoint</c> treats the WorkerW/Progman background
+    /// layers as always empty, without querying the list view for the actual icon layout.
+    /// </summary>
+    /// <param name="className">The background-layer window class under test.</param>
     [Theory]
     [InlineData("WorkerW")]
     [InlineData("Progman")]
@@ -248,6 +278,11 @@ public class DesktopGestureServiceTests
             Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that <c>IDesktopGestureEnvironment.IsEmptyDesktopPoint</c> delegates directly to
+    /// <see cref="INativeApi.IsListViewPointEmpty(IntPtr, int, int)"/> when the point is over a
+    /// <c>SysListView32</c> window.
+    /// </summary>
     [Fact]
     public void Environment_IsEmptyDesktopPoint_SysListView32_DelegatesToIsListViewPointEmpty()
     {
@@ -262,6 +297,10 @@ public class DesktopGestureServiceTests
         Assert.True(env.IsEmptyDesktopPoint(10, 20));
     }
 
+    /// <summary>
+    /// Verifies that when the point is over a <c>SHELLDLL_DefView</c> window, the environment first locates
+    /// the child <c>SysListView32</c> and checks emptiness against that child, not the parent.
+    /// </summary>
     [Fact]
     public void Environment_IsEmptyDesktopPoint_ShellDllDefView_FindsChildListViewFirst()
     {
@@ -278,6 +317,10 @@ public class DesktopGestureServiceTests
         Assert.True(env.IsEmptyDesktopPoint(10, 20));
     }
 
+    /// <summary>
+    /// Verifies that when no <c>SysListView32</c> child is found under a <c>SHELLDLL_DefView</c> window, the
+    /// point is reported as not empty rather than throwing or guessing.
+    /// </summary>
     [Fact]
     public void Environment_IsEmptyDesktopPoint_ShellDllDefView_WhenNoListViewChildFound_ReturnsFalse()
     {
@@ -292,6 +335,10 @@ public class DesktopGestureServiceTests
         Assert.False(env.IsEmptyDesktopPoint(10, 20));
     }
 
+    /// <summary>
+    /// Verifies that a point over a window class unrelated to the desktop's icon list is never reported as an
+    /// empty desktop point.
+    /// </summary>
     [Fact]
     public void Environment_IsEmptyDesktopPoint_UnknownWindowClass_ReturnsFalse()
     {
@@ -307,6 +354,10 @@ public class DesktopGestureServiceTests
 
     // ── Hook callback wiring: HookCallback -> state machine -> public events ────────────────────
 
+    /// <summary>
+    /// Verifies that a negative hook code is forwarded to <c>CallNextHookEx</c> untouched, per the
+    /// WH_MOUSE_LL contract, without reading the mouse point or touching the state machine.
+    /// </summary>
     [Fact]
     public void HookCallback_NegativeCode_PassesThroughWithoutProcessingMessage()
     {
@@ -323,6 +374,10 @@ public class DesktopGestureServiceTests
         _nativeApiMock.Verify(api => api.ReadMouseHookPoint(It.IsAny<IntPtr>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that two left-button clicks within the double-click window over an empty desktop point raise
+    /// <see cref="DesktopGestureService.DesktopDoubleClicked"/> and still let the message pass through.
+    /// </summary>
     [Fact]
     public void HookCallback_DoubleClickOnEmptyDesktop_RaisesDesktopDoubleClickedAndDoesNotSwallow()
     {
@@ -351,6 +406,10 @@ public class DesktopGestureServiceTests
         Assert.Equal(next, result); // a double click is never swallowed
     }
 
+    /// <summary>
+    /// Verifies that a right-button drag over the desktop raises <see cref="DesktopGestureService.LassoCompleted"/>
+    /// with the drag's bounding rectangle and swallows the final button-up so the shell context menu never appears.
+    /// </summary>
     [Fact]
     public void HookCallback_RightButtonLassoDragOverDesktop_SwallowsAndRaisesLassoCompleted()
     {
@@ -387,6 +446,10 @@ public class DesktopGestureServiceTests
         Assert.Equal(new IntPtr(1), result); // suppressed so the desktop context menu does not appear
     }
 
+    /// <summary>
+    /// Verifies that a right-button click without any drag between down and up is treated as an ordinary click:
+    /// no lasso is raised and the button-up message is passed through unswallowed.
+    /// </summary>
     [Fact]
     public void HookCallback_RightButtonClickWithoutDrag_DoesNotSwallowOrRaiseLasso()
     {
@@ -413,6 +476,11 @@ public class DesktopGestureServiceTests
         Assert.Equal(next, result);
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown while decoding the mouse message is logged to <see cref="Console.Error"/>
+    /// and swallowed by the hook procedure, which still forwards the message via <c>CallNextHookEx</c> so
+    /// system-wide input is never stalled by a bug in the gesture logic.
+    /// </summary>
     [Fact]
     public void HookCallback_WhenProcessingThrows_LogsAndDoesNotSwallowOrPropagate()
     {
@@ -445,6 +513,10 @@ public class DesktopGestureServiceTests
         Assert.Contains("Desktop gesture hook failed: garbage lParam", consoleOutput.ToString());
     }
 
+    /// <summary>
+    /// Verifies that an exception thrown by an external <see cref="DesktopGestureService.DesktopDoubleClicked"/>
+    /// subscriber is caught and logged rather than escaping through the hook procedure.
+    /// </summary>
     [Fact]
     public void HookCallback_WhenSubscriberThrows_LogsAndDoesNotPropagate()
     {
@@ -481,5 +553,20 @@ public class DesktopGestureServiceTests
         }
 
         Assert.Contains("Desktop gesture subscriber failed: boom", consoleOutput.ToString());
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private LowLevelMouseCallback CaptureHookProc(IntPtr? hookHandleResult = null)
+    {
+        LowLevelMouseCallback? captured = null;
+        _nativeApiMock
+            .Setup(api => api.SetWindowsHookEx(WhMouseLl, It.IsAny<LowLevelMouseCallback>(), ModuleHandle, 0))
+            .Callback<int, LowLevelMouseCallback, IntPtr, uint>((_, proc, _, _) => captured = proc)
+            .Returns(hookHandleResult ?? HookHandle);
+
+        _service.Start();
+
+        Assert.NotNull(captured);
+        return captured!;
     }
 }

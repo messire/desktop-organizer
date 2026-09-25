@@ -49,7 +49,7 @@ public static class PanelContentSizer
     /// under <paramref name="layoutPolicy"/> — the same way <see cref="Controls.AdaptiveIconGridPanel"/>
     /// itself does, but analytically, from a WINDOW-width value instead of a live measured content width.
     /// </summary>
-    /// <param name="windowWidth">The panel's current <see cref="Window.Width"/>, in DIP. Never mutated
+    /// <param name="windowWidth">The panel's current <see cref="FrameworkElement.Width"/>, in DIP. Never mutated
     /// or re-derived by this type — see the class remarks on "Однонаправленность".</param>
     /// <param name="iconSize">The panel's current <c>IconSize</c>, in DIP.</param>
     /// <param name="layoutPolicy">
@@ -101,10 +101,10 @@ public static class PanelContentSizer
     /// icon" term this formula could accidentally use instead.
     /// </summary>
     /// <param name="itemCount">See <see cref="ResolveDisplayRowCount"/>.</param>
-    /// <param name="iconSize">See <see cref="ResolveColumnCapacity"/>.</param>
-    /// <param name="windowWidth">See <see cref="ResolveColumnCapacity"/>.</param>
-    /// <param name="layoutPolicy">See <see cref="ResolveColumnCapacity"/>.</param>
-    /// <param name="verticalScrollBarWidth">See <see cref="ResolveColumnCapacity"/>.</param>
+    /// <param name="iconSize">The panel's current <c>IconSize</c>, in DIP — see <see cref="ResolveColumnCapacity"/>.</param>
+    /// <param name="windowWidth">The panel's current <see cref="FrameworkElement.Width"/>, in DIP — see <see cref="ResolveColumnCapacity"/>.</param>
+    /// <param name="layoutPolicy">The panel's current <see cref="IconLayoutPolicy"/> — see <see cref="ResolveColumnCapacity"/>.</param>
+    /// <param name="verticalScrollBarWidth">The real system vertical scrollbar width — see <see cref="ResolveColumnCapacity"/>.</param>
     public static double ComputeRawContentHeight(
         int itemCount,
         double iconSize,
@@ -129,6 +129,7 @@ public static class PanelContentSizer
     /// code already applies) for a <see cref="PanelGeometryMode.LegacyFreeform"/> panel — no workspace
     /// row-span concept applies there.
     /// </summary>
+    /// <param name="rawHeight"><see cref="ComputeRawContentHeight"/>'s result.</param>
     public static double RoundForLegacyFreeform(double rawHeight) => Math.Ceiling(Math.Max(0d, rawHeight));
 
     /// <summary>
@@ -171,13 +172,18 @@ public static class PanelContentSizer
     /// (<c>Views/ChildWindow.ContentSizing.cs</c>) — see this type's own class remarks.
     /// </summary>
     /// <param name="itemCount">See <see cref="ResolveDisplayRowCount"/>.</param>
-    /// <param name="iconSize">See <see cref="ResolveColumnCapacity"/>.</param>
-    /// <param name="windowWidth">See <see cref="ResolveColumnCapacity"/>.</param>
-    /// <param name="layoutPolicy">See <see cref="ResolveColumnCapacity"/>.</param>
-    /// <param name="verticalScrollBarWidth">See <see cref="ResolveColumnCapacity"/>.</param>
+    /// <param name="iconSize">The panel's current <c>IconSize</c>, in DIP — see <see cref="ResolveColumnCapacity"/>.</param>
+    /// <param name="windowWidth">The panel's current <see cref="FrameworkElement.Width"/>, in DIP — see <see cref="ResolveColumnCapacity"/>.</param>
+    /// <param name="layoutPolicy">The panel's current <see cref="IconLayoutPolicy"/> — see <see cref="ResolveColumnCapacity"/>.</param>
+    /// <param name="verticalScrollBarWidth">The real system vertical scrollbar width — see <see cref="ResolveColumnCapacity"/>.</param>
     /// <param name="geometryMode">Selects the rounding rule (see above).</param>
-    /// <param name="unitSize">See <see cref="RoundHeightUnitsForGridAligned"/>.</param>
-    /// <param name="gap">See <see cref="RoundHeightUnitsForGridAligned"/>.</param>
+    /// <param name="unitSize">
+    /// <see cref="WorkspaceGridMetrics.UnitSize"/> — see <see cref="RoundHeightUnitsForGridAligned"/>.
+    /// In production this parameter is always <see cref="WorkspaceGridMetrics.UnitSize"/> itself (via
+    /// <see cref="PanelGridStateResolver.Resolve"/>'s resolved <c>UnitSize</c>); the default value here
+    /// exists for direct/test callers.
+    /// </param>
+    /// <param name="gap"><see cref="WorkspaceGridMetrics.DefaultGap"/> — see <see cref="RoundHeightUnitsForGridAligned"/>.</param>
     /// <returns>The final, ready-to-apply <c>Window.Height</c> value, in DIP.</returns>
     public static double FitHeight(
         int itemCount,

@@ -34,7 +34,7 @@ public sealed class PanelVisualStateBehavior : IDisposable
     /// publishes the initial resolved state.
     /// </summary>
     /// <param name="root">
-    /// The panel's root element — <see cref="FrameworkElement.IsMouseOver"/> on this element is the
+    /// The panel's root element — <see cref="UIElement.IsMouseOver"/> on this element is the
     /// "pointer over the whole panel" fact (D-6), and this is also the element
     /// <see cref="PanelTheme.VisualStateProperty"/> is written to (it is an inherited attached property,
     /// so every descendant — including <c>PanelChrome</c> — sees the resolved value without needing its

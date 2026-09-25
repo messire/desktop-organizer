@@ -10,6 +10,10 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class PanelSelectionCoordinatorTests
 {
+    /// <summary>
+    /// Verifies that <see cref="PanelSelectionCoordinator.NotifySelected"/> raises
+    /// <see cref="PanelSelectionCoordinator.SelectionClaimed"/> with the given owner.
+    /// </summary>
     [Fact]
     public void NotifySelected_RaisesSelectionClaimed_WithTheGivenOwner()
     {
@@ -23,6 +27,10 @@ public class PanelSelectionCoordinatorTests
         Assert.Same(owner, raisedOwner);
     }
 
+    /// <summary>
+    /// Verifies that every subscriber to <see cref="PanelSelectionCoordinator.SelectionClaimed"/>
+    /// receives a single <see cref="PanelSelectionCoordinator.NotifySelected"/> call.
+    /// </summary>
     [Fact]
     public void NotifySelected_MultipleSubscribers_AllReceiveTheEvent()
     {
@@ -42,6 +50,10 @@ public class PanelSelectionCoordinatorTests
         Assert.True(received3);
     }
 
+    /// <summary>
+    /// Verifies the coordinator-side reentrancy guard (risk R3): re-claiming a selection the same owner
+    /// already holds is a no-op and never re-raises <see cref="PanelSelectionCoordinator.SelectionClaimed"/>.
+    /// </summary>
     [Fact]
     public void NotifySelected_SameOwnerTwiceInARow_RaisesSelectionClaimedOnlyOnce()
     {
@@ -60,6 +72,11 @@ public class PanelSelectionCoordinatorTests
         Assert.Equal(1, raisedCount);
     }
 
+    /// <summary>
+    /// Verifies that claiming distinct owners in sequence raises
+    /// <see cref="PanelSelectionCoordinator.SelectionClaimed"/> once per claim, even when an earlier
+    /// owner is re-claimed after another owner held the selection in between.
+    /// </summary>
     [Fact]
     public void NotifySelected_DifferentOwners_RaisesSelectionClaimedEachTime()
     {
@@ -76,6 +93,10 @@ public class PanelSelectionCoordinatorTests
         Assert.Equal(3, raisedCount);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSelectionCoordinator.NotifySelected"/> throws
+    /// <see cref="ArgumentNullException"/> for a <see langword="null"/> owner.
+    /// </summary>
     [Fact]
     public void NotifySelected_NullOwner_Throws()
     {
@@ -84,6 +105,11 @@ public class PanelSelectionCoordinatorTests
         Assert.Throws<ArgumentNullException>(() => sut.NotifySelected(null!));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSelectionCoordinator.ClearAll"/> raises
+    /// <see cref="PanelSelectionCoordinator.SelectionClaimed"/> with a fresh sentinel owner that matches
+    /// no real panel, so every subscriber deselects.
+    /// </summary>
     [Fact]
     public void ClearAll_RaisesSelectionClaimed_WithAnOwnerThatMatchesNoSubscriber()
     {
@@ -98,6 +124,12 @@ public class PanelSelectionCoordinatorTests
         Assert.NotSame(self, raisedOwner);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelSelectionCoordinator.ClearAll"/> resets the current-owner state, so
+    /// re-claiming the owner held before the clear raises
+    /// <see cref="PanelSelectionCoordinator.SelectionClaimed"/> again instead of being swallowed by the
+    /// idempotent-owner guard.
+    /// </summary>
     [Fact]
     public void ClearAll_ThenNotifySelected_SameOwnerAsBeforeClearAll_RaisesSelectionClaimedAgain()
     {
@@ -116,6 +148,10 @@ public class PanelSelectionCoordinatorTests
         Assert.Equal(1, raisedCount);
     }
 
+    /// <summary>
+    /// Verifies that unsubscribing a handler from <see cref="PanelSelectionCoordinator.SelectionClaimed"/>
+    /// stops it from receiving any further events.
+    /// </summary>
     [Fact]
     public void Unsubscribe_StopsReceivingFurtherEvents()
     {
@@ -134,6 +170,12 @@ public class PanelSelectionCoordinatorTests
         Assert.Equal(1, raisedCount);
     }
 
+    /// <summary>
+    /// Regression guard for risk R3: a subscriber that re-calls
+    /// <see cref="PanelSelectionCoordinator.NotifySelected"/> for the very owner it was just told about
+    /// (from within its own handler) must not send the coordinator into unbounded recursion — the
+    /// idempotent-owner guard stops it regardless of subscriber behavior.
+    /// </summary>
     [Fact]
     public void NotifySelected_SubscriberReClaimsSameOwnerFromWithinHandler_DoesNotRecurseInfinitely()
     {
@@ -158,6 +200,10 @@ public class PanelSelectionCoordinatorTests
         Assert.Equal(1, invocationCount);
     }
 
+    /// <summary>
+    /// Verifies that a subscriber claiming a different owner from within its own handler (two panels
+    /// "fighting" over the selection) still terminates, delivering both claims in order.
+    /// </summary>
     [Fact]
     public void NotifySelected_SubscriberClaimsADifferentOwnerFromWithinHandler_TerminatesAndDeliversBoth()
     {

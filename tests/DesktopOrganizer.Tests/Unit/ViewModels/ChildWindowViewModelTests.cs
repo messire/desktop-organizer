@@ -46,6 +46,10 @@ public class ChildWindowViewModelTests
     private readonly Mock<IPanelSelectionCoordinator> _selectionCoordinatorMock = new();
     private readonly Mock<IGestureDiagnostics> _diagnosticsMock = new();
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ChildWindowViewModelTests"/> class, ensuring a live
+    /// WPF <see cref="Application"/> exists and seeding the default icon provider and move-hint mocks.
+    /// </summary>
     public ChildWindowViewModelTests()
     {
         EnsureWpfApplication();
@@ -56,94 +60,13 @@ public class ChildWindowViewModelTests
         _appSettingsMock.SetupProperty(s => s.HasShownMoveHint, false);
     }
 
-    /// <summary>
-    /// The VM constructor resolves <c>ListViewTemplate</c>/<c>GridViewTemplate</c> via
-    /// <see cref="System.Windows.Application.Current"/>. There's no WPF host in the test process by
-    /// default (no <c>UseWPF</c> app bootstrap), so a minimal <see cref="System.Windows.Application"/>
-    /// is created once per test run, mirroring what <c>App.xaml</c> does in production.
-    /// </summary>
-    /// <remarks>
-    /// M-2 fix (P08 fix cycle 2, sta-test-conventions.md "live but non-pumping owner"): delegates to
-    /// <see cref="WpfApplicationHost.EnsureApplication"/> — the one place the real merge chain
-    /// <c>App.xaml.cs</c>'s own <c>LoadResourceDictionaries()</c> builds is defined — instead of hand-
-    /// rolling a throwaway <see cref="System.Windows.Application"/> with only <c>Templates.xaml</c>
-    /// merged in. Whichever call across the whole <c>dotnet test</c> process gets here first still owns
-    /// <see cref="System.Windows.Application.Current"/> for the rest of the run (see that class's own
-    /// remarks); this method no longer duplicates that decision with its own "was it null before" check.
-    /// </remarks>
-    private static void EnsureWpfApplication() => WpfApplicationHost.EnsureApplication();
-
-    /// <summary>
-    /// Ensures every operation already queued on <paramref name="dispatcher"/> at Normal priority or
-    /// above — in particular, whatever <c>ChildWindowViewModel.OnFolderChanged</c> just queued via the
-    /// fire-and-forget <see cref="UiDispatch.TryBeginInvoke"/> (CRITICAL C-1 fix, P08 fix cycle 2) — has
-    /// run, before returning.
-    /// </summary>
-    /// <remarks>
-    /// Takes <paramref name="dispatcher"/> explicitly (always <c>Application.Current!.Dispatcher</c> at
-    /// the call site) rather than assuming <see cref="Dispatcher.CurrentDispatcher"/> — i.e. THIS xUnit
-    /// thread's own — because WHICH thread ends up owning <see cref="Application.Current"/> for the whole
-    /// `dotnet test` process depends on whichever WPF-touching fixture across the ENTIRE assembly happens
-    /// to run first (see <see cref="WpfApplicationHost"/>'s own remarks): it might be this very
-    /// constructor's own <see cref="EnsureWpfApplication"/> call, or it might be a dedicated
-    /// <c>StaTestRunner</c>-owned worker thread from a completely different test class that got there
-    /// first. Two different drain mechanisms follow from that:
-    /// <list type="bullet">
-    /// <item><description>
-    /// Same thread (<see cref="Dispatcher.CheckAccess"/> true — this xUnit thread owns
-    /// <see cref="Application.Current"/> itself): it is NOT otherwise pumping at all, so a blocking wait
-    /// here would deadlock; push a nested <see cref="DispatcherFrame"/> instead, which re-enters the
-    /// dispatcher's own queue processing synchronously, in place.
-    /// </description></item>
-    /// <item><description>
-    /// A different thread (some other fixture's <c>StaTestRunner</c>-owned worker): that thread is, by
-    /// `StaTestRunner`'s own contract, ALREADY pumping forever, so a plain blocking wait for a
-    /// low-priority marker to run is both safe (this thread isn't the one that needs to pump) and
-    /// correct.
-    /// </description></item>
-    /// </list>
-    /// </remarks>
-    private static void FlushDispatcherQueue(Dispatcher dispatcher)
-    {
-        if (dispatcher.CheckAccess())
-        {
-            var frame = new DispatcherFrame();
-            dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => frame.Continue = false));
-            Dispatcher.PushFrame(frame);
-            return;
-        }
-
-        using var completed = new ManualResetEventSlim(initialState: false);
-        dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => completed.Set()));
-
-        if (!completed.Wait(Timeout))
-        {
-            throw new TimeoutException(
-                $"{nameof(ChildWindowViewModelTests)}.{nameof(FlushDispatcherQueue)}: dispatcher did not drain within {Timeout}.");
-        }
-    }
-
-    private ChildWindowViewModel BuildSut(IPanelSelectionCoordinator? selectionCoordinator = null) => new(
-        _iconProviderMock.Object,
-        _fileLauncherMock.Object,
-        _watcherFactoryMock.Object,
-        _storageMock.Object,
-        _renameServiceMock.Object,
-        _appSettingsMock.Object,
-        selectionCoordinator ?? _selectionCoordinatorMock.Object,
-        _diagnosticsMock.Object);
-
-    private static string NewTempFilePath() => Path.Combine(Path.GetTempPath(), $"DOrgVmTest_{Guid.NewGuid():N}.txt");
-
-    private static string NewTempDirPath()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), $"DOrgVmTestDir_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        return dir;
-    }
-
     // ── D13: AddDroppedFiles fallback when MoveIn/MoveInDirectory return null ────────────────────
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelItemStorageService.MoveIn"/> returns <c>null</c> for a
+    /// dropped file, <see cref="ChildWindowViewModel.AddDroppedFiles"/> falls back to referencing the
+    /// original source path in place.
+    /// </summary>
     [Fact]
     public void AddDroppedFiles_MoveInReturnsNull_FallsBackToOriginalPath()
     {
@@ -172,6 +95,11 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelItemStorageService.MoveInDirectory"/> returns <c>null</c> for
+    /// a dropped folder, <see cref="ChildWindowViewModel.AddDroppedFiles"/> falls back to referencing the
+    /// original source folder path in place.
+    /// </summary>
     [Fact]
     public void AddDroppedFiles_MoveInDirectoryReturnsNull_FallsBackToOriginalPath()
     {
@@ -200,6 +128,11 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelItemStorageService.MoveIn"/> returns a managed path,
+    /// <see cref="ChildWindowViewModel.AddDroppedFiles"/> uses that managed path instead of the original
+    /// source path.
+    /// </summary>
     [Fact]
     public void AddDroppedFiles_MoveInSucceeds_UsesManagedPath()
     {
@@ -231,6 +164,11 @@ public class ChildWindowViewModelTests
 
     // ── Move-hint: MoveHintRequested (one-time, guarded by IAppSettings.HasShownMoveHint) ───────
 
+    /// <summary>
+    /// Verifies that when a dropped file is genuinely moved and the one-time hint has not been shown
+    /// yet, <see cref="ChildWindowViewModel.MoveHintRequested"/> fires exactly once and
+    /// <see cref="IAppSettings.HasShownMoveHint"/> is persisted.
+    /// </summary>
     [Fact]
     public void AddDroppedFiles_FileActuallyMoved_HintNotShownYet_RaisesMoveHintOnceAndPersists()
     {
@@ -262,6 +200,11 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when a dropped file is genuinely moved but the one-time hint already fired in a
+    /// past session, <see cref="ChildWindowViewModel.MoveHintRequested"/> does not fire again and
+    /// settings are not re-saved.
+    /// </summary>
     [Fact]
     public void AddDroppedFiles_FileActuallyMoved_HintAlreadyShown_DoesNotRaiseOrSave()
     {
@@ -293,6 +236,11 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when a dropped file falls back to its original path (no real move happened),
+    /// <see cref="ChildWindowViewModel.MoveHintRequested"/> does not fire even though the hint has not
+    /// been shown yet.
+    /// </summary>
     [Fact]
     public void AddDroppedFiles_NothingActuallyMoved_HintNotShownYet_DoesNotRaise()
     {
@@ -323,6 +271,11 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when a single drop contains multiple paths and only one of them is genuinely
+    /// moved, <see cref="ChildWindowViewModel.MoveHintRequested"/> fires exactly once for the whole
+    /// drop, not once per moved file.
+    /// </summary>
     [Fact]
     public void AddDroppedFiles_MultiplePathsOnlyOneActuallyMoved_RaisesMoveHintExactlyOnce()
     {
@@ -360,6 +313,11 @@ public class ChildWindowViewModelTests
 
     // ── D9 (VM-part): RemoveFileItem degrades to Release on OriginalPathUnknown (ADR-B) ─────────
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelItemStorageService.Restore"/> reports
+    /// <see cref="RestoreOutcome.OriginalPathUnknown"/>, removing the item degrades to calling
+    /// <see cref="IPanelItemStorageService.Release"/> (legacy managed copy with no manifest entry).
+    /// </summary>
     [Fact]
     public void RemoveFileItem_RestoreReturnsOriginalPathUnknown_CallsRelease()
     {
@@ -378,6 +336,10 @@ public class ChildWindowViewModelTests
         _storageMock.Verify(s => s.Release(managedPath), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelItemStorageService.Restore"/> succeeds, removing the item
+    /// does not additionally call <see cref="IPanelItemStorageService.Release"/>.
+    /// </summary>
     [Fact]
     public void RemoveFileItem_RestoreSucceeds_DoesNotCallRelease()
     {
@@ -396,6 +358,13 @@ public class ChildWindowViewModelTests
         _storageMock.Verify(s => s.Release(It.IsAny<string>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that only <see cref="RestoreOutcome.OriginalPathUnknown"/> triggers the ADR-B
+    /// degradation to <see cref="IPanelItemStorageService.Release"/>: neither
+    /// <see cref="RestoreOutcome.NotManaged"/> (already a no-op) nor <see cref="RestoreOutcome.Failed"/>
+    /// (managed copy intentionally left in storage) calls it.
+    /// </summary>
+    /// <param name="outcome">The <see cref="RestoreOutcome"/> value <see cref="IPanelItemStorageService.Restore"/> returns.</param>
     [Theory]
     [InlineData(RestoreOutcome.NotManaged)]
     [InlineData(RestoreOutcome.Failed)]
@@ -421,6 +390,10 @@ public class ChildWindowViewModelTests
     // ── D3 (Block D, docs/PLANS/phase-7-performance-hardening.md): Model.PropertyChanged
     // subscription lifecycle — no leak past Dispose, no double subscription on repeated LoadFromModel.
 
+    /// <summary>
+    /// Verifies that after <see cref="ChildWindowViewModel.Dispose"/>, subsequent changes to a model
+    /// that outlives the disposed view model no longer raise <see cref="ChildWindowViewModel.FilesChanged"/>.
+    /// </summary>
     [Fact]
     public void Dispose_ThenModelContentFilterChanges_DoesNotRaiseFilesChanged()
     {
@@ -442,6 +415,10 @@ public class ChildWindowViewModelTests
         Assert.False(filesChangedRaised);
     }
 
+    /// <summary>
+    /// Verifies that after <see cref="ChildWindowViewModel.Dispose"/>, subsequent changes to the
+    /// model's view mode no longer update <see cref="ChildWindowViewModel.CurrentViewTemplate"/>.
+    /// </summary>
     [Fact]
     public void Dispose_ThenModelViewModeChanges_DoesNotChangeCurrentViewTemplate()
     {
@@ -459,6 +436,11 @@ public class ChildWindowViewModelTests
         Assert.Same(templateBeforeDispose, sut.CurrentViewTemplate);
     }
 
+    /// <summary>
+    /// Verifies that re-binding via <see cref="ChildWindowViewModel.LoadFromModel"/> to a different
+    /// model unsubscribes from the first model, so subsequent changes to the stale model no longer
+    /// raise <see cref="ChildWindowViewModel.FilesChanged"/>.
+    /// </summary>
     [Fact]
     public void LoadFromModel_CalledWithDifferentModel_StaleModelChangesNoLongerRaiseFilesChanged()
     {
@@ -481,6 +463,11 @@ public class ChildWindowViewModelTests
         Assert.False(filesChangedRaised);
     }
 
+    /// <summary>
+    /// Verifies that after re-binding to a different model, the view model is subscribed to that model
+    /// exactly once, so a subsequent change raises <see cref="ChildWindowViewModel.FilesChanged"/>
+    /// exactly once.
+    /// </summary>
     [Fact]
     public void LoadFromModel_CalledWithDifferentModel_CurrentModelChangeRaisesFilesChangedExactlyOnce()
     {
@@ -502,6 +489,11 @@ public class ChildWindowViewModelTests
         Assert.Equal(1, filesChangedCount);
     }
 
+    /// <summary>
+    /// Regression guard (code-quality review, Phase 7 Block D follow-up, MAJOR-6): verifies that
+    /// re-binding to a different model replaces the file set rather than accumulating onto whatever was
+    /// already loaded.
+    /// </summary>
     [Fact]
     public void LoadFromModel_CalledWithDifferentModel_DropsFirstModelsFiles()
     {
@@ -523,6 +515,12 @@ public class ChildWindowViewModelTests
 
     // ── ADR-009 Amendment 2026-09-22 (P08): stale-path self-heal on LoadFromModel ───────────────
 
+    /// <summary>
+    /// Regression for P00 baseline finding F-9/H2: verifies that when a stale path has a live managed
+    /// copy known to <see cref="IPanelItemStorageService.TryFindManagedPath"/>,
+    /// <see cref="ChildWindowViewModel.LoadFromModel"/> resolves the item to that managed path instead
+    /// of building a permanently-broken <see cref="FileItem"/>.
+    /// </summary>
     [Fact]
     public void LoadFromModel_StalePathWithLiveManagedCopy_ResolvesToManagedPath()
     {
@@ -553,6 +551,11 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when a stale path has no live managed copy, <see cref="ChildWindowViewModel.LoadFromModel"/>
+    /// leaves the item exactly as it was — still shown, still marked non-existent — never dropped or
+    /// silently replaced.
+    /// </summary>
     [Fact]
     public void LoadFromModel_StalePathWithNoManagedCopy_KeepsOriginalPath()
     {
@@ -571,6 +574,12 @@ public class ChildWindowViewModelTests
         Assert.False(item.Exists);
     }
 
+    /// <summary>
+    /// CRITICAL C1 fix, part (b) (P08 fix cycle 1, 2026-09-22): verifies that a stale-path remap is
+    /// written back to <see cref="ChildWindowModel.FilePaths"/> immediately in memory, and that
+    /// <see cref="ChildWindowViewModel.FilesChanged"/> fires so the fix survives a crash before any
+    /// later save.
+    /// </summary>
     [Fact]
     public void LoadFromModel_StalePathWithLiveManagedCopy_WritesRemapBackToModelFilePathsImmediately()
     {
@@ -608,6 +617,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when no remap happens (no live managed copy), <see cref="ChildWindowModel.FilePaths"/>
+    /// is left untouched and no save is requested for the no-op.
+    /// </summary>
     [Fact]
     public void LoadFromModel_StalePathWithNoManagedCopy_DoesNotMutateModelFilePathsOrRaiseFilesChanged()
     {
@@ -628,6 +641,10 @@ public class ChildWindowViewModelTests
         Assert.False(filesChangedRaised);
     }
 
+    /// <summary>
+    /// Verifies that the read-time stale-path remap never consults
+    /// <see cref="IPanelItemStorageService.TryFindManagedPath"/> for a path that already exists on disk.
+    /// </summary>
     [Fact]
     public void LoadFromModel_PathAlreadyExists_NeverConsultsStorageForResolution()
     {
@@ -656,6 +673,11 @@ public class ChildWindowViewModelTests
 
     // ── P08: RefreshItemsLiveness re-resolves the icon when a missing file reappears ────────────
 
+    /// <summary>
+    /// Regression for P00 baseline finding H3: verifies that when a missing file reappears,
+    /// <see cref="BaseViewModel.RefreshItemsLiveness"/> re-resolves its icon via
+    /// <see cref="IIconProvider.GetIcon"/> instead of leaving it stuck on the placeholder.
+    /// </summary>
     [Fact]
     public void RefreshItemsLiveness_ItemReappears_ReResolvesIconViaProvider()
     {
@@ -688,6 +710,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="BaseViewModel.RefreshItemsLiveness"/> does not re-call
+    /// <see cref="IIconProvider.GetIcon"/> for an item that stays missing across ticks.
+    /// </summary>
     [Fact]
     public void RefreshItemsLiveness_ItemStaysMissing_NeverCallsIconProviderAgain()
     {
@@ -705,6 +731,10 @@ public class ChildWindowViewModelTests
         _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="BaseViewModel.RefreshItemsLiveness"/> does not re-call
+    /// <see cref="IIconProvider.GetIcon"/> for an item that stays present across ticks.
+    /// </summary>
     [Fact]
     public void RefreshItemsLiveness_ItemStaysPresent_NeverCallsIconProviderAgain()
     {
@@ -737,6 +767,11 @@ public class ChildWindowViewModelTests
     // still showing the icon pipeline's own placeholder (a transient SHGetFileInfo failure, e.g.
     // during autostart before the shell has finished initializing) ─────────────────────────────────
 
+    /// <summary>
+    /// M3 regression (P08 fix cycle 1, 2026-09-22): verifies that an item which exists but still shows
+    /// the icon pipeline's placeholder (a transient <c>SHGetFileInfo</c> failure) is retried with backoff
+    /// by <see cref="BaseViewModel.RefreshItemsLiveness"/> until it resolves the real icon.
+    /// </summary>
     [Fact]
     public void RefreshItemsLiveness_ItemExistsButIconIsPlaceholder_RetriesWithBackoff_ThenResolvesRealIcon()
     {
@@ -780,6 +815,11 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when the icon placeholder never resolves,
+    /// <see cref="BaseViewModel.RefreshItemsLiveness"/> stops retrying after three attempts
+    /// rather than hitting the icon provider on every future tick.
+    /// </summary>
     [Fact]
     public void RefreshItemsLiveness_PlaceholderPersistsForever_StopsRetryingAfterThreeAttempts()
     {
@@ -818,6 +858,10 @@ public class ChildWindowViewModelTests
 
     // ── A6: SelectedFile survives a ReplaceFileItems rebuild (ADR-012 Reset side effect) ───────────
 
+    /// <summary>
+    /// Verifies that when a content filter change triggers a rebuild but the selected file is still in
+    /// the new filtered set, <see cref="BaseViewModel.SelectedFile"/> remains the same instance.
+    /// </summary>
     [Fact]
     public void ContentFilterChange_SelectedFileStillInNewSet_RemainsSelected()
     {
@@ -838,6 +882,10 @@ public class ChildWindowViewModelTests
         Assert.Same(itemA, sut.SelectedFile);
     }
 
+    /// <summary>
+    /// Verifies that selection restoration after a rebuild matches the selected file's path
+    /// case-insensitively, per <c>ReplaceFileItems</c>'s comparison rule.
+    /// </summary>
     [Fact]
     public void ContentFilterChange_SelectedFileMatchedCaseInsensitively()
     {
@@ -857,6 +905,10 @@ public class ChildWindowViewModelTests
         Assert.Equal(pathA, sut.SelectedFile!.Path, ignoreCase: true);
     }
 
+    /// <summary>
+    /// Verifies that when a content filter change removes the selected file from the new filtered set,
+    /// <see cref="BaseViewModel.SelectedFile"/> is cleared to <c>null</c>.
+    /// </summary>
     [Fact]
     public void ContentFilterChange_SelectedFileNoLongerInNewSet_ClearsSelection()
     {
@@ -877,6 +929,11 @@ public class ChildWindowViewModelTests
 
     // ── C3: BeginRenameCommand / CommitRenameCommand / CancelRenameCommand ──────────────────────
 
+    /// <summary>
+    /// Verifies that executing <see cref="ChildWindowViewModel.BeginRenameCommand"/> with an explicit
+    /// item sets <see cref="ChildWindowViewModel.EditingItem"/> and pre-fills
+    /// <see cref="ChildWindowViewModel.EditingName"/> from its display name.
+    /// </summary>
     [Fact]
     public void BeginRenameCommand_SetsEditingItemAndEditingName()
     {
@@ -900,6 +957,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that executing <see cref="ChildWindowViewModel.BeginRenameCommand"/> with a <c>null</c>
+    /// parameter falls back to editing <see cref="BaseViewModel.SelectedFile"/>.
+    /// </summary>
     [Fact]
     public void BeginRenameCommand_NullParameter_FallsBackToSelectedFile()
     {
@@ -923,6 +984,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a successful commit relocates the item to its new path, raises
+    /// <see cref="ChildWindowViewModel.FilesChanged"/>, and closes the rename editor.
+    /// </summary>
     [Fact]
     public void CommitRenameCommand_Success_RelocatesItemRaisesFilesChangedAndClosesEditor()
     {
@@ -957,6 +1022,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that committing a blank (whitespace-only) name closes the editor without invoking
+    /// <see cref="IFileItemRenameService.Rename"/> or touching the item.
+    /// </summary>
     [Fact]
     public void CommitRenameCommand_EmptyName_ClosesEditorWithoutCallingRenameService()
     {
@@ -986,6 +1055,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that committing a name identical to the pre-filled value closes the editor without
+    /// invoking <see cref="IFileItemRenameService.Rename"/>.
+    /// </summary>
     [Fact]
     public void CommitRenameCommand_NameUnchanged_ClosesEditorWithoutCallingRenameService()
     {
@@ -1021,6 +1094,7 @@ public class ChildWindowViewModelTests
     /// is deliberately left set to the item being edited — see <c>CommitRename</c>'s doc comment
     /// ("Keep the editor open so the user can correct the name.").
     /// </summary>
+    /// <param name="outcome">The failed <see cref="RenameOutcome"/> the rename service reports.</param>
     [Theory]
     [InlineData(RenameOutcome.NameTaken)]
     [InlineData(RenameOutcome.InvalidName)]
@@ -1058,6 +1132,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that executing <see cref="ChildWindowViewModel.CancelRenameCommand"/> closes the editor
+    /// and leaves the item and the file system untouched.
+    /// </summary>
     [Fact]
     public void CancelRenameCommand_ClosesEditorWithoutTouchingFileSystem()
     {
@@ -1086,6 +1164,11 @@ public class ChildWindowViewModelTests
 
     // ── R10/C3: rename in a Folder Portal panel is allowed (unlike RemoveFileCommand) ──────────
 
+    /// <summary>
+    /// Verifies that in a Folder Portal panel, <see cref="ChildWindowViewModel.RemoveFileCommand"/>
+    /// cannot execute, while <see cref="ChildWindowViewModel.BeginRenameCommand"/> and
+    /// <see cref="ChildWindowViewModel.CommitRenameCommand"/> can always execute.
+    /// </summary>
     [Fact]
     public void RemoveFileCommand_CanExecute_FalseInPortal_ButBeginRenameAndCommitRename_AlwaysCanExecute()
     {
@@ -1110,6 +1193,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that committing a rename for an item inside a Folder Portal panel succeeds and relocates
+    /// the item to its new path.
+    /// </summary>
     [Fact]
     public void CommitRenameCommand_InPortalPanel_RenamesSuccessfully()
     {
@@ -1149,9 +1236,9 @@ public class ChildWindowViewModelTests
     // ── .lnk display/rename parity: DisplayName hides .lnk, CommitRename re-attaches it ─────────
 
     /// <summary>
-    /// <see cref="FileItem.DisplayName"/> hides a shortcut's <c>.lnk"</c>, so
-    /// <see cref="ChildWindowViewModel.BeginRename"/> — which pre-fills
-    /// <see cref="ChildWindowViewModel.EditingName"/> from it — must not show the extension either.
+    /// <see cref="FileItem.DisplayName"/> hides a shortcut's <c>.lnk"</c>, so the private
+    /// <c>BeginRename</c> method — which pre-fills <see cref="ChildWindowViewModel.EditingName"/> from
+    /// it — must not show the extension either.
     /// </summary>
     [Fact]
     public void BeginRenameCommand_Shortcut_PreFillsEditingNameWithoutLnkExtension()
@@ -1179,8 +1266,8 @@ public class ChildWindowViewModelTests
 
     /// <summary>
     /// CRITICAL regression guard: <see cref="ChildWindowViewModel.EditingName"/> for a shortcut never
-    /// includes <c>.lnk</c> (see <see cref="FileItem.DisplayName"/>), so
-    /// <see cref="ChildWindowViewModel.CommitRename"/> must re-attach <c>.lnk</c> before calling
+    /// includes <c>.lnk</c> (see <see cref="FileItem.DisplayName"/>), so the private <c>CommitRename</c>
+    /// method must re-attach <c>.lnk</c> before calling
     /// <see cref="IFileItemRenameService.Rename"/> — otherwise committing a rename with an unchanged
     /// extension-less name would physically strip <c>.lnk</c> from the file on disk and break the
     /// shortcut. This asserts the exact string passed to the rename service ends with <c>.lnk</c>.
@@ -1217,7 +1304,7 @@ public class ChildWindowViewModelTests
     }
 
     /// <summary>
-    /// If the user explicitly types <c>.lnk</c> themselves, <see cref="ChildWindowViewModel.CommitRename"/>
+    /// If the user explicitly types <c>.lnk</c> themselves, the private <c>CommitRename</c> method
     /// must not double it up into <c>NewChrome.lnk.lnk</c>.
     /// </summary>
     [Fact]
@@ -1284,6 +1371,11 @@ public class ChildWindowViewModelTests
 
     // ── ADR-014 Decision 2/3: SortMode.Name projection ──────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that switching to <see cref="PanelSortMode.Name"/> sorts
+    /// <see cref="BaseViewModel.FileItems"/> by name while leaving the persisted manual order in
+    /// <see cref="BaseViewModel.AllItems"/> untouched (ADR-014 Decision 2).
+    /// </summary>
     [Fact]
     public void SortModeName_SortsFileItems_ButLeavesAllItemsUnsorted()
     {
@@ -1304,6 +1396,11 @@ public class ChildWindowViewModelTests
         Assert.Equal(originalAllItemsOrder, sut.AllItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that switching from <see cref="PanelSortMode.Name"/> back to
+    /// <see cref="PanelSortMode.Manual"/> restores the exact prior manual order of
+    /// <see cref="BaseViewModel.FileItems"/>.
+    /// </summary>
     [Fact]
     public void SortModeName_ThenBackToManual_RestoresExactPriorFileItemsOrder()
     {
@@ -1321,6 +1418,11 @@ public class ChildWindowViewModelTests
 
     // ── ADR-014: SortMode.Name × ContentFilter interplay ─────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that under <see cref="PanelSortMode.Name"/>, an active
+    /// <see cref="PanelContentFilter.HideShortcuts"/> filter sorts only the filtered (non-shortcut)
+    /// subset.
+    /// </summary>
     [Fact]
     public void SortModeName_WithHideShortcutsFilter_SortsTheFilteredSubset()
     {
@@ -1335,6 +1437,11 @@ public class ChildWindowViewModelTests
             sut.FileItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that under <see cref="PanelSortMode.Name"/>, an active
+    /// <see cref="PanelContentFilter.FoldersOnly"/> filter sorts the visible folders using natural
+    /// (case-insensitive alphabetical) order.
+    /// </summary>
     [Fact]
     public void SortModeName_WithFoldersOnlyFilter_SortsVisibleFoldersNaturally()
     {
@@ -1363,6 +1470,11 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that under <see cref="PanelSortMode.Name"/>, an active
+    /// <see cref="PanelContentFilter.HideAll"/> filter results in an empty
+    /// <see cref="BaseViewModel.FileItems"/> list without throwing.
+    /// </summary>
     [Fact]
     public void SortModeName_WithHideAllFilter_ResultsInEmptyListWithoutExceptions()
     {
@@ -1377,6 +1489,11 @@ public class ChildWindowViewModelTests
 
     // ── ADR-014: AddFiles while sorted by name ───────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that adding a new file while <see cref="PanelSortMode.Name"/> is active inserts it at
+    /// its alphabetical position in <see cref="BaseViewModel.FileItems"/>, rather than appending
+    /// it at the end.
+    /// </summary>
     [Fact]
     public void AddFiles_WhileSortModeIsName_NewItemInsertedAtAlphabeticalPosition_NotAppended()
     {
@@ -1393,12 +1510,19 @@ public class ChildWindowViewModelTests
 
     // ── ADR-014 Decision 6: ReorderItem auto-switches Name -> Manual ─────────────────────────────
 
+    /// <summary>
+    /// Verifies that dragging an item while <see cref="PanelSortMode.Name"/> is active switches
+    /// <see cref="ChildWindowModel.SortMode"/> to <see cref="PanelSortMode.Manual"/> and materializes
+    /// the currently-sorted visible order into <see cref="BaseViewModel.AllItems"/>, with the
+    /// dragged item placed at its drop position.
+    /// </summary>
     [Fact]
     public void ReorderItem_FromNameMode_SwitchesToManual_MaterializesOrderWithMovedItemInPlace()
     {
         using var sut = BuildSut();
         sut.LoadFromModel(new ChildWindowModel { SortMode = PanelSortMode.Name });
         sut.AddFiles([@"C:\fake\b.txt", @"C:\fake\a.txt", @"C:\fake\c.txt"]);
+
         // Sorted visible order at this point: a, b, c.
         Assert.Equal(
             [@"C:\fake\a.txt", @"C:\fake\b.txt", @"C:\fake\c.txt"],
@@ -1418,6 +1542,11 @@ public class ChildWindowViewModelTests
             sut.FileItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// ADR-014 Decision 6/8: verifies that the Name-to-Manual sort mode switch and the actual item move
+    /// triggered by a single drag-drop gesture surface as exactly one
+    /// <see cref="ChildWindowViewModel.FilesChanged"/> notification, not two.
+    /// </summary>
     [Fact]
     public void ReorderItem_FromNameMode_RealMove_RaisesFilesChangedExactlyOnce()
     {
@@ -1438,6 +1567,11 @@ public class ChildWindowViewModelTests
         Assert.Equal(1, filesChangedCount);
     }
 
+    /// <summary>
+    /// Verifies that even when the drop gap is a no-op for the underlying item move, the Name-to-Manual
+    /// sort mode switch is itself a real, persistable state change that still raises
+    /// <see cref="ChildWindowViewModel.FilesChanged"/> exactly once.
+    /// </summary>
     [Fact]
     public void ReorderItem_FromNameMode_NoOpDrop_StillSwitchesToManual_RaisesFilesChangedExactlyOnce()
     {
@@ -1461,6 +1595,11 @@ public class ChildWindowViewModelTests
 
     // ── ReorderItem while already Manual ─────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that reordering an item while already in <see cref="PanelSortMode.Manual"/> leaves the
+    /// sort mode unchanged and raises <see cref="ChildWindowViewModel.FilesChanged"/> exactly once for
+    /// a real move.
+    /// </summary>
     [Fact]
     public void ReorderItem_InManualMode_DoesNotChangeSortMode_RaisesFilesChangedOnceOnRealMove()
     {
@@ -1482,6 +1621,10 @@ public class ChildWindowViewModelTests
             sut.FileItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that reordering an item to a gap that is a no-op while already in
+    /// <see cref="PanelSortMode.Manual"/> does not raise <see cref="ChildWindowViewModel.FilesChanged"/>.
+    /// </summary>
     [Fact]
     public void ReorderItem_InManualMode_NoOpDrop_DoesNotRaiseFilesChanged()
     {
@@ -1501,6 +1644,11 @@ public class ChildWindowViewModelTests
 
     // ── ADR-014 Decision 7: Folder Portal sort behavior ──────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that in a Folder Portal panel, <see cref="ChildWindowViewModel.EffectiveSortMode"/> is
+    /// always forced to <see cref="PanelSortMode.Name"/>, even though the raw
+    /// <see cref="ChildWindowModel.SortMode"/> stays <see cref="PanelSortMode.Manual"/>.
+    /// </summary>
     [Fact]
     public void EffectiveSortMode_PortalPanel_AlwaysName_EvenWhenModelSortModeIsManual()
     {
@@ -1528,6 +1676,11 @@ public class ChildWindowViewModelTests
     //    EffectiveSortMode on every single path that changes what either projects to — verified here
     //    for all such paths found via `grep EffectiveSortMode` in ChildWindowViewModel.cs. ────────────
 
+    /// <summary>
+    /// Verifies that loading a model that puts the panel into Folder Portal mode raises
+    /// <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/> for both
+    /// <see cref="ChildWindowViewModel.EffectiveSortMode"/> and <see cref="ChildWindowViewModel.IsSortedByName"/>.
+    /// </summary>
     [Fact]
     public void LoadFromModel_EntersPortal_RaisesBothEffectiveSortModeAndIsSortedByName()
     {
@@ -1564,6 +1717,11 @@ public class ChildWindowViewModelTests
     // call-sites (entering and leaving the portal) that used to carry the CRITICAL-2 manual
     // `OnPropertyChanged(nameof(EffectiveSortMode))` calls before this change.
 
+    /// <summary>
+    /// Verifies that changing <see cref="ChildWindowModel.SortMode"/> directly raises
+    /// <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/> for both
+    /// <see cref="ChildWindowViewModel.EffectiveSortMode"/> and <see cref="ChildWindowViewModel.IsSortedByName"/>.
+    /// </summary>
     [Fact]
     public void ModelSortModeChanged_RaisesBothEffectiveSortModeAndIsSortedByName()
     {
@@ -1580,6 +1738,12 @@ public class ChildWindowViewModelTests
         Assert.True(sut.IsSortedByName);
     }
 
+    /// <summary>
+    /// Verifies that executing <see cref="ChildWindowViewModel.ToggleSortModeCommand"/> switches the
+    /// model to <see cref="PanelSortMode.Name"/> and raises
+    /// <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/> for both
+    /// <see cref="ChildWindowViewModel.EffectiveSortMode"/> and <see cref="ChildWindowViewModel.IsSortedByName"/>.
+    /// </summary>
     [Fact]
     public void ToggleSortModeCommand_RaisesBothEffectiveSortModeAndIsSortedByName()
     {
@@ -1597,6 +1761,11 @@ public class ChildWindowViewModelTests
         Assert.Equal(PanelSortMode.Name, sut.Model.SortMode);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ChildWindowViewModel.IsSortedByName"/> tracks
+    /// <see cref="ChildWindowViewModel.EffectiveSortMode"/> as the model toggles between
+    /// <see cref="PanelSortMode.Manual"/> and <see cref="PanelSortMode.Name"/>.
+    /// </summary>
     [Fact]
     public void IsSortedByName_ReflectsEffectiveSortMode_ManualAndName()
     {
@@ -1612,6 +1781,11 @@ public class ChildWindowViewModelTests
         Assert.False(sut.IsSortedByName);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="ChildWindowViewModel.ReorderItem"/> in a Folder Portal panel is
+    /// a no-op: it neither raises <see cref="ChildWindowViewModel.FilesChanged"/> nor reorders
+    /// <see cref="BaseViewModel.AllItems"/>.
+    /// </summary>
     [Fact]
     public void ReorderItem_PortalPanel_IsNoOp_DoesNotRaiseFilesChangedOrReorderAllItems()
     {
@@ -1642,6 +1816,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ChildWindowViewModel.SetSortModeCommand"/> cannot execute for a Folder
+    /// Portal panel, but can execute for a regular panel.
+    /// </summary>
     [Fact]
     public void SetSortModeCommand_CanExecute_FalseForPortal_TrueOtherwise()
     {
@@ -1666,6 +1844,10 @@ public class ChildWindowViewModelTests
         }
     }
 
+    /// <summary>
+    /// Verifies that executing <see cref="ChildWindowViewModel.SetSortModeCommand"/> writes the given
+    /// value to <see cref="ChildWindowModel.SortMode"/>.
+    /// </summary>
     [Fact]
     public void SetSortModeCommand_Execute_WritesModelSortMode()
     {
@@ -1679,6 +1861,10 @@ public class ChildWindowViewModelTests
 
     // ── P06 (docs/fix-prompts/06-fit-content.md): SetIconLayoutPolicyCommand ────────────────────────
 
+    /// <summary>
+    /// Verifies that executing <see cref="ChildWindowViewModel.SetIconLayoutPolicyCommand"/> writes the
+    /// given value to <see cref="ChildWindowModel.IconLayoutPolicy"/>.
+    /// </summary>
     [Fact]
     public void SetIconLayoutPolicyCommand_Execute_WritesModelIconLayoutPolicy()
     {
@@ -1690,6 +1876,11 @@ public class ChildWindowViewModelTests
         Assert.Equal(IconLayoutPolicy.FixedGap, sut.Model.IconLayoutPolicy);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ChildWindowViewModel.SetIconLayoutPolicyCommand"/> can always execute,
+    /// including for a Folder Portal panel — unlike <see cref="ChildWindowViewModel.SetSortModeCommand"/>,
+    /// icon layout policy has nothing to do with manual item ordering.
+    /// </summary>
     [Fact]
     public void SetIconLayoutPolicyCommand_CanExecute_AlwaysTrue_EvenForAPortal()
     {
@@ -1718,6 +1909,11 @@ public class ChildWindowViewModelTests
 
     // ── ADR-014 Decision 7 (fixes §1.2): Folder Portal watcher tick preserves alphabetical order ───
 
+    /// <summary>
+    /// Verifies that when the folder watcher reports a new file in a Folder Portal panel, the item is
+    /// inserted at its alphabetical position in <see cref="BaseViewModel.FileItems"/>, not
+    /// appended at the end.
+    /// </summary>
     [Fact]
     public void Portal_WatcherCreatedEvent_NewFileInsertedAtAlphabeticalPosition_NotAppended()
     {
@@ -1865,6 +2061,10 @@ public class ChildWindowViewModelTests
 
     // ── MAJOR M-1 (P08 fix cycle 2): RefreshExistence single-flight guard ───────────────────────────
 
+    /// <summary>
+    /// Verifies that the first <see cref="ChildWindowViewModel.RefreshExistence"/> tick with no refresh
+    /// already pending queues one and marks <see cref="ChildWindowViewModel.IsExistenceRefreshPending"/>.
+    /// </summary>
     [Fact]
     public void RefreshExistence_WhenNoRefreshIsPending_QueuesOneAndMarksItPending()
     {
@@ -1903,6 +2103,11 @@ public class ChildWindowViewModelTests
             "still exactly one refresh pending after 10 ticks — never reset/corrupted by the later, skipped ticks.");
     }
 
+    /// <summary>
+    /// Verifies that a <see cref="ChildWindowViewModel.RefreshExistence"/> tick arriving after
+    /// <see cref="ChildWindowViewModel.Dispose"/> early-returns without throwing and without claiming
+    /// the single-flight pending slot.
+    /// </summary>
     [Fact]
     public void RefreshExistence_AfterDispose_NeverTouchesThePendingFlag()
     {
@@ -1920,6 +2125,10 @@ public class ChildWindowViewModelTests
 
     // ── ui-polishing-1 §2.4 Block A2: IPanelSelectionCoordinator integration ─────────────────────
 
+    /// <summary>
+    /// Verifies that setting <see cref="BaseViewModel.SelectedFile"/> to a non-null item notifies
+    /// <see cref="IPanelSelectionCoordinator"/> of the claim.
+    /// </summary>
     [Fact]
     public void SelectedFile_SetToNonNull_NotifiesCoordinator()
     {
@@ -1931,6 +2140,10 @@ public class ChildWindowViewModelTests
         _selectionCoordinatorMock.Verify(c => c.NotifySelected(sut), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that clearing <see cref="BaseViewModel.SelectedFile"/> to <c>null</c> does not
+    /// notify <see cref="IPanelSelectionCoordinator"/>, since clearing is not a selection claim.
+    /// </summary>
     [Fact]
     public void SelectedFile_SetToNull_DoesNotNotifyCoordinator()
     {
@@ -1946,6 +2159,10 @@ public class ChildWindowViewModelTests
         _selectionCoordinatorMock.Verify(c => c.NotifySelected(It.IsAny<object>()), Times.Never);
     }
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelSelectionCoordinator.SelectionClaimed"/> fires for a
+    /// different owner, <see cref="BaseViewModel.SelectedFile"/> is cleared.
+    /// </summary>
     [Fact]
     public void SelectionClaimed_FromAnotherOwner_ClearsSelectedFile()
     {
@@ -1958,6 +2175,10 @@ public class ChildWindowViewModelTests
         Assert.Null(sut.SelectedFile);
     }
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelSelectionCoordinator.SelectionClaimed"/> fires for this same
+    /// view model as owner, <see cref="BaseViewModel.SelectedFile"/> is left untouched.
+    /// </summary>
     [Fact]
     public void SelectionClaimed_FromSelf_DoesNotClearSelectedFile()
     {
@@ -1973,6 +2194,11 @@ public class ChildWindowViewModelTests
         Assert.Same(item, sut.SelectedFile);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ChildWindowViewModel.Dispose"/> unsubscribes from
+    /// <see cref="IPanelSelectionCoordinator.SelectionClaimed"/>, so a later claim from another owner
+    /// does not touch the disposed instance or throw.
+    /// </summary>
     [Fact]
     public void Dispose_UnsubscribesFromSelectionClaimed()
     {
@@ -1990,6 +2216,11 @@ public class ChildWindowViewModelTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Integration-style (ui-polishing-1 §2.4 Block A2 DoD 4): verifies that two
+    /// <see cref="ChildWindowViewModel"/> panels sharing a real <see cref="PanelSelectionCoordinator"/>
+    /// clear each other's selection whenever one selects an item.
+    /// </summary>
     [Fact]
     public void TwoPanels_SharingCoordinator_SelectingInOneClearsTheOther()
     {
@@ -2016,6 +2247,11 @@ public class ChildWindowViewModelTests
         Assert.Null(panel2.SelectedFile);
     }
 
+    /// <summary>
+    /// Regression guard for ui-polishing-1 §2.4 Block A2 risk R3: verifies that repeatedly bouncing
+    /// selection between two panels sharing one real <see cref="PanelSelectionCoordinator"/> terminates
+    /// normally instead of recursing into a stack overflow.
+    /// </summary>
     [Fact]
     public void TwoPanels_SharingCoordinator_NoRecursionOrStackOverflow()
     {
@@ -2046,6 +2282,12 @@ public class ChildWindowViewModelTests
 
     // ── ui-polishing-1 §5.6 DoD 4: cross-panel-type selection (fence panel <-> sidebar) ──────────
 
+    /// <summary>
+    /// Integration-style (ui-polishing-1 Block D, DoD 4): verifies that a fence panel
+    /// (<see cref="ChildWindowViewModel"/>) and the system icons sidebar (<see cref="SystemIconsPanelViewModel"/>)
+    /// sharing a real <see cref="PanelSelectionCoordinator"/> clear each other's selection when either
+    /// selects an item.
+    /// </summary>
     [Fact]
     public void TwoPanels_SharingCoordinator_ChildWindowAndSystemIconsPanel_SelectingInOneClearsTheOther()
     {
@@ -2077,4 +2319,92 @@ public class ChildWindowViewModelTests
         Assert.Same(fenceItem, fencePanel.SelectedFile);
         Assert.Null(sidebarPanel.SelectedItem);
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The VM constructor resolves <c>ListViewTemplate</c>/<c>GridViewTemplate</c> via
+    /// <see cref="System.Windows.Application.Current"/>. There's no WPF host in the test process by
+    /// default (no <c>UseWPF</c> app bootstrap), so a minimal <see cref="System.Windows.Application"/>
+    /// is created once per test run, mirroring what <c>App.xaml</c> does in production.
+    /// </summary>
+    /// <remarks>
+    /// M-2 fix (P08 fix cycle 2, sta-test-conventions.md "live but non-pumping owner"): delegates to
+    /// <see cref="WpfApplicationHost.EnsureApplication"/> — the one place the real merge chain
+    /// <c>App.xaml.cs</c>'s own <c>LoadResourceDictionaries()</c> builds is defined — instead of hand-
+    /// rolling a throwaway <see cref="System.Windows.Application"/> with only <c>Templates.xaml</c>
+    /// merged in. Whichever call across the whole <c>dotnet test</c> process gets here first still owns
+    /// <see cref="System.Windows.Application.Current"/> for the rest of the run (see that class's own
+    /// remarks); this method no longer duplicates that decision with its own "was it null before" check.
+    /// </remarks>
+    private static void EnsureWpfApplication() => WpfApplicationHost.EnsureApplication();
+
+    /// <summary>
+    /// Ensures every operation already queued on <paramref name="dispatcher"/> at Normal priority or
+    /// above — in particular, whatever <c>ChildWindowViewModel.OnFolderChanged</c> just queued via the
+    /// fire-and-forget <see cref="UiDispatch.TryBeginInvoke"/> (CRITICAL C-1 fix, P08 fix cycle 2) — has
+    /// run, before returning.
+    /// </summary>
+    /// <remarks>
+    /// Takes <paramref name="dispatcher"/> explicitly (always <c>Application.Current!.Dispatcher</c> at
+    /// the call site) rather than assuming <see cref="Dispatcher.CurrentDispatcher"/> — i.e. THIS xUnit
+    /// thread's own — because WHICH thread ends up owning <see cref="Application.Current"/> for the whole
+    /// `dotnet test` process depends on whichever WPF-touching fixture across the ENTIRE assembly happens
+    /// to run first (see <see cref="WpfApplicationHost"/>'s own remarks): it might be this very
+    /// constructor's own <see cref="EnsureWpfApplication"/> call, or it might be a dedicated
+    /// <c>StaTestRunner</c>-owned worker thread from a completely different test class that got there
+    /// first. Two different drain mechanisms follow from that:
+    /// <list type="bullet">
+    /// <item><description>
+    /// Same thread (<see cref="Dispatcher.CheckAccess"/> true — this xUnit thread owns
+    /// <see cref="Application.Current"/> itself): it is NOT otherwise pumping at all, so a blocking wait
+    /// here would deadlock; push a nested <see cref="DispatcherFrame"/> instead, which re-enters the
+    /// dispatcher's own queue processing synchronously, in place.
+    /// </description></item>
+    /// <item><description>
+    /// A different thread (some other fixture's <c>StaTestRunner</c>-owned worker): that thread is, by
+    /// `StaTestRunner`'s own contract, ALREADY pumping forever, so a plain blocking wait for a
+    /// low-priority marker to run is both safe (this thread isn't the one that needs to pump) and
+    /// correct.
+    /// </description></item>
+    /// </list>
+    /// </remarks>
+    private static void FlushDispatcherQueue(Dispatcher dispatcher)
+    {
+        if (dispatcher.CheckAccess())
+        {
+            var frame = new DispatcherFrame();
+            dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
+            return;
+        }
+
+        using var completed = new ManualResetEventSlim(initialState: false);
+        dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() => completed.Set()));
+
+        if (!completed.Wait(Timeout))
+        {
+            throw new TimeoutException(
+                $"{nameof(ChildWindowViewModelTests)}.{nameof(FlushDispatcherQueue)}: dispatcher did not drain within {Timeout}.");
+        }
+    }
+
+    private static string NewTempFilePath() => Path.Combine(Path.GetTempPath(), $"DOrgVmTest_{Guid.NewGuid():N}.txt");
+
+    private static string NewTempDirPath()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"DOrgVmTestDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private ChildWindowViewModel BuildSut(IPanelSelectionCoordinator? selectionCoordinator = null) => new(
+        _iconProviderMock.Object,
+        _fileLauncherMock.Object,
+        _watcherFactoryMock.Object,
+        _storageMock.Object,
+        _renameServiceMock.Object,
+        _appSettingsMock.Object,
+        selectionCoordinator ?? _selectionCoordinatorMock.Object,
+        _diagnosticsMock.Object);
 }

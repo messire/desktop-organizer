@@ -14,6 +14,10 @@ namespace DesktopOrganizer.Tests.Unit.Theming;
 [Trait(UnitTests, "UI")]
 public class HighContrastStateTests
 {
+    /// <summary>
+    /// Verifies that <see cref="HighContrastState.IsActive"/> round-trips through set/get, restoring the
+    /// original value afterward so this test never leaks state into other tests sharing the collection.
+    /// </summary>
     [Fact]
     public void IsActive_IsSettableAndReadable_RoundTrips()
     {

@@ -93,48 +93,12 @@ public class JsonApplicationStateStoreTests
             throw new InvalidOperationException("Simulated migration bug (test-only).");
     }
 
-    private static (string Root, StateStorePaths Paths) BuildPaths()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"DOrgState_{Guid.NewGuid():N}");
-        return (root, new StateStorePaths(root));
-    }
-
-    private static void SafeDeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
-    }
-
-    private static JsonApplicationStateStore BuildStore(
-        StateStorePaths paths,
-        FakeStorageLock? storageLock = null,
-        FakeLegacyImporter? legacyImporter = null,
-        StateMigrationRunner? migrationRunner = null,
-        FakeDiagnosticsLog? diagnostics = null,
-        Func<StateWriteStage, bool>? testForceWriteFailureAt = null) =>
-        new(
-            paths,
-            storageLock ?? new FakeStorageLock(),
-            legacyImporter ?? new FakeLegacyImporter(),
-            migrationRunner ?? new StateMigrationRunner(Array.Empty<ISettingsMigration>()),
-            () => diagnostics is not null ? diagnostics : NullDiagnosticsLog.Instance,
-            testForceWriteFailureAt);
-
-    private static void SeedFile(StateStorePaths paths, string path, JsonObject fullDocument)
-    {
-        Directory.CreateDirectory(paths.StateDirectory);
-        File.WriteAllText(path, fullDocument.ToJsonString());
-    }
-
-    private static JsonObject FullDocument(int schemaVersion, string marker) =>
-        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, schemaVersion, DateTimeOffset.UtcNow, "test");
-
     // ── Rung 1: Loaded ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies read/recovery ladder rung 1: a primary file already at the current schema loads as
+    /// <see cref="StateLoadStatus.Loaded"/> with zero migrations applied and its payload preserved.
+    /// </summary>
     [Fact]
     public void Load_PrimaryAtCurrentSchema_ReturnsLoaded_NoMigrationsApplied()
     {
@@ -158,6 +122,11 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a primary file at an older schema is migrated to current and the migrated document
+    /// is written back to primary, so a second, independent <see cref="JsonApplicationStateStore.Load"/>
+    /// sees it already at the current version with zero further migrations applied (S-4 analogue).
+    /// </summary>
     [Fact]
     public void Load_PrimaryAtOlderSchema_MigratesAndRewritesPrimary_SecondLoadAppliesZero()
     {
@@ -196,6 +165,11 @@ public class JsonApplicationStateStoreTests
     // a permanent, one-time snapshot of the document as it existed before an in-place migration, so a
     // rollback to an older build has something recoverable even after `.bak` gets rotated by the next
     // ordinary Save(). ────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that migrating an older-schema primary writes a permanent, one-time pre-migration
+    /// snapshot of the document as it existed before migration (MINOR fix, fix-cycle 1, docs/PLANS/workspace-grid-migration.md §10.5).
+    /// </summary>
     [Fact]
     public void Load_PrimaryAtOlderSchema_WritesPermanentPreMigrationSnapshot()
     {
@@ -220,6 +194,12 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that the permanent pre-migration snapshot survives a subsequent ordinary
+    /// <see cref="JsonApplicationStateStore.Save"/> that rotates <c>.bak</c> to the just-migrated
+    /// content — before this fix, the pre-migration document only survived in <c>.bak</c> and any
+    /// post-migration save would permanently lose the original.
+    /// </summary>
     [Fact]
     public void Load_PreMigrationSnapshotSurvives_AfterASubsequentOrdinarySaveRotatesBak()
     {
@@ -247,6 +227,11 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that an existing pre-migration snapshot for a given source schema version is never
+    /// overwritten by a second, independent upgrade from that same version (e.g. an operator manually
+    /// restoring an old backup that gets migrated again).
+    /// </summary>
     [Fact]
     public void Load_PrimaryAtOlderSchema_SecondUpgradeFromSameVersion_DoesNotOverwriteExistingSnapshot()
     {
@@ -270,6 +255,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that no pre-migration snapshot is written when the primary is already at the current
+    /// schema, since no migration ran.
+    /// </summary>
     [Fact]
     public void Load_PrimaryAlreadyAtCurrentSchema_NoMigrationRan_DoesNotWritePreMigrationSnapshot()
     {
@@ -289,6 +278,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when the primary is missing and the backup is at an older schema, migrating the
+    /// recovered backup still writes a permanent pre-migration snapshot of the backup's original content.
+    /// </summary>
     [Fact]
     public void Load_PrimaryMissing_BackupAtOlderSchema_WritesPermanentPreMigrationSnapshot()
     {
@@ -315,6 +308,11 @@ public class JsonApplicationStateStoreTests
     // ── Pre-migration backup, fix-cycle 2 (MAJOR N-2, docs/PLANS/workspace-grid-migration.md §10.8):
     // (1) must respect the advisory storage lock, same as PersistAfterLoad; (2) must never leave a
     // truncated file under the permanent target name if the write is interrupted. ──────────────────
+
+    /// <summary>
+    /// Verifies that the pre-migration snapshot respects the advisory storage lock: when the lock is not
+    /// held, no snapshot is written (MAJOR N-2, fix-cycle 2, docs/PLANS/workspace-grid-migration.md §10.8).
+    /// </summary>
     [Fact]
     public void Load_PrimaryAtOlderSchema_StorageLockNotHeld_DoesNotWritePreMigrationSnapshot()
     {
@@ -335,6 +333,11 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that an orphaned, incomplete temp file left over from a process that crashed mid-way
+    /// through a previous pre-migration snapshot write is swept before this attempt writes its own, so
+    /// the permanent snapshot target never ends up holding truncated content (MAJOR N-2, fix-cycle 2).
+    /// </summary>
     [Fact]
     public void Load_PrimaryAtOlderSchema_OrphanedTempFileFromPriorCrash_DoesNotLeaveATruncatedSnapshot()
     {
@@ -370,6 +373,11 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── Rung 2: RecoveredFromBackup (primary missing) ───────────────────────
+
+    /// <summary>
+    /// Verifies read/recovery ladder rung 2: a missing primary with a valid backup recovers as
+    /// <see cref="StateLoadStatus.RecoveredFromBackup"/> and immediately rewrites the primary from the backup.
+    /// </summary>
     [Fact]
     public void Load_PrimaryMissing_BackupValid_RecoversAndRewritesPrimary()
     {
@@ -392,6 +400,11 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when the primary is missing, the backup is valid, but the advisory storage lock is
+    /// not held, recovery happens in memory (a degraded read-only session) but never touches disk, not
+    /// even for the internal recovery rewrite.
+    /// </summary>
     [Fact]
     public void Load_PrimaryMissing_BackupValid_LockNotHeld_RecoversInMemoryButDoesNotWrite()
     {
@@ -414,6 +427,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that recovering from a valid backup with a missing primary writes a
+    /// "StateRecoveredFromBackup" diagnostic event with reason "PrimaryMissing".
+    /// </summary>
     [Fact]
     public void Load_PrimaryMissing_BackupValid_WritesStateRecoveredFromBackupDiagnosticEvent()
     {
@@ -436,6 +453,11 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── Rung 3: RecoveredFromBackup (primary corrupt) ───────────────────────
+
+    /// <summary>
+    /// Verifies read/recovery ladder rung 3: a corrupt primary with a valid backup quarantines the
+    /// corrupt primary (byte-for-byte, unmodified) and recovers as <see cref="StateLoadStatus.RecoveredFromBackup"/>.
+    /// </summary>
     [Fact]
     public void Load_PrimaryCorrupt_BackupValid_QuarantinesPrimaryAndRecovers()
     {
@@ -468,6 +490,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that recovering from a valid backup with a corrupt primary writes a
+    /// "StateRecoveredFromBackup" diagnostic event with reason "PrimaryCorrupt".
+    /// </summary>
     [Fact]
     public void Load_PrimaryCorrupt_BackupValid_WritesStateRecoveredFromBackupDiagnosticEvent()
     {
@@ -492,6 +518,11 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── Rung 4: Quarantined ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies read/recovery ladder rung 4: a corrupt primary with no backup quarantines the primary and
+    /// returns <see cref="StateLoadStatus.Quarantined"/> with an empty payload, while the store remains writable.
+    /// </summary>
     [Fact]
     public void Load_PrimaryCorrupt_NoBackup_QuarantinesAndReturnsEmptyWritable()
     {
@@ -517,6 +548,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when both the primary and the backup are corrupt, both files are quarantined and
+    /// the load returns <see cref="StateLoadStatus.Quarantined"/>.
+    /// </summary>
     [Fact]
     public void Load_PrimaryCorrupt_BackupAlsoCorrupt_QuarantinesBoth()
     {
@@ -543,6 +578,11 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when the primary is missing and the backup is corrupt, the backup is quarantined
+    /// and the load returns <see cref="StateLoadStatus.Quarantined"/> without ever falling back to
+    /// importing from the legacy store, even though legacy data is present.
+    /// </summary>
     [Fact]
     public void Load_PrimaryMissing_BackupCorrupt_QuarantinesBackup_DoesNotFallBackToLegacy()
     {
@@ -567,6 +607,12 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── Rung 5: ImportedFromLegacy ───────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies read/recovery ladder rung 5: with nothing on disk but legacy data present, the legacy
+    /// document is imported, migrated to current, written to primary, and the load returns
+    /// <see cref="StateLoadStatus.ImportedFromLegacy"/>.
+    /// </summary>
     [Fact]
     public void Load_NothingOnDisk_LegacyHasData_ImportsMigratesAndWrites()
     {
@@ -595,6 +641,11 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── Rung 6: FirstRun ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies read/recovery ladder rung 6: with nothing on disk and no legacy data, the load returns
+    /// <see cref="StateLoadStatus.FirstRun"/> with an empty payload and writes nothing.
+    /// </summary>
     [Fact]
     public void Load_NothingOnDisk_LegacyEmpty_ReturnsFirstRun_WritesNothing()
     {
@@ -618,6 +669,13 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── Rung 7: NewerSchema ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies read/recovery ladder rung 7: a primary at a newer-than-current schema returns
+    /// <see cref="StateLoadStatus.NewerSchema"/> with an empty payload, leaves the on-disk primary
+    /// untouched, and permanently marks the store non-writable for the rest of the session, including
+    /// against a subsequent <see cref="JsonApplicationStateStore.Save"/> call.
+    /// </summary>
     [Fact]
     public void Load_PrimaryNewerSchema_ReturnsEmptyPayload_NeverWritable_NeverWritesForSession()
     {
@@ -648,6 +706,11 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── Write barrier (D-11) ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="JsonApplicationStateStore.Save"/> called before <c>Load</c> returns
+    /// <see cref="StateSaveResult.SkippedBeforeLoad"/> and never writes to disk (D-11 write barrier).
+    /// </summary>
     [Fact]
     public void Save_BeforeLoad_ReturnsSkippedBeforeLoad_NeverWrites()
     {
@@ -668,6 +731,11 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── No-op guard ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that saving structurally identical payload content twice in a row skips the second
+    /// write as <see cref="StateSaveResult.SkippedNoChange"/>.
+    /// </summary>
     [Fact]
     public void Save_SamePayloadTwice_SecondCallIsSkippedNoChange()
     {
@@ -690,6 +758,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="JsonApplicationStateStore.Save"/> throws <see cref="ArgumentException"/>
+    /// when the caller's payload includes a reserved envelope key such as <c>schemaVersion</c>.
+    /// </summary>
     [Fact]
     public void Save_ReservedEnvelopeKeyInPayload_Throws()
     {
@@ -708,6 +780,12 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── Storage lock: read-only degradation ─────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="JsonApplicationStateStore.Save"/> returns
+    /// <see cref="StateSaveResult.SkippedReadOnly"/> and never writes to disk when the advisory storage
+    /// lock is not held.
+    /// </summary>
     [Fact]
     public void Save_LockNotHeld_ReturnsSkippedReadOnly_NeverWrites()
     {
@@ -730,6 +808,13 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── A failed write never moves committed state (D-6 step 5) ────────────
+
+    /// <summary>
+    /// Verifies that a save that fails after the OS-level atomic replace already completed
+    /// (<see cref="StateWriteStage.AfterReplace"/>) does not move the store's own committed-state
+    /// baseline, so a second <see cref="JsonApplicationStateStore.Save"/> with the exact same payload is
+    /// still treated as a real write rather than a wrongly-skipped no-op (D-6 step 5).
+    /// </summary>
     [Fact]
     public void Save_WriteFails_DoesNotMoveCommittedState_NextSaveWithSamePayloadStillWrites()
     {
@@ -771,6 +856,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a save that fails before the atomic replace (<see cref="StateWriteStage.AfterValidate"/>)
+    /// never creates the primary file, on a store that had no primary to begin with.
+    /// </summary>
     [Fact]
     public void Save_WriteFailsAtEarlyStage_PrimaryUnchanged()
     {
@@ -794,6 +883,12 @@ public class JsonApplicationStateStoreTests
 
     // ── M-6: a migration bug must never brick startup ────────────────────────
 
+    /// <summary>
+    /// Verifies that a bug inside a registered migration (simulated by <see cref="ThrowingMigration"/>)
+    /// never crashes <see cref="JsonApplicationStateStore.Load"/>: the primary is quarantined, the load
+    /// returns <see cref="StateLoadStatus.Quarantined"/>, and the store remains writable for the rest of
+    /// the session (M-6).
+    /// </summary>
     [Fact]
     public void Load_PrimaryOlderSchema_MigrationThrows_QuarantinesPrimary_ReturnsQuarantinedInsteadOfCrashing()
     {
@@ -819,6 +914,12 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when the primary is corrupt, the backup is valid, but migrating the recovered
+    /// backup throws, both the corrupt primary and the failed-to-migrate backup end up quarantined and
+    /// the load returns <see cref="StateLoadStatus.Quarantined"/> — neither file is left on disk to keep
+    /// failing every subsequent load (M-6).
+    /// </summary>
     [Fact]
     public void Load_PrimaryCorrupt_BackupValid_MigrationThrows_QuarantinesBothFiles_ReturnsQuarantined()
     {
@@ -849,6 +950,11 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when the primary is missing and migrating the recovered backup throws, the backup
+    /// is quarantined, the load returns <see cref="StateLoadStatus.Quarantined"/>, and the store remains
+    /// writable (M-6).
+    /// </summary>
     [Fact]
     public void Load_PrimaryMissing_BackupValid_MigrationThrows_QuarantinesBackup_ReturnsQuarantined()
     {
@@ -873,6 +979,12 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that when migrating a freshly imported legacy document throws, the load returns
+    /// <see cref="StateLoadStatus.Quarantined"/> with an empty payload and no quarantine file path (since
+    /// nothing under the state directory backs a legacy-imported document), without throwing and while
+    /// keeping the store writable (M-6).
+    /// </summary>
     [Fact]
     public void Load_LegacyImport_MigrationThrows_ReturnsQuarantinedEmptyPayload_NoFileToQuarantine_StillWritable()
     {
@@ -897,6 +1009,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a migration failure writes a "StateMigrationFailed" diagnostic event carrying the
+    /// from/to schema versions and only the exception's type name, never its message or any other detail.
+    /// </summary>
     [Fact]
     public void Load_MigrationThrows_WritesStateMigrationFailedDiagnosticEvent_ErrorTypeOnlyNeverMessage()
     {
@@ -925,6 +1041,11 @@ public class JsonApplicationStateStoreTests
     }
 
     // ── Diagnostics privacy (R-12): only ex.GetType().Name, never a path or ex.Message ──────────
+
+    /// <summary>
+    /// Verifies that a "StateSaveFailed" diagnostic event carries only the failing exception's type
+    /// name and never the file path or exception message (R-12 diagnostics privacy).
+    /// </summary>
     [Fact]
     public void Save_WriteFails_DiagnosticsCarryOnlyExceptionTypeName_NeverMessageOrPath()
     {
@@ -951,6 +1072,11 @@ public class JsonApplicationStateStoreTests
 
     // ── QuarantineLoadedDocument (ADR-024 finalization C-1) ─────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="JsonApplicationStateStore.QuarantineLoadedDocument"/> copies (not moves)
+    /// the full current primary content into a quarantine file, leaving the primary file exactly as it
+    /// was and still the committed state until <see cref="JsonApplicationStateStore.Save"/> actually runs.
+    /// </summary>
     [Fact]
     public void QuarantineLoadedDocument_PrimaryExists_CopiesFullPrimaryToQuarantine_LeavesPrimaryInPlace()
     {
@@ -979,6 +1105,12 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies the core C-1 scenario: after a partial load reports itself via
+    /// <see cref="JsonApplicationStateStore.QuarantineLoadedDocument"/> and the very next
+    /// <see cref="JsonApplicationStateStore.Save"/> persists the reduced state, the quarantine file
+    /// keeps holding the full original document even after the primary has been overwritten.
+    /// </summary>
     [Fact]
     public void QuarantineLoadedDocument_ThenSave_QuarantineStillHoldsTheFullOriginalPayload_AfterPrimaryIsOverwritten()
     {
@@ -1008,6 +1140,11 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="JsonApplicationStateStore.QuarantineLoadedDocument"/> multiple
+    /// times within the same load session only quarantines once, regardless of the reason string passed
+    /// on subsequent calls.
+    /// </summary>
     [Fact]
     public void QuarantineLoadedDocument_CalledTwice_OnlyQuarantinesOnce()
     {
@@ -1031,6 +1168,12 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that the once-per-load idempotency guard on
+    /// <see cref="JsonApplicationStateStore.QuarantineLoadedDocument"/> resets on every new
+    /// <see cref="JsonApplicationStateStore.Load"/> call, so a genuinely new session's partial-load
+    /// report still preserves that session's own pre-loss primary.
+    /// </summary>
     [Fact]
     public void QuarantineLoadedDocument_CalledAgainAfterANewLoad_QuarantinesAgain()
     {
@@ -1057,6 +1200,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="JsonApplicationStateStore.QuarantineLoadedDocument"/> before
+    /// <c>Load</c> is a safe no-op that never throws and quarantines nothing.
+    /// </summary>
     [Fact]
     public void QuarantineLoadedDocument_BeforeLoad_DoesNothing_NeverThrows()
     {
@@ -1080,6 +1227,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="JsonApplicationStateStore.QuarantineLoadedDocument"/> is a safe no-op on
+    /// the FirstRun case, where nothing has been committed to disk yet, so there is nothing to preserve.
+    /// </summary>
     [Fact]
     public void QuarantineLoadedDocument_NoPrimaryFileExists_DoesNothing_NeverThrows()
     {
@@ -1104,6 +1255,10 @@ public class JsonApplicationStateStoreTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="JsonApplicationStateStore.QuarantineLoadedDocument"/> writes a
+    /// "StateQuarantined" diagnostic event carrying the caller-supplied reason.
+    /// </summary>
     [Fact]
     public void QuarantineLoadedDocument_WritesStateQuarantinedDiagnosticEventWithReason()
     {
@@ -1125,4 +1280,46 @@ public class JsonApplicationStateStoreTests
             SafeDeleteDirectory(root);
         }
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static (string Root, StateStorePaths Paths) BuildPaths()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"DOrgState_{Guid.NewGuid():N}");
+        return (root, new StateStorePaths(root));
+    }
+
+    private static void SafeDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private static JsonApplicationStateStore BuildStore(
+        StateStorePaths paths,
+        FakeStorageLock? storageLock = null,
+        FakeLegacyImporter? legacyImporter = null,
+        StateMigrationRunner? migrationRunner = null,
+        FakeDiagnosticsLog? diagnostics = null,
+        Func<StateWriteStage, bool>? testForceWriteFailureAt = null) =>
+        new(
+            paths,
+            storageLock ?? new FakeStorageLock(),
+            legacyImporter ?? new FakeLegacyImporter(),
+            migrationRunner ?? new StateMigrationRunner(Array.Empty<ISettingsMigration>()),
+            () => diagnostics is not null ? diagnostics : NullDiagnosticsLog.Instance,
+            testForceWriteFailureAt);
+
+    private static void SeedFile(StateStorePaths paths, string path, JsonObject fullDocument)
+    {
+        Directory.CreateDirectory(paths.StateDirectory);
+        File.WriteAllText(path, fullDocument.ToJsonString());
+    }
+
+    private static JsonObject FullDocument(int schemaVersion, string marker) =>
+        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, schemaVersion, DateTimeOffset.UtcNow, "test");
 }

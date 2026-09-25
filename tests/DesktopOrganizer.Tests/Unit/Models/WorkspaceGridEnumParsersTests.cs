@@ -14,6 +14,13 @@ namespace DesktopOrganizer.Tests.Unit.Models;
 public class WorkspaceGridEnumParsersTests
 {
     // ── PanelGeometryModeParser ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that out-of-range numeric strings, a comma-separated combination of member names,
+    /// unrecognised text, empty, and null all degrade to <see cref="PanelGeometryMode.LegacyFreeform"/>
+    /// rather than producing an undefined enum value.
+    /// </summary>
+    /// <param name="value">The raw, possibly invalid or corrupted persisted string to parse.</param>
     [Theory]
     [InlineData("7")]
     [InlineData("-1")]
@@ -25,6 +32,12 @@ public class WorkspaceGridEnumParsersTests
     public void PanelGeometryMode_InvalidInput_FallsBackToLegacyFreeform(string? value) =>
         Assert.Equal(PanelGeometryMode.LegacyFreeform, PanelGeometryModeParser.ParseOrLegacyFreeform(value));
 
+    /// <summary>
+    /// Verifies that valid member names parse to their corresponding <see cref="PanelGeometryMode"/>
+    /// value regardless of letter case.
+    /// </summary>
+    /// <param name="value">The member name to parse, in any letter case.</param>
+    /// <param name="expected">The <see cref="PanelGeometryMode"/> value that name should parse to.</param>
     [Theory]
     [InlineData("LegacyFreeform", PanelGeometryMode.LegacyFreeform)]
     [InlineData("legacyfreeform", PanelGeometryMode.LegacyFreeform)]
@@ -34,6 +47,13 @@ public class WorkspaceGridEnumParsersTests
         Assert.Equal(expected, PanelGeometryModeParser.ParseOrLegacyFreeform(value));
 
     // ── PanelSizingModeParser ────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that out-of-range numeric strings, a comma-separated combination of member names,
+    /// unrecognised text, empty, and null all degrade to <see cref="PanelSizingMode.Manual"/> rather
+    /// than producing an undefined enum value.
+    /// </summary>
+    /// <param name="value">The raw, possibly invalid or corrupted persisted string to parse.</param>
     [Theory]
     [InlineData("7")]
     [InlineData("-1")]
@@ -45,6 +65,12 @@ public class WorkspaceGridEnumParsersTests
     public void PanelSizingMode_InvalidInput_FallsBackToManual(string? value) =>
         Assert.Equal(PanelSizingMode.Manual, PanelSizingModeParser.ParseOrManual(value));
 
+    /// <summary>
+    /// Verifies that valid member names parse to their corresponding <see cref="PanelSizingMode"/>
+    /// value regardless of letter case.
+    /// </summary>
+    /// <param name="value">The member name to parse, in any letter case.</param>
+    /// <param name="expected">The <see cref="PanelSizingMode"/> value that name should parse to.</param>
     [Theory]
     [InlineData("Manual", PanelSizingMode.Manual)]
     [InlineData("AutoContent", PanelSizingMode.AutoContent)]
@@ -53,6 +79,13 @@ public class WorkspaceGridEnumParsersTests
         Assert.Equal(expected, PanelSizingModeParser.ParseOrManual(value));
 
     // ── IconLayoutPolicyParser ───────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that out-of-range numeric strings, a comma-separated combination of member names,
+    /// unrecognised text, empty, and null all degrade to <see cref="IconLayoutPolicy.LegacyStretch"/>
+    /// rather than producing an undefined enum value.
+    /// </summary>
+    /// <param name="value">The raw, possibly invalid or corrupted persisted string to parse.</param>
     [Theory]
     [InlineData("7")]
     [InlineData("-1")]
@@ -64,6 +97,12 @@ public class WorkspaceGridEnumParsersTests
     public void IconLayoutPolicy_InvalidInput_FallsBackToLegacyStretch(string? value) =>
         Assert.Equal(IconLayoutPolicy.LegacyStretch, IconLayoutPolicyParser.ParseOrLegacyStretch(value));
 
+    /// <summary>
+    /// Verifies that valid member names parse to their corresponding <see cref="IconLayoutPolicy"/>
+    /// value regardless of letter case.
+    /// </summary>
+    /// <param name="value">The member name to parse, in any letter case.</param>
+    /// <param name="expected">The <see cref="IconLayoutPolicy"/> value that name should parse to.</param>
     [Theory]
     [InlineData("LegacyStretch", IconLayoutPolicy.LegacyStretch)]
     [InlineData("FixedGap", IconLayoutPolicy.FixedGap)]

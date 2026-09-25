@@ -126,10 +126,10 @@ public class AdaptiveGridLayoutBaselineTests
         const double persistedDev = 120d;
         const double persistedPersonal = 351d;
 
-        Assert.True(persistedWork >= requiredWork);
-        Assert.True(persistedSoft2 >= requiredSoft2);
-        Assert.True(persistedDev >= requiredDev);
-        Assert.True(persistedPersonal >= requiredPersonal);
+        Assert.True(requiredWork <= persistedWork);
+        Assert.True(requiredSoft2 <= persistedSoft2);
+        Assert.True(requiredDev <= persistedDev);
+        Assert.True(requiredPersonal <= persistedPersonal);
 
         var spread = new[] { persistedWork, persistedSoft2, persistedDev, persistedPersonal };
         Assert.Equal(351d, spread.Max());
@@ -161,6 +161,6 @@ public class AdaptiveGridLayoutBaselineTests
         var stepsFromMinimum = (persisted - minimum) / tickFrequency;
         var nearestTickValue = minimum + (Math.Round(stepsFromMinimum) * tickFrequency);
 
-        Assert.NotEqual(nearestTickValue, persisted);
+        Assert.NotEqual(persisted, nearestTickValue);
     }
 }

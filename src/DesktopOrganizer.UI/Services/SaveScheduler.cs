@@ -13,11 +13,11 @@ namespace DesktopOrganizer.UI.Services;
 /// last user action is never lost.
 ///
 /// The debounce mechanism itself is abstracted behind <see cref="IDebounceTimer"/> (resolved via
-/// <paramref name="timerProvider"/> on every call, not cached at construction) so that:
+/// <c>timerProvider</c> on every call, not cached at construction) so that:
 /// <list type="bullet">
 /// <item>tests can trigger the deferred callback deterministically via a fake timer instead of racing
 /// a real one;</item>
-/// <item>when no timer is available (<paramref name="timerProvider"/> returns <see langword="null"/> —
+/// <item>when no timer is available (<c>timerProvider</c> returns <see langword="null"/> —
 /// e.g. <c>Application.Current</c> is <see langword="null"/> in a headless/test host, or shutdown has
 /// already torn the dispatcher down), <see cref="Request"/> degrades to an immediate synchronous save
 /// instead of silently losing the request.</item>

@@ -42,6 +42,8 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
     /// <summary>
     /// Initializes a new instance of the <see cref="LayoutSnapshotsViewModel"/> class.
     /// </summary>
+    /// <param name="service">Persists and restores layout snapshots.</param>
+    /// <param name="confirmation">Gates the delete command behind a user confirmation prompt.</param>
     public LayoutSnapshotsViewModel(ILayoutSnapshotService service, IConfirmationService confirmation)
     {
         _service = service;
@@ -49,7 +51,7 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
 
         CaptureSnapshotCommand = new RelayCommand(CaptureSnapshot);
         RestoreSnapshotCommand = new RelayCommand<string>(RestoreSnapshot);
-        DeleteSnapshotCommand  = new RelayCommand<string>(DeleteSnapshot);
+        DeleteSnapshotCommand = new RelayCommand<string>(DeleteSnapshot);
 
         _service.Load();
         RefreshList();

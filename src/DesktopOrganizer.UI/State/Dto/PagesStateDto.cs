@@ -8,7 +8,9 @@ namespace DesktopOrganizer.UI.State.Dto;
 /// </summary>
 internal sealed class PagesStateDto
 {
+    /// <summary>The ordered list of page identifiers.</summary>
     public List<string> Ids { get; set; } = ["default"];
 
+    /// <summary>The identifier of the currently active page. Written consistent with <see cref="Ids"/>; not validated on load.</summary>
     public string CurrentPageId { get; set; } = "default";
 }

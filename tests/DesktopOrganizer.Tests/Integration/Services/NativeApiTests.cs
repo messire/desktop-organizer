@@ -18,6 +18,10 @@ public class NativeApiTests
     private const FileAttribute Attributes = FileAttribute.Normal;
     private readonly NativeApi _nativeApi = new ();
 
+    /// <summary>
+    /// Test cases for <see cref="GetFileInfo_ReturnsExpectedResult"/>: an existing file path (expected
+    /// to yield a valid icon handle) and a non-existent one (expected to yield <see cref="IntPtr.Zero"/>).
+    /// </summary>
     public static IEnumerable<object[]> FileInfoTestData => new List<object[]>
     {
         new object[] { Path.GetFullPath("Resources/TestFile.txt"), true, Icon | UseFileAttributes },
@@ -27,6 +31,9 @@ public class NativeApiTests
     /// <summary>
     /// Ensures that GetFileInfo returns the expected result for valid and invalid file paths.
     /// </summary>
+    /// <param name="filePath">The path passed to <c>GetFileInfo</c>.</param>
+    /// <param name="shouldReturnValidHandle">Whether a non-zero icon handle is expected for this path.</param>
+    /// <param name="flags">The <see cref="FileFlag"/> combination passed to <c>GetFileInfo</c>.</param>
     [Theory]
     [MemberData(nameof(FileInfoTestData))]
     public void GetFileInfo_ReturnsExpectedResult(string filePath, bool shouldReturnValidHandle, FileFlag flags)
@@ -56,7 +63,7 @@ public class NativeApiTests
     public void DestroyIcon_BehavesAsExpected()
     {
         // Arrange
-        var validHandle = User32.LoadIcon(IntPtr.Zero, User32.IDI_APPLICATION);
+        var validHandle = User32.LoadIcon(IntPtr.Zero, User32.IdiApplication);
         var invalidHandle = IntPtr.Zero;
 
         // Act & Assert for valid handle
@@ -74,6 +81,10 @@ public class NativeApiTests
     /// Negative coordinates are included on purpose: a monitor left of / above the primary one
     /// produces them, and a sign error here would corrupt every sizing message on such a setup.
     /// </summary>
+    /// <param name="left">The left coordinate to round-trip.</param>
+    /// <param name="top">The top coordinate to round-trip.</param>
+    /// <param name="right">The right coordinate to round-trip.</param>
+    /// <param name="bottom">The bottom coordinate to round-trip.</param>
     [Theory]
     [InlineData(0, 0, 0, 0)]
     [InlineData(10, 20, 310, 420)]
@@ -131,6 +142,12 @@ public class NativeApiTests
     /// The rectangle read back from <c>lParam</c> reports the extent the sizing math works with.
     /// An inverted rectangle is deliberately NOT normalized — it is surfaced as negative extent.
     /// </summary>
+    /// <param name="left">The left coordinate to write.</param>
+    /// <param name="top">The top coordinate to write.</param>
+    /// <param name="right">The right coordinate to write.</param>
+    /// <param name="bottom">The bottom coordinate to write.</param>
+    /// <param name="width">The expected <c>Width</c> computed from the stored rectangle.</param>
+    /// <param name="height">The expected <c>Height</c> computed from the stored rectangle.</param>
     [Theory]
     [InlineData(10, 20, 310, 420, 300, 400)]
     [InlineData(-50, -50, 50, 50, 100, 100)]
@@ -240,6 +257,8 @@ public class NativeApiTests
             GC.KeepAlive(keepAlive);
         }
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Creates a hidden top-level window with a unique class name. The window procedure must stay

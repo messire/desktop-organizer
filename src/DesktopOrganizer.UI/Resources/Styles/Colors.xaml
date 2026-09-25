@@ -132,4 +132,22 @@
         window (plan D-5) — PART_HitCatcher's whole reason to exist.
     -->
     <Color x:Key="Color.HitTest.Catcher">#01000000</Color>
+<!--
+        Overlay scrollbar (docs/prompts/scrollbar-pack, spec 04 "Design tokens"): the custom vertical
+        ScrollBar every panel ListBox's ScrollViewer uses (Controls.xaml's Control.ScrollBar.Overlay,
+        applied as an implicit style from ChildWindow.xaml's PanelRoot and SystemIconsPanelWindow.xaml's
+        root Border — NOT MainWindow.xaml, whose light Settings window stays system-styled, D-9).
+        Neutral graphite / frosted grey, deliberately never accent-tinted and never a glow — the bar
+        must dissolve into PanelChrome's dark surface (Color.Surface.Base #1E1E1E), not compete with it.
+        Track is fully transparent (alpha 00 is fine here: the Track's RepeatButtons carry their own
+        Transparent-brush hit-test fill for WPF hit-testing, and the bar sits over the panel's own composed
+        surface pixels, so the OS-level layered-window click-through of alpha-0 pixels — the
+        PART_HitCatcher alpha=1 concern below — does not apply). Thumb alphas step Normal < Hover < Pressed so the
+        hover/drag feedback is a delicate lightening, not a colour change.
+    -->
+    <Color x:Key="Color.ScrollBar.Track">#00000000</Color>
+    <Color x:Key="Color.ScrollBar.Thumb">#66788088</Color>
+    <Color x:Key="Color.ScrollBar.ThumbBorder">#407F8A90</Color>
+    <Color x:Key="Color.ScrollBar.ThumbHover">#80919BA0</Color>
+    <Color x:Key="Color.ScrollBar.ThumbPressed">#A0A8B0B4</Color>
 </ResourceDictionary>

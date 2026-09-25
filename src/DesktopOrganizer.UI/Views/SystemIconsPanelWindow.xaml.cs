@@ -34,8 +34,9 @@ public partial class SystemIconsPanelWindow : Window
     private readonly ListReorderGestureController<SystemIconItemModel> _reorderController;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="SystemIconsPanelWindow"/>.
+    /// Initializes a new instance of the <see cref="SystemIconsPanelWindow"/> class.
     /// </summary>
+    /// <param name="viewModel">The panel's ViewModel, bound as this window's <see cref="FrameworkElement.DataContext"/>.</param>
     public SystemIconsPanelWindow(SystemIconsPanelViewModel viewModel)
     {
         _viewModel = viewModel;
@@ -67,9 +68,56 @@ public partial class SystemIconsPanelWindow : Window
     }
 
     // -------------------------------------------------------------------------
-    // Right-click → native shell context menu
+    // Helpers
     // -------------------------------------------------------------------------
 
+    /// <summary>
+    /// Returns the zero-based insertion index inside a vertical StackPanel given a drop position.
+    /// </summary>
+    private static int GetInsertionIndex(StackPanel panel, Point dropPos)
+    {
+        int index = 0;
+        foreach (UIElement child in panel.Children)
+        {
+            if (child is not FrameworkElement fe)
+            {
+                index++;
+                continue;
+            }
+
+            var childPos = fe.TranslatePoint(new Point(0, 0), panel);
+            double midY = childPos.Y + (fe.ActualHeight / 2.0);
+            if (dropPos.Y < midY) break;
+            index++;
+        }
+
+        return index;
+    }
+
+    /// <summary>
+    /// Returns the Y offset (relative to <paramref name="panel"/>) where the insertion
+    /// line should be drawn. Matches the top edge of the item the cursor is above, or
+    /// the bottom edge of the last item when the cursor is below all items.
+    /// </summary>
+    private static double GetInsertionYOffset(StackPanel panel, Point dropPos)
+    {
+        double lastBottom = 0;
+        foreach (UIElement child in panel.Children)
+        {
+            if (child is not FrameworkElement fe) continue;
+            var childPos = fe.TranslatePoint(new Point(0, 0), panel);
+            double midY = childPos.Y + (fe.ActualHeight / 2.0);
+            if (dropPos.Y < midY)
+                return childPos.Y;
+            lastBottom = childPos.Y + fe.ActualHeight;
+        }
+
+        return lastBottom;
+    }
+
+    // -------------------------------------------------------------------------
+    // Right-click → native shell context menu
+    // -------------------------------------------------------------------------
     private void IconButton_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement fe && fe.DataContext is SystemIconItemModel item)
@@ -81,7 +129,7 @@ public partial class SystemIconsPanelWindow : Window
 
             var logicalPos = e.GetPosition(this);
             var screenX = (int)((Left + logicalPos.X) * dpiX);
-            var screenY = (int)((Top  + logicalPos.Y) * dpiY);
+            var screenY = (int)((Top + logicalPos.Y) * dpiY);
 
             var hwnd = new WindowInteropHelper(this).Handle;
 
@@ -193,7 +241,6 @@ public partial class SystemIconsPanelWindow : Window
     // -------------------------------------------------------------------------
     // Per-item drag-over / drop for Recycle Bin file drop
     // -------------------------------------------------------------------------
-
     private void IconButton_DragOver(object sender, DragEventArgs e)
     {
         if (sender is FrameworkElement fe &&
@@ -227,49 +274,7 @@ public partial class SystemIconsPanelWindow : Window
             _viewModel.SendToRecycleBin(paths, hwnd);
             e.Handled = true;
         }
+
         // else: reorder drops bubble to the parent ListBox handler
-    }
-
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Returns the zero-based insertion index inside a vertical StackPanel given a drop position.
-    /// </summary>
-    private static int GetInsertionIndex(StackPanel panel, Point dropPos)
-    {
-        int index = 0;
-        foreach (UIElement child in panel.Children)
-        {
-            if (child is not FrameworkElement fe) { index++; continue; }
-            var childPos = fe.TranslatePoint(new Point(0, 0), panel);
-            double midY = childPos.Y + fe.ActualHeight / 2.0;
-            if (dropPos.Y < midY) break;
-            index++;
-        }
-
-        return index;
-    }
-
-    /// <summary>
-    /// Returns the Y offset (relative to <paramref name="panel"/>) where the insertion
-    /// line should be drawn. Matches the top edge of the item the cursor is above, or
-    /// the bottom edge of the last item when the cursor is below all items.
-    /// </summary>
-    private static double GetInsertionYOffset(StackPanel panel, Point dropPos)
-    {
-        double lastBottom = 0;
-        foreach (UIElement child in panel.Children)
-        {
-            if (child is not FrameworkElement fe) continue;
-            var childPos = fe.TranslatePoint(new Point(0, 0), panel);
-            double midY = childPos.Y + fe.ActualHeight / 2.0;
-            if (dropPos.Y < midY)
-                return childPos.Y;
-            lastBottom = childPos.Y + fe.ActualHeight;
-        }
-
-        return lastBottom;
     }
 }

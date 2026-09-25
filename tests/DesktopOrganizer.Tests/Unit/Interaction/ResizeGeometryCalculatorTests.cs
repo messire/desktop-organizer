@@ -19,25 +19,16 @@ public class ResizeGeometryCalculatorTests
     // Same fixed "current window" bounds as the C1 characterization suite: rawRight = 400, rawBottom = 450.
     private static readonly Rect StartBounds = new(100, 200, 300, 250);
 
-    private static ResizeConstraints FreeConstraints(double minWidth = GridMetrics.MinPanelSize) => new(
-        MinWidth: minWidth,
-        MinHeight: GridMetrics.MinPanelSize,
-        SnapCellWidth: 0d,
-        SnapCellHeight: 0d,
-        TitleBarHeight: ChildWindow.TitleBarHeight,
-        HorizontalChrome: GridMetrics.FileListHPadding,
-        VerticalChrome: GridMetrics.FileListVPadding);
-
-    private static Rect ApplyOneDelta(ResizeEdge edge, Vector delta, ResizeConstraints constraints, Rect? start = null)
-    {
-        var bounds = start ?? StartBounds;
-        var raw = new ResizeRawExtent(bounds.Width, bounds.Height);
-        raw = ResizeGeometryCalculator.Accumulate(raw, edge, delta);
-
-        return ResizeGeometryCalculator.Apply(bounds, edge, raw, bounds.Right, bounds.Bottom, constraints);
-    }
-
     // ── T-GEO-01..08: one case per ResizeEdge, free mode (List / snap off) ──────────────────────────
+
+    /// <summary>Verifies that in free mode, applying one delta to each of the eight edges moves only the expected axis while keeping the opposite edge (anchor) fixed.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
+    /// <param name="expectedLeft">The expected resulting Left.</param>
+    /// <param name="expectedTop">The expected resulting Top.</param>
+    /// <param name="expectedWidth">The expected resulting width.</param>
+    /// <param name="expectedHeight">The expected resulting height.</param>
     [Theory]
     [InlineData(ResizeEdge.Right, 40d, 0d, 100d, 200d, 340d, 250d)]
     [InlineData(ResizeEdge.Left, 40d, 0d, 140d, 200d, 260d, 250d)]
@@ -48,8 +39,13 @@ public class ResizeGeometryCalculatorTests
     [InlineData(ResizeEdge.BottomLeft, 40d, 25d, 140d, 200d, 260d, 275d)]
     [InlineData(ResizeEdge.BottomRight, 40d, 25d, 100d, 200d, 340d, 275d)]
     public void Apply_FreeMode_AllEightEdges_MovesOnlyExpectedAxisAndKeepsAnchor(
-        ResizeEdge edge, double dx, double dy,
-        double expectedLeft, double expectedTop, double expectedWidth, double expectedHeight)
+        ResizeEdge edge,
+        double dx,
+        double dy,
+        double expectedLeft,
+        double expectedTop,
+        double expectedWidth,
+        double expectedHeight)
     {
         var result = ApplyOneDelta(edge, new Vector(dx, dy), FreeConstraints());
 
@@ -59,6 +55,9 @@ public class ResizeGeometryCalculatorTests
     // ── T-GEO-09..12: corners — both axes and both anchors simultaneously (already exercised above as
     // part of the 8-edge theory; these add an explicit second-delta accumulation to prove Accumulate's
     // running total, not just a single call, drives Apply correctly for corners specifically). ──────
+
+    /// <summary>Verifies that for corner edges, two accumulated deltas move both axes and hold both anchors.</summary>
+    /// <param name="edge">The corner edge being dragged.</param>
     [Theory]
     [InlineData(ResizeEdge.TopLeft)]
     [InlineData(ResizeEdge.TopRight)]
@@ -93,14 +92,28 @@ public class ResizeGeometryCalculatorTests
     }
 
     // ── T-GEO-13..16: min size — drag far past the minimum; opposite (anchor) edge must not move. ───
+
+    /// <summary>Verifies that dragging far past the minimum size clamps the result to <c>MinWidth</c>/<c>MinHeight</c> while leaving the anchor edge unaffected.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
+    /// <param name="expectedLeft">The expected resulting Left.</param>
+    /// <param name="expectedTop">The expected resulting Top.</param>
+    /// <param name="expectedWidth">The expected resulting width.</param>
+    /// <param name="expectedHeight">The expected resulting height.</param>
     [Theory]
     [InlineData(ResizeEdge.Left, 250d, 0d, 280d, 200d, 120d, 250d)]
     [InlineData(ResizeEdge.Right, -250d, 0d, 100d, 200d, 120d, 250d)]
     [InlineData(ResizeEdge.Top, 0d, 200d, 100d, 330d, 300d, 120d)]
     [InlineData(ResizeEdge.Bottom, 0d, -200d, 100d, 200d, 300d, 120d)]
     public void Apply_FreeMode_MinSizeClamp_AnchorEdgeUnaffected(
-        ResizeEdge edge, double dx, double dy,
-        double expectedLeft, double expectedTop, double expectedWidth, double expectedHeight)
+        ResizeEdge edge,
+        double dx,
+        double dy,
+        double expectedLeft,
+        double expectedTop,
+        double expectedWidth,
+        double expectedHeight)
     {
         var result = ApplyOneDelta(edge, new Vector(dx, dy), FreeConstraints());
 
@@ -108,6 +121,8 @@ public class ResizeGeometryCalculatorTests
     }
 
     // ── T-GEO-17: Grid + snap on — width quantised to a whole column via Math.Ceiling. ───────────────
+
+    /// <summary>Verifies that with Grid+snap on, the resulting width is quantised to a whole column via <see cref="Math.Ceiling(double)"/>.</summary>
     [Fact]
     public void Apply_GridSnapOn_Width_CeilsToSnappedColumnExtent()
     {
@@ -127,6 +142,8 @@ public class ResizeGeometryCalculatorTests
     }
 
     // ── T-GEO-18: Grid + snap on — height quantised to a whole row via Math.Ceiling. ─────────────────
+
+    /// <summary>Verifies that with Grid+snap on, the resulting height is quantised to a whole row via <see cref="Math.Ceiling(double)"/>.</summary>
     [Fact]
     public void Apply_GridSnapOn_Height_CeilsToSnappedRowExtent()
     {
@@ -146,6 +163,8 @@ public class ResizeGeometryCalculatorTests
 
     // ── T-GEO-19: dropping a fractional IconSize into snap-on still yields an integer pixel result
     // (Math.Ceiling really applied, not just "already a whole number by coincidence"). ───────────────
+
+    /// <summary>Verifies that a fractional icon size fed into snap-on still yields a whole-pixel width, proving <see cref="Math.Ceiling(double)"/> was actually applied.</summary>
     [Fact]
     public void Apply_GridSnapOn_FractionalIconSize_StillProducesWholePixelWidth()
     {
@@ -160,6 +179,8 @@ public class ResizeGeometryCalculatorTests
     }
 
     // ── T-GEO-20: Grid mode but snap disabled -> pixel-accurate, no quantization at all. ─────────────
+
+    /// <summary>Verifies that Grid mode with snap disabled produces a pixel-accurate result, with no quantisation at all.</summary>
     [Fact]
     public void Apply_GridModeSnapOff_IsPixelAccurate()
     {
@@ -175,6 +196,8 @@ public class ResizeGeometryCalculatorTests
     // ── T-GEO-21: List-mode constraints (SnapCellWidth/Height == 0) stay free on BOTH axes even when
     // fed a Grid-shaped delta — SnapResizeToIconGrid is enforced by the CALLER (BuildConstraints), not
     // by Apply itself; Apply is free purely because the constraints say so. ─────────────────────────
+
+    /// <summary>Verifies that List-mode constraints (<c>SnapCellWidth</c>/<c>SnapCellHeight</c> both zero) stay free on both axes even when fed a Grid-shaped delta.</summary>
     [Fact]
     public void Apply_ListModeConstraints_BothAxesFreeRegardlessOfDeltaShape()
     {
@@ -188,6 +211,8 @@ public class ResizeGeometryCalculatorTests
 
     // ── T-GEO-22: MinWidth selection differs by view mode (List vs Grid) — Apply just uses whatever
     // MinWidth it is given; this pins that a small IconSize genuinely produces two DIFFERENT floors. ─
+
+    /// <summary>Verifies that <c>MinWidth</c> genuinely differs between Grid and List view modes for a sufficiently large icon size.</summary>
     [Fact]
     public void MinWidth_GridVsList_AreGenuinelyDifferentFloors()
     {
@@ -201,6 +226,8 @@ public class ResizeGeometryCalculatorTests
 
     // ── T-GEO-23: horizontal (0.5) vs vertical (0) edge-padding ratios genuinely diverge — regression
     // pin for "one row of icons reported double height" bug. ─────────────────────────────────────────
+
+    /// <summary>Verifies that height snapping uses the vertical edge-padding ratio, not the horizontal one — regression guard for a "row reported double height" bug.</summary>
     [Fact]
     public void Apply_GridSnapOn_HeightUsesVerticalRatio_NotHorizontalRatio()
     {
@@ -219,6 +246,13 @@ public class ResizeGeometryCalculatorTests
 
     // ── T-GEO-24: Accumulate — sign convention: Right/Bottom ADD, Left/Top SUBTRACT; the untouched
     // axis is left exactly as passed in. ──────────────────────────────────────────────────────────────
+
+    /// <summary>Verifies that <see cref="ResizeGeometryCalculator.Accumulate"/> follows the Right/Bottom-add, Left/Top-subtract sign convention, and leaves the untouched axis exactly as passed in.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
+    /// <param name="expectedWidth">The expected resulting width.</param>
+    /// <param name="expectedHeight">The expected resulting height.</param>
     [Theory]
     [InlineData(ResizeEdge.Right, 10d, 0d, 310d, 250d)]
     [InlineData(ResizeEdge.Left, 10d, 0d, 290d, 250d)]
@@ -237,6 +271,10 @@ public class ResizeGeometryCalculatorTests
     }
 
     // ── T-GEO-25: non-finite input (NaN/Infinity) -> Apply returns `current` unchanged (H3 guard). ──
+
+    /// <summary>Verifies that a non-finite raw extent (NaN/Infinity) makes <see cref="ResizeGeometryCalculator.Apply"/> return the current bounds unchanged (the H3 guard).</summary>
+    /// <param name="rawWidth">The candidate raw width.</param>
+    /// <param name="rawHeight">The candidate raw height.</param>
     [Theory]
     [InlineData(double.NaN, 250d)]
     [InlineData(double.PositiveInfinity, 250d)]
@@ -251,6 +289,9 @@ public class ResizeGeometryCalculatorTests
         Assert.Equal(StartBounds, result);
     }
 
+    /// <summary>Verifies that a non-finite anchor (NaN/Infinity) makes <see cref="ResizeGeometryCalculator.Apply"/> return the current bounds unchanged.</summary>
+    /// <param name="anchorRight">The candidate anchor Right coordinate.</param>
+    /// <param name="anchorBottom">The candidate anchor Bottom coordinate.</param>
     [Theory]
     [InlineData(double.NaN, 450d)]
     [InlineData(400d, double.PositiveInfinity)]
@@ -266,6 +307,8 @@ public class ResizeGeometryCalculatorTests
     // ── Point 7 — the axis the dragged edge does NOT affect is returned from `current`, not
     // recomputed even structurally-equal: prove Top/Bottom leave X/Width from `current` untouched even
     // when `current` deliberately disagrees with StartBounds (simulating a mid-gesture current rect). ─
+
+    /// <summary>Verifies that a vertical-only edge (Bottom) leaves the current Left/Width from <c>current</c> untouched, even when <c>current</c> deliberately disagrees with the start bounds.</summary>
     [Fact]
     public void Apply_VerticalOnlyEdge_LeavesCurrentWidthAndLeftUntouched()
     {
@@ -276,5 +319,24 @@ public class ResizeGeometryCalculatorTests
 
         Assert.Equal(999d, result.Left, precision: 6);
         Assert.Equal(555d, result.Width, precision: 6);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static ResizeConstraints FreeConstraints(double minWidth = GridMetrics.MinPanelSize) => new(
+        MinWidth: minWidth,
+        MinHeight: GridMetrics.MinPanelSize,
+        SnapCellWidth: 0d,
+        SnapCellHeight: 0d,
+        TitleBarHeight: ChildWindow.TitleBarHeight,
+        HorizontalChrome: GridMetrics.FileListHPadding,
+        VerticalChrome: GridMetrics.FileListVPadding);
+
+    private static Rect ApplyOneDelta(ResizeEdge edge, Vector delta, ResizeConstraints constraints, Rect? start = null)
+    {
+        var bounds = start ?? StartBounds;
+        var raw = new ResizeRawExtent(bounds.Width, bounds.Height);
+        raw = ResizeGeometryCalculator.Accumulate(raw, edge, delta);
+
+        return ResizeGeometryCalculator.Apply(bounds, edge, raw, bounds.Right, bounds.Bottom, constraints);
     }
 }

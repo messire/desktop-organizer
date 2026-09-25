@@ -15,8 +15,6 @@ namespace DesktopOrganizer.UI.Converters;
 /// </summary>
 public sealed class AccentBrushConverter : IValueConverter
 {
-    internal const int MaxCachedBrushes = 256;
-
     /// <summary>
     /// Alpha applied to a selected panel item's accent fill. <c>public</c> (CRITICAL-1 fix — NOT merely
     /// <c>internal</c>, despite this type and <c>Resources/Styles/Panels.xaml</c>'s <c>PanelItemContainerStyle</c>
@@ -41,6 +39,9 @@ public sealed class AccentBrushConverter : IValueConverter
     /// consistency even though nothing currently references it from XAML via <c>x:Static</c>.
     /// </summary>
     public const double HoverAlpha = 0.16;
+
+    /// <summary>Upper bound on the number of cached brushes before <see cref="Cache"/> is cleared and rebuilt from scratch.</summary>
+    internal const int MaxCachedBrushes = 256;
 
     private const double IndicatorAlpha = 1.0;
 

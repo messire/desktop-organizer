@@ -48,6 +48,7 @@ public sealed class ResizeAffordanceGate : IResizeAffordance
     /// (<c>SetEnabled(!collapsed)</c>), with no awareness that it is no longer talking directly to the
     /// underlying affordance.
     /// </summary>
+    /// <param name="enabled"><see langword="true"/> when the panel is not rolled up.</param>
     public void SetEnabled(bool enabled)
     {
         _notCollapsed = enabled;
@@ -60,6 +61,7 @@ public sealed class ResizeAffordanceGate : IResizeAffordance
     /// <see cref="Services.ILayoutEditModeService.ModeChanged"/> fires or the Normal-mode gesture
     /// preference/lock setting changes.
     /// </summary>
+    /// <param name="allowed"><see langword="true"/> when the current layout-edit policy permits resizing.</param>
     public void SetAllowedByPolicy(bool allowed)
     {
         _allowedByPolicy = allowed;

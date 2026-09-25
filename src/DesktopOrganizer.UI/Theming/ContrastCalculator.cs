@@ -6,8 +6,8 @@ namespace DesktopOrganizer.UI.Theming;
 /// Pure WCAG 2.x contrast-ratio math (docs/PLANS/workspace-grid-07-visual.md "Contrast") — the
 /// machine-checkable form of the plan's contrast table, which checks the Ambient Accent surface tokens'
 /// text/icon contrast when composited over a light (<c>#F0F0F0</c>) and a dark (<c>#101010</c>)
-/// representative wallpaper for <see cref="PanelSurfaceStyle.Solid"/>/<see cref="PanelSurfaceStyle.Ambient"/>/
-/// <see cref="PanelSurfaceStyle.Glass"/>. This type has no XAML/converter consumer of its own — it is a
+/// representative wallpaper for <see cref="Models.PanelSurfaceStyle.Solid"/>/<see cref="Models.PanelSurfaceStyle.Ambient"/>/
+/// <see cref="Models.PanelSurfaceStyle.Glass"/>. This type has no XAML/converter consumer of its own — it is a
 /// small, self-contained calculator whose output feeds that plan document's table (and is itself
 /// machine-checked, in the test project, against WCAG's own published reference values) — the same
 /// "pure logic + doc-table" split already used by <see cref="SurfaceComposer"/> for the colour-
@@ -36,6 +36,8 @@ public static class ContrastCalculator
     /// pipeline; <see cref="ContrastRatio"/> is then computed between an opaque foreground token (text/
     /// icon colour, never translucent in this app's token set) and THIS method's result.
     /// </summary>
+    /// <param name="foreground">The (possibly translucent) colour being composited on top.</param>
+    /// <param name="background">The opaque colour underneath; its own alpha channel is ignored.</param>
     public static Color CompositeOverOpaque(Color foreground, Color background)
     {
         var alpha = foreground.A / 255.0;
@@ -55,6 +57,7 @@ public static class ContrastCalculator
     /// already-composited, opaque colour (call <see cref="CompositeOverOpaque"/> first for a translucent
     /// surface).
     /// </summary>
+    /// <param name="color">The opaque colour to compute the relative luminance of.</param>
     public static double RelativeLuminance(Color color)
     {
         double Linearize(byte channel)
@@ -71,6 +74,8 @@ public static class ContrastCalculator
     /// colours), order-independent (<c>ContrastRatio(a, b) == ContrastRatio(b, a)</c>), maximal (21.0)
     /// between pure black and pure white.
     /// </summary>
+    /// <param name="a">The first opaque colour.</param>
+    /// <param name="b">The second opaque colour.</param>
     public static double ContrastRatio(Color a, Color b)
     {
         var luminanceA = RelativeLuminance(a);
@@ -87,6 +92,9 @@ public static class ContrastCalculator
     /// <paramref name="surface"/> composited over <paramref name="wallpaper"/> — i.e. "how readable is
     /// this label/icon, given the panel surface it sits on may let the desktop wallpaper show through".
     /// </summary>
+    /// <param name="foreground">The opaque text/icon token colour.</param>
+    /// <param name="surface">The (possibly translucent) panel surface colour.</param>
+    /// <param name="wallpaper">The opaque desktop wallpaper colour behind the surface.</param>
     public static double ContrastAgainstComposited(Color foreground, Color surface, Color wallpaper)
         => ContrastRatio(foreground, CompositeOverOpaque(surface, wallpaper));
 }

@@ -11,9 +11,18 @@ namespace DesktopOrganizer.UI.Theming;
 /// </summary>
 public enum PanelVisualState
 {
+    /// <summary>No gesture, no pointer over the panel, no title edit in progress.</summary>
     Idle,
+
+    /// <summary>The pointer is over the panel and no stronger state applies.</summary>
     Hover,
+
+    /// <summary>The panel title is currently being edited.</summary>
     Editing,
+
+    /// <summary>The panel is currently being dragged (title-bar move gesture).</summary>
     Dragging,
+
+    /// <summary>The panel is currently being resized.</summary>
     Resizing,
 }

@@ -6,7 +6,7 @@ namespace DesktopOrganizer.UI.Models;
 /// arbitrary spans, not the only allowed size: manual resize (quantised to the grid) and "Fit panel to
 /// content" remain available for any <see cref="GridSpan"/>, per ADR-028's explicit rejection of a
 /// "only S/M/L" restriction. See <see cref="WorkspaceGridMetrics.SpanForPreset"/> for the
-/// preset → <see cref="GridSpan"/> mapping and <see cref="WorkspaceLayoutPolicy.PreferredSize"/> for the
+/// preset → <see cref="GridSpan"/> mapping and <see cref="WorkspaceLayoutPolicy.PreferredSize(PanelSizePreset, double, double)"/> for the
 /// DIP size it resolves to.
 /// </summary>
 public enum PanelSizePreset

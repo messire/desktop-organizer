@@ -45,6 +45,7 @@ internal sealed class StateMigrationRunner
     /// chain fails fast here, at DI composition time, rather than surfacing later as a confusing
     /// mid-migration gap — fail-closed, per ADR-024 D-9.
     /// </summary>
+    /// <param name="migrations">The unordered set of migration steps to chain together.</param>
     /// <exception cref="InvalidOperationException">
     /// The registered migrations do not form a single, contiguous, gap-free, single-step chain.
     /// </exception>

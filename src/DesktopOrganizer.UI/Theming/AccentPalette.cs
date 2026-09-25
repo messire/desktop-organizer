@@ -13,11 +13,22 @@ public static class AccentPalette
     /// <summary>Migration/global fallback accent — never a preset (see <see cref="IsPreset"/>).</summary>
     public const string Neutral = "#6B7280";
 
+    /// <summary>The "Blue" selectable accent preset.</summary>
     public const string Blue = "#3B82F6";
+
+    /// <summary>The "Violet" selectable accent preset.</summary>
     public const string Violet = "#A855F7";
+
+    /// <summary>The "Amber" selectable accent preset.</summary>
     public const string Amber = "#F59E0B";
+
+    /// <summary>The "Green" selectable accent preset.</summary>
     public const string Green = "#22C55E";
+
+    /// <summary>The "Cyan" selectable accent preset.</summary>
     public const string Cyan = "#06B6D4";
+
+    /// <summary>The "Coral" selectable accent preset.</summary>
     public const string Coral = "#F06464";
 
     /// <summary>
@@ -50,6 +61,7 @@ public static class AccentPalette
     /// hex strings only ever carry RGB. Never throws: <see langword="null"/>, empty, whitespace-only, or
     /// any string that isn't one of the four accepted digit lengths returns <see cref="Default"/> instead.
     /// </summary>
+    /// <param name="hex">The candidate hex colour string to normalize.</param>
     public static string Normalize(string? hex)
     {
         if (string.IsNullOrWhiteSpace(hex))
@@ -86,6 +98,7 @@ public static class AccentPalette
     /// <see cref="Normalize"/>: once a user has actually changed "Default background color" away from the
     /// shipped default, that is a deliberate choice and must not be second-guessed or reformatted.
     /// </summary>
+    /// <param name="defaultBackgroundColor">The raw <c>AppSettings.DefaultBackgroundColor</c> value to resolve from.</param>
     public static string ResolveDefaultAccent(string? defaultBackgroundColor)
     {
         if (string.IsNullOrWhiteSpace(defaultBackgroundColor))
@@ -100,6 +113,7 @@ public static class AccentPalette
     /// Whether <paramref name="hex"/> (after <see cref="Normalize"/>) is one of the six selectable
     /// <see cref="Presets"/>. <see cref="Neutral"/> and any junk/unrecognized input return <see langword="false"/>.
     /// </summary>
+    /// <param name="hex">The candidate hex colour string to test.</param>
     public static bool IsPreset(string? hex)
     {
         var normalized = Normalize(hex);

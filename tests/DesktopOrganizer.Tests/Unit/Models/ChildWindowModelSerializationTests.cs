@@ -6,12 +6,17 @@ namespace DesktopOrganizer.Tests.Unit.Models;
 /// <summary>
 /// Unit tests for <see cref="ChildWindowModel.SortMode"/> JSON persistence (ADR-014 Decision 1),
 /// serialized the same way <c>WindowManager</c> serializes the whole panel list — plain
-/// <see cref="JsonSerializer.Serialize{TValue}(TValue, Type?)"/>/<see cref="JsonSerializer.Deserialize{TValue}(string, JsonSerializerOptions?)"/>
+/// <see cref="JsonSerializer.Serialize{TValue}(TValue, JsonSerializerOptions?)"/>/<see cref="JsonSerializer.Deserialize{TValue}(string, JsonSerializerOptions?)"/>
 /// with no custom <see cref="JsonSerializerOptions"/> and no <c>JsonStringEnumConverter</c>.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class ChildWindowModelSerializationTests
 {
+    /// <summary>
+    /// Verifies that deserializing a pre-existing JSON document with no <c>SortMode</c> property leaves
+    /// <see cref="ChildWindowModel.SortMode"/> at its field-initializer default of
+    /// <see cref="PanelSortMode.Manual"/>, preserving legacy panels' item order.
+    /// </summary>
     [Fact]
     public void Deserialize_JsonWithoutSortModeField_DefaultsToManual()
     {
@@ -35,6 +40,10 @@ public class ChildWindowModelSerializationTests
         Assert.Equal(["C:\\fake\\a.txt", "C:\\fake\\b.txt"], model.FilePaths);
     }
 
+    /// <summary>
+    /// Verifies that a <see cref="ChildWindowModel"/> with <see cref="PanelSortMode.Name"/> round-trips
+    /// through plain JSON serialization and deserialization without losing that sort mode.
+    /// </summary>
     [Fact]
     public void RoundTrip_NameSortMode_DeserializesBackToName()
     {
@@ -47,6 +56,11 @@ public class ChildWindowModelSerializationTests
         Assert.Equal(PanelSortMode.Name, roundTripped!.SortMode);
     }
 
+    /// <summary>
+    /// Verifies that a <see cref="ChildWindowModel"/> with an explicitly set
+    /// <see cref="PanelSortMode.Manual"/> round-trips through plain JSON serialization and
+    /// deserialization without losing that sort mode.
+    /// </summary>
     [Fact]
     public void RoundTrip_ManualSortMode_DeserializesBackToManual()
     {
@@ -59,6 +73,10 @@ public class ChildWindowModelSerializationTests
         Assert.Equal(PanelSortMode.Manual, roundTripped!.SortMode);
     }
 
+    /// <summary>
+    /// Verifies that setting <see cref="ChildWindowModel.SortMode"/> to a new value raises
+    /// <c>PropertyChanged</c> for that property.
+    /// </summary>
     [Fact]
     public void SortMode_Set_RaisesPropertyChanged()
     {
@@ -71,6 +89,10 @@ public class ChildWindowModelSerializationTests
         Assert.Contains(nameof(ChildWindowModel.SortMode), raisedProperties);
     }
 
+    /// <summary>
+    /// Verifies that re-assigning <see cref="ChildWindowModel.SortMode"/> to its current default value
+    /// is a no-op that does not raise <c>PropertyChanged</c>.
+    /// </summary>
     [Fact]
     public void SortMode_SetToSameValue_DoesNotRaisePropertyChanged()
     {

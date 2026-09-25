@@ -26,11 +26,14 @@ public class WindowManagerGridSizeNormalizationTests
     private const double G = WorkspaceGridMetrics.DefaultGap;
     private const string Display1 = @"\\.\DISPLAY1";
 
-    private static MonitorInfo Primary(Rect? workArea = null) =>
-        new(Display1, new Rect(0, 0, 1920, 1080), workArea ?? new Rect(0, 0, 1920, 1032), true);
-
     // ── NormalizeLegacyFreeformToGridSize — the user-reported repro ─────────────────────────────────
 
+    /// <summary>
+    /// Verifies the exact user-reported repro: a panel placed on an old, smaller <c>GridSize</c> lattice
+    /// has both its position and size moved onto the new, larger lattice by
+    /// <see cref="WindowManager.NormalizeLegacyFreeformToGridSize"/>, respecting the List-mode minimum
+    /// size floor.
+    /// </summary>
     [Fact]
     public void NormalizeLegacyFreeformToGridSize_UserRepro_PositionAndSizeMoveToTheNewLattice()
     {
@@ -50,6 +53,9 @@ public class WindowManagerGridSizeNormalizationTests
         Assert.Equal(new DrawingSize(144, 144), model.Size); // 64 -> 48 (below the 120 floor) -> 144.
     }
 
+    /// <summary>
+    /// Verifies that a <c>gridSize</c> of 1 (grid snapping disabled) never changes the model.
+    /// </summary>
     [Fact]
     public void NormalizeLegacyFreeformToGridSize_GridSizeOne_NeverChangesTheModel()
     {
@@ -66,6 +72,9 @@ public class WindowManagerGridSizeNormalizationTests
         Assert.Equal(new DrawingSize(64, 64), model.Size);
     }
 
+    /// <summary>
+    /// Verifies that a panel already aligned to the current grid-size lattice reports no change.
+    /// </summary>
     [Fact]
     public void NormalizeLegacyFreeformToGridSize_AlreadyOnTheLattice_ReportsNoChange()
     {
@@ -83,6 +92,10 @@ public class WindowManagerGridSizeNormalizationTests
         Assert.Equal(new DrawingSize(144, 144), model.Size);
     }
 
+    /// <summary>
+    /// Verifies that normalizing a Grid-mode panel respects the icon-grid-derived minimum width floor,
+    /// not the flat List-mode floor, when the persisted width is tiny.
+    /// </summary>
     [Fact]
     public void NormalizeLegacyFreeformToGridSize_GridModePanel_UsesTheIconGridDerivedWidthFloor()
     {
@@ -104,6 +117,10 @@ public class WindowManagerGridSizeNormalizationTests
         Assert.Equal(0d, model.Size.Width % 48);
     }
 
+    /// <summary>
+    /// Verifies that a negative saved position rounds to the grid symmetrically, isolated from any
+    /// work-area clamping.
+    /// </summary>
     [Fact]
     public void NormalizeLegacyFreeformToGridSize_NegativePosition_SnapsSymmetrically()
     {
@@ -122,6 +139,10 @@ public class WindowManagerGridSizeNormalizationTests
         Assert.Equal(-48, model.Position.Y);
     }
 
+    /// <summary>
+    /// Verifies that the normalized position is clamped back into the monitor's work area when the
+    /// grid-aligned result would otherwise fall outside it.
+    /// </summary>
     [Fact]
     public void NormalizeLegacyFreeformToGridSize_ClampsIntoTheMonitorsWorkArea()
     {
@@ -139,20 +160,11 @@ public class WindowManagerGridSizeNormalizationTests
 
     // ── NormalizeGridAlignedToGridSize — only touches GridAligned when GridSize is commensurate with U ─
 
-    private static ChildWindowModel GridPanel(int x, int y, int widthSpan, int heightSpan)
-    {
-        var size = WorkspaceLayoutPolicy.SpansToBounds(new GridSpan(widthSpan, heightSpan), U, G);
-        return new ChildWindowModel
-        {
-            GeometryMode = PanelGeometryMode.GridAligned,
-            MonitorDeviceId = Display1,
-            WidthSpanUnits = widthSpan,
-            HeightSpanUnits = heightSpan,
-            Position = new DrawingPoint(x, y),
-            Size = new DrawingSize((int)size.Width, (int)size.Height),
-        };
-    }
-
+    /// <summary>
+    /// Verifies that when <c>GridSize</c> is a whole multiple of the workspace unit size,
+    /// <see cref="WindowManager.NormalizeGridAlignedToGridSize"/> realigns the bounds onto it and
+    /// recomputes the model's spans from the new size, keeping the model self-consistent (ADR-028).
+    /// </summary>
     [Fact]
     public void NormalizeGridAlignedToGridSize_GridSizeCommensurateWithU_RealignsAndRecomputesSpans()
     {
@@ -173,6 +185,11 @@ public class WindowManagerGridSizeNormalizationTests
         Assert.Equal(result.Size, recomputedSize);
     }
 
+    /// <summary>
+    /// Verifies that when <c>GridSize</c> is not a whole multiple of the workspace unit size, aligning to
+    /// it would pull the panel off the workspace grid it is locked to — so the method is a no-op,
+    /// leaving both bounds and spans untouched.
+    /// </summary>
     [Fact]
     public void NormalizeGridAlignedToGridSize_GridSizeNotAMultipleOfU_IsANoOp()
     {
@@ -190,6 +207,9 @@ public class WindowManagerGridSizeNormalizationTests
         Assert.Equal(originalSpanH, model.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that a <c>gridSize</c> of 1 (grid snapping disabled) is a no-op.
+    /// </summary>
     [Fact]
     public void NormalizeGridAlignedToGridSize_GridSizeOne_IsANoOp()
     {
@@ -201,6 +221,10 @@ public class WindowManagerGridSizeNormalizationTests
         Assert.Equal(bounds, result);
     }
 
+    /// <summary>
+    /// Verifies that bounds already on the <c>GridSize</c> lattice are returned unchanged, since both
+    /// grids already agree.
+    /// </summary>
     [Fact]
     public void NormalizeGridAlignedToGridSize_AlreadyOnTheGridSizeLattice_ReturnsBoundsUnchanged()
     {
@@ -214,6 +238,53 @@ public class WindowManagerGridSizeNormalizationTests
     }
 
     // ── ResolveMonitorPlacement / OnMonitorsChanged wiring — SaveWindowsState only when changed ──────
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.NormalizePanelsToGrid"/> never saves when there are no
+    /// open panels to normalize.
+    /// </summary>
+    [Fact]
+    public void NormalizePanelsToGrid_NoOpenPanels_NeverSaves()
+    {
+        var manager = BuildWindowManager(gridSize: 48, out var stateMock);
+
+        manager.NormalizePanelsToGrid();
+
+        stateMock.Verify(s => s.SaveNow(), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.NormalizePanelsToGrid"/> never saves and does not throw
+    /// when <c>GridSize</c> is 1 (grid snapping disabled).
+    /// </summary>
+    [Fact]
+    public void NormalizePanelsToGrid_GridSizeOne_NeverSaves()
+    {
+        var manager = BuildWindowManager(gridSize: 1, out var stateMock);
+
+        var exception = Record.Exception(manager.NormalizePanelsToGrid);
+
+        Assert.Null(exception);
+        stateMock.Verify(s => s.SaveNow(), Times.Never);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static MonitorInfo Primary(Rect? workArea = null) =>
+        new(Display1, new Rect(0, 0, 1920, 1080), workArea ?? new Rect(0, 0, 1920, 1032), true);
+
+    private static ChildWindowModel GridPanel(int x, int y, int widthSpan, int heightSpan)
+    {
+        var size = WorkspaceLayoutPolicy.SpansToBounds(new GridSpan(widthSpan, heightSpan), U, G);
+        return new ChildWindowModel
+        {
+            GeometryMode = PanelGeometryMode.GridAligned,
+            MonitorDeviceId = Display1,
+            WidthSpanUnits = widthSpan,
+            HeightSpanUnits = heightSpan,
+            Position = new DrawingPoint(x, y),
+            Size = new DrawingSize((int)size.Width, (int)size.Height),
+        };
+    }
 
     private static WindowManager BuildWindowManager(int gridSize, out Mock<IApplicationStateService> stateMock)
     {
@@ -231,26 +302,5 @@ public class WindowManagerGridSizeNormalizationTests
             itemStorageMock.Object,
             stateMock.Object,
             appSettingsMock.Object);
-    }
-
-    [Fact]
-    public void NormalizePanelsToGrid_NoOpenPanels_NeverSaves()
-    {
-        var manager = BuildWindowManager(gridSize: 48, out var stateMock);
-
-        manager.NormalizePanelsToGrid();
-
-        stateMock.Verify(s => s.SaveNow(), Times.Never);
-    }
-
-    [Fact]
-    public void NormalizePanelsToGrid_GridSizeOne_NeverSaves()
-    {
-        var manager = BuildWindowManager(gridSize: 1, out var stateMock);
-
-        var exception = Record.Exception(manager.NormalizePanelsToGrid);
-
-        Assert.Null(exception);
-        stateMock.Verify(s => s.SaveNow(), Times.Never);
     }
 }

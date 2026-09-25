@@ -16,6 +16,10 @@ public class ManagedItemNameTests
 
     // ── With extension (file) ───────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> strips a legacy GUID suffix
+    /// from a file name while keeping the extension.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_FileWithExtension_StripsSuffixKeepsExtension()
     {
@@ -23,6 +27,10 @@ public class ManagedItemNameTests
         Assert.Equal("Report.docx", ManagedItemName.StripLegacyGuidSuffix(input));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> strips only the GUID suffix
+    /// from a name with a multi-dot extension (e.g. <c>.tar.gz</c>), leaving the rest intact.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_FileWithMultiDotExtension_StripsOnlyTheGuidSuffix()
     {
@@ -32,6 +40,10 @@ public class ManagedItemNameTests
 
     // ── Without extension (folder) ──────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> strips a legacy GUID suffix
+    /// from an extensionless folder name.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_FolderNameNoExtension_StripsSuffix()
     {
@@ -41,6 +53,10 @@ public class ManagedItemNameTests
 
     // ── Not a GUID suffix at all ─────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> leaves a name unchanged when
+    /// its trailing underscore-delimited segment is not hex at all.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_TrailingUnderscoreNotHex_ReturnsUnchanged()
     {
@@ -48,6 +64,10 @@ public class ManagedItemNameTests
         Assert.Equal(input, ManagedItemName.StripLegacyGuidSuffix(input));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> leaves a name unchanged when
+    /// it has no underscore at all.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_NoUnderscoreAtAll_ReturnsUnchanged()
     {
@@ -57,6 +77,10 @@ public class ManagedItemNameTests
 
     // ── Boundary: 31 vs 33 hex characters ────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> leaves a name unchanged when
+    /// the trailing hex run is one character short of the required 32.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_31HexChars_ReturnsUnchanged()
     {
@@ -65,6 +89,11 @@ public class ManagedItemNameTests
         Assert.Equal(input, ManagedItemName.StripLegacyGuidSuffix(input));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> leaves a name unchanged when
+    /// the trailing hex run is one character longer than the required 32 (so the character before the
+    /// last 32 hex digits is itself hex, not an underscore).
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_33HexChars_ReturnsUnchanged()
     {
@@ -76,6 +105,10 @@ public class ManagedItemNameTests
         Assert.Equal(input, ManagedItemName.StripLegacyGuidSuffix(input));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> strips the suffix when the
+    /// trailing hex run is exactly the required 32 characters.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_Exactly32HexChars_Strips()
     {
@@ -85,6 +118,10 @@ public class ManagedItemNameTests
 
     // ── Case-insensitivity of the hex characters ─────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> strips an all-uppercase hex
+    /// GUID suffix.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_UpperCaseHex_Strips()
     {
@@ -92,6 +129,10 @@ public class ManagedItemNameTests
         Assert.Equal("Report.docx", ManagedItemName.StripLegacyGuidSuffix(input));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> strips a mixed-case hex GUID
+    /// suffix.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_MixedCaseHex_Strips()
     {
@@ -101,6 +142,10 @@ public class ManagedItemNameTests
 
     // ── Degenerate case: stripping would leave an empty base name ───────────
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> returns the input unchanged
+    /// when stripping the matched GUID suffix would leave an empty base name before the extension.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_NameIsOnlyTheGuidSuffix_ReturnsInputUnchanged()
     {
@@ -110,6 +155,10 @@ public class ManagedItemNameTests
         Assert.Equal(input, ManagedItemName.StripLegacyGuidSuffix(input));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> returns the input unchanged
+    /// when stripping the matched GUID suffix would leave an empty base name and there is no extension.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_NameIsOnlyTheGuidSuffixNoExtension_ReturnsInputUnchanged()
     {
@@ -119,6 +168,10 @@ public class ManagedItemNameTests
 
     // ── Null-free / empty-input safety ───────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="ManagedItemName.StripLegacyGuidSuffix"/> returns an empty string
+    /// unchanged, without throwing.
+    /// </summary>
     [Fact]
     public void StripLegacyGuidSuffix_EmptyString_ReturnsEmptyString()
     {

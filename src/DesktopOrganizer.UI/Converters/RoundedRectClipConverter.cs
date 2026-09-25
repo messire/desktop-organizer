@@ -8,8 +8,8 @@ namespace DesktopOrganizer.UI.Converters;
 /// <summary>
 /// Builds a rounded-rectangle clip <see cref="Geometry"/> from an element's own
 /// <c>(ActualWidth, ActualHeight, CornerRadius)</c> — docs/PLANS/workspace-grid-07-visual.md "Border
-/// radius". A <see cref="Border"/> paints its own <see cref="Border.Background"/>/
-/// <see cref="Border.BorderBrush"/> with rounded corners natively, but does NOT clip arbitrary CHILD
+/// radius". A <see cref="System.Windows.Controls.Border"/> paints its own <see cref="System.Windows.Controls.Border.Background"/>/
+/// <see cref="System.Windows.Controls.Border.BorderBrush"/> with rounded corners natively, but does NOT clip arbitrary CHILD
 /// content to that same rounded shape — a square-cornered descendant (a
 /// <see cref="System.Windows.Controls.ListBox"/>'s scrollbar, a selection rectangle sitting flush
 /// against the edge) can render past the rounded corner into the transparent area outside it.
@@ -58,7 +58,7 @@ namespace DesktopOrganizer.UI.Converters;
 /// </para>
 /// <para>
 /// <b>ADR-030 update (D-5):</b> <c>PART_HitCatcher</c> (<c>Resources/Styles/Panels.xaml</c>, a
-/// near-invisible but OPAQUE <see cref="Border"/> spanning the WHOLE window rect, underneath everything
+/// near-invisible but OPAQUE <see cref="System.Windows.Controls.Border"/> spanning the WHOLE window rect, underneath everything
 /// else) closes this always-transparent lens on BOTH the WPF <c>Thumb</c> path and the native
 /// <c>WM_NCHITTEST</c> path: the OS now always finds a non-zero-alpha pixel to route the click to,
 /// regardless of where the panel's own rounded corner leaves the composited bitmap transparent. The

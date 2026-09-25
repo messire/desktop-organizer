@@ -47,6 +47,7 @@ public class NativeNameAttributeTests
     /// tripping xUnit1012; the null-forgiving operator at the call site is what makes the
     /// (non-nullable) constructor parameter actually receive it.
     /// </summary>
+    /// <param name="invalidName">The null or empty name value passed to the constructor.</param>
     [Theory]
     [InlineData(null)]
     [InlineData("")]

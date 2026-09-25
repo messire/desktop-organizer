@@ -23,20 +23,28 @@ namespace DesktopOrganizer.UI.State.Dto;
 /// </remarks>
 internal sealed class PanelGeometryDto
 {
+    /// <summary>The panel's left position, in DIP.</summary>
     public int X { get; set; }
 
+    /// <summary>The panel's top position, in DIP.</summary>
     public int Y { get; set; }
 
+    /// <summary>The panel's expanded width, in DIP.</summary>
     public int Width { get; set; }
 
+    /// <summary>The panel's expanded height, in DIP.</summary>
     public int Height { get; set; }
 
+    /// <summary>The device id of the monitor the panel was last placed on, or <see langword="null"/> if unknown.</summary>
     public string? MonitorDeviceId { get; set; }
 
+    /// <summary>The panel window's <see cref="System.Windows.WindowState"/>.</summary>
     public WindowState WindowState { get; set; } = WindowState.Normal;
 
+    /// <summary>Whether the panel is collapsed to its title bar.</summary>
     public bool IsRolledUp { get; set; }
 
+    /// <summary>Whether the panel is currently shown.</summary>
     public bool IsVisible { get; set; } = true;
 
     /// <summary>

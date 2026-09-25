@@ -56,7 +56,7 @@ public static class AdaptiveGridLayout
     /// points. That is no longer true now that <see cref="DefaultMinGap"/> = 4: the gap term in
     /// <see cref="Extent"/> is multiplied by <c>(count - 1)</c>, so it drops out only for a single cell
     /// (<c>count = 1</c>) — <c>Extent(1, cell, gap, cell*0.5) == 2*cell</c> for ANY <c>gap</c>, which is
-    /// exactly what <see cref="GridMetrics.MinPanelWidth"/> relies on. For <c>count &gt;= 2</c> the snapped
+    /// exactly what <see cref="GridMetrics.MinPanelWidth(double)"/> relies on. For <c>count &gt;= 2</c> the snapped
     /// extent now includes <c>(count-1)*4</c> pixels of gap that a <c>gap = 0</c> extent didn't have, so
     /// a panel with 2+ columns/rows will land on a NEW width/height the first time it re-snaps after
     /// this change — this is an expected, intentional side effect of increasing <c>pmin</c>, not a
@@ -217,7 +217,8 @@ public static class AdaptiveGridLayout
     /// <see cref="RowCount"/>, <see cref="ItemsInRow"/>, <see cref="Offset"/>, <see cref="Extent"/>,
     /// <see cref="CountForExtent"/>, and <see cref="SnapExtent"/> are all policy-agnostic by design
     /// (ADR-029 Решение 3: no second, competing "gap" concept is introduced — the policy only chooses
-    /// which of the two ALREADY-EXISTING <see cref="RowGap"/> branches applies to a full row).
+    /// which of the two ALREADY-EXISTING <see cref="RowGap(int, int, double, double, double, double)"/>
+    /// branches applies to a full row).
     /// </summary>
     /// <param name="itemsInRow">The number of items actually placed in this row (<see cref="ItemsInRow"/>).</param>
     /// <param name="rowCapacity">The row's maximum capacity (<see cref="RowCapacity"/>'s <c>k_max</c>).</param>
@@ -243,8 +244,8 @@ public static class AdaptiveGridLayout
     /// <param name="indexInLine">The zero-based position within the row (horizontal) or the zero-based
     /// row index (vertical).</param>
     /// <param name="cell">The cell size along the axis.</param>
-    /// <param name="gap">The gap to use between cells (<see cref="RowGap"/> for horizontal,
-    /// <paramref name="minGap"/> — never stretched — for vertical; see plan §5).</param>
+    /// <param name="gap">The gap to use between cells (<see cref="RowGap(int, int, double, double, double, double)"/> for horizontal,
+    /// the minimum gap — never stretched — for vertical; see plan §5).</param>
     /// <param name="edgePadding">The edge padding (<c>m</c>).</param>
     /// <returns><c>edgePadding + indexInLine * (cell + gap)</c>.</returns>
     public static double Offset(int indexInLine, double cell, double gap, double edgePadding)

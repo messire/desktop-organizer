@@ -113,14 +113,6 @@ public static class WorkspaceLayoutPolicy
         return new Point(origin.X + (slot.Col * safeUnitSize), origin.Y + (slot.Row * safeUnitSize));
     }
 
-    /// <summary>Single-axis half of <see cref="PositionToSlot"/>.</summary>
-    private static int SlotIndexForCoordinate(double raw, double origin, double unitSize)
-    {
-        if (!double.IsFinite(raw) || !double.IsFinite(origin) || !double.IsFinite(unitSize) || unitSize <= 0d) return 0;
-
-        return (int)Math.Round((raw - origin) / unitSize);
-    }
-
     /// <summary>
     /// Converts a raw DIP size into the smallest integer <see cref="GridSpan"/> whose
     /// <see cref="SpansToBounds"/> covers it (ADR-028 "px↔DIP": <see cref="Math.Ceiling(double)"/>, never
@@ -558,6 +550,102 @@ public static class WorkspaceLayoutPolicy
     }
 
     /// <summary>
+    /// Anti-overlap clamp for a <see cref="PanelGeometryMode.GridAligned"/> RESIZE gesture, expressed in
+    /// whole grid slots (fix-cycle 1, MAJOR-5(c); ADR-028 "Resize: ... Anti-overlap при resize — закрывает
+    /// открытый пункт ADR-017"). Because every <see cref="PanelGeometryMode.GridAligned"/> panel's edges
+    /// land on the SAME shared grid (ADR-028's key structural guarantee for this mode), shrinking one grid
+    /// unit at a time from the dragged edge can never stop "half inside" a neighbour's cell — the
+    /// continuous-AABB case ADR-017 left as an open backlog item for resize. Intended to run immediately
+    /// after <see cref="SnapBounds(Rect,Point,ResizeEdge,double,double,GridSpan)"/>, before the result is
+    /// applied to the window (same "anti-overlap always last" layering as the existing drag pipeline).
+    /// </summary>
+    /// <param name="candidate">The proposed, already grid-quantised resize rectangle (e.g. the output of <see cref="SnapBounds(Rect,Point,ResizeEdge,double,double,GridSpan)"/>).</param>
+    /// <param name="edge">The edge/corner being dragged — determines which side(s) may shrink.</param>
+    /// <param name="obstacles">The other live panels' current rectangles (same shape as <see cref="PanelCollision.ClampAgainstObstacles(Rect,double,double,IReadOnlyList{Rect})"/>'s <c>obstacles</c> parameter).</param>
+    /// <param name="unitSize">The workspace grid unit <c>U</c>, in DIP.</param>
+    /// <param name="gap">The panel gap <c>G</c>, in DIP — also the minimum clearance enforced against every obstacle (same semantics as <see cref="PanelCollision.ClampAgainstObstacles(Rect,double,double,IReadOnlyList{Rect},double)"/>).</param>
+    /// <param name="minSpan">
+    /// The minimum span the result must never go below, even if that means it still overlaps an obstacle
+    /// — a resize can never make the panel disappear below the floor size just to satisfy anti-overlap
+    /// (same "floor wins" precedent as this type's own minimum-span clamps elsewhere).
+    /// </param>
+    /// <returns>
+    /// <paramref name="candidate"/> unchanged if it does not come within <paramref name="gap"/> DIP of any
+    /// obstacle that shrinking can ever actually clear (see remarks), or if none of
+    /// <paramref name="obstacles"/> is; otherwise the dragged edge is pulled back one whole
+    /// <paramref name="unitSize"/> slot at a time (recomputing the opposite edge's fixed position exactly
+    /// as <see cref="SnapBounds(Rect,Point,ResizeEdge,double,double,GridSpan)"/> would) until either no
+    /// obstacle is within <paramref name="gap"/> DIP or <paramref name="minSpan"/> is reached.
+    /// </returns>
+    /// <remarks>
+    /// <b>Fix-cycle 2, MAJOR-B.</b> An obstacle on the ANCHOR side of <paramref name="candidate"/> — i.e.
+    /// one this resize's fixed (non-moving) edge already overlaps or precedes, before a single unit is ever
+    /// shrunk — can never be cleared by moving the OPPOSITE edge, because the anchor itself never moves. The
+    /// original implementation did not distinguish this from a genuinely resolvable obstacle: it just kept
+    /// shrinking every iteration regardless, destroying the panel's size down to <paramref name="minSpan"/>
+    /// for zero actual benefit (repro: <c>candidate=(100,100,248,248)</c>, <paramref name="edge"/>=<c>Right</c>
+    /// (anchor = <c>Left</c> = 100), obstacle=<c>(50,100,100,248)</c> (X∈[50,150], straddling the anchor) —
+    /// 20 iterations later the result was <c>(100,100,88,248)</c>, still overlapping, width destroyed for
+    /// nothing). Fixed with a one-time pre-filter (<see cref="CanEverClear"/>), evaluated against
+    /// <paramref name="candidate"/>'s ORIGINAL anchor position (the anchor never moves during the loop, so
+    /// this only needs to run once, not per iteration): an obstacle that the moving edge(s) can never place
+    /// on the far side of, on ANY axis <paramref name="edge"/> actually moves, is dropped from consideration
+    /// entirely — it is neither shrunk toward nor allowed to trip the <paramref name="minSpan"/> floor
+    /// return; the panel's original <paramref name="candidate"/> size is preserved for it, the same
+    /// "pre-existing state is not auto-corrected" spirit as ADR-017's R1, applied here to a resize gesture
+    /// instead of a drag. If <see cref="CanEverClear"/> drops every obstacle, <paramref name="candidate"/>
+    /// is returned immediately, unshrunk. An obstacle that legitimately sits ahead of the moving edge (the
+    /// "обратная ситуация" case) is unaffected by this filter and still shrinks exactly to
+    /// <paramref name="gap"/> DIP of clearance as before.
+    /// <para>
+    /// <b>Fix-cycle 2, MINOR-C.</b> The floor check below now tests <c>shrunkWidth</c>/<c>shrunkHeight</c>
+    /// against <paramref name="minSpan"/> only on the axis/axes <paramref name="edge"/> actually moves
+    /// (<c>edge.AffectsWidth()</c>/<c>AffectsHeight()</c>). The original code checked BOTH unconditionally,
+    /// so a collapsed (rolled-up) panel — whose HEIGHT span (<see cref="WorkspaceGridMetrics.CollapsedHeaderSpan"/>,
+    /// 5 as of P04's OQ-4 = A fix; this comment said 4, the pre-fix P02 value, until P04 fix-cycle 1) is
+    /// legitimately below the EXPANDED floor (<see cref="WorkspaceGridMetrics.MinHeightSpanExpanded"/>,
+    /// 12) — silently no-opped on the very first iteration of a WIDTH-only resize (<paramref name="edge"/> =
+    /// <c>Left</c>/<c>Right</c>, which never touches height at all), because the untouched height span
+    /// already read as "below minSpan.HeightUnits (12)" even though nothing was ever asking to shrink it.
+    /// </para>
+    /// </remarks>
+    public static Rect ClampResizeToSlots(Rect candidate, ResizeEdge edge, IReadOnlyList<Rect> obstacles, double unitSize, double gap, GridSpan minSpan)
+    {
+        WorkspaceGridMetrics.ValidateGap(unitSize, gap); // Fix-cycle 2, MINOR-E (also enforces unitSize > 0 and finite).
+
+        if (obstacles.Count == 0)
+            return candidate;
+
+        var relevant = FilterObstaclesResolvableByThisEdge(candidate, edge, obstacles);
+        if (relevant.Count == 0)
+            return candidate; // MAJOR-B: every obstacle is anchor-side / otherwise unresolvable by this edge -- nothing to do.
+
+        var span = BoundsToSpans(candidate.Size, unitSize, gap);
+        var current = candidate;
+
+        while (OverlapsAnyWithGap(current, relevant, gap))
+        {
+            var widthMoves = edge.AffectsWidth();
+            var heightMoves = edge.AffectsHeight();
+            var shrunkWidth = widthMoves ? span.WidthUnits - 1 : span.WidthUnits;
+            var shrunkHeight = heightMoves ? span.HeightUnits - 1 : span.HeightUnits;
+
+            // MINOR-C: only the axis/axes this edge actually moves are checked against the floor.
+            if ((widthMoves && shrunkWidth < minSpan.WidthUnits) || (heightMoves && shrunkHeight < minSpan.HeightUnits))
+                return current; // MinSpan floor reached -- accept the residual overlap rather than violate it.
+
+            span = new GridSpan(shrunkWidth, shrunkHeight);
+            var size = SpansToBounds(span, unitSize, gap);
+
+            var left = edge.AnchorsRight() ? current.Right - size.Width : current.Left;
+            var top = edge.AnchorsBottom() ? current.Bottom - size.Height : current.Top;
+            current = new Rect(left, top, size.Width, size.Height);
+        }
+
+        return current;
+    }
+
+    /// <summary>
     /// One-axis half of <see cref="SafeClamp(Rect,Rect,double,double)"/>: picks the largest slot index
     /// <c>k &gt;= 0</c> such that <c>origin + k*unitSize + extent &lt;= origin + areaExtent</c> — solving
     /// for <c>k</c> gives <c>maxSlot = Floor((areaExtent - extent) / unitSize)</c>. Clamped to <c>&gt;= 0</c>:
@@ -700,102 +788,6 @@ public static class WorkspaceLayoutPolicy
     }
 
     /// <summary>
-    /// Anti-overlap clamp for a <see cref="PanelGeometryMode.GridAligned"/> RESIZE gesture, expressed in
-    /// whole grid slots (fix-cycle 1, MAJOR-5(c); ADR-028 "Resize: ... Anti-overlap при resize — закрывает
-    /// открытый пункт ADR-017"). Because every <see cref="PanelGeometryMode.GridAligned"/> panel's edges
-    /// land on the SAME shared grid (ADR-028's key structural guarantee for this mode), shrinking one grid
-    /// unit at a time from the dragged edge can never stop "half inside" a neighbour's cell — the
-    /// continuous-AABB case ADR-017 left as an open backlog item for resize. Intended to run immediately
-    /// after <see cref="SnapBounds(Rect,Point,ResizeEdge,double,double,GridSpan)"/>, before the result is
-    /// applied to the window (same "anti-overlap always last" layering as the existing drag pipeline).
-    /// </summary>
-    /// <param name="candidate">The proposed, already grid-quantised resize rectangle (e.g. the output of <see cref="SnapBounds(Rect,Point,ResizeEdge,double,double,GridSpan)"/>).</param>
-    /// <param name="edge">The edge/corner being dragged — determines which side(s) may shrink.</param>
-    /// <param name="obstacles">The other live panels' current rectangles (same shape as <see cref="PanelCollision.ClampAgainstObstacles(Rect,double,double,IReadOnlyList{Rect})"/>'s <c>obstacles</c> parameter).</param>
-    /// <param name="unitSize">The workspace grid unit <c>U</c>, in DIP.</param>
-    /// <param name="gap">The panel gap <c>G</c>, in DIP — also the minimum clearance enforced against every obstacle (same semantics as <see cref="PanelCollision.ClampAgainstObstacles(Rect,double,double,IReadOnlyList{Rect},double)"/>).</param>
-    /// <param name="minSpan">
-    /// The minimum span the result must never go below, even if that means it still overlaps an obstacle
-    /// — a resize can never make the panel disappear below the floor size just to satisfy anti-overlap
-    /// (same "floor wins" precedent as this type's own minimum-span clamps elsewhere).
-    /// </param>
-    /// <returns>
-    /// <paramref name="candidate"/> unchanged if it does not come within <paramref name="gap"/> DIP of any
-    /// obstacle that shrinking can ever actually clear (see remarks), or if none of
-    /// <paramref name="obstacles"/> is; otherwise the dragged edge is pulled back one whole
-    /// <paramref name="unitSize"/> slot at a time (recomputing the opposite edge's fixed position exactly
-    /// as <see cref="SnapBounds(Rect,Point,ResizeEdge,double,double,GridSpan)"/> would) until either no
-    /// obstacle is within <paramref name="gap"/> DIP or <paramref name="minSpan"/> is reached.
-    /// </returns>
-    /// <remarks>
-    /// <b>Fix-cycle 2, MAJOR-B.</b> An obstacle on the ANCHOR side of <paramref name="candidate"/> — i.e.
-    /// one this resize's fixed (non-moving) edge already overlaps or precedes, before a single unit is ever
-    /// shrunk — can never be cleared by moving the OPPOSITE edge, because the anchor itself never moves. The
-    /// original implementation did not distinguish this from a genuinely resolvable obstacle: it just kept
-    /// shrinking every iteration regardless, destroying the panel's size down to <paramref name="minSpan"/>
-    /// for zero actual benefit (repro: <c>candidate=(100,100,248,248)</c>, <paramref name="edge"/>=<c>Right</c>
-    /// (anchor = <c>Left</c> = 100), obstacle=<c>(50,100,100,248)</c> (X∈[50,150], straddling the anchor) —
-    /// 20 iterations later the result was <c>(100,100,88,248)</c>, still overlapping, width destroyed for
-    /// nothing). Fixed with a one-time pre-filter (<see cref="CanEverClear"/>), evaluated against
-    /// <paramref name="candidate"/>'s ORIGINAL anchor position (the anchor never moves during the loop, so
-    /// this only needs to run once, not per iteration): an obstacle that the moving edge(s) can never place
-    /// on the far side of, on ANY axis <paramref name="edge"/> actually moves, is dropped from consideration
-    /// entirely — it is neither shrunk toward nor allowed to trip the <paramref name="minSpan"/> floor
-    /// return; the panel's original <paramref name="candidate"/> size is preserved for it, the same
-    /// "pre-existing state is not auto-corrected" spirit as ADR-017's R1, applied here to a resize gesture
-    /// instead of a drag. If <see cref="CanEverClear"/> drops every obstacle, <paramref name="candidate"/>
-    /// is returned immediately, unshrunk. An obstacle that legitimately sits ahead of the moving edge (the
-    /// "обратная ситуация" case) is unaffected by this filter and still shrinks exactly to
-    /// <paramref name="gap"/> DIP of clearance as before.
-    /// <para>
-    /// <b>Fix-cycle 2, MINOR-C.</b> The floor check below now tests <c>shrunkWidth</c>/<c>shrunkHeight</c>
-    /// against <paramref name="minSpan"/> only on the axis/axes <paramref name="edge"/> actually moves
-    /// (<c>edge.AffectsWidth()</c>/<c>AffectsHeight()</c>). The original code checked BOTH unconditionally,
-    /// so a collapsed (rolled-up) panel — whose HEIGHT span (<see cref="WorkspaceGridMetrics.CollapsedHeaderSpan"/>,
-    /// 5 as of P04's OQ-4 = A fix; this comment said 4, the pre-fix P02 value, until P04 fix-cycle 1) is
-    /// legitimately below the EXPANDED floor (<see cref="WorkspaceGridMetrics.MinHeightSpanExpanded"/>,
-    /// 12) — silently no-opped on the very first iteration of a WIDTH-only resize (<paramref name="edge"/> =
-    /// <c>Left</c>/<c>Right</c>, which never touches height at all), because the untouched height span
-    /// already read as "below minSpan.HeightUnits (12)" even though nothing was ever asking to shrink it.
-    /// </para>
-    /// </remarks>
-    public static Rect ClampResizeToSlots(Rect candidate, ResizeEdge edge, IReadOnlyList<Rect> obstacles, double unitSize, double gap, GridSpan minSpan)
-    {
-        WorkspaceGridMetrics.ValidateGap(unitSize, gap); // Fix-cycle 2, MINOR-E (also enforces unitSize > 0 and finite).
-
-        if (obstacles.Count == 0)
-            return candidate;
-
-        var relevant = FilterObstaclesResolvableByThisEdge(candidate, edge, obstacles);
-        if (relevant.Count == 0)
-            return candidate; // MAJOR-B: every obstacle is anchor-side / otherwise unresolvable by this edge -- nothing to do.
-
-        var span = BoundsToSpans(candidate.Size, unitSize, gap);
-        var current = candidate;
-
-        while (OverlapsAnyWithGap(current, relevant, gap))
-        {
-            var widthMoves = edge.AffectsWidth();
-            var heightMoves = edge.AffectsHeight();
-            var shrunkWidth = widthMoves ? span.WidthUnits - 1 : span.WidthUnits;
-            var shrunkHeight = heightMoves ? span.HeightUnits - 1 : span.HeightUnits;
-
-            // MINOR-C: only the axis/axes this edge actually moves are checked against the floor.
-            if ((widthMoves && shrunkWidth < minSpan.WidthUnits) || (heightMoves && shrunkHeight < minSpan.HeightUnits))
-                return current; // MinSpan floor reached -- accept the residual overlap rather than violate it.
-
-            span = new GridSpan(shrunkWidth, shrunkHeight);
-            var size = SpansToBounds(span, unitSize, gap);
-
-            var left = edge.AnchorsRight() ? current.Right - size.Width : current.Left;
-            var top = edge.AnchorsBottom() ? current.Bottom - size.Height : current.Top;
-            current = new Rect(left, top, size.Width, size.Height);
-        }
-
-        return current;
-    }
-
-    /// <summary>
     /// Fix-cycle 2, MAJOR-B: filters <paramref name="obstacles"/> down to the ones a
     /// <paramref name="edge"/>-resize of <paramref name="original"/> could EVER clear, evaluated once
     /// against <paramref name="original"/>'s own (never-moving) anchor position/positions. See
@@ -865,5 +857,13 @@ public static class WorkspaceLayoutPolicy
         }
 
         return false;
+    }
+
+    /// <summary>Single-axis half of <see cref="PositionToSlot"/>.</summary>
+    private static int SlotIndexForCoordinate(double raw, double origin, double unitSize)
+    {
+        if (!double.IsFinite(raw) || !double.IsFinite(origin) || !double.IsFinite(unitSize) || unitSize <= 0d) return 0;
+
+        return (int)Math.Round((raw - origin) / unitSize);
     }
 }

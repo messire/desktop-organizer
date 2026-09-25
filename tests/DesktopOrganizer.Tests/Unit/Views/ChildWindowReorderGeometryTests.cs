@@ -1,6 +1,6 @@
 using System.Windows;
-using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Behaviors;
+using DesktopOrganizer.UI.Models;
 
 namespace DesktopOrganizer.Tests.Unit.Views;
 
@@ -17,6 +17,10 @@ public class ChildWindowReorderGeometryTests
 {
     private static readonly Size ContainerSize = new(40, 20);
 
+    /// <summary>
+    /// Verifies that a <c>null</c> container index (cursor over empty space past the last item) always
+    /// resolves to the end-of-list gap, regardless of the other arguments.
+    /// </summary>
     [Fact]
     public void ComputeInsertionGap_NullContainerIndex_ReturnsItemCount()
     {
@@ -27,6 +31,10 @@ public class ChildWindowReorderGeometryTests
         Assert.Equal(5, gap);
     }
 
+    /// <summary>
+    /// Verifies that a <c>null</c> container index resolves to the end-of-list gap in
+    /// <see cref="PanelViewMode.List"/> too.
+    /// </summary>
     [Fact]
     public void ComputeInsertionGap_NullContainerIndex_ListMode_StillReturnsItemCount()
     {
@@ -37,6 +45,11 @@ public class ChildWindowReorderGeometryTests
 
     // ── Grid (PanelViewMode.Grid) — horizontal (X) axis ──────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that in <see cref="PanelViewMode.Grid"/>, a cursor before the container's horizontal
+    /// midpoint resolves the gap to the container's own index.
+    /// </summary>
+    /// <param name="index">The hovered container's index.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(3)]
@@ -49,6 +62,11 @@ public class ChildWindowReorderGeometryTests
         Assert.Equal(index, gap);
     }
 
+    /// <summary>
+    /// Verifies that in <see cref="PanelViewMode.Grid"/>, a cursor after the container's horizontal
+    /// midpoint resolves the gap to the container's index plus one.
+    /// </summary>
+    /// <param name="index">The hovered container's index.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(3)]
@@ -61,6 +79,10 @@ public class ChildWindowReorderGeometryTests
         Assert.Equal(index + 1, gap);
     }
 
+    /// <summary>
+    /// Verifies that in <see cref="PanelViewMode.Grid"/>, the vertical cursor position is ignored —
+    /// only the horizontal half determines the gap.
+    /// </summary>
     [Fact]
     public void ComputeInsertionGap_GridMode_IgnoresVerticalPosition()
     {
@@ -75,6 +97,11 @@ public class ChildWindowReorderGeometryTests
 
     // ── List (PanelViewMode.List) — vertical (Y) axis ────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that in <see cref="PanelViewMode.List"/>, a cursor before the container's vertical
+    /// midpoint resolves the gap to the container's own index.
+    /// </summary>
+    /// <param name="index">The hovered container's index.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(2)]
@@ -87,6 +114,11 @@ public class ChildWindowReorderGeometryTests
         Assert.Equal(index, gap);
     }
 
+    /// <summary>
+    /// Verifies that in <see cref="PanelViewMode.List"/>, a cursor after the container's vertical
+    /// midpoint resolves the gap to the container's index plus one.
+    /// </summary>
+    /// <param name="index">The hovered container's index.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(2)]
@@ -99,6 +131,10 @@ public class ChildWindowReorderGeometryTests
         Assert.Equal(index + 1, gap);
     }
 
+    /// <summary>
+    /// Verifies that in <see cref="PanelViewMode.List"/>, the horizontal cursor position is ignored —
+    /// only the vertical half determines the gap.
+    /// </summary>
     [Fact]
     public void ComputeInsertionGap_ListMode_IgnoresHorizontalPosition()
     {

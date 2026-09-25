@@ -21,6 +21,7 @@ namespace DesktopOrganizer.Tests.Unit.Behaviors;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class RollUpBehaviorMotionTests
 {
+    /// <summary>Verifies that with reduced motion, <see cref="RollUpBehavior.ApplyRollUp"/> sets the collapsed target height immediately, without starting an animation.</summary>
     [Fact]
     public void ApplyRollUp_ReducedMotion_SetsTargetHeightImmediately_NoAnimation()
     {
@@ -49,6 +50,7 @@ public class RollUpBehaviorMotionTests
         });
     }
 
+    /// <summary>Verifies that with reduced motion, rolling a panel back down sets the expanded height immediately, without an animation.</summary>
     [Fact]
     public void ApplyRollUp_ReducedMotion_RollingBackDown_SetsExpandedHeightImmediately()
     {
@@ -75,6 +77,7 @@ public class RollUpBehaviorMotionTests
         });
     }
 
+    /// <summary>Verifies that with animations enabled, <see cref="RollUpBehavior.ApplyRollUp"/> synchronously starts from the expanded height rather than jumping straight to the collapsed target.</summary>
     [Fact]
     public void ApplyRollUp_AnimationsEnabled_StartsFromExpandedHeightSynchronously_DoesNotJumpToTarget()
     {
@@ -107,6 +110,7 @@ public class RollUpBehaviorMotionTests
         });
     }
 
+    /// <summary>Verifies that the reduced-motion early return still runs the content-row-collapse and resize-affordance-disable side effects, same as the animated path.</summary>
     [Fact]
     public void ApplyRollUp_ReducedMotion_DisablesResizeAffordanceAndCollapsesContentRow_SameAsAnimatedPath()
     {

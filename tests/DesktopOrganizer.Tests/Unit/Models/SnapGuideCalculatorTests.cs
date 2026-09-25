@@ -15,6 +15,42 @@ public class SnapGuideCalculatorTests
     // A generous work area that never triggers the off-screen guard unless a test says otherwise.
     private static readonly Rect BigWorkArea = new(0, 0, 10_000, 10_000);
 
+    /// <summary>
+    /// Supplies (current, proposed, obstacles) triples covering a spread of guide/clamp composition
+    /// scenarios — single and multiple obstacles, diagonal adjacency, and a pre-existing (ghost)
+    /// overlap — for the R-8 composition theory below.
+    /// </summary>
+    /// <returns>The composition cases, each a (current, proposed, obstacles) triple.</returns>
+    public static TheoryData<Rect, Rect, Rect[]> CompositionCases()
+    {
+        var data = new TheoryData<Rect, Rect, Rect[]>();
+
+        // Case A: moving toward a single obstacle, guide would pull it flush — clamp must still hold the wall.
+        data.Add(new Rect(0, 0, 100, 100), new Rect(146, 4, 100, 100), [new Rect(150, 0, 100, 100)]);
+
+        // Case B: guide pulls toward CenterY of an obstacle directly below, while sliding X freely.
+        data.Add(new Rect(0, 0, 100, 100), new Rect(400, 146, 100, 100), [new Rect(0, 150, 100, 100)]);
+
+        // Case C: two obstacles, one on each axis, both within guide range and both blocking.
+        data.Add(
+            new Rect(0, 0, 100, 100),
+            new Rect(148, 148, 100, 100),
+            [new Rect(150, 0, 100, 100), new Rect(0, 150, 100, 100)]);
+
+        // Case D: obstacle is diagonally adjacent — guide aligns centre while the panel is also moving
+        // straight toward it; clamp must still prevent any new overlap.
+        data.Add(new Rect(0, 0, 100, 100), new Rect(96, 96, 100, 100), [new Rect(100, 100, 100, 100)]);
+
+        // Case E: panel already overlapping an obstacle (R1 ghost) moves further in — guide should not
+        // change the ghost-amnesty outcome of the clamp step.
+        data.Add(new Rect(60, 0, 100, 100), new Rect(66, 4, 100, 100), [new Rect(0, 0, 100, 100)]);
+
+        // Case F: no obstacle within guide range at all — degenerates to plain clamp behaviour.
+        data.Add(new Rect(0, 0, 100, 100), new Rect(300, 300, 100, 100), [new Rect(150, 0, 100, 100)]);
+
+        return data;
+    }
+
     // ----- No obstacles / degenerate input -----
 
     /// <summary>Test 1: empty obstacle list → no-op, no guides.</summary>
@@ -102,6 +138,7 @@ public class SnapGuideCalculatorTests
     public void Snap_WithinThreshold_SnapsToObstacleBottomEdge()
     {
         var obstacle = new Rect(900, 300, 80, 80); // Top = 300, Bottom = 380
+
         // moving is short (Height=20) so its Top is far from obstacle.Top and its centre is far from the
         // obstacle's centre — only BottomEdge can qualify.
         var moving = new Rect(1100, 357, 80, 20); // moving.Bottom = 377, 3px from obstacle.Bottom(380)
@@ -119,6 +156,7 @@ public class SnapGuideCalculatorTests
     public void Snap_WithinThreshold_SnapsToObstacleCenterX()
     {
         var obstacle = new Rect(400, 500, 100, 100); // Left = 400, Right = 500, CenterX = 450
+
         // moving is narrow (Width=44) and offset so its Left(430)/Right(474) are both far from the
         // obstacle's Left/Right, but its centre(452) is close to the obstacle's centre(450) —
         // only CenterX can qualify.
@@ -137,6 +175,7 @@ public class SnapGuideCalculatorTests
     public void Snap_WithinThreshold_SnapsToObstacleCenterY()
     {
         var obstacle = new Rect(500, 400, 100, 100); // Top = 400, Bottom = 500, CenterY = 450
+
         // moving is short (Height=44) and offset so its Top(430)/Bottom(474) are both far from the
         // obstacle's Top/Bottom, but its centre(452) is close to the obstacle's centre(450) —
         // only CenterY can qualify.
@@ -310,6 +349,7 @@ public class SnapGuideCalculatorTests
     public void Snap_CorrectionWouldLeaveWorkArea_GuideDiscardedOnThatAxis()
     {
         var workArea = new Rect(0, 0, 1000, 1000);
+
         // Y is deliberately far apart (5000) so only the X guide could ever qualify — isolates the
         // off-screen guard's effect to the axis under test.
         var obstacle = new Rect(-100, 5000, 80, 80); // LeftEdge target = -100 -> new panel rect fully off-screen (X in [-100,-20])
@@ -368,6 +408,7 @@ public class SnapGuideCalculatorTests
     {
         var secondMonitorWorkArea = new Rect(1920, 0, 1920, 1040);
         var obstacle = new Rect(2000, 500, 80, 80); // lives entirely within the second monitor's region
+
         // Y is deliberately far apart so only the X/LeftEdge candidate can qualify.
         var moving = new Rect(2005, 10_000, 80, 80); // moving.Left(2005) is 5px from obstacle.Left(2000)
 
@@ -404,14 +445,17 @@ public class SnapGuideCalculatorTests
 
     /// <summary>
     /// Test 19 (R-8, critical): the full drag pipeline — <c>GridSnap</c> (simulated as already applied to
-    /// <paramref name="moving"/>'s position by the caller in production; here <c>moving</c> already stands
-    /// in for the post-grid-snap proposal) → <see cref="SnapGuideCalculator.Snap"/> →
-    /// <see cref="PanelCollision.ClampAgainstObstacles"/> — never leaves the panel newly overlapping any
+    /// <paramref name="proposed"/>'s position by the caller in production; here <c>proposed</c> already
+    /// stands in for the post-grid-snap proposal) → <see cref="SnapGuideCalculator.Snap"/> →
+    /// <c>PanelCollision.ClampAgainstObstacles</c> — never leaves the panel newly overlapping any
     /// obstacle, across a spread of obstacle layouts and starting positions. Mirrors
     /// <c>PanelCollisionTests</c>' own <c>CreatesNewOverlap</c>-style checks, extended to also exercise the
-    /// guide step in between. The "hard wall" (<see cref="PanelCollision.ClampAgainstObstacles"/>) always
+    /// guide step in between. The "hard wall" (<c>PanelCollision.ClampAgainstObstacles</c>) always
     /// runs last, exactly as <c>PanelDragMoveBehavior.OnTitleBarMouseMove</c> wires it.
     /// </summary>
+    /// <param name="current">The panel's rectangle before this frame's move.</param>
+    /// <param name="proposed">The post-grid-snap proposed rectangle, before the guide step runs.</param>
+    /// <param name="obstacles">The stationary obstacles the guide and clamp steps must respect.</param>
     [Theory]
     [MemberData(nameof(CompositionCases))]
     public void Pipeline_GuideSnapThenClamp_NeverCreatesNewOverlap(Rect current, Rect proposed, Rect[] obstacles)
@@ -426,39 +470,9 @@ public class SnapGuideCalculatorTests
             var wasAlreadyOverlapping = PanelCollision.Overlaps(current, obstacle);
             var isNowOverlapping = PanelCollision.Overlaps(afterRect, obstacle);
 
-            Assert.False(isNowOverlapping && !wasAlreadyOverlapping,
-                $"Guide-snap + clamp introduced a NEW overlap against obstacle {obstacle} " +
-                $"(current={current}, proposed={proposed}, guided={guideResult.Position}, clamped={afterRect}).");
+            var message = $"Guide-snap + clamp introduced a NEW overlap against obstacle {obstacle} " +
+                $"(current={current}, proposed={proposed}, guided={guideResult.Position}, clamped={afterRect}).";
+            Assert.False(isNowOverlapping && !wasAlreadyOverlapping, message);
         }
-    }
-
-    public static TheoryData<Rect, Rect, Rect[]> CompositionCases()
-    {
-        var data = new TheoryData<Rect, Rect, Rect[]>();
-
-        // Case A: moving toward a single obstacle, guide would pull it flush — clamp must still hold the wall.
-        data.Add(new Rect(0, 0, 100, 100), new Rect(146, 4, 100, 100), [new Rect(150, 0, 100, 100)]);
-
-        // Case B: guide pulls toward CenterY of an obstacle directly below, while sliding X freely.
-        data.Add(new Rect(0, 0, 100, 100), new Rect(400, 146, 100, 100), [new Rect(0, 150, 100, 100)]);
-
-        // Case C: two obstacles, one on each axis, both within guide range and both blocking.
-        data.Add(
-            new Rect(0, 0, 100, 100),
-            new Rect(148, 148, 100, 100),
-            [new Rect(150, 0, 100, 100), new Rect(0, 150, 100, 100)]);
-
-        // Case D: obstacle is diagonally adjacent — guide aligns centre while the panel is also moving
-        // straight toward it; clamp must still prevent any new overlap.
-        data.Add(new Rect(0, 0, 100, 100), new Rect(96, 96, 100, 100), [new Rect(100, 100, 100, 100)]);
-
-        // Case E: panel already overlapping an obstacle (R1 ghost) moves further in — guide should not
-        // change the ghost-amnesty outcome of the clamp step.
-        data.Add(new Rect(60, 0, 100, 100), new Rect(66, 4, 100, 100), [new Rect(0, 0, 100, 100)]);
-
-        // Case F: no obstacle within guide range at all — degenerates to plain clamp behaviour.
-        data.Add(new Rect(0, 0, 100, 100), new Rect(300, 300, 100, 100), [new Rect(150, 0, 100, 100)]);
-
-        return data;
     }
 }

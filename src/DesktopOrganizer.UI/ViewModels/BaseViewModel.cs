@@ -11,6 +11,9 @@ namespace DesktopOrganizer.UI.ViewModels;
 /// </summary>
 public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropertyChanged
 {
+    /// <summary>Maximum number of placeholder-retry attempts per item (see <see cref="RetryPlaceholderIcon"/>).</summary>
+    private const int MaxPlaceholderRetryAttempts = 3;
+
     private readonly IIconProvider _iconProvider = iconProvider;
     private readonly List<FileItem> _allItems = [];
 
@@ -45,12 +48,6 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     public ObservableCollection<FileItem> FileItems => _fileItems;
 
     /// <summary>
-    /// The full, unfiltered set of items managed by this panel.
-    /// Subclasses use this as the source when computing filter projections.
-    /// </summary>
-    protected internal IReadOnlyList<FileItem> AllItems => _allItems;
-
-    /// <summary>
     /// Text displaying the current number of visible files.
     /// </summary>
     public string FileCountText => $"File Count: {FileItems.Count}";
@@ -71,6 +68,102 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     }
 
     /// <summary>
+    /// The full, unfiltered set of items managed by this panel.
+    /// Subclasses use this as the source when computing filter projections.
+    /// </summary>
+    protected internal IReadOnlyList<FileItem> AllItems => _allItems;
+
+    /// <summary>
+    /// Re-indexes <see cref="_allItemPaths"/> for <paramref name="item"/> after a successful physical
+    /// rename (see <c>ChildWindowViewModel.CommitRenameCommand</c>) and relocates the item in place via
+    /// <see cref="FileItem.Relocate"/> — the same <see cref="FileItem"/> instance is kept (rather than
+    /// replaced), so any bound selection/UI state referencing it survives. No-op (and no
+    /// <see cref="OnSourceChanged"/> raised) if <paramref name="item"/> isn't currently tracked by this
+    /// ViewModel.
+    /// </summary>
+    /// <remarks>
+    /// Does not call <see cref="OnSourceChanged"/> itself — the caller (<c>ChildWindowViewModel</c>)
+    /// still needs to re-run its content filter afterwards, since a rename can change the extension and
+    /// therefore <see cref="FileItem.IsShortcut"/>; the caller does that explicitly so it can also fold
+    /// it into whatever single collection-change notification it's about to raise.
+    /// </remarks>
+    /// <param name="item">The item being renamed. Must be an instance currently in <see cref="AllItems"/>.</param>
+    /// <param name="newPath">The item's new full path, as returned by the rename service.</param>
+    internal void TryRenameItem(FileItem item, string newPath)
+    {
+        if (!_allItems.Contains(item)) return;
+
+        _allItemPaths.Remove(item.Path);
+
+        // A rename can never collide with an already-tracked path (the rename service itself rejects
+        // NameTaken), but guard anyway: dedup the same way AddFilesCore does, rather than risk two
+        // entries in _allItemPaths pointing at the same FileItem.
+        _allItemPaths.Add(newPath);
+
+        item.Relocate(newPath, _iconProvider.GetIcon(newPath));
+    }
+
+    /// <summary>
+    /// Re-validates <see cref="FileItem.Exists"/>/<see cref="FileItem.IsDirectory"/> for every tracked
+    /// item against the current file-system state (<see cref="FileItem.Refresh"/>), and re-resolves the
+    /// icon for any item that just transitioned from missing to present. <see cref="IIconProvider"/>
+    /// deliberately never caches its placeholder result for a missing path (see
+    /// <c>IconProvider.GetIcon</c>), so a single fresh call here is enough to replace a stuck
+    /// placeholder with the file's real icon once the underlying file/folder actually reappears (e.g.
+    /// a removable drive is remounted, or a stale path was resolved to its managed copy on the next
+    /// <c>ChildWindowViewModel.LoadFromModel</c>) — P00 baseline finding H3.
+    /// </summary>
+    /// <remarks>
+    /// A content-change re-fetch for items that stay present throughout (e.g. an <c>.exe</c>'s
+    /// embedded icon changing after an in-place update) is intentionally NOT performed here:
+    /// <see cref="IIconProvider.GetIcon"/> already does that freshness check (comparing
+    /// <c>LastWriteTimeUtc</c>) once actually called, but calling it for every tracked item on every
+    /// liveness tick would reintroduce the exact synchronous UI-thread cost this panel's icon pipeline
+    /// already measured as expensive for large panels (~2.8ms/item — see
+    /// docs/DIAGNOSTICS/icon-loading-findings.md). The missing → present transition this method reacts
+    /// to is comparatively rare and bounded by how many items were actually broken, not by the panel's
+    /// full size.
+    /// <para>
+    /// <b>M3 addition (P08 fix cycle 1, 2026-09-22):</b> the missing→present transition above only
+    /// ever fires once per disappearance. A file that is <see cref="FileItem.Exists"/> throughout but
+    /// whose <em>icon retrieval itself</em> failed transiently — e.g. <c>SHGetFileInfoW</c> called
+    /// before the shell has finished initializing during autostart — used to leave the item stuck on
+    /// <see cref="IIconProvider"/>'s placeholder for the rest of the session, since nothing ever called
+    /// <see cref="IIconProvider.GetIcon"/> again for an item that was never "missing" to begin with.
+    /// Every existing, still-placeholder item is now retried too, bounded to
+    /// <see cref="MaxPlaceholderRetryAttempts"/> attempts with a growing per-tick backoff (see
+    /// <see cref="RetryPlaceholderIcon"/>) — NOT unconditionally on every tick, which would reintroduce
+    /// the exact synchronous UI-thread cost documented above for the common "still missing"/"still
+    /// present with a real icon" cases (this only ever does extra work for the rare stuck-placeholder
+    /// case, bounded to 3 tries total per item).
+    /// </para>
+    /// </remarks>
+    internal void RefreshItemsLiveness()
+    {
+        foreach (var item in _allItems)
+        {
+            var wasMissing = !item.Exists;
+            item.Refresh();
+
+            if (wasMissing && item.Exists)
+            {
+                item.UpdateIcon(_iconProvider.GetIcon(item.Path));
+                _placeholderRetries.Remove(item); // fresh reappearance supersedes any prior retry state
+            }
+            else if (item.Exists && _iconProvider.IsPlaceholder(item.Icon))
+            {
+                RetryPlaceholderIcon(item);
+            }
+            else
+            {
+                // Either still missing, or present with a real (non-placeholder) icon — either way,
+                // any previous retry bookkeeping for this item is no longer relevant.
+                _placeholderRetries.Remove(item);
+            }
+        }
+    }
+
+    /// <summary>
     /// Adds an array of file paths to the full collection after validating them, ensuring no duplicates.
     /// Calls <see cref="OnSourceChanged"/> after mutation so subclasses can re-apply their filter —
     /// skipped entirely when nothing was actually added (e.g. a watcher event for a path already
@@ -80,17 +173,6 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     protected internal void AddFiles(string[] files)
     {
         if (AddFilesCore(files)) OnSourceChanged();
-    }
-
-    /// <summary>
-    /// Removes a file item from the full collection.
-    /// </summary>
-    /// <param name="file">File item to be removed.</param>
-    protected void RemoveFile(FileItem file)
-    {
-        if (!_allItems.Remove(file)) return;
-        _allItemPaths.Remove(file.Path);
-        OnSourceChanged();
     }
 
     /// <summary>
@@ -226,6 +308,17 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     }
 
     /// <summary>
+    /// Removes a file item from the full collection.
+    /// </summary>
+    /// <param name="file">File item to be removed.</param>
+    protected void RemoveFile(FileItem file)
+    {
+        if (!_allItems.Remove(file)) return;
+        _allItemPaths.Remove(file.Path);
+        OnSourceChanged();
+    }
+
+    /// <summary>
     /// Called whenever <see cref="AllItems"/> changes. The default implementation
     /// projects all items into <see cref="FileItems"/> unchanged (no filtering).
     /// Override in subclasses to apply a filter predicate.
@@ -322,96 +415,6 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     }
 
     /// <summary>
-    /// Re-indexes <see cref="_allItemPaths"/> for <paramref name="item"/> after a successful physical
-    /// rename (see <c>ChildWindowViewModel.CommitRenameCommand</c>) and relocates the item in place via
-    /// <see cref="FileItem.Relocate"/> — the same <see cref="FileItem"/> instance is kept (rather than
-    /// replaced), so any bound selection/UI state referencing it survives. No-op (and no
-    /// <see cref="OnSourceChanged"/> raised) if <paramref name="item"/> isn't currently tracked by this
-    /// ViewModel.
-    /// </summary>
-    /// <remarks>
-    /// Does not call <see cref="OnSourceChanged"/> itself — the caller (<c>ChildWindowViewModel</c>)
-    /// still needs to re-run its content filter afterwards, since a rename can change the extension and
-    /// therefore <see cref="FileItem.IsShortcut"/>; the caller does that explicitly so it can also fold
-    /// it into whatever single collection-change notification it's about to raise.
-    /// </remarks>
-    /// <param name="item">The item being renamed. Must be an instance currently in <see cref="AllItems"/>.</param>
-    /// <param name="newPath">The item's new full path, as returned by the rename service.</param>
-    internal void TryRenameItem(FileItem item, string newPath)
-    {
-        if (!_allItems.Contains(item)) return;
-
-        _allItemPaths.Remove(item.Path);
-
-        // A rename can never collide with an already-tracked path (the rename service itself rejects
-        // NameTaken), but guard anyway: dedup the same way AddFilesCore does, rather than risk two
-        // entries in _allItemPaths pointing at the same FileItem.
-        _allItemPaths.Add(newPath);
-
-        item.Relocate(newPath, _iconProvider.GetIcon(newPath));
-    }
-
-    /// <summary>
-    /// Re-validates <see cref="FileItem.Exists"/>/<see cref="FileItem.IsDirectory"/> for every tracked
-    /// item against the current file-system state (<see cref="FileItem.Refresh"/>), and re-resolves the
-    /// icon for any item that just transitioned from missing to present. <see cref="IIconProvider"/>
-    /// deliberately never caches its placeholder result for a missing path (see
-    /// <c>IconProvider.GetIcon</c>), so a single fresh call here is enough to replace a stuck
-    /// placeholder with the file's real icon once the underlying file/folder actually reappears (e.g.
-    /// a removable drive is remounted, or a stale path was resolved to its managed copy on the next
-    /// <c>ChildWindowViewModel.LoadFromModel</c>) — P00 baseline finding H3.
-    /// </summary>
-    /// <remarks>
-    /// A content-change re-fetch for items that stay present throughout (e.g. an <c>.exe</c>'s
-    /// embedded icon changing after an in-place update) is intentionally NOT performed here:
-    /// <see cref="IIconProvider.GetIcon"/> already does that freshness check (comparing
-    /// <c>LastWriteTimeUtc</c>) once actually called, but calling it for every tracked item on every
-    /// liveness tick would reintroduce the exact synchronous UI-thread cost this panel's icon pipeline
-    /// already measured as expensive for large panels (~2.8ms/item — see
-    /// docs/DIAGNOSTICS/icon-loading-findings.md). The missing → present transition this method reacts
-    /// to is comparatively rare and bounded by how many items were actually broken, not by the panel's
-    /// full size.
-    /// <para>
-    /// <b>M3 addition (P08 fix cycle 1, 2026-09-22):</b> the missing→present transition above only
-    /// ever fires once per disappearance. A file that is <see cref="FileItem.Exists"/> throughout but
-    /// whose <em>icon retrieval itself</em> failed transiently — e.g. <c>SHGetFileInfoW</c> called
-    /// before the shell has finished initializing during autostart — used to leave the item stuck on
-    /// <see cref="IIconProvider"/>'s placeholder for the rest of the session, since nothing ever called
-    /// <see cref="IIconProvider.GetIcon"/> again for an item that was never "missing" to begin with.
-    /// Every existing, still-placeholder item is now retried too, bounded to
-    /// <see cref="MaxPlaceholderRetryAttempts"/> attempts with a growing per-tick backoff (see
-    /// <see cref="RetryPlaceholderIcon"/>) — NOT unconditionally on every tick, which would reintroduce
-    /// the exact synchronous UI-thread cost documented above for the common "still missing"/"still
-    /// present with a real icon" cases (this only ever does extra work for the rare stuck-placeholder
-    /// case, bounded to 3 tries total per item).
-    /// </para>
-    /// </remarks>
-    internal void RefreshItemsLiveness()
-    {
-        foreach (var item in _allItems)
-        {
-            var wasMissing = !item.Exists;
-            item.Refresh();
-
-            if (wasMissing && item.Exists)
-            {
-                item.UpdateIcon(_iconProvider.GetIcon(item.Path));
-                _placeholderRetries.Remove(item); // fresh reappearance supersedes any prior retry state
-            }
-            else if (item.Exists && _iconProvider.IsPlaceholder(item.Icon))
-            {
-                RetryPlaceholderIcon(item);
-            }
-            else
-            {
-                // Either still missing, or present with a real (non-placeholder) icon — either way,
-                // any previous retry bookkeeping for this item is no longer relevant.
-                _placeholderRetries.Remove(item);
-            }
-        }
-    }
-
-    /// <summary>
     /// Retries <see cref="IIconProvider.GetIcon"/> for <paramref name="item"/> — an item that exists on
     /// disk but is still showing the icon pipeline's own placeholder (see
     /// <see cref="RefreshItemsLiveness"/>) — bounded to <see cref="MaxPlaceholderRetryAttempts"/> total
@@ -442,9 +445,6 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
         item.UpdateIcon(icon);
         _placeholderRetries.Remove(item); // resolved — no further bookkeeping needed
     }
-
-    /// <summary>Maximum number of placeholder-retry attempts per item (see <see cref="RetryPlaceholderIcon"/>).</summary>
-    private const int MaxPlaceholderRetryAttempts = 3;
 
     /// <summary>Per-item mutable retry counters for <see cref="RetryPlaceholderIcon"/>.</summary>
     private sealed class PlaceholderRetryState

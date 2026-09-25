@@ -47,19 +47,22 @@ internal sealed class AtomicJsonFileWriter
     /// <summary>
     /// Initializes a new instance of the <see cref="AtomicJsonFileWriter"/> class for production use.
     /// </summary>
+    /// <param name="paths">The storage paths (primary/temp/quarantine files) this writer operates on.</param>
     public AtomicJsonFileWriter(StateStorePaths paths)
         : this(paths, testForceFailureAt: null)
     {
     }
 
     /// <summary>
-    /// Test-only overload that lets a caller simulate the write protocol failing (a process death,
-    /// an unhandled exception, etc.) immediately after any given <see cref="StateWriteStage"/>
-    /// completes, without needing to actually crash the process or race real file-system faults.
-    /// Direct analog of <c>JsonLinesDiagnosticsLog._testForceReopenFailure</c> and
+    /// Initializes a new instance of the <see cref="AtomicJsonFileWriter"/> class. Test-only overload
+    /// that lets a caller simulate the write protocol failing (a process death, an unhandled
+    /// exception, etc.) immediately after any given <see cref="StateWriteStage"/> completes, without
+    /// needing to actually crash the process or race real file-system faults. Direct analog of
+    /// <c>JsonLinesDiagnosticsLog._testForceReopenFailure</c> and
     /// <c>PanelItemStorageService.forceCrossVolume</c>. <see langword="null"/> (the production path
     /// above) never injects a failure.
     /// </summary>
+    /// <param name="paths">The storage paths (primary/temp/quarantine files) this writer operates on.</param>
     /// <param name="testForceFailureAt">
     /// Invoked with each <see cref="StateWriteStage"/> as the write protocol reaches it; returning
     /// <see langword="true"/> makes <see cref="Write"/> behave exactly as if the process died at that
@@ -107,6 +110,7 @@ internal sealed class AtomicJsonFileWriter
     /// there is nothing left to delete, and the primary file must not be rolled back (a real crash at
     /// that point in production could never roll back a completed OS-level rename either).
     /// </remarks>
+    /// <param name="envelope">The already-wrapped envelope document to write.</param>
     /// <exception cref="AtomicWriteFailedException">
     /// The write protocol did not complete. <see cref="AtomicWriteFailedException.Stage"/> identifies
     /// where.

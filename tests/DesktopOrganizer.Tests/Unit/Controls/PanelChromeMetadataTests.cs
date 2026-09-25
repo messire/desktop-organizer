@@ -18,6 +18,10 @@ namespace DesktopOrganizer.Tests.Unit.Controls;
 [Trait(UnitTests, "UI")]
 public class PanelChromeMetadataTests
 {
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.TitleProperty"/> is a <see cref="string"/> property defaulting
+    /// to <see cref="string.Empty"/>.
+    /// </summary>
     [Fact]
     public void TitleProperty_IsStringType_DefaultsToEmpty()
     {
@@ -25,6 +29,10 @@ public class PanelChromeMetadataTests
         Assert.Equal(string.Empty, PanelChrome.TitleProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.TitleEditorProperty"/> is an <see cref="object"/> property
+    /// defaulting to <c>null</c>.
+    /// </summary>
     [Fact]
     public void TitleEditorProperty_IsObjectType_DefaultsToNull()
     {
@@ -32,6 +40,10 @@ public class PanelChromeMetadataTests
         Assert.Null(PanelChrome.TitleEditorProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.HeaderActionsProperty"/> is an <see cref="object"/> property
+    /// defaulting to <c>null</c>.
+    /// </summary>
     [Fact]
     public void HeaderActionsProperty_IsObjectType_DefaultsToNull()
     {
@@ -39,6 +51,10 @@ public class PanelChromeMetadataTests
         Assert.Null(PanelChrome.HeaderActionsProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.SemanticIconProperty"/> is a <see cref="string"/> property
+    /// defaulting to <see cref="string.Empty"/>.
+    /// </summary>
     [Fact]
     public void SemanticIconProperty_IsStringType_DefaultsToEmpty()
     {
@@ -46,6 +62,10 @@ public class PanelChromeMetadataTests
         Assert.Equal(string.Empty, PanelChrome.SemanticIconProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.AccentBrushProperty"/> is a <see cref="Brush"/> property
+    /// defaulting to <see cref="Brushes.Transparent"/>.
+    /// </summary>
     [Fact]
     public void AccentBrushProperty_IsBrushType_DefaultsToTransparent()
     {
@@ -53,6 +73,10 @@ public class PanelChromeMetadataTests
         Assert.Same(Brushes.Transparent, PanelChrome.AccentBrushProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.SurfaceBrushProperty"/> is a <see cref="Brush"/> property
+    /// defaulting to <see cref="Brushes.Transparent"/>.
+    /// </summary>
     [Fact]
     public void SurfaceBrushProperty_IsBrushType_DefaultsToTransparent()
     {
@@ -60,6 +84,10 @@ public class PanelChromeMetadataTests
         Assert.Same(Brushes.Transparent, PanelChrome.SurfaceBrushProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.SurfaceStyleProperty"/> is a <see cref="PanelSurfaceStyle"/>
+    /// property defaulting to <see cref="PanelSurfaceStyle.Ambient"/>.
+    /// </summary>
     [Fact]
     public void SurfaceStyleProperty_IsPanelSurfaceStyleType_DefaultsToAmbient()
     {
@@ -67,6 +95,10 @@ public class PanelChromeMetadataTests
         Assert.Equal(PanelSurfaceStyle.Ambient, PanelChrome.SurfaceStyleProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.VisualStateProperty"/> is a <see cref="PanelVisualState"/>
+    /// property defaulting to <see cref="PanelVisualState.Idle"/>.
+    /// </summary>
     [Fact]
     public void VisualStateProperty_IsPanelVisualStateType_DefaultsToIdle()
     {
@@ -74,6 +106,10 @@ public class PanelChromeMetadataTests
         Assert.Equal(PanelVisualState.Idle, PanelChrome.VisualStateProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.IsLayoutEditingProperty"/> is a <see cref="bool"/> property
+    /// defaulting to <c>false</c>.
+    /// </summary>
     [Fact]
     public void IsLayoutEditingProperty_IsBoolType_DefaultsToFalse()
     {
@@ -81,6 +117,10 @@ public class PanelChromeMetadataTests
         Assert.Equal(false, PanelChrome.IsLayoutEditingProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.IsRolledUpProperty"/> is a <see cref="bool"/> property
+    /// defaulting to <c>false</c>.
+    /// </summary>
     [Fact]
     public void IsRolledUpProperty_IsBoolType_DefaultsToFalse()
     {
@@ -88,6 +128,10 @@ public class PanelChromeMetadataTests
         Assert.Equal(false, PanelChrome.IsRolledUpProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.ItemCountProperty"/> is an <see cref="int"/> property
+    /// defaulting to <c>0</c>.
+    /// </summary>
     [Fact]
     public void ItemCountProperty_IsIntType_DefaultsToZero()
     {
@@ -95,6 +139,10 @@ public class PanelChromeMetadataTests
         Assert.Equal(0, PanelChrome.ItemCountProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelChrome.HeaderHeightProperty"/> is a <see cref="double"/> property
+    /// defaulting to <see cref="PanelMetrics.HeaderHeight"/>.
+    /// </summary>
     [Fact]
     public void HeaderHeightProperty_IsDoubleType_DefaultsToPanelMetricsHeaderHeight()
     {
@@ -102,6 +150,10 @@ public class PanelChromeMetadataTests
         Assert.Equal(PanelMetrics.HeaderHeight, PanelChrome.HeaderHeightProperty.DefaultMetadata.DefaultValue);
     }
 
+    /// <summary>
+    /// Verifies that every dependency property declared on <see cref="PanelChrome"/> reports
+    /// <see cref="PanelChrome"/> itself as its owner type.
+    /// </summary>
     [Fact]
     public void AllProperties_OwnerTypeIsPanelChrome()
     {
@@ -119,6 +171,10 @@ public class PanelChromeMetadataTests
         Assert.Equal(typeof(PanelChrome), PanelChrome.HeaderHeightProperty.OwnerType);
     }
 
+    /// <summary>
+    /// Verifies that every <see cref="PanelChrome"/> template-part name constant matches the
+    /// <c>PART_</c>-prefixed name documented for its corresponding template part.
+    /// </summary>
     [Fact]
     public void TemplatePartNames_MatchTheirDocumentedPART_Prefix()
     {

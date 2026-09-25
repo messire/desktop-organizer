@@ -18,7 +18,7 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 
 /// <summary>
 /// TDD regression coverage for the P05 fix-cycle's MAJOR-1 finding: <see cref="ChildWindow.Initialize"/>
-/// must NEVER mutate a loaded panel's persisted <see cref="Window.Width"/> — loading a panel is not a
+/// must NEVER mutate a loaded panel's persisted <see cref="FrameworkElement.Width"/> — loading a panel is not a
 /// user gesture, and ADR-028's "no jump on first launch" invariant applies to EVERY
 /// <see cref="PanelGeometryMode"/>, not just <see cref="PanelGeometryMode.GridAligned"/> (see this
 /// fix-cycle's ADR-028/ADR-029 amendments). Before the fix, <c>Initialize</c> unconditionally called
@@ -40,12 +40,12 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 /// leaves the ORIGINAL, non-STA xUnit thread — would throw
 /// "the calling thread cannot access this object because a different thread owns it" the moment a SECOND
 /// <see cref="System.Threading.Thread"/> in this class touches whatever <see cref="Application.Current"/>
-/// already exists from an earlier test). <see cref="RunOnStaThread{T}"/>/<see cref="MergeResourceDictionaries"/>
+/// already exists from an earlier test). <see cref="RunOnStaThread{T}"/>/<c>MergeResourceDictionaries</c>
 /// below are duplicated from that class rather than shared/refactored out (matches this codebase's own
 /// established precedent of duplicating small STA/chrome-accounting helpers across
 /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c> rather than reaching for a shared
 /// utility neither one has a reference to).
-/// <see cref="NativeSizingSwitch"/> is steered onto the Thumb-based
+/// <see cref="DesktopOrganizer.UI.Interaction.Native.NativeSizingSwitch"/> is steered onto the Thumb-based
 /// <see cref="DesktopOrganizer.UI.Behaviors.PanelResizeController"/> path
 /// (<c>IAppSettings.NativePanelSizing = false</c>) so construction never touches any native/P-Invoke code
 /// — the whole point of this test is exercised entirely in managed WPF layout.
@@ -53,15 +53,6 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class ChildWindowInitializeTests
 {
-    private static ChildWindowModel BuildGridModel(double width, double iconSize = 48d, IconLayoutPolicy policy = IconLayoutPolicy.LegacyStretch) => new()
-    {
-        ViewMode = PanelViewMode.Grid,
-        IconSize = iconSize,
-        IconLayoutPolicy = policy,
-        Position = new DrawingPoint(0, 0),
-        Size = new DrawingSize((int)width, 300),
-    };
-
     /// <summary>
     /// The core MAJOR-1 regression: a persisted 3-column width (344 DIP at IconSize 48 — the EXACT
     /// pre-F3 <c>SnapWidthToGrid</c> snap point for 3 columns, see
@@ -171,7 +162,7 @@ public class ChildWindowInitializeTests
     /// moment the SAME live panel switches to <c>FixedGap</c> — because <c>FixedGap</c>'s M-2 reservation
     /// (<see cref="SystemParameters.VerticalScrollBarWidth"/>) makes the SAME 352 DIP window no longer
     /// wide enough to fit 3 columns once that extra chrome is accounted for. The expected value is
-    /// computed via the exact same formula <see cref="Behaviors.PanelResizeController.SnapWidthToGrid"/>
+    /// computed via the exact same formula <see cref="DesktopOrganizer.UI.Behaviors.PanelResizeController.SnapWidthToGrid"/>
     /// itself uses (not a hard-coded number) — this is the same "characterize the real mechanism, not a
     /// coincidence" style already used by this class's MAJOR-1 tests above.
     /// </summary>
@@ -233,26 +224,6 @@ public class ChildWindowInitializeTests
     }
 
     /// <summary>
-    /// Pure re-implementation of <see cref="Behaviors.PanelResizeController.SnapWidthToGrid"/>'s formula
-    /// (Grid mode, snap enabled) — used by the two tests above so their expectations are derived from the
-    /// SAME mechanism the production code uses, not independently hard-coded numbers that could drift
-    /// from it, or that could be wrong at a <see cref="SystemParameters.VerticalScrollBarWidth"/>
-    /// rounding boundary on some machine other than the one these numbers were manually checked on.
-    /// </summary>
-    private static double ExpectedSnappedWidth(double windowWidth, IconLayoutPolicy policy, double iconSize)
-    {
-        var scrollBarWidth = SystemParameters.VerticalScrollBarWidth;
-        var cell = GridMetrics.CellSize(iconSize);
-        var chrome = GridMetrics.ContentHorizontalChrome(policy, scrollBarWidth);
-        var edgePadding = AdaptiveGridLayout.EdgePadding(cell, AdaptiveGridLayout.DefaultEdgePaddingRatio);
-        var content = Math.Max(0d, windowWidth - chrome);
-
-        return Math.Ceiling(Math.Max(
-            GridMetrics.MinPanelWidth(iconSize, policy, scrollBarWidth),
-            AdaptiveGridLayout.SnapExtent(content, cell, AdaptiveGridLayout.DefaultMinGap, edgePadding) + chrome));
-    }
-
-    /// <summary>
     /// When <c>IAppSettings.SnapResizeToIconGrid</c> is disabled, <c>SnapWidthToGrid</c>'s own early
     /// return means an <c>IconLayoutPolicy</c> change (like an <c>IconSize</c>/<c>ViewMode</c> change)
     /// must NOT touch the persisted width at all — the new trigger relies entirely on
@@ -275,6 +246,35 @@ public class ChildWindowInitializeTests
 
         Assert.Equal(352d, afterInit);
         Assert.Equal(352d, afterPolicyChange);
+    }
+
+    private static ChildWindowModel BuildGridModel(double width, double iconSize = 48d, IconLayoutPolicy policy = IconLayoutPolicy.LegacyStretch) => new()
+    {
+        ViewMode = PanelViewMode.Grid,
+        IconSize = iconSize,
+        IconLayoutPolicy = policy,
+        Position = new DrawingPoint(0, 0),
+        Size = new DrawingSize((int)width, 300),
+    };
+
+    /// <summary>
+    /// Pure re-implementation of <see cref="DesktopOrganizer.UI.Behaviors.PanelResizeController.SnapWidthToGrid"/>'s formula
+    /// (Grid mode, snap enabled) — used by the two tests above so their expectations are derived from the
+    /// SAME mechanism the production code uses, not independently hard-coded numbers that could drift
+    /// from it, or that could be wrong at a <see cref="SystemParameters.VerticalScrollBarWidth"/>
+    /// rounding boundary on some machine other than the one these numbers were manually checked on.
+    /// </summary>
+    private static double ExpectedSnappedWidth(double windowWidth, IconLayoutPolicy policy, double iconSize)
+    {
+        var scrollBarWidth = SystemParameters.VerticalScrollBarWidth;
+        var cell = GridMetrics.CellSize(iconSize);
+        var chrome = GridMetrics.ContentHorizontalChrome(policy, scrollBarWidth);
+        var edgePadding = AdaptiveGridLayout.EdgePadding(cell, AdaptiveGridLayout.DefaultEdgePaddingRatio);
+        var content = Math.Max(0d, windowWidth - chrome);
+
+        return Math.Ceiling(Math.Max(
+            GridMetrics.MinPanelWidth(iconSize, policy, scrollBarWidth),
+            AdaptiveGridLayout.SnapExtent(content, cell, AdaptiveGridLayout.DefaultMinGap, edgePadding) + chrome));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════

@@ -13,8 +13,12 @@ public class V1ToV2MigrationTests
 {
     private static readonly V1ToV2Migration Migration = new();
 
-    private static JsonObject Parse(string json) => JsonNode.Parse(json)!.AsObject();
-
+    /// <summary>
+    /// Verifies that <see cref="V1ToV2Migration"/> maps a numeric legacy <c>ViewMode</c> value to its
+    /// frozen v1-era enum name.
+    /// </summary>
+    /// <param name="numeric">The legacy numeric <c>ViewMode</c> value.</param>
+    /// <param name="expectedName">The frozen v1-era enum name it must map to.</param>
     [Theory]
     [InlineData(0, "List")]
     [InlineData(1, "Grid")]
@@ -27,6 +31,12 @@ public class V1ToV2MigrationTests
         Assert.Equal(expectedName, v2["panels"]![0]!["viewMode"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that <see cref="V1ToV2Migration"/> maps a numeric legacy <c>ContentFilter</c> value to
+    /// its frozen v1-era enum name.
+    /// </summary>
+    /// <param name="numeric">The legacy numeric <c>ContentFilter</c> value.</param>
+    /// <param name="expectedName">The frozen v1-era enum name it must map to.</param>
     [Theory]
     [InlineData(0, "ShowAll")]
     [InlineData(1, "HideAll")]
@@ -41,6 +51,12 @@ public class V1ToV2MigrationTests
         Assert.Equal(expectedName, v2["panels"]![0]!["contentFilter"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that <see cref="V1ToV2Migration"/> maps a numeric legacy <c>SortMode</c> value to its
+    /// frozen v1-era enum name.
+    /// </summary>
+    /// <param name="numeric">The legacy numeric <c>SortMode</c> value.</param>
+    /// <param name="expectedName">The frozen v1-era enum name it must map to.</param>
     [Theory]
     [InlineData(0, "Manual")]
     [InlineData(1, "Name")]
@@ -53,6 +69,10 @@ public class V1ToV2MigrationTests
         Assert.Equal(expectedName, v2["panels"]![0]!["sortMode"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that an out-of-range numeric enum value for <c>ViewMode</c>/<c>ContentFilter</c>/<c>SortMode</c>
+    /// defaults to the index-zero enum name rather than throwing.
+    /// </summary>
     [Fact]
     public void Migrate_UnknownEnumValue_DefaultsToIndexZeroName()
     {
@@ -66,6 +86,11 @@ public class V1ToV2MigrationTests
         Assert.Equal("Manual", panel["sortMode"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that <see cref="V1ToV2Migration"/> renames every PascalCase v1 panel field to its
+    /// camelCase v2 equivalent while preserving values, including a null <c>sourceFolderPath</c> key
+    /// that must still be present.
+    /// </summary>
     [Fact]
     public void Migrate_PanelFields_RenamedToCamelCase()
     {
@@ -119,6 +144,10 @@ public class V1ToV2MigrationTests
         Assert.Equal(["a.txt"], panel["filePaths"]!.AsArray().Select(n => n!.GetValue<string>()));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="V1ToV2Migration"/> renames the <c>pages</c> object's PascalCase fields
+    /// (<c>Ids</c>, <c>CurrentPageId</c>) to camelCase while preserving values.
+    /// </summary>
     [Fact]
     public void Migrate_Pages_RenamedToCamelCase()
     {
@@ -130,6 +159,9 @@ public class V1ToV2MigrationTests
         Assert.Equal("work", v2["pages"]!["currentPageId"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that a v1 document with no <c>pages</c> section migrates to a single "default" page.
+    /// </summary>
     [Fact]
     public void Migrate_MissingPages_DefaultsToSingleDefaultPage()
     {
@@ -141,6 +173,10 @@ public class V1ToV2MigrationTests
         Assert.Equal("default", v2["pages"]!["currentPageId"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that <see cref="V1ToV2Migration"/> renames the <c>systemIconsPanel</c> object's
+    /// PascalCase fields, including its nested <c>Items</c> array, to camelCase while preserving values.
+    /// </summary>
     [Fact]
     public void Migrate_SystemIconsPanel_RenamedToCamelCase()
     {
@@ -169,6 +205,9 @@ public class V1ToV2MigrationTests
         Assert.Equal(0, item["order"]!.GetValue<int>());
     }
 
+    /// <summary>
+    /// Verifies that a v1 document with no <c>systemIconsPanel</c> section stays without that key after migration.
+    /// </summary>
     [Fact]
     public void Migrate_MissingSystemIconsPanel_StaysAbsent()
     {
@@ -179,6 +218,10 @@ public class V1ToV2MigrationTests
         Assert.False(v2.ContainsKey("systemIconsPanel"));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="V1ToV2Migration"/> unpacks a layout snapshot's <c>PanelJsonItems</c>
+    /// (an array of JSON-encoded strings) into real, camelCase-migrated panel objects under <c>panels</c>.
+    /// </summary>
     [Fact]
     public void Migrate_PanelJsonItems_UnpacksJsonStringsIntoRealObjects()
     {
@@ -204,6 +247,10 @@ public class V1ToV2MigrationTests
         Assert.IsType<JsonObject>(panels[0]);
     }
 
+    /// <summary>
+    /// Verifies that a layout snapshot whose <c>PanelJsonItems</c> contains one unparsable JSON string
+    /// is dropped entirely, while other, healthy snapshots in the same document still migrate normally.
+    /// </summary>
     [Fact]
     public void Migrate_SnapshotWithCorruptPanelJsonItemEntry_DropsWholeSnapshot_OthersSurvive()
     {
@@ -226,6 +273,10 @@ public class V1ToV2MigrationTests
         Assert.Equal("healthy", snapshots[0]!["id"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// Verifies that a v1 document with no <c>panels</c> or <c>layoutSnapshots</c> sections migrates
+    /// both to empty arrays rather than leaving them absent or throwing.
+    /// </summary>
     [Fact]
     public void Migrate_MissingPanelsAndLayoutSnapshots_DefaultToEmptyArrays()
     {
@@ -236,6 +287,8 @@ public class V1ToV2MigrationTests
         Assert.Empty(v2["panels"]!.AsArray());
         Assert.Empty(v2["layoutSnapshots"]!.AsArray());
     }
+
+    private static JsonObject Parse(string json) => JsonNode.Parse(json)!.AsObject();
 
     private static JsonObject BuildDocumentWithSinglePanel(string panelEnumFieldsJson)
     {

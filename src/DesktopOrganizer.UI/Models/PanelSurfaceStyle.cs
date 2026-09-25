@@ -30,6 +30,7 @@ public enum PanelSurfaceStyle
 public static class PanelSurfaceStyleParser
 {
     /// <summary>Parses <paramref name="value"/> case-insensitively; unrecognised/empty input falls back to <see cref="PanelSurfaceStyle.Ambient"/> — never throws.</summary>
+    /// <param name="value">The candidate string to parse, e.g. from persisted settings.</param>
     public static PanelSurfaceStyle ParseOrAmbient(string? value) =>
         Enum.TryParse<PanelSurfaceStyle>(value, ignoreCase: true, out var parsed) ? parsed : PanelSurfaceStyle.Ambient;
 }

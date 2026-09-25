@@ -16,6 +16,12 @@ public class InteractionVisualStateTests
 {
     // Priority (D-6): Dragging|Resizing > Editing > Hover > Idle. A Dragging/Resizing gesture always
     // wins regardless of pointer/editing facts; otherwise isTitleEditing beats isPointerOver.
+
+    /// <summary>
+    /// Provides every (gesture, isPointerOver, isTitleEditing) combination along with the expected
+    /// <see cref="PanelVisualState"/> per the D-6 priority table, as theory data for
+    /// <see cref="Resolve_AllCombinations_MatchPriorityTable"/>.
+    /// </summary>
     public static IEnumerable<object[]> ResolveCases()
     {
         foreach (var gesture in Enum.GetValues<PanelInteractionState>())
@@ -41,6 +47,14 @@ public class InteractionVisualStateTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="InteractionVisualState.Resolve"/> matches the D-6 priority table for
+    /// every (gesture, isPointerOver, isTitleEditing) combination.
+    /// </summary>
+    /// <param name="gesture">The active interaction gesture.</param>
+    /// <param name="isPointerOver">Whether the pointer is hovering the panel.</param>
+    /// <param name="isTitleEditing">Whether the panel title is being edited.</param>
+    /// <param name="expected">The expected resolved visual state.</param>
     [Theory]
     [MemberData(nameof(ResolveCases))]
     public void Resolve_AllCombinations_MatchPriorityTable(
@@ -51,6 +65,10 @@ public class InteractionVisualStateTests
         Assert.Equal(expected, result);
     }
 
+    /// <summary>
+    /// Verifies that a dragging gesture always resolves to <see cref="PanelVisualState.Dragging"/>, even
+    /// when the pointer is over the panel and the title is being edited.
+    /// </summary>
     [Fact]
     public void Resolve_DraggingGesture_AlwaysWinsOverEditingAndHover()
     {
@@ -59,6 +77,10 @@ public class InteractionVisualStateTests
         Assert.Equal(PanelVisualState.Dragging, result);
     }
 
+    /// <summary>
+    /// Verifies that a resizing gesture always resolves to <see cref="PanelVisualState.Resizing"/>, even
+    /// when the pointer is over the panel and the title is being edited.
+    /// </summary>
     [Fact]
     public void Resolve_ResizingGesture_AlwaysWinsOverEditingAndHover()
     {
@@ -76,6 +98,10 @@ public class InteractionVisualStateTests
         PanelVisualState.Resizing,
     };
 
+    /// <summary>
+    /// Verifies that <see cref="InteractionVisualState.BorderOpacityFor"/> strictly increases across all
+    /// five visual states, including between Dragging and Resizing (unlike the chrome/accent channels).
+    /// </summary>
     [Fact]
     public void BorderOpacityFor_StrictlyIncreasesAcrossAllFiveStates()
     {
@@ -88,18 +114,30 @@ public class InteractionVisualStateTests
             Assert.True(values[i] > values[i - 1], $"Expected strictly increasing at index {i} ({PriorityOrder[i]})");
     }
 
+    /// <summary>
+    /// Verifies that <see cref="InteractionVisualState.ChromeOpacityFor"/> increases monotonically with
+    /// priority across the five visual states, allowing Dragging and Resizing to tie.
+    /// </summary>
     [Fact]
     public void ChromeOpacityFor_MonotonicallyIncreasesWithPriority_DraggingAndResizingMayTie()
     {
         AssertMonotonicWithAllowedTie(InteractionVisualState.ChromeOpacityFor);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="InteractionVisualState.BorderOpacityFor"/> is lowest for
+    /// <see cref="PanelVisualState.Idle"/> and highest for <see cref="PanelVisualState.Resizing"/>.
+    /// </summary>
     [Fact]
     public void BorderOpacityFor_IdleIsLowest_ResizingIsHighest()
     {
         Assert.True(InteractionVisualState.BorderOpacityFor(PanelVisualState.Idle) < InteractionVisualState.BorderOpacityFor(PanelVisualState.Resizing));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="InteractionVisualState.ChromeOpacityFor"/> is muted (not fully opaque) for
+    /// <see cref="PanelVisualState.Idle"/> and fully revealed for <see cref="PanelVisualState.Resizing"/>.
+    /// </summary>
     [Fact]
     public void ChromeOpacityFor_IdleIsMuted_ResizingIsFullyRevealed()
     {
@@ -108,12 +146,20 @@ public class InteractionVisualStateTests
         Assert.Equal(1.0, InteractionVisualState.ChromeOpacityFor(PanelVisualState.Resizing));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="InteractionVisualState.AccentEmphasisFor"/> increases monotonically with
+    /// priority across the five visual states, allowing Dragging and Resizing to tie.
+    /// </summary>
     [Fact]
     public void AccentEmphasisFor_MonotonicallyIncreasesWithPriority_DraggingAndResizingMayTie()
     {
         AssertMonotonicWithAllowedTie(InteractionVisualState.AccentEmphasisFor);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="InteractionVisualState.AccentEmphasisFor"/> pins Resizing (1.7) strictly
+    /// greater than Dragging (1.5), so the two no longer tie on the accent channel.
+    /// </summary>
     [Fact]
     public void AccentEmphasisFor_ResizingIsStrictlyGreaterThanDragging()
     {
@@ -130,6 +176,10 @@ public class InteractionVisualStateTests
         Assert.Equal(1.5, InteractionVisualState.AccentEmphasisFor(PanelVisualState.Dragging));
     }
 
+    /// <summary>
+    /// Verifies that the combined (border, chrome, accent) signature for each of the five visual states
+    /// is pairwise distinct, even though individual channels may tie between Dragging and Resizing.
+    /// </summary>
     [Fact]
     public void VisualStateSignatures_AreAllPairwiseDistinct_AcrossAllFiveStates()
     {

@@ -11,6 +11,11 @@ namespace DesktopOrganizer.Tests.Unit.Models;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class ObservableRangeCollectionTests
 {
+    /// <summary>
+    /// Verifies that <see cref="ObservableRangeCollection{T}.ReplaceAll"/> materializes its source
+    /// before clearing the backing items, so a lazy projection over the collection itself (e.g.
+    /// <c>collection.Where(...)</c>) still yields the items that matched before the clear.
+    /// </summary>
     [Fact]
     public void ReplaceAll_SelfReferentialProjection_KeepsAllMatchingItems()
     {
@@ -24,6 +29,11 @@ public class ObservableRangeCollectionTests
         Assert.Equal([2, 4], collection);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="ObservableRangeCollection{T}.ReplaceAll"/> reentrantly from a
+    /// <c>CollectionChanged</c> handler still throws <see cref="InvalidOperationException"/>, i.e. the
+    /// base class's reentrancy guard is not bypassed by the direct <c>Items</c> mutation.
+    /// </summary>
     [Fact]
     public void ReplaceAll_CalledReentrantlyFromCollectionChangedHandler_ThrowsInvalidOperationException()
     {
@@ -43,6 +53,11 @@ public class ObservableRangeCollectionTests
         Assert.Throws<InvalidOperationException>(() => collection.ReplaceAll([3, 4]));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="ObservableRangeCollection{T}.ReplaceAll"/> raises exactly one
+    /// <c>CollectionChanged</c> notification with a <see cref="NotifyCollectionChangedAction.Reset"/>
+    /// action, rather than one notification per replaced item.
+    /// </summary>
     [Fact]
     public void ReplaceAll_RaisesExactlyOneResetNotification()
     {

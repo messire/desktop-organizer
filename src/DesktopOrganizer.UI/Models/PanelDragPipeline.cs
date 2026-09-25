@@ -52,7 +52,7 @@ public static class PanelDragPipeline
     /// <see langword="true"/> while the free-move modifier (<c>Alt</c>) is held: the QUANTISATION step is
     /// skipped for this frame only (the panel follows the cursor 1:1), while guides and anti-overlap keep
     /// running — ADR-028 «Модификатор свободного движения». Never affects
-    /// <see cref="ResolveGridDrop"/>: on release the panel is always quantised again.
+    /// <see cref="ResolveGridDrop(Rect,PanelGridState,IReadOnlyList{Rect})"/>: on release the panel is always quantised again.
     /// </param>
     /// <returns>The position to actually write onto the window this frame.</returns>
     public static Point ResolveGridFrame(
@@ -89,29 +89,6 @@ public static class PanelDragPipeline
 
         // Step 3 — the hard wall (always last).
         return ClampHardWall(current, proposed.X, proposed.Y, obstacles, state.Gap).TopLeft;
-    }
-
-    /// <summary>
-    /// M-1 fix-cycle 1: resolves the work area of whichever monitor's <c>Bounds</c> contains
-    /// <paramref name="positionWindowSpace"/> (converted to screen space via
-    /// <see cref="DesktopCoordinateSpace"/>) — the same "scan the once-per-gesture monitor snapshot"
-    /// technique the <see cref="PanelGeometryMode.LegacyFreeform"/> guide block already uses, just moved
-    /// into the pure pipeline so <see cref="ResolveGridFrame"/> can do it too. Falls back to
-    /// <see cref="Rect.Empty"/> (SnapGuideCalculator.Snap's own documented "disable the guard" contract)
-    /// when no entry matches — the same fallback the Legacy scan uses, not a silently stale work area.
-    /// </summary>
-    private static Rect ResolveWorkAreaAtPosition(
-        Point positionWindowSpace,
-        IReadOnlyList<(string DeviceName, Rect Bounds, Rect WorkArea)> monitors)
-    {
-        var screenPoint = DesktopCoordinateSpace.ToScreenSpace(positionWindowSpace);
-        for (var i = 0; i < monitors.Count; i++)
-        {
-            if (monitors[i].Bounds.Contains(screenPoint))
-                return DesktopCoordinateSpace.ToWindowSpace(monitors[i].WorkArea);
-        }
-
-        return Rect.Empty;
     }
 
     /// <summary>
@@ -352,5 +329,28 @@ public static class PanelDragPipeline
         }
 
         return state;
+    }
+
+    /// <summary>
+    /// M-1 fix-cycle 1: resolves the work area of whichever monitor's <c>Bounds</c> contains
+    /// <paramref name="positionWindowSpace"/> (converted to screen space via
+    /// <see cref="DesktopCoordinateSpace"/>) — the same "scan the once-per-gesture monitor snapshot"
+    /// technique the <see cref="PanelGeometryMode.LegacyFreeform"/> guide block already uses, just moved
+    /// into the pure pipeline so <see cref="ResolveGridFrame"/> can do it too. Falls back to
+    /// <see cref="Rect.Empty"/> (SnapGuideCalculator.Snap's own documented "disable the guard" contract)
+    /// when no entry matches — the same fallback the Legacy scan uses, not a silently stale work area.
+    /// </summary>
+    private static Rect ResolveWorkAreaAtPosition(
+        Point positionWindowSpace,
+        IReadOnlyList<(string DeviceName, Rect Bounds, Rect WorkArea)> monitors)
+    {
+        var screenPoint = DesktopCoordinateSpace.ToScreenSpace(positionWindowSpace);
+        for (var i = 0; i < monitors.Count; i++)
+        {
+            if (monitors[i].Bounds.Contains(screenPoint))
+                return DesktopCoordinateSpace.ToWindowSpace(monitors[i].WorkArea);
+        }
+
+        return Rect.Empty;
     }
 }

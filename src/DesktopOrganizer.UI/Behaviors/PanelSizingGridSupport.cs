@@ -193,9 +193,6 @@ internal static class PanelSizingGridSupport
             host.NotifyHeightResizeCommitted();
     }
 
-    private static bool IsFinite(Rect rect)
-        => double.IsFinite(rect.X) && double.IsFinite(rect.Y) && double.IsFinite(rect.Width) && double.IsFinite(rect.Height);
-
     /// <summary>
     /// ADR-011 Amendment 2026-09-24 (resize extension): the idempotent commit-time safety net that
     /// guarantees a resize gesture never comes to rest off <c>IAppSettings.GridSize</c>'s lattice, shared
@@ -280,4 +277,7 @@ internal static class PanelSizingGridSupport
 
         return new Rect(left, top, width, height);
     }
+
+    private static bool IsFinite(Rect rect)
+        => double.IsFinite(rect.X) && double.IsFinite(rect.Y) && double.IsFinite(rect.Width) && double.IsFinite(rect.Height);
 }

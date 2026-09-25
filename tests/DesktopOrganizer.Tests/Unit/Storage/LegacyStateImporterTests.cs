@@ -23,18 +23,12 @@ public class LegacyStateImporterTests
 {
     private readonly Mock<IAppSettings> _appSettingsMock = new();
 
-    private ILegacyStateImporter BuildSut() => new LegacySettingsImporter(_appSettingsMock.Object);
-
-    private void SetupDefaults()
-    {
-        _appSettingsMock.SetupGet(s => s.ChildWindowsState).Returns(string.Empty);
-        _appSettingsMock.SetupGet(s => s.Pages).Returns("[\"default\"]");
-        _appSettingsMock.SetupGet(s => s.CurrentPage).Returns("default");
-        _appSettingsMock.SetupGet(s => s.LayoutSnapshots).Returns("[]");
-        _appSettingsMock.SetupGet(s => s.SystemIconsPanel).Returns(string.Empty);
-    }
-
     // ── FirstRun vs import ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that when all five legacy <see cref="IAppSettings"/> keys are at their default values,
+    /// <see cref="LegacySettingsImporter.TryImport"/> returns null (ADR-024 D-7 step 6, FirstRun).
+    /// </summary>
     [Fact]
     public void AllKeysAtDefault_ReturnsNull()
     {
@@ -45,6 +39,10 @@ public class LegacyStateImporterTests
         Assert.Null(result);
     }
 
+    /// <summary>
+    /// Verifies that when all five legacy <see cref="IAppSettings"/> keys are explicitly null,
+    /// <see cref="LegacySettingsImporter.TryImport"/> returns null instead of throwing.
+    /// </summary>
     [Fact]
     public void AllKeysNull_ReturnsNull()
     {
@@ -59,6 +57,10 @@ public class LegacyStateImporterTests
         Assert.Null(result);
     }
 
+    /// <summary>
+    /// Verifies that when only the legacy <c>ChildWindowsState</c> key holds non-default data,
+    /// <see cref="LegacySettingsImporter.TryImport"/> returns a non-null document (ADR-024 D-7 step 5, import).
+    /// </summary>
     [Fact]
     public void OnlyPanelsPresent_ReturnsNonNullDocument()
     {
@@ -72,6 +74,12 @@ public class LegacyStateImporterTests
     }
 
     // ── Full document, all five keys populated ──────────────────────────────────
+
+    /// <summary>
+    /// Verifies that with all five legacy <see cref="IAppSettings"/> keys populated,
+    /// <see cref="LegacySettingsImporter.TryImport"/> assembles a full schema-v1 document with envelope
+    /// fields and every panel, page, layout snapshot, and system icons panel field carried over.
+    /// </summary>
     [Fact]
     public void AllFiveKeysPopulated_ProducesFullV1Document()
     {
@@ -113,6 +121,11 @@ public class LegacyStateImporterTests
     }
 
     // ── pages object assembled from two separate legacy fields ──────────────────
+
+    /// <summary>
+    /// Verifies that the imported document's <c>pages</c> object is assembled from the two separate
+    /// legacy <c>Pages</c> and <c>CurrentPage</c> settings keys.
+    /// </summary>
     [Fact]
     public void PagesObject_AssembledFromSeparatePagesAndCurrentPageFields()
     {
@@ -129,6 +142,10 @@ public class LegacyStateImporterTests
         Assert.Equal("personal", (string)pages["CurrentPageId"]!);
     }
 
+    /// <summary>
+    /// Verifies that an empty legacy <c>CurrentPage</c> value makes the imported document's current
+    /// page id default to "default".
+    /// </summary>
     [Fact]
     public void CurrentPageBlank_DefaultsToDefaultPageId()
     {
@@ -144,6 +161,11 @@ public class LegacyStateImporterTests
     }
 
     // ── one corrupt block does not block the rest ────────────────────────────────
+
+    /// <summary>
+    /// Verifies that corrupt JSON in the legacy <c>ChildWindowsState</c> key degrades only the panels
+    /// section to empty, while pages and layout snapshots are still imported normally.
+    /// </summary>
     [Fact]
     public void CorruptChildWindowsState_OthersStillImported_PanelsDegradeToEmpty()
     {
@@ -169,6 +191,10 @@ public class LegacyStateImporterTests
         Assert.Single(snapshots);
     }
 
+    /// <summary>
+    /// Verifies that corrupt JSON in the legacy <c>LayoutSnapshots</c> key degrades only the layout
+    /// snapshots section to empty, while panels are still imported normally.
+    /// </summary>
     [Fact]
     public void CorruptLayoutSnapshots_OthersStillImported_SnapshotsDegradeToEmpty()
     {
@@ -188,6 +214,10 @@ public class LegacyStateImporterTests
         Assert.Empty(snapshots);
     }
 
+    /// <summary>
+    /// Verifies that corrupt JSON in the legacy <c>SystemIconsPanel</c> key degrades only the system
+    /// icons panel section to an empty object, while panels are still imported normally.
+    /// </summary>
     [Fact]
     public void CorruptSystemIconsPanel_OthersStillImported_SystemIconsPanelDegradesToEmptyObject()
     {
@@ -207,6 +237,10 @@ public class LegacyStateImporterTests
         Assert.Empty(systemIconsPanel);
     }
 
+    /// <summary>
+    /// Verifies that corrupt JSON in the legacy <c>Pages</c> key degrades only the pages section to the
+    /// single "default" page, while panels are still imported normally.
+    /// </summary>
     [Fact]
     public void CorruptPages_OthersStillImported_PagesDegradeToDefault()
     {
@@ -228,6 +262,12 @@ public class LegacyStateImporterTests
     }
 
     // ── never throws ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that with every one of the five legacy settings keys holding corrupt JSON,
+    /// <see cref="LegacySettingsImporter.TryImport"/> never throws and still returns a non-null,
+    /// fully-degraded document.
+    /// </summary>
     [Fact]
     public void EveryKeyCorrupt_DoesNotThrow_ReturnsNonNullDegradedDocument()
     {
@@ -236,10 +276,22 @@ public class LegacyStateImporterTests
         _appSettingsMock.SetupGet(s => s.CurrentPage).Returns("work");
         _appSettingsMock.SetupGet(s => s.LayoutSnapshots).Returns("not json at all");
         _appSettingsMock.SetupGet(s => s.SystemIconsPanel).Returns("also not json");
-#pragma warning restore CS0618
 
         var exception = Record.Exception(() => BuildSut().TryImport());
 
         Assert.Null(exception);
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private ILegacyStateImporter BuildSut() => new LegacySettingsImporter(_appSettingsMock.Object);
+
+    private void SetupDefaults()
+    {
+        _appSettingsMock.SetupGet(s => s.ChildWindowsState).Returns(string.Empty);
+        _appSettingsMock.SetupGet(s => s.Pages).Returns("[\"default\"]");
+        _appSettingsMock.SetupGet(s => s.CurrentPage).Returns("default");
+        _appSettingsMock.SetupGet(s => s.LayoutSnapshots).Returns("[]");
+        _appSettingsMock.SetupGet(s => s.SystemIconsPanel).Returns(string.Empty);
+    }
+#pragma warning restore CS0618
 }

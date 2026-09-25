@@ -15,7 +15,7 @@ public static class PanelCollision
 {
     /// <summary>
     /// Overlap tolerance in DIP. Perfectly edge-to-edge rectangles (e.g. the result of a previous
-    /// <see cref="ClampAgainstObstacles"/> call) must never register as overlapping — with an exact
+    /// <see cref="ClampAgainstObstacles(Rect, double, double, IReadOnlyList{Rect})"/> call) must never register as overlapping — with an exact
     /// <c>&gt; 0</c> threshold, accumulated <see cref="double"/> rounding error could occasionally flip
     /// a truly-flush edge into a positive overlap and re-trigger the block, causing jitter. See plan
     /// §3.2, "Отсутствие дрожания".
@@ -30,7 +30,7 @@ public static class PanelCollision
     /// this threshold answers "was this pre-existing overlap clearly intentional/real, or just
     /// accumulated double-rounding noise around a flush edge". Sharing one constant for both questions
     /// meant a flush pair that drifted to a ~0.50001px overlap (independent <c>Window.Left</c>/
-    /// <c>ActualWidth</c> reads across <c>MouseMove</c>, <see cref="ClampAgainstObstacles"/>,
+    /// <c>ActualWidth</c> reads across <c>MouseMove</c>, <see cref="ClampAgainstObstacles(Rect, double, double, IReadOnlyList{Rect})"/>,
     /// <c>LayoutSnapshotService.Restore</c>, or a DPI change) would silently satisfy the R1 amnesty
     /// test and permanently disable the wall between that pair until they separated completely — a
     /// silent, hard-to-repro regression (finalization MAJOR M-1). A 2px gap between "definitely still
@@ -49,22 +49,6 @@ public static class PanelCollision
     /// <param name="b">The second rectangle.</param>
     /// <returns><see langword="true"/> if the rectangles overlap by more than <see cref="Eps"/> DIP on both axes.</returns>
     public static bool Overlaps(Rect a, Rect b) => Overlaps(a, b, Eps);
-
-    /// <summary>
-    /// Rectangle overlap test with an explicit tolerance. See <see cref="Overlaps(Rect, Rect)"/> (uses
-    /// <see cref="Eps"/>) for the "is this a real collision" question, and <see cref="GhostEps"/>'s
-    /// remarks for why the R1 amnesty check below uses a different, wider tolerance here instead.
-    /// </summary>
-    /// <param name="a">The first rectangle.</param>
-    /// <param name="b">The second rectangle.</param>
-    /// <param name="eps">The overlap tolerance, in DIP.</param>
-    /// <returns><see langword="true"/> if the rectangles overlap by more than <paramref name="eps"/> DIP on both axes.</returns>
-    private static bool Overlaps(Rect a, Rect b, double eps)
-    {
-        var overlapX = Math.Min(a.Right, b.Right) - Math.Max(a.X, b.X);
-        var overlapY = Math.Min(a.Bottom, b.Bottom) - Math.Max(a.Y, b.Y);
-        return overlapX > eps && overlapY > eps;
-    }
 
     /// <summary>
     /// AABB collision response for a single drag frame: clamps the proposed move from
@@ -92,6 +76,91 @@ public static class PanelCollision
     /// <returns>The clamped rectangle to actually apply to the window.</returns>
     public static Rect ClampAgainstObstacles(Rect current, double proposedLeft, double proposedTop, IReadOnlyList<Rect> obstacles)
         => ClampAgainstObstaclesCore(current, proposedLeft, proposedTop, obstacles, 0d);
+
+    /// <summary>
+    /// Gap-aware overload of <see cref="ClampAgainstObstacles(Rect,double,double,IReadOnlyList{Rect})"/>
+    /// (fix-cycle 1, MAJOR-5(b), additive — the zero-gap overload above is UNCHANGED, byte-for-byte, and
+    /// keeps serving <see cref="PanelGeometryMode.LegacyFreeform"/>'s existing flush-touching behavior).
+    /// A <see cref="PanelGeometryMode.GridAligned"/> panel must stop <paramref name="gap"/> DIP away from a
+    /// neighbour (ADR-028's "cell + gap" model — the same visible seam a properly grid-aligned pair of
+    /// panels already has by construction once both are on the shared workspace grid), not flush against
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Fix-cycle 2, MAJOR-A.</b> No longer inflates the obstacle list up front and delegates to the
+    /// zero-gap overload verbatim — that made the R1 ghost/amnesty check fire against the INFLATED
+    /// rectangle, which let a panel already sitting closer than <paramref name="gap"/> DIP to a real
+    /// obstacle (but not actually intersecting it) tunnel straight through on approach. See
+    /// <see cref="ClampAgainstObstaclesCore"/>'s remarks for the full repro and the fix (ghost check and a
+    /// new "behind the direction of travel" guard both run against the REAL obstacle; only the final wall
+    /// position is offset by <paramref name="gap"/>). Zero array allocation either way —
+    /// <see cref="InflateX"/>/<see cref="InflateY"/> operate on <see cref="Rect"/> value types.
+    /// <para>
+    /// <b>P03 carry-over fix.</b> The remaining inflation is now per-axis (<see cref="InflateX"/> for the
+    /// horizontal pass, <see cref="InflateY"/> for the vertical one) so an obstacle that is within
+    /// <paramref name="gap"/> DIP of the panel on the PERPENDICULAR axis, without overlapping it there, no
+    /// longer becomes a wall and no longer blocks sliding along it — see <see cref="InflateX"/>'s remarks.
+    /// </para>
+    /// </remarks>
+    /// <param name="current">The panel's rectangle before this frame's move/resize.</param>
+    /// <param name="proposedLeft">The proposed new <c>Left</c>.</param>
+    /// <param name="proposedTop">The proposed new <c>Top</c>.</param>
+    /// <param name="obstacles">The other live panels' current screen rectangles.</param>
+    /// <param name="gap">
+    /// The minimum clearance to keep from every obstacle, in DIP. Non-positive/non-finite values
+    /// reproduce the zero-gap overload's exact behavior (flush-touching allowed).
+    /// </param>
+    /// <returns>The clamped rectangle to actually apply to the window, never closer than <paramref name="gap"/> DIP to any obstacle it stopped against.</returns>
+    public static Rect ClampAgainstObstacles(Rect current, double proposedLeft, double proposedTop, IReadOnlyList<Rect> obstacles, double gap)
+    {
+        var safeGap = double.IsFinite(gap) && gap > 0d ? gap : 0d;
+        return ClampAgainstObstaclesCore(current, proposedLeft, proposedTop, obstacles, safeGap);
+    }
+
+    /// <summary>
+    /// Used by <c>ChildWindow.SnapToGrid</c> on mouse-up (plan §3.5) to decide, per axis, whether
+    /// applying <see cref="GridSnap"/>'s quantised position would create a NEW overlap that the
+    /// pre-snap position did not already have. Deliberately checks for a <em>new</em> overlap, not
+    /// "any" overlap, so R1 (pre-existing overlaps, e.g. restored from a pre-feature save) never
+    /// blocks the grid snap from being applied. The "was <paramref name="before"/> already overlapping
+    /// this obstacle" half of that check uses <see cref="GhostEps"/>, not <see cref="Eps"/>, for the
+    /// same reason as the R1 checks in <see cref="ClampAgainstObstacles(Rect, double, double, IReadOnlyList{Rect})"/> (finalization MAJOR M-1):
+    /// otherwise a flush pre-existing pair nudged by rounding noise to a ~0.50001px overlap could read
+    /// as "already overlapping" here too and amnesty a snap that actually creates a real new overlap.
+    /// </summary>
+    /// <param name="before">The panel's rectangle before applying the grid snap to this axis.</param>
+    /// <param name="after">The panel's rectangle after applying the grid snap to this axis.</param>
+    /// <param name="obstacles">The other live panels' current screen rectangles.</param>
+    /// <returns>
+    /// <see langword="true"/> if some obstacle overlaps <paramref name="after"/> but did not already
+    /// overlap <paramref name="before"/>.
+    /// </returns>
+    public static bool CreatesNewOverlap(Rect before, Rect after, IReadOnlyList<Rect> obstacles)
+    {
+        for (var i = 0; i < obstacles.Count; i++)
+        {
+            var o = obstacles[i];
+            if (Overlaps(after, o) && !Overlaps(before, o, GhostEps)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Rectangle overlap test with an explicit tolerance. See <see cref="Overlaps(Rect, Rect)"/> (uses
+    /// <see cref="Eps"/>) for the "is this a real collision" question, and <see cref="GhostEps"/>'s
+    /// remarks for why the R1 amnesty check below uses a different, wider tolerance here instead.
+    /// </summary>
+    /// <param name="a">The first rectangle.</param>
+    /// <param name="b">The second rectangle.</param>
+    /// <param name="eps">The overlap tolerance, in DIP.</param>
+    /// <returns><see langword="true"/> if the rectangles overlap by more than <paramref name="eps"/> DIP on both axes.</returns>
+    private static bool Overlaps(Rect a, Rect b, double eps)
+    {
+        var overlapX = Math.Min(a.Right, b.Right) - Math.Max(a.X, b.X);
+        var overlapY = Math.Min(a.Bottom, b.Bottom) - Math.Max(a.Y, b.Y);
+        return overlapX > eps && overlapY > eps;
+    }
 
     /// <summary>
     /// Shared implementation behind both the zero-gap overload above and the gap-aware overload below
@@ -139,7 +208,7 @@ public static class PanelCollision
     /// extended to the new gap concept — but no further approach is allowed either).
     /// </para>
     /// <para>
-    /// This shared core also drops fix-cycle 1's <c>Rect[]</c> allocation entirely — <see cref="Inflate"/> is
+    /// This shared core also drops fix-cycle 1's <c>Rect[]</c> allocation entirely — <see cref="InflateX"/>/<see cref="InflateY"/> are
     /// called per-obstacle-per-candidate-block (a <see cref="Rect"/> is a value type; no heap allocation),
     /// so the gap-aware overload is now exactly as allocation-free as the zero-gap one.
     /// </para>
@@ -235,73 +304,4 @@ public static class PanelCollision
         => gap <= 0d
             ? rect
             : new Rect(rect.X, rect.Y - gap, rect.Width, Math.Max(0d, rect.Height + (2d * gap)));
-
-    /// <summary>
-    /// Gap-aware overload of <see cref="ClampAgainstObstacles(Rect,double,double,IReadOnlyList{Rect})"/>
-    /// (fix-cycle 1, MAJOR-5(b), additive — the zero-gap overload above is UNCHANGED, byte-for-byte, and
-    /// keeps serving <see cref="PanelGeometryMode.LegacyFreeform"/>'s existing flush-touching behavior).
-    /// A <see cref="PanelGeometryMode.GridAligned"/> panel must stop <paramref name="gap"/> DIP away from a
-    /// neighbour (ADR-028's "cell + gap" model — the same visible seam a properly grid-aligned pair of
-    /// panels already has by construction once both are on the shared workspace grid), not flush against
-    /// it.
-    /// </summary>
-    /// <remarks>
-    /// <b>Fix-cycle 2, MAJOR-A.</b> No longer inflates the obstacle list up front and delegates to the
-    /// zero-gap overload verbatim — that made the R1 ghost/amnesty check fire against the INFLATED
-    /// rectangle, which let a panel already sitting closer than <paramref name="gap"/> DIP to a real
-    /// obstacle (but not actually intersecting it) tunnel straight through on approach. See
-    /// <see cref="ClampAgainstObstaclesCore"/>'s remarks for the full repro and the fix (ghost check and a
-    /// new "behind the direction of travel" guard both run against the REAL obstacle; only the final wall
-    /// position is offset by <paramref name="gap"/>). Zero array allocation either way —
-    /// <see cref="InflateX"/>/<see cref="InflateY"/> operate on <see cref="Rect"/> value types.
-    /// <para>
-    /// <b>P03 carry-over fix.</b> The remaining inflation is now per-axis (<see cref="InflateX"/> for the
-    /// horizontal pass, <see cref="InflateY"/> for the vertical one) so an obstacle that is within
-    /// <paramref name="gap"/> DIP of the panel on the PERPENDICULAR axis, without overlapping it there, no
-    /// longer becomes a wall and no longer blocks sliding along it — see <see cref="InflateX"/>'s remarks.
-    /// </para>
-    /// </remarks>
-    /// <param name="current">The panel's rectangle before this frame's move/resize.</param>
-    /// <param name="proposedLeft">The proposed new <c>Left</c>.</param>
-    /// <param name="proposedTop">The proposed new <c>Top</c>.</param>
-    /// <param name="obstacles">The other live panels' current screen rectangles.</param>
-    /// <param name="gap">
-    /// The minimum clearance to keep from every obstacle, in DIP. Non-positive/non-finite values
-    /// reproduce the zero-gap overload's exact behavior (flush-touching allowed).
-    /// </param>
-    /// <returns>The clamped rectangle to actually apply to the window, never closer than <paramref name="gap"/> DIP to any obstacle it stopped against.</returns>
-    public static Rect ClampAgainstObstacles(Rect current, double proposedLeft, double proposedTop, IReadOnlyList<Rect> obstacles, double gap)
-    {
-        var safeGap = double.IsFinite(gap) && gap > 0d ? gap : 0d;
-        return ClampAgainstObstaclesCore(current, proposedLeft, proposedTop, obstacles, safeGap);
-    }
-
-    /// <summary>
-    /// Used by <c>ChildWindow.SnapToGrid</c> on mouse-up (plan §3.5) to decide, per axis, whether
-    /// applying <see cref="GridSnap"/>'s quantised position would create a NEW overlap that the
-    /// pre-snap position did not already have. Deliberately checks for a <em>new</em> overlap, not
-    /// "any" overlap, so R1 (pre-existing overlaps, e.g. restored from a pre-feature save) never
-    /// blocks the grid snap from being applied. The "was <paramref name="before"/> already overlapping
-    /// this obstacle" half of that check uses <see cref="GhostEps"/>, not <see cref="Eps"/>, for the
-    /// same reason as the R1 checks in <see cref="ClampAgainstObstacles"/> (finalization MAJOR M-1):
-    /// otherwise a flush pre-existing pair nudged by rounding noise to a ~0.50001px overlap could read
-    /// as "already overlapping" here too and amnesty a snap that actually creates a real new overlap.
-    /// </summary>
-    /// <param name="before">The panel's rectangle before applying the grid snap to this axis.</param>
-    /// <param name="after">The panel's rectangle after applying the grid snap to this axis.</param>
-    /// <param name="obstacles">The other live panels' current screen rectangles.</param>
-    /// <returns>
-    /// <see langword="true"/> if some obstacle overlaps <paramref name="after"/> but did not already
-    /// overlap <paramref name="before"/>.
-    /// </returns>
-    public static bool CreatesNewOverlap(Rect before, Rect after, IReadOnlyList<Rect> obstacles)
-    {
-        for (var i = 0; i < obstacles.Count; i++)
-        {
-            var o = obstacles[i];
-            if (Overlaps(after, o) && !Overlaps(before, o, GhostEps)) return true;
-        }
-
-        return false;
-    }
 }

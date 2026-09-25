@@ -19,28 +19,10 @@ public class StorageFileLockTests
     // no reason to actually wait out 450 ms of real time per test.
     private static readonly TimeSpan NoDelay = TimeSpan.Zero;
 
-    private static (StateStorePaths Paths, string Root) BuildPaths()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"DOrgStorageLock_{Guid.NewGuid():N}");
-        return (new StateStorePaths(root), root);
-    }
-
-    private static void SafeDeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup; a still-locked handle from a test failure shouldn't mask the real
-            // assertion failure.
-        }
-    }
-
-    private static StorageFileLock BuildLock(StateStorePaths paths, int maxAttempts = 3) =>
-        new(paths, maxAttempts, NoDelay);
-
+    /// <summary>
+    /// Verifies that <see cref="StorageFileLock.TryAcquire"/> succeeds when no other holder exists,
+    /// setting <see cref="StorageFileLock.IsHeld"/> and creating the lock file on disk.
+    /// </summary>
     [Fact]
     public void TryAcquire_NoOtherHolder_Succeeds_AndSetsIsHeld()
     {
@@ -62,6 +44,10 @@ public class StorageFileLockTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a second <see cref="StorageFileLock"/> instance pointed at the same lock path fails
+    /// to acquire while the first still holds it, and the first holder is left unaffected.
+    /// </summary>
     [Fact]
     public void TryAcquire_SecondInstanceSamePath_FailsWhileFirstHolds()
     {
@@ -84,6 +70,10 @@ public class StorageFileLockTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a second <see cref="StorageFileLock"/> instance can acquire the same lock path once
+    /// the first holder disposes and releases it.
+    /// </summary>
     [Fact]
     public void TryAcquire_AfterFirstDisposes_SecondSucceeds()
     {
@@ -108,6 +98,10 @@ public class StorageFileLockTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="StorageFileLock.Dispose"/> releases the held handle and that calling it
+    /// a second time is idempotent and does not throw.
+    /// </summary>
     [Fact]
     public void Dispose_ReleasesHandle_IsIdempotent()
     {
@@ -131,6 +125,10 @@ public class StorageFileLockTests
         }
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="StorageFileLock.TryAcquire"/> a second time on an instance that
+    /// already holds the lock is idempotent and returns true again.
+    /// </summary>
     [Fact]
     public void TryAcquire_CalledTwiceOnSameHeldInstance_IsIdempotent_ReturnsTrue()
     {
@@ -151,6 +149,10 @@ public class StorageFileLockTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a disposed <see cref="StorageFileLock"/> instance never reacquires the lock;
+    /// <see cref="StorageFileLock.TryAcquire"/> returns false after <c>Dispose</c>.
+    /// </summary>
     [Fact]
     public void TryAcquire_AfterDispose_NeverReacquires_ReturnsFalse()
     {
@@ -172,6 +174,10 @@ public class StorageFileLockTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="StorageFileLock.IsHeld"/> defaults to false before any
+    /// <see cref="StorageFileLock.TryAcquire"/> attempt has been made.
+    /// </summary>
     [Fact]
     public void IsHeld_DefaultsFalse_BeforeAnyAcquireAttempt()
     {
@@ -188,6 +194,10 @@ public class StorageFileLockTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="StorageFileLock.TryAcquire"/> creates the missing storage root directory
+    /// and succeeds when the state directory does not exist yet.
+    /// </summary>
     [Fact]
     public void TryAcquire_MissingStorageRoot_CreatesDirectoryAndSucceeds()
     {
@@ -207,4 +217,26 @@ public class StorageFileLockTests
             SafeDeleteDirectory(root);
         }
     }
+
+    private static (StateStorePaths Paths, string Root) BuildPaths()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"DOrgStorageLock_{Guid.NewGuid():N}");
+        return (new StateStorePaths(root), root);
+    }
+
+    private static void SafeDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a still-locked handle from a test failure shouldn't mask the real
+            // assertion failure.
+        }
+    }
+
+    private static StorageFileLock BuildLock(StateStorePaths paths, int maxAttempts = 3) =>
+        new(paths, maxAttempts, NoDelay);
 }

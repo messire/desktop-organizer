@@ -16,19 +16,12 @@ public class FileItemRenameServiceTests
 {
     private readonly Mock<IPanelItemStorageService> _storageMock = new();
 
-    private FileItemRenameService BuildSut() => new(_storageMock.Object);
-
-    private static string NewTempFilePath() => Path.Combine(Path.GetTempPath(), $"DOrgRenameSvc_{Guid.NewGuid():N}.txt");
-
-    private static string NewTempDirPath()
-    {
-        var dir = Path.Combine(Path.GetTempPath(), $"DOrgRenameSvcDir_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        return dir;
-    }
-
     // ── Not managed: plain physical rename ──────────────────────────────────
 
+    /// <summary>
+    /// Verifies that renaming a not-managed file performs a plain physical move to the new name in the
+    /// same directory and preserves its content.
+    /// </summary>
     [Fact]
     public void Rename_NotManagedFile_RenamesPhysicallyAndReturnsNewPath()
     {
@@ -58,6 +51,10 @@ public class FileItemRenameServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that renaming a not-managed directory performs a plain physical move to the new name and
+    /// preserves its contents.
+    /// </summary>
     [Fact]
     public void Rename_NotManagedDirectory_RenamesPhysicallyAndReturnsNewPath()
     {
@@ -89,6 +86,10 @@ public class FileItemRenameServiceTests
 
     // ── Collision ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that renaming to a name already occupied by another file returns
+    /// <see cref="RenameOutcome.NameTaken"/> and leaves both the source and the pre-existing file untouched.
+    /// </summary>
     [Fact]
     public void Rename_NotManagedFile_DestinationAlreadyExists_ReturnsNameTakenAndSourceIntact()
     {
@@ -120,6 +121,9 @@ public class FileItemRenameServiceTests
 
     // ── Not found ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that renaming a path that no longer exists on disk returns <see cref="RenameOutcome.NotFound"/>.
+    /// </summary>
     [Fact]
     public void Rename_PathDoesNotExist_ReturnsNotFound()
     {
@@ -136,6 +140,11 @@ public class FileItemRenameServiceTests
 
     // ── Invalid name — rejected before any I/O ──────────────────────────────
 
+    /// <summary>
+    /// Verifies that a syntactically invalid target name is rejected with <see cref="RenameOutcome.InvalidName"/>
+    /// before any storage-ownership check or file-system I/O runs.
+    /// </summary>
+    /// <param name="invalidName">The invalid candidate name under test.</param>
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -170,6 +179,10 @@ public class FileItemRenameServiceTests
 
     // ── Managed path: delegation ─────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that renaming a managed path is delegated to
+    /// <see cref="IPanelItemStorageService.RenameManaged"/> and that its successful result flows back verbatim.
+    /// </summary>
     [Fact]
     public void Rename_ManagedPath_DelegatesToRenameManaged_AndReturnsRenamed()
     {
@@ -188,6 +201,10 @@ public class FileItemRenameServiceTests
         _storageMock.Verify(s => s.RenameManaged(managedPath, "New.txt"), Times.Once);
     }
 
+    /// <summary>
+    /// Verifies that when <see cref="IPanelItemStorageService.RenameManaged"/> reports
+    /// <see cref="RenameOutcome.Failed"/>, that outcome is forwarded unchanged.
+    /// </summary>
     [Fact]
     public void Rename_ManagedPath_RenameManagedReturnsFailed_ForwardsFailed()
     {
@@ -226,4 +243,16 @@ public class FileItemRenameServiceTests
         Assert.Equal(RenameOutcome.NameTaken, result.Outcome);
         Assert.Null(result.NewPath);
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static string NewTempFilePath() => Path.Combine(Path.GetTempPath(), $"DOrgRenameSvc_{Guid.NewGuid():N}.txt");
+
+    private static string NewTempDirPath()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"DOrgRenameSvcDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private FileItemRenameService BuildSut() => new(_storageMock.Object);
 }

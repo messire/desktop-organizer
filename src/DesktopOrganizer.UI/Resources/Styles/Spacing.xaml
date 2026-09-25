@@ -65,4 +65,34 @@
 
     <GridLength x:Key="GridLength.Auto">Auto</GridLength>
     <GridLength x:Key="GridLength.Star">*</GridLength>
+<!--
+        Overlay scrollbar geometry (docs/prompts/scrollbar-pack, spec 04) — consumed by Controls.xaml's
+        Control.ScrollBar.Overlay / Control.ScrollBar.Thumb. Lives here (not Models/PanelMetrics.cs) because
+        nothing in C# needs these values: the ScrollViewer/ScrollBar/Track/Thumb chain is stock WPF and
+        only its visual template changes. The one C#-side number that is RELATED — GridMetrics's FixedGap
+        reservation of SystemParameters.VerticalScrollBarWidth (17 DIP on a default system) — is
+        deliberately NOT retargeted at ScrollBar.Width: over-reserving 3 DIP costs nothing visible, while
+        wiring layout math to a XAML token would invert the "C# constant is the single source of truth"
+        rule this file's own top-of-file comment sets.
+
+        ScrollBar.ThumbInset.*: the transparent margin between the Thumb's full-width hit region (the whole
+        14-DIP track — a wider drag target than the 8-DIP pill itself) and the visible pill, i.e.
+        (ScrollBar.Width - ScrollBar.ThumbThickness) / 2 on each side. Hand-written literal (XAML has no
+        arithmetic markup extension), pinned equal to that derivation by a dedicated STA test — same
+        drift-guard convention as Radius.Panel.Inner above.
+
+        Thumb minimum length vs. WPF's Track: the Track computes its OWN minimum thumb length as
+        floor(0.5 x <SystemParameters.VerticalScrollBarButtonHeightKey resource>) (dotnet/wpf Track.cs,
+        ComputeScrollBarLengths consults TryFindResource for that key first, then the system value), so
+        Controls.xaml's ScrollBar templates publish 2 x ScrollBar.ThumbMinLength under that key in their
+        own template resources — see the remarks there for why it has to be a literal — to make the
+        Track's arrange/drag math agree with Thumb.MinHeight = ScrollBar.ThumbMinLength.
+    -->
+    <sys:Double x:Key="ScrollBar.Width">14</sys:Double>
+    <sys:Double x:Key="ScrollBar.ThumbThickness">8</sys:Double>
+    <sys:Double x:Key="ScrollBar.ThumbMinLength">36</sys:Double>
+    <sys:Double x:Key="ScrollBar.DisabledOpacity">0.35</sys:Double>
+    <Thickness x:Key="ScrollBar.ThumbInset.Vertical">3,0,3,0</Thickness>
+    <Thickness x:Key="ScrollBar.ThumbInset.Horizontal">0,3,0,3</Thickness>
+    <CornerRadius x:Key="Radius.ScrollBarThumb">4</CornerRadius>
 </ResourceDictionary>

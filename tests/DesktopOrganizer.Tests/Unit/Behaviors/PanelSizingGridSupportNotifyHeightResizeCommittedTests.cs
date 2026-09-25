@@ -14,6 +14,8 @@ namespace DesktopOrganizer.Tests.Unit.Behaviors;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class PanelSizingGridSupportNotifyHeightResizeCommittedTests
 {
+    /// <summary>Verifies that <see cref="PanelSizingGridSupport.NotifyHeightResizeCommitted"/> calls the host for every height-affecting <paramref name="edge"/>.</summary>
+    /// <param name="edge">The height-affecting edge that was committed.</param>
     [Theory]
     [InlineData(ResizeEdge.Top)]
     [InlineData(ResizeEdge.Bottom)]
@@ -30,6 +32,8 @@ public class PanelSizingGridSupportNotifyHeightResizeCommittedTests
         host.Verify(h => h.NotifyHeightResizeCommitted(), Times.Once);
     }
 
+    /// <summary>Verifies that <see cref="PanelSizingGridSupport.NotifyHeightResizeCommitted"/> never calls the host for a width-only <paramref name="edge"/>.</summary>
+    /// <param name="edge">The width-only edge that was committed.</param>
     [Theory]
     [InlineData(ResizeEdge.Left)]
     [InlineData(ResizeEdge.Right)]
@@ -42,6 +46,7 @@ public class PanelSizingGridSupportNotifyHeightResizeCommittedTests
         host.Verify(h => h.NotifyHeightResizeCommitted(), Times.Never);
     }
 
+    /// <summary>Verifies that <see cref="PanelSizingGridSupport.NotifyHeightResizeCommitted"/> never throws when given a <see langword="null"/> host.</summary>
     [Fact]
     public void NotifyHeightResizeCommitted_NullHost_NeverThrows()
     {

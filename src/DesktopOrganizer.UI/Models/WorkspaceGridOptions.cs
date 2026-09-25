@@ -14,7 +14,7 @@ namespace DesktopOrganizer.UI.Models;
 /// <param name="MinWidthSpanExpanded">Minimum expanded width, in <paramref name="UnitSize"/>-units.</param>
 /// <param name="MinHeightSpanExpanded">Minimum expanded height, in <paramref name="UnitSize"/>-units.</param>
 /// <param name="CollapsedHeaderSpan">Collapsed (rolled-up) header height, in <paramref name="UnitSize"/>-units.</param>
-/// <param name="PresetSpans">The preset → <see cref="GridSpan"/> table used by <see cref="WorkspaceLayoutPolicy.PreferredSize"/> callers.</param>
+/// <param name="PresetSpans">The preset → <see cref="GridSpan"/> table used by <see cref="WorkspaceLayoutPolicy.PreferredSize(PanelSizePreset, WorkspaceGridOptions)"/> callers.</param>
 public sealed record WorkspaceGridOptions(
     double UnitSize,
     double Gap,

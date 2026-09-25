@@ -59,6 +59,8 @@ public static class ListReorderGeometry
     /// (empty space below/after the very last row). See the <see cref="Point"/> overload below (this is
     /// a thin wrapper over it) for the full contract, including the P05 fix-cycle same-row fallback.
     /// </summary>
+    /// <param name="listBox">The panel's file-list <see cref="ListBox"/> (either view mode's <c>ItemsPanel</c>).</param>
+    /// <param name="e">The drag event whose position (relative to <paramref name="listBox"/>) is hit-tested.</param>
     public static ListBoxItem? HitTestReorderContainer(ListBox listBox, DragEventArgs e)
         => HitTestReorderContainer(listBox, e.GetPosition(listBox));
 

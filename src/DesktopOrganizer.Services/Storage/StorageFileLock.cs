@@ -47,8 +47,9 @@ internal sealed class StorageFileLock : IStorageLock
     }
 
     /// <summary>
-    /// Test-only overload with an explicit <see cref="StateStorePaths"/> (so tests point at a
-    /// disposable temp folder instead of the real <c>%LOCALAPPDATA%\DesktopOrganizer\</c>, mirroring
+    /// Initializes a new instance of the <see cref="StorageFileLock"/> class. Test-only overload with
+    /// an explicit <see cref="StateStorePaths"/> (so tests point at a disposable temp folder instead of
+    /// the real <c>%LOCALAPPDATA%\DesktopOrganizer\</c>, mirroring
     /// <see cref="JsonApplicationStateStore"/>'s test constructor) and an explicit retry schedule, so
     /// tests can pass <see cref="TimeSpan.Zero"/> instead of waiting out the real 450 ms budget.
     /// </summary>

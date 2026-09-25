@@ -9,12 +9,19 @@ namespace DesktopOrganizer.Tests.Unit.Diagnostics;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class NullDiagnosticsLogTests
 {
+    /// <summary>
+    /// Verifies that <see cref="NullDiagnosticsLog.IsEnabled"/> always returns <see langword="false"/>.
+    /// </summary>
     [Fact]
     public void IsEnabled_ReturnsFalse()
     {
         Assert.False(NullDiagnosticsLog.Instance.IsEnabled);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="NullDiagnosticsLog.Instance"/> returns the exact same reference on
+    /// every access.
+    /// </summary>
     [Fact]
     public void Instance_IsASingleton_SameReferenceEveryAccess()
     {
@@ -24,6 +31,9 @@ public class NullDiagnosticsLogTests
         Assert.Same(first, second);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="NullDiagnosticsLog.Write"/> with a payload does not throw.
+    /// </summary>
     [Fact]
     public void Write_DoesNotThrow()
     {
@@ -37,6 +47,10 @@ public class NullDiagnosticsLogTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="NullDiagnosticsLog.Write"/> with a <see langword="null"/> scope and no
+    /// payload does not throw.
+    /// </summary>
     [Fact]
     public void Write_WithNoPayload_DoesNotThrow()
     {
@@ -45,6 +59,9 @@ public class NullDiagnosticsLogTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="NullDiagnosticsLog.Flush"/> does not throw.
+    /// </summary>
     [Fact]
     public void Flush_DoesNotThrow()
     {
@@ -53,6 +70,9 @@ public class NullDiagnosticsLogTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="NullDiagnosticsLog.Dispose"/> does not throw.
+    /// </summary>
     [Fact]
     public void Dispose_DoesNotThrow()
     {
@@ -61,6 +81,10 @@ public class NullDiagnosticsLogTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="NullDiagnosticsLog.Dispose"/> twice is idempotent and does not
+    /// throw.
+    /// </summary>
     [Fact]
     public void Dispose_CalledTwice_IsIdempotent()
     {
@@ -70,6 +94,10 @@ public class NullDiagnosticsLogTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Verifies that the shared <see cref="NullDiagnosticsLog.Instance"/> singleton remains usable and
+    /// a no-op for every caller even after another caller has disposed it.
+    /// </summary>
     [Fact]
     public void Instance_UsableAfterDispose_StillNoOp()
     {

@@ -28,14 +28,20 @@ internal static class LayeredChromeVisuals
     private static readonly double MaxBaseline = InteractionVisualState.BorderOpacityFor(PanelVisualState.Resizing);
 
     /// <summary><c>PART_Glow</c>'s own <see cref="System.Windows.UIElement.Opacity"/> for <paramref name="state"/>/<paramref name="isLayoutEditing"/> — <see cref="PanelMetrics.GlowOpacityIdle"/> .. <see cref="PanelMetrics.GlowOpacityMax"/>.</summary>
+    /// <param name="state">The resolved visual state.</param>
+    /// <param name="isLayoutEditing">Whether Edit Layout mode is currently active.</param>
     public static double GlowOpacityFor(PanelVisualState state, bool isLayoutEditing)
         => Interpolate(state, isLayoutEditing, PanelMetrics.GlowOpacityIdle, PanelMetrics.GlowOpacityMax);
 
     /// <summary><c>PART_AccentStroke</c>'s own <see cref="System.Windows.UIElement.Opacity"/> for <paramref name="state"/>/<paramref name="isLayoutEditing"/> — <see cref="PanelMetrics.AccentStrokeOpacityIdle"/> .. <see cref="PanelMetrics.AccentStrokeOpacityMax"/>.</summary>
+    /// <param name="state">The resolved visual state.</param>
+    /// <param name="isLayoutEditing">Whether Edit Layout mode is currently active.</param>
     public static double AccentStrokeOpacityFor(PanelVisualState state, bool isLayoutEditing)
         => Interpolate(state, isLayoutEditing, PanelMetrics.AccentStrokeOpacityIdle, PanelMetrics.AccentStrokeOpacityMax);
 
     /// <summary><c>PART_NeutralStroke</c>'s own <see cref="System.Windows.UIElement.Opacity"/> for <paramref name="state"/>/<paramref name="isLayoutEditing"/> — <see cref="PanelMetrics.NeutralStrokeOpacityIdle"/> .. <see cref="PanelMetrics.NeutralStrokeOpacityMax"/>.</summary>
+    /// <param name="state">The resolved visual state.</param>
+    /// <param name="isLayoutEditing">Whether Edit Layout mode is currently active.</param>
     public static double NeutralStrokeOpacityFor(PanelVisualState state, bool isLayoutEditing)
         => Interpolate(state, isLayoutEditing, PanelMetrics.NeutralStrokeOpacityIdle, PanelMetrics.NeutralStrokeOpacityMax);
 
@@ -57,6 +63,8 @@ internal static class LayeredChromeVisuals
     /// <c>LayeredChromeVisualsTests</c> uses this to pin that the combination stays monotonic and pairwise
     /// distinguishable, not merely that each INPUT channel is.
     /// </summary>
+    /// <param name="state">The resolved visual state.</param>
+    /// <param name="isLayoutEditing">Whether Edit Layout mode is currently active.</param>
     internal static double CombinedNeutralBorderOpacityFor(PanelVisualState state, bool isLayoutEditing)
     {
         var overlayOpacity = LayoutEditVisuals.BorderOpacityFor(state, isLayoutEditing);

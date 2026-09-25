@@ -106,7 +106,7 @@ public static class WorkspaceGridMetrics
 
     /// <summary>
     /// Default preset → <see cref="GridSpan"/> map (ADR-028 table, "Presets"). Exposed as a plain
-    /// dictionary (not hardcoded into <see cref="WorkspaceLayoutPolicy.PreferredSize"/>) so a future
+    /// dictionary (not hardcoded into <see cref="WorkspaceLayoutPolicy.PreferredSize(PanelSizePreset, WorkspaceGridOptions)"/>) so a future
     /// <c>WorkspaceGridOptions</c> consumer (settings UI, ADR-028 has no such UI requirement yet) could
     /// substitute an overridden table without touching this type. Backed by a
     /// <see cref="FrozenDictionary{TKey,TValue}"/> (fix-cycle 1, NIT) rather than a plain mutable

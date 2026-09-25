@@ -25,8 +25,9 @@ internal sealed class SystemShellService : ISystemShellService, IDisposable
     public event EventHandler<RecycleBinState>? RecycleBinChanged;
 
     /// <summary>
-    /// Initializes a new instance of <see cref="SystemShellService"/>.
+    /// Initializes a new instance of the <see cref="SystemShellService"/> class.
     /// </summary>
+    /// <param name="nativeApi">The native P/Invoke facade this service delegates shell operations to.</param>
     public SystemShellService(INativeApi nativeApi)
     {
         _nativeApi = nativeApi;

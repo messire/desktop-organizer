@@ -7,7 +7,7 @@ namespace DesktopOrganizer.Tests.Unit.Interaction;
 /// <summary>
 /// ADR-011 Amendment 2026-09-24 (resize extension): <see cref="ResizeConstraints.SizeGridStep"/>'s
 /// effect on <see cref="ResizeGeometryCalculator.Apply"/> — the LegacyFreeform-shaped half of the
-/// feature (a <see cref="Models.PanelGeometryMode.GridAligned"/> gesture's OWN <c>SizeGridStep</c>
+/// feature (a <see cref="PanelGeometryMode.GridAligned"/> gesture's OWN <c>SizeGridStep</c>
 /// commensurability gate is covered separately, at <c>ResizeConstraintsFactory.BuildConstraints</c> and
 /// <c>ResizeGestureSession</c> level, since <see cref="ResizeGeometryCalculator"/> itself has no notion
 /// of grid alignment).
@@ -29,26 +29,13 @@ public class ResizeGeometryCalculatorSizeGridStepTests
     // 144x144 (both exact multiples of 48) at (100, 100) — Right = 244, Bottom = 244.
     private static readonly Rect StartBounds = new(100d, 100d, 144d, 144d);
 
-    private static ResizeConstraints SizeGridConstraints(double sizeGridStep = GridSize) => new(
-        MinWidth: MinWidth,
-        MinHeight: MinHeight,
-        SnapCellWidth: 0d,
-        SnapCellHeight: 0d,
-        TitleBarHeight: 32d,
-        HorizontalChrome: GridMetrics.FileListHPadding,
-        VerticalChrome: GridMetrics.FileListVPadding,
-        SizeGridStep: sizeGridStep);
-
-    private static Rect ApplyOneShot(ResizeEdge edge, double dx, double dy, ResizeConstraints constraints, Rect? start = null)
-    {
-        var bounds = start ?? StartBounds;
-        var raw = ResizeGeometryCalculator.Accumulate(new ResizeRawExtent(bounds.Width, bounds.Height), edge, new Vector(dx, dy));
-        return ResizeGeometryCalculator.Apply(bounds, edge, raw, bounds.Right, bounds.Bottom, constraints);
-    }
-
     // ── Round-half-up to the nearest 48 multiple, reusing GridSizeNormalizer verbatim (not a threshold
     // magnet like GridSnap.SnapAxis): 144 + 40 = 184 -> nearest of {144, 192} is 192 (distance 8 vs 40).
     // 144 + 20 = 164 -> nearest of {144, 192} is 144 (distance 20 vs 28). ────────────────────────────────
+
+    /// <summary>Verifies that dragging the Right edge quantises the resulting width to the nearest <c>GridSize</c> multiple, round-half-up.</summary>
+    /// <param name="dx">The raw horizontal delta applied to the Right edge.</param>
+    /// <param name="expectedWidth">The expected quantised width.</param>
     [Theory]
     [InlineData(40d, 192d)]
     [InlineData(20d, 144d)]
@@ -64,6 +51,8 @@ public class ResizeGeometryCalculatorSizeGridStepTests
 
     // ── Exact tie (24 DIP from both neighbours, half of 48) resolves round-HALF-UP, not banker's
     // rounding: 144 + 24 = 168 is exactly between 144 and 192 -> 192. ───────────────────────────────────
+
+    /// <summary>Verifies that an exact halfway tie between two <c>GridSize</c> multiples resolves round-half-up, not banker's rounding.</summary>
     [Fact]
     public void ExactHalfwayTie_RoundsUp()
     {
@@ -74,6 +63,8 @@ public class ResizeGeometryCalculatorSizeGridStepTests
 
     // ── The dragged LEFT edge moves; the anchor (Right, fixed at gesture start = 244) never does — the
     // generic anchor logic downstream of the branch selection applies uniformly. ─────────────────────────
+
+    /// <summary>Verifies that dragging the Left edge quantises the width while keeping the Right edge (the anchor) fixed, repositioning Left from the quantised width.</summary>
     [Fact]
     public void Left_KeepsTheRightEdgeAnchored_AndRepositionsLeftFromTheQuantisedWidth()
     {
@@ -89,6 +80,8 @@ public class ResizeGeometryCalculatorSizeGridStepTests
     // ── Below the minimum: nearest multiple of 48 to a tiny raw width is BELOW MinWidth (120), so the
     // result promotes to the smallest multiple >= MinWidth. GridSizeNormalizer.NormalizeExtent's own
     // floor logic, exercised end to end through Apply. ─────────────────────────────────────────────────
+
+    /// <summary>Verifies that when the nearest <c>GridSize</c> multiple falls below <c>MinWidth</c>, the result promotes to the smallest multiple at or above the minimum.</summary>
     [Fact]
     public void BelowTheMinimum_PromotesToTheSmallestGridSizeMultipleAtOrAboveMinWidth()
     {
@@ -104,6 +97,10 @@ public class ResizeGeometryCalculatorSizeGridStepTests
 
     // ── Height axis mirrors width exactly (SizeGridStep, unlike the pre-existing free-height branch,
     // operates on raw.Height directly and symmetrically with width — no chrome round trip on either axis). ──
+
+    /// <summary>Verifies that dragging the Bottom edge quantises the resulting height the same way width is quantised.</summary>
+    /// <param name="dy">The raw vertical delta applied to the Bottom edge.</param>
+    /// <param name="expectedHeight">The expected quantised height.</param>
     [Theory]
     [InlineData(40d, 192d)]
     [InlineData(20d, 144d)]
@@ -119,6 +116,8 @@ public class ResizeGeometryCalculatorSizeGridStepTests
     // ── All 8 edges: the untouched axis is never modified, and the anchor edge(s) never move — the same
     // "point 7" contract the icon-grid-snap/free branches already guarantee, now also true for the new
     // SizeGridStep branch (it reuses the exact same downstream anchor-application code). ─────────────────
+
+    /// <summary>Gets the eight <see cref="ResizeEdge"/> values, each paired with a raw drag delta.</summary>
     public static TheoryData<ResizeEdge, double, double> EightEdges => new()
     {
         { ResizeEdge.Left, -40d, 0d },
@@ -131,6 +130,10 @@ public class ResizeGeometryCalculatorSizeGridStepTests
         { ResizeEdge.BottomRight, 40d, 40d },
     };
 
+    /// <summary>Verifies that for every edge, the SizeGridStep branch quantises only the affected axis and keeps the anchor edge(s) fixed.</summary>
+    /// <param name="edge">The edge being dragged.</param>
+    /// <param name="dx">The raw horizontal delta.</param>
+    /// <param name="dy">The raw vertical delta.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void EveryEdge_QuantisesTheAffectedAxisOnly_AndKeepsTheAnchorFixed(ResizeEdge edge, double dx, double dy)
@@ -164,6 +167,8 @@ public class ResizeGeometryCalculatorSizeGridStepTests
 
     // ── Priority: SizeGridStep wins even when SnapCellWidth/Height are ALSO (incorrectly) populated —
     // defense in depth matching ResizeConstraintsFactory's own "or the calculator checks first" note. ────
+
+    /// <summary>Verifies that <c>SizeGridStep</c> takes priority over the icon-grid snap cell size, even when both are somehow set.</summary>
     [Fact]
     public void SizeGridStep_TakesPriorityOverIconGridSnap_WhenBothAreSomehowSet()
     {
@@ -185,6 +190,11 @@ public class ResizeGeometryCalculatorSizeGridStepTests
     // ── Path-independence (mirrors ResizeGeometryCalculatorApplyEquivalenceTests' own pattern): a
     // 4-step Accumulate chain and one absolute raw extent must agree bit-for-bit — the property both
     // resize controllers' golden-equivalence tests rely on. ────────────────────────────────────────────
+
+    /// <summary>Verifies that, under the SizeGridStep branch, a 4-step <see cref="ResizeGeometryCalculator.Accumulate"/> chain and one absolute raw extent produce a bit-for-bit identical <see cref="Rect"/>.</summary>
+    /// <param name="edge">The edge being resized.</param>
+    /// <param name="totalDx">The total horizontal drag delta.</param>
+    /// <param name="totalDy">The total vertical drag delta.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void AccumulateChain_And_SingleAbsoluteApply_ProduceBitForBitIdenticalRect(ResizeEdge edge, double totalDx, double totalDy)
@@ -213,6 +223,8 @@ public class ResizeGeometryCalculatorSizeGridStepTests
     // factory for that input (see ResizeConstraintsFactoryTests), and this calculator's own guard
     // (`SizeGridStep > 0d`) means passing a literal 0 here reproduces the OLD icon-grid/free behaviour
     // bit-for-bit — the machine-checked half of "old tests stay unchanged". ───────────────────────────────
+
+    /// <summary>Verifies that with <c>SizeGridStep == 0</c> ("no grid"), <see cref="ResizeGeometryCalculator.Apply"/> reproduces the old icon-grid/free behavior bit-for-bit.</summary>
     [Fact]
     public void GridSizeIsOff_IsBitForBitIdenticalToTheOldBehaviour()
     {
@@ -236,6 +248,8 @@ public class ResizeGeometryCalculatorSizeGridStepTests
 
     // ── Non-finite SizeGridStep is treated exactly like every other non-finite constraint field — the
     // H3 guard returns `current` unchanged rather than propagating NaN into Window.Width/Height. ────────
+
+    /// <summary>Verifies that a non-finite <c>SizeGridStep</c> is treated like any other non-finite constraint field, returning the current bounds unchanged.</summary>
     [Fact]
     public void NonFiniteSizeGridStep_ReturnsCurrentUnchanged()
     {
@@ -245,5 +259,23 @@ public class ResizeGeometryCalculatorSizeGridStepTests
             StartBounds, ResizeEdge.Right, new ResizeRawExtent(200d, 144d), StartBounds.Right, StartBounds.Bottom, constraints);
 
         Assert.Equal(StartBounds, result);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static ResizeConstraints SizeGridConstraints(double sizeGridStep = GridSize) => new(
+        MinWidth: MinWidth,
+        MinHeight: MinHeight,
+        SnapCellWidth: 0d,
+        SnapCellHeight: 0d,
+        TitleBarHeight: 32d,
+        HorizontalChrome: GridMetrics.FileListHPadding,
+        VerticalChrome: GridMetrics.FileListVPadding,
+        SizeGridStep: sizeGridStep);
+
+    private static Rect ApplyOneShot(ResizeEdge edge, double dx, double dy, ResizeConstraints constraints, Rect? start = null)
+    {
+        var bounds = start ?? StartBounds;
+        var raw = ResizeGeometryCalculator.Accumulate(new ResizeRawExtent(bounds.Width, bounds.Height), edge, new Vector(dx, dy));
+        return ResizeGeometryCalculator.Apply(bounds, edge, raw, bounds.Right, bounds.Bottom, constraints);
     }
 }

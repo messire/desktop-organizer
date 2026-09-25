@@ -11,6 +11,9 @@ public class FolderWatcherTests
 {
     // ── ShouldIgnore ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="FolderWatcher.ShouldIgnore"/> returns true for a <c>desktop.ini</c> path.
+    /// </summary>
     [Fact]
     public void ShouldIgnore_DesktopIni_ReturnsTrue()
     {
@@ -18,6 +21,9 @@ public class FolderWatcherTests
         Assert.True(result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FolderWatcher.ShouldIgnore"/> matches <c>desktop.ini</c> case-insensitively.
+    /// </summary>
     [Fact]
     public void ShouldIgnore_DesktopIni_CaseInsensitive_ReturnsTrue()
     {
@@ -25,6 +31,9 @@ public class FolderWatcherTests
         Assert.True(result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FolderWatcher.ShouldIgnore"/> returns true for a <c>thumbs.db</c> path.
+    /// </summary>
     [Fact]
     public void ShouldIgnore_ThumbsDb_ReturnsTrue()
     {
@@ -32,6 +41,9 @@ public class FolderWatcherTests
         Assert.True(result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FolderWatcher.ShouldIgnore"/> matches <c>thumbs.db</c> case-insensitively.
+    /// </summary>
     [Fact]
     public void ShouldIgnore_ThumbsDb_CaseInsensitive_ReturnsTrue()
     {
@@ -39,6 +51,10 @@ public class FolderWatcherTests
         Assert.True(result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FolderWatcher.ShouldIgnore"/> returns true for a file with the hidden
+    /// attribute set, using a real temp file so <see cref="File.GetAttributes(string)"/> reflects it.
+    /// </summary>
     [Fact]
     public void ShouldIgnore_HiddenFile_ReturnsTrue()
     {
@@ -61,6 +77,9 @@ public class FolderWatcherTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FolderWatcher.ShouldIgnore"/> returns false for a regular, non-hidden file.
+    /// </summary>
     [Fact]
     public void ShouldIgnore_RegularFile_ReturnsFalse()
     {
@@ -81,6 +100,10 @@ public class FolderWatcherTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FolderWatcher.ShouldIgnore"/> returns false for a path that no longer
+    /// exists on disk, so a Deleted event is never suppressed.
+    /// </summary>
     [Fact]
     public void ShouldIgnore_DeletedFile_ReturnsFalse()
     {
@@ -92,6 +115,10 @@ public class FolderWatcherTests
 
     // ── Debounce — integration tests with real FileSystemWatcher ────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="FolderWatcher.Changed"/> fires after the debounce window once a real
+    /// file system change occurs, against a real <see cref="FileSystemWatcher"/>.
+    /// </summary>
     [Fact]
     public void FolderChanged_IsRaised_AfterDebounceWindow()
     {
@@ -118,6 +145,10 @@ public class FolderWatcherTests
         }
     }
 
+    /// <summary>
+    /// Verifies that several rapid file system changes within the debounce window collapse into
+    /// exactly one <see cref="FolderWatcher.Changed"/> event.
+    /// </summary>
     [Fact]
     public void FolderChanged_NotRaised_DuringDebounceWindow()
     {
@@ -161,6 +192,11 @@ public class FolderWatcherTests
 
     // ── OnDebounceElapsed subscriber isolation (Task 2, sta-test-conventions.md "known remaining hazards") ──
 
+    /// <summary>
+    /// Verifies that a <see cref="FolderWatcher.Changed"/> subscriber that throws never crashes the
+    /// timer callback thread or the process, and that a subsequent, separate debounce window still
+    /// delivers the event to other, well-behaved subscribers.
+    /// </summary>
     [Fact]
     public void Changed_SubscriberThrows_TimerKeepsRunning_NextEventStillDelivered()
     {
@@ -203,6 +239,11 @@ public class FolderWatcherTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="FolderWatcher.Stop"/> can acquire its internal lock immediately and
+    /// return promptly even while a <see cref="FolderWatcher.Changed"/> subscriber is still blocking on
+    /// the timer-callback thread, rather than deadlocking against it.
+    /// </summary>
     [Fact]
     public void Stop_WhileSubscriberIsStillRunningOnTheTimerThread_DoesNotDeadlock()
     {
@@ -255,6 +296,7 @@ public class FolderWatcherTests
         }
     }
 
+    // ── helpers ──────────────────────────────────────────────────────────────
     private static string CreateTempDirectory()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"do_fw_{Guid.NewGuid():N}");

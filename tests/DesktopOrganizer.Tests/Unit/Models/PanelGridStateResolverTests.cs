@@ -25,20 +25,11 @@ public class PanelGridStateResolverTests
     private static readonly (string DeviceName, Rect Bounds, Rect WorkArea) NegativeSecondary =
         ("\\\\.\\DISPLAY3", new Rect(-1920, -200, 1920, 1080), new Rect(-1920, -160, 1920, 1040));
 
-    private static ChildWindowModel GridAlignedModel(
-        string? monitorDeviceId = null,
-        int? widthSpanUnits = null,
-        int? heightSpanUnits = null) =>
-        new()
-        {
-            GeometryMode = PanelGeometryMode.GridAligned,
-            MonitorDeviceId = monitorDeviceId,
-            WidthSpanUnits = widthSpanUnits,
-            HeightSpanUnits = heightSpanUnits,
-        };
-
     // ── Rule 1: Инвариант В1 — GeometryMode gate ──────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that resolving a null model returns <see cref="PanelGridState.Legacy"/>.
+    /// </summary>
     [Fact]
     public void Resolve_NullModel_ReturnsLegacy()
     {
@@ -48,6 +39,10 @@ public class PanelGridStateResolverTests
         Assert.False(result.IsGridAligned);
     }
 
+    /// <summary>
+    /// Verifies that resolving a model in <see cref="PanelGeometryMode.LegacyFreeform"/> mode returns
+    /// <see cref="PanelGridState.Legacy"/>, per Инвариант В1's GeometryMode gate.
+    /// </summary>
     [Fact]
     public void Resolve_LegacyFreeformModel_ReturnsLegacy()
     {
@@ -60,6 +55,10 @@ public class PanelGridStateResolverTests
 
     // ── Rule 2: no monitors -> fail-safe Legacy ───────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that resolving with an empty monitor list fails safe to
+    /// <see cref="PanelGridState.Legacy"/> instead of throwing.
+    /// </summary>
     [Fact]
     public void Resolve_EmptyMonitorList_ReturnsLegacy()
     {
@@ -72,6 +71,10 @@ public class PanelGridStateResolverTests
 
     // ── Rule 2: monitor resolution order ──────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that a persisted monitor device name takes priority over bounds-based containment —
+    /// even when the panel's bounds sit inside a different monitor, the explicitly named one wins.
+    /// </summary>
     [Fact]
     public void Resolve_MatchesMonitorByDeviceName_EvenWhenBoundsWouldSuggestAnotherMonitor()
     {
@@ -85,6 +88,10 @@ public class PanelGridStateResolverTests
         Assert.Equal(Secondary.WorkArea.TopLeft, result.Origin);
     }
 
+    /// <summary>
+    /// Verifies that matching the persisted monitor device name against the live monitor list is
+    /// case-insensitive.
+    /// </summary>
     [Fact]
     public void Resolve_DeviceNameMatch_IsCaseInsensitive()
     {
@@ -95,6 +102,10 @@ public class PanelGridStateResolverTests
         Assert.Equal(Secondary.DeviceName, result.MonitorDeviceId);
     }
 
+    /// <summary>
+    /// Verifies that when the persisted monitor device name matches nothing in the live monitor list,
+    /// resolution falls back to finding the monitor whose bounds contain the panel's center.
+    /// </summary>
     [Fact]
     public void Resolve_NoDeviceNameMatch_FallsBackToCenterContainment()
     {
@@ -107,6 +118,10 @@ public class PanelGridStateResolverTests
         Assert.Equal(Secondary.DeviceName, result.MonitorDeviceId);
     }
 
+    /// <summary>
+    /// Verifies that the bounds-based monitor fallback uses the panel's center point, not its
+    /// top-left corner, to find the containing monitor (ADR-028).
+    /// </summary>
     [Fact]
     public void Resolve_UsesCenter_NotTopLeft_ToFindMonitor()
     {
@@ -121,6 +136,10 @@ public class PanelGridStateResolverTests
         Assert.Equal(Primary.DeviceName, result.MonitorDeviceId);
     }
 
+    /// <summary>
+    /// Verifies that when neither the device name nor the center-containment check matches any
+    /// monitor, resolution falls back to the first monitor in the supplied list.
+    /// </summary>
     [Fact]
     public void Resolve_NoMatchAtAll_FallsBackToFirstMonitorInList()
     {
@@ -133,6 +152,10 @@ public class PanelGridStateResolverTests
         Assert.Equal(Secondary.DeviceName, result.MonitorDeviceId);
     }
 
+    /// <summary>
+    /// Verifies that resolving against a monitor with a negative-coordinate work area correctly
+    /// translates the resulting origin, work area, and device id to that monitor's values.
+    /// </summary>
     [Fact]
     public void Resolve_NegativeMonitorOrigin_TranslatesCorrectly()
     {
@@ -148,6 +171,11 @@ public class PanelGridStateResolverTests
 
     // ── Rule 4: constants + rolled-up-aware minimum span ──────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that resolving an expanded (not rolled-up) panel uses
+    /// <see cref="WorkspaceGridMetrics.MinSpanExpanded"/> as the minimum span, plus the shared
+    /// unit size and gap constants.
+    /// </summary>
     [Fact]
     public void Resolve_Expanded_UsesMinSpanExpanded()
     {
@@ -160,6 +188,11 @@ public class PanelGridStateResolverTests
         Assert.Equal(G, result.Gap);
     }
 
+    /// <summary>
+    /// Verifies that resolving a rolled-up panel uses
+    /// <see cref="WorkspaceGridMetrics.MinSpanCollapsed"/> as the minimum span, instead of the
+    /// expanded-panel minimum.
+    /// </summary>
     [Fact]
     public void Resolve_RolledUp_UsesMinSpanCollapsed()
     {
@@ -172,6 +205,10 @@ public class PanelGridStateResolverTests
 
     // ── Rule 5: persisted spans, valid ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that already-valid persisted width/height spans are used as-is, without the resolver
+    /// rewriting the model's span properties.
+    /// </summary>
     [Fact]
     public void Resolve_ValidPersistedSpans_AreUsedAsIs_AndModelIsNotRewritten()
     {
@@ -184,6 +221,13 @@ public class PanelGridStateResolverTests
         Assert.Equal(30, model.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that missing or below-minimum persisted spans trigger lazy migration: the resolver
+    /// derives fresh width/height spans from the panel's current bounds and writes them back to the
+    /// model.
+    /// </summary>
+    /// <param name="width">The persisted width span, or null/below-minimum to force migration.</param>
+    /// <param name="height">The persisted height span, or null/below-minimum to force migration.</param>
     [Theory]
     [InlineData(null, 20)]
     [InlineData(20, null)]
@@ -204,6 +248,13 @@ public class PanelGridStateResolverTests
         Assert.Equal(expected.HeightUnits, model.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that when there is no persisted span AND the current bounds are degenerate (zero or
+    /// NaN in either dimension), the resolver returns <see cref="PanelGridState.Legacy"/> for this
+    /// frame without writing any span onto the model.
+    /// </summary>
+    /// <param name="width">A degenerate (zero or NaN) width to resolve against.</param>
+    /// <param name="height">A degenerate (zero or NaN) height to resolve against.</param>
     [Theory]
     [InlineData(0d, 100d)]
     [InlineData(100d, 0d)]
@@ -221,6 +272,11 @@ public class PanelGridStateResolverTests
         Assert.Null(model.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that a model with no persisted spans and a zero-size rectangle (matching the state
+    /// <c>AddPanel</c> is in before its first <c>SizeChanged</c>) resolves to
+    /// <see cref="PanelGridState.Legacy"/>.
+    /// </summary>
     [Fact]
     public void Resolve_MissingSpans_ZeroSize_ReturnsLegacy_MatchingAddPanelBeforeFirstRenderSizeChanged()
     {
@@ -233,6 +289,10 @@ public class PanelGridStateResolverTests
 
     // ── ParticipatesInGrid (P03 fast path) ────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelGridStateResolver.ParticipatesInGrid"/> returns false for both a
+    /// null model and a <see cref="PanelGeometryMode.LegacyFreeform"/> model.
+    /// </summary>
     [Fact]
     public void ParticipatesInGrid_NullOrLegacyFreeform_IsFalse()
     {
@@ -241,6 +301,11 @@ public class PanelGridStateResolverTests
             new ChildWindowModel { GeometryMode = PanelGeometryMode.LegacyFreeform }));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelGridStateResolver.ParticipatesInGrid"/> returns true for a
+    /// grid-aligned model even without any persisted spans — it is only a "could it" pre-check, not
+    /// the authority on whether the panel actually resolves to a usable grid state.
+    /// </summary>
     [Fact]
     public void ParticipatesInGrid_GridAligned_IsTrue_EvenWithoutSpans()
     {
@@ -249,6 +314,11 @@ public class PanelGridStateResolverTests
         Assert.True(PanelGridStateResolver.ParticipatesInGrid(GridAlignedModel()));
     }
 
+    /// <summary>
+    /// Verifies that when <see cref="PanelGridStateResolver.ParticipatesInGrid"/> returns false for a
+    /// legacy model, <see cref="PanelGridStateResolver.Resolve"/> agrees by returning
+    /// <see cref="PanelGridState.Legacy"/> for the same model.
+    /// </summary>
     [Fact]
     public void ParticipatesInGrid_False_AgreesWithResolve()
     {
@@ -259,4 +329,17 @@ public class PanelGridStateResolverTests
             PanelGridState.Legacy,
             PanelGridStateResolver.Resolve(legacy, new Rect(0, 0, 260, 300), [Primary], isRolledUp: false));
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static ChildWindowModel GridAlignedModel(
+        string? monitorDeviceId = null,
+        int? widthSpanUnits = null,
+        int? heightSpanUnits = null) =>
+        new()
+        {
+            GeometryMode = PanelGeometryMode.GridAligned,
+            MonitorDeviceId = monitorDeviceId,
+            WidthSpanUnits = widthSpanUnits,
+            HeightSpanUnits = heightSpanUnits,
+        };
 }

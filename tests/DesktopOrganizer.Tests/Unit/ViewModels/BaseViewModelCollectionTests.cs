@@ -15,8 +15,18 @@ namespace DesktopOrganizer.Tests.Unit.ViewModels;
 // InternalsVisibleTo), mirroring Unit/ContentFilter/ContentFilterTests.cs's FilterViewModel. RemoveFile
 // is plain `protected`, so it needs this tiny subclass wrapper.
 // ---------------------------------------------------------------------------
-file sealed class MutableViewModel(IIconProvider iconProvider) : BaseViewModel(iconProvider)
+
+/// <summary>
+/// WPF-free stub exposing <see cref="BaseViewModel"/>'s <c>protected</c> (not <c>protected internal</c>)
+/// mutation surface — specifically <c>RemoveFile</c> — for direct testing.
+/// </summary>
+/// <param name="iconProvider">The icon provider forwarded to the base <see cref="BaseViewModel"/>.</param>
+internal sealed class MutableViewModel(IIconProvider iconProvider) : BaseViewModel(iconProvider)
 {
+    /// <summary>
+    /// Removes the given item via the base class's <c>protected</c> <c>RemoveFile</c> method.
+    /// </summary>
+    /// <param name="item">The item to remove.</param>
     public void RemoveFileItem(FileItem item) => RemoveFile(item);
 }
 
@@ -27,13 +37,30 @@ file sealed class MutableViewModel(IIconProvider iconProvider) : BaseViewModel(i
 // MoveItem's visible-index-to-full-set anchoring rule (ADR-014 Decision 5) and ReplaceFileItems' early
 // exit (ADR-014 Decision 8) directly against BaseViewModel, independent of ChildWindowViewModel.
 // ---------------------------------------------------------------------------
-file sealed class FilterableViewModel(IIconProvider iconProvider) : BaseViewModel(iconProvider)
+
+/// <summary>
+/// WPF-free stub applying a caller-settable predicate on every <c>OnSourceChanged</c> rebuild — mirrors
+/// <c>ChildWindowViewModel.ApplyFilterAndSort</c> at the <see cref="BaseViewModel"/> level, without pulling
+/// in the whole WPF-dependent <c>ChildWindowViewModel</c>. Used to exercise <see cref="BaseViewModel.MoveItem"/>'s
+/// visible-index-to-full-set anchoring rule (ADR-014 Decision 5) and <c>ReplaceFileItems</c>' early exit
+/// (ADR-014 Decision 8) directly against <see cref="BaseViewModel"/>.
+/// </summary>
+/// <param name="iconProvider">The icon provider forwarded to the base <see cref="BaseViewModel"/>.</param>
+internal sealed class FilterableViewModel(IIconProvider iconProvider) : BaseViewModel(iconProvider)
 {
+    /// <summary>
+    /// Gets or sets the predicate applied to <see cref="BaseViewModel.AllItems"/> on every rebuild. Defaults
+    /// to showing every item.
+    /// </summary>
     public Func<FileItem, bool> Filter { get; set; } = _ => true;
 
     /// <summary>Re-applies the current <see cref="Filter"/> without any underlying state change.</summary>
     public void Reproject() => OnSourceChanged();
 
+    /// <summary>
+    /// Rebuilds <see cref="BaseViewModel.FileItems"/> by projecting <see cref="BaseViewModel.AllItems"/>
+    /// through the current <see cref="Filter"/>.
+    /// </summary>
     protected override void OnSourceChanged() => ReplaceFileItems(AllItems.Where(Filter));
 }
 
@@ -41,7 +68,7 @@ file sealed class FilterableViewModel(IIconProvider iconProvider) : BaseViewMode
 /// Unit tests for Phase 7 Block D (docs/PLANS/phase-7-performance-hardening.md — audit findings 5, 6):
 /// O(1) duplicate detection in <see cref="BaseViewModel.AddFiles"/>/<see cref="BaseViewModel.ReplaceAll"/>
 /// and single-notification batch rebuilds of <see cref="BaseViewModel.FileItems"/> via
-/// <see cref="ObservableRangeCollection{T}"/>.
+/// <see cref="DesktopOrganizer.UI.Models.ObservableRangeCollection{T}"/>.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class BaseViewModelCollectionTests
@@ -51,17 +78,11 @@ public class BaseViewModelCollectionTests
     private const string PathC = @"C:\fake\C.txt";
     private const string PathD = @"C:\fake\D.txt";
 
-    private static Mock<IIconProvider> BuildIconProviderMock()
-    {
-        var iconMock = new Mock<IIconProvider>();
-        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((System.Windows.Media.ImageSource)null!);
-        return iconMock;
-    }
-
-    private static BaseViewModel BuildVm() => new MutableViewModel(BuildIconProviderMock().Object);
-
     // ── D1: O(1) dedup index stays consistent with _allItems across all mutations ─────────────────
 
+    /// <summary>
+    /// Verifies that adding the exact same path twice in a single call results in only one tracked item.
+    /// </summary>
     [Fact]
     public void AddFiles_ExactDuplicatePath_AddedOnlyOnce()
     {
@@ -72,6 +93,10 @@ public class BaseViewModelCollectionTests
         Assert.Single(vm.AllItems);
     }
 
+    /// <summary>
+    /// Verifies that the dedup index treats paths differing only by casing as the same entry, matching
+    /// <c>RemoveFileByPath</c>'s case-insensitive comparer.
+    /// </summary>
     [Fact]
     public void AddFiles_DifferingCasing_TreatedAsSameEntry()
     {
@@ -86,6 +111,10 @@ public class BaseViewModelCollectionTests
         Assert.Single(vm.AllItems);
     }
 
+    /// <summary>
+    /// Verifies that removing an item by path frees its slot in the dedup index, so re-adding the same
+    /// path afterward is treated as a new file rather than being silently swallowed.
+    /// </summary>
     [Fact]
     public void AddFiles_ThenRemoveByPath_ThenReAdd_IndexAllowsReAdd()
     {
@@ -100,6 +129,10 @@ public class BaseViewModelCollectionTests
         Assert.Single(vm.AllItems);
     }
 
+    /// <summary>
+    /// Verifies that removing an item via <see cref="MutableViewModel.RemoveFileItem"/> frees its path in
+    /// the dedup index, so re-adding the same path afterward is treated as a new file.
+    /// </summary>
     [Fact]
     public void RemoveFile_ThenReAddSamePath_IndexAllowsReAdd()
     {
@@ -113,6 +146,10 @@ public class BaseViewModelCollectionTests
         Assert.Single(vm.AllItems);
     }
 
+    /// <summary>
+    /// Verifies that <c>ReplaceAll</c> clears the dedup index, so a path dropped by one call can be
+    /// re-submitted successfully by a later one.
+    /// </summary>
     [Fact]
     public void ReplaceAll_ClearsIndex_AllowsPreviousPathsToBeReAdded()
     {
@@ -125,6 +162,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal(PathA, item.Path);
     }
 
+    /// <summary>
+    /// Verifies that a single <c>ReplaceAll</c> call whose input contains duplicate paths only adds each
+    /// distinct path once.
+    /// </summary>
     [Fact]
     public void ReplaceAll_WithDuplicatePathsInInput_AddsEachPathOnce()
     {
@@ -137,6 +178,10 @@ public class BaseViewModelCollectionTests
 
     // ── D2: batch notification — exactly one CollectionChanged / FileCountText per rebuild ─────────
 
+    /// <summary>
+    /// Verifies that a full <see cref="BaseViewModel.FileItems"/> rebuild raises exactly one
+    /// <see cref="INotifyCollectionChanged.CollectionChanged"/> event, with <see cref="NotifyCollectionChangedAction.Reset"/>.
+    /// </summary>
     [Fact]
     public void OnSourceChanged_FullRebuild_RaisesExactlyOneCollectionChangedReset()
     {
@@ -152,6 +197,11 @@ public class BaseViewModelCollectionTests
         Assert.Equal(NotifyCollectionChangedAction.Reset, raised.Action);
     }
 
+    /// <summary>
+    /// Verifies that a full <see cref="BaseViewModel.FileItems"/> rebuild raises
+    /// <see cref="INotifyPropertyChanged.PropertyChanged"/> for <see cref="BaseViewModel.FileCountText"/>
+    /// exactly once.
+    /// </summary>
     [Fact]
     public void OnSourceChanged_FullRebuild_RaisesFileCountTextExactlyOnce()
     {
@@ -169,6 +219,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal(1, raisedCount);
     }
 
+    /// <summary>
+    /// Verifies that <c>ReplaceAll</c> raises exactly one <see cref="INotifyCollectionChanged.CollectionChanged"/>
+    /// event, with <see cref="NotifyCollectionChangedAction.Reset"/>.
+    /// </summary>
     [Fact]
     public void ReplaceAll_FullRebuild_RaisesExactlyOneCollectionChangedReset()
     {
@@ -184,6 +238,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal(NotifyCollectionChangedAction.Reset, raised.Action);
     }
 
+    /// <summary>
+    /// Verifies that after a batched rebuild, <see cref="BaseViewModel.FileItems"/> actually reflects the
+    /// new contents rather than staying stale.
+    /// </summary>
     [Fact]
     public void FileItems_AfterRebuild_ContainsProjectedItems()
     {
@@ -200,6 +258,11 @@ public class BaseViewModelCollectionTests
 
     // ── D1 (early-exit optimization): AddFiles with nothing new added skips the rebuild ─────────────
 
+    /// <summary>
+    /// Verifies that calling <c>AddFiles</c> with paths that are all already tracked is a no-op re-sync
+    /// that raises neither <see cref="INotifyCollectionChanged.CollectionChanged"/> nor
+    /// <see cref="BaseViewModel.FileCountText"/> notifications.
+    /// </summary>
     [Fact]
     public void AddFiles_AllPathsAlreadyTracked_DoesNotRaiseCollectionChanged()
     {
@@ -220,6 +283,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal(0, raisedCount);
     }
 
+    /// <summary>
+    /// Verifies that calling <c>AddFiles</c> with an empty array raises no
+    /// <see cref="INotifyCollectionChanged.CollectionChanged"/> event.
+    /// </summary>
     [Fact]
     public void AddFiles_EmptyArray_DoesNotRaiseCollectionChanged()
     {
@@ -234,6 +301,10 @@ public class BaseViewModelCollectionTests
         Assert.Empty(events);
     }
 
+    /// <summary>
+    /// Verifies that <c>ReplaceAll</c> with an empty set still clears <see cref="BaseViewModel.FileItems"/>,
+    /// so the early-exit optimization in <c>AddFiles</c> does not suppress this rebuild.
+    /// </summary>
     [Fact]
     public void ReplaceAll_ToEmpty_StillClearsFileItems()
     {
@@ -251,6 +322,10 @@ public class BaseViewModelCollectionTests
 
     // ── TryRenameItem (ADR-013 Decision 4/6): _allItemPaths re-indexed after a physical rename ──────
 
+    /// <summary>
+    /// Verifies that after <c>TryRenameItem</c> relocates an item, its old path is freed from the dedup
+    /// index, so re-adding that old path is treated as a distinct new file.
+    /// </summary>
     [Fact]
     public void TryRenameItem_OldPathIsFreed_CanBeReAddedAsANewFile()
     {
@@ -271,6 +346,10 @@ public class BaseViewModelCollectionTests
         Assert.Contains(vm.AllItems, f => f.Path == PathB);
     }
 
+    /// <summary>
+    /// Verifies that after <c>TryRenameItem</c> relocates an item, its new path is indexed, so
+    /// re-submitting that path via <c>AddFiles</c> is deduplicated rather than creating a duplicate item.
+    /// </summary>
     [Fact]
     public void TryRenameItem_NewPathIsDeduplicatedOnReAdd()
     {
@@ -289,6 +368,11 @@ public class BaseViewModelCollectionTests
         Assert.Contains(vm.AllItems, f => f.Path == PathB);
     }
 
+    /// <summary>
+    /// Verifies that calling <c>TryRenameItem</c> for an item that is not tracked in
+    /// <see cref="BaseViewModel.AllItems"/> is a no-op that leaves the untracked item and the index
+    /// untouched.
+    /// </summary>
     [Fact]
     public void TryRenameItem_ItemNotTracked_NoOp()
     {
@@ -307,6 +391,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal(3, vm.AllItems.Count);
     }
 
+    /// <summary>
+    /// Verifies that <c>TryRenameItem</c> relocates the same <see cref="FileItem"/> instance in place,
+    /// rather than discarding and recreating it, so UI state bound to that instance stays valid.
+    /// </summary>
     [Fact]
     public void TryRenameItem_RelocatesTheSameInstance_InPlace()
     {
@@ -323,6 +411,10 @@ public class BaseViewModelCollectionTests
 
     // ── Scale smoke test (non-gating: generous threshold, documents the O(n) fix) ───────────────────
 
+    /// <summary>
+    /// Verifies that <c>ReplaceAll</c> with five thousand paths completes well within a generous time
+    /// threshold, documenting the O(n) index-based dedup fix.
+    /// </summary>
     [Fact]
     public void ReplaceAll_FiveThousandPaths_CompletesWithinGenerousThreshold()
     {
@@ -341,6 +433,10 @@ public class BaseViewModelCollectionTests
 
     // ── ADR-014 Decision 5: BaseViewModel.MoveItem — no active filter ──────────────────────────────
 
+    /// <summary>
+    /// Verifies that moving an item forward to a gap index inserts it right after the item that now
+    /// precedes that gap.
+    /// </summary>
     [Fact]
     public void MoveItem_Forward_InsertsRightAfterTargetPredecessor()
     {
@@ -356,6 +452,9 @@ public class BaseViewModelCollectionTests
         Assert.Equal([PathB, PathA, PathC, PathD], vm.AllItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that moving an item backward to gap index 0 inserts it at the very front of the collection.
+    /// </summary>
     [Fact]
     public void MoveItem_Backward_InsertsBeforeTargetPredecessor()
     {
@@ -370,6 +469,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal([PathD, PathA, PathB, PathC], vm.FileItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that moving the last item to gap index 0 relocates it to index zero, ahead of every
+    /// other item.
+    /// </summary>
     [Fact]
     public void MoveItem_ToStart_MovesToIndexZero()
     {
@@ -383,6 +486,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal([PathC, PathA, PathB], vm.FileItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that moving the first item to a gap index equal to the item count relocates it past the
+    /// last item.
+    /// </summary>
     [Fact]
     public void MoveItem_ToEnd_MovesPastLastItem()
     {
@@ -396,6 +503,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal([PathB, PathC, PathA], vm.FileItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that moving an item to the gap immediately before its own current position is a no-op
+    /// that leaves the order unchanged.
+    /// </summary>
     [Fact]
     public void MoveItem_GapImmediatelyBeforeItsOwnPosition_IsNoOp()
     {
@@ -409,6 +520,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal([PathA, PathB, PathC], vm.FileItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that moving an item to the gap immediately after its own current position is a no-op
+    /// that leaves the order unchanged.
+    /// </summary>
     [Fact]
     public void MoveItem_GapImmediatelyAfterItsOwnPosition_IsNoOp()
     {
@@ -422,6 +537,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal([PathA, PathB, PathC], vm.FileItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that calling <c>MoveItem</c> with an item not present in <see cref="BaseViewModel.FileItems"/>
+    /// returns <c>false</c> and leaves the collection order unchanged.
+    /// </summary>
     [Fact]
     public void MoveItem_ItemNotInFileItems_ReturnsFalse()
     {
@@ -435,6 +554,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal([PathA, PathB], vm.FileItems.Select(f => f.Path));
     }
 
+    /// <summary>
+    /// Verifies that <c>MoveItem</c> only reorders items and does not affect the dedup index, so
+    /// re-adding an already-tracked path afterward still deduplicates.
+    /// </summary>
     [Fact]
     public void MoveItem_DoesNotTouchAllItemPaths_ReAddingSamePathStillDeduplicates()
     {
@@ -449,6 +572,11 @@ public class BaseViewModelCollectionTests
         Assert.Equal(3, vm.AllItems.Count);
     }
 
+    /// <summary>
+    /// Verifies that a real <c>MoveItem</c> reorder raises exactly one
+    /// <see cref="INotifyCollectionChanged.CollectionChanged"/> event with <see cref="NotifyCollectionChangedAction.Move"/>,
+    /// not a full <see cref="NotifyCollectionChangedAction.Reset"/>.
+    /// </summary>
     [Fact]
     public void MoveItem_RealMove_RaisesExactlyOneMoveNotification_NotReset()
     {
@@ -468,6 +596,11 @@ public class BaseViewModelCollectionTests
 
     // ── ADR-014 Decision 5 (R4 — key test): MoveItem with an active content filter ──────────────────
 
+    /// <summary>
+    /// Verifies that moving a visible item under an active content filter anchors it to its new visible
+    /// neighbor's position in the full <see cref="BaseViewModel.AllItems"/> set, while preserving the
+    /// relative order of the items hidden by the filter.
+    /// </summary>
     [Fact]
     public void MoveItem_WithHiddenItems_AnchorsToVisibleNeighbor_PreservingHiddenItemsRelativeOrder()
     {
@@ -491,6 +624,11 @@ public class BaseViewModelCollectionTests
 
     // ── ADR-014 Decision 6: BaseViewModel.SortAllItems ──────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <c>SortAllItems</c> reorders <see cref="BaseViewModel.AllItems"/> in place without
+    /// raising any <see cref="BaseViewModel.FileItems"/> notification and without disturbing dedup
+    /// membership.
+    /// </summary>
     [Fact]
     public void SortAllItems_ReordersAllItems_WithoutRebuildingFileItemsOrChangingMembership()
     {
@@ -521,6 +659,11 @@ public class BaseViewModelCollectionTests
 
     // ── ADR-014 Decision 8: ReplaceFileItems early exit on an identical projection ──────────────────
 
+    /// <summary>
+    /// Verifies that re-projecting <see cref="BaseViewModel.FileItems"/> against an unchanged source and
+    /// filter raises neither <see cref="INotifyCollectionChanged.CollectionChanged"/> nor
+    /// <see cref="BaseViewModel.FileCountText"/> notifications.
+    /// </summary>
     [Fact]
     public void ReplaceFileItems_IdenticalProjection_RaisesNoCollectionChangedOrFileCountText()
     {
@@ -538,6 +681,10 @@ public class BaseViewModelCollectionTests
         Assert.DoesNotContain(nameof(BaseViewModel.FileCountText), raisedProperties);
     }
 
+    /// <summary>
+    /// Verifies that when the underlying source genuinely changes, the resulting projection raises
+    /// exactly one <see cref="NotifyCollectionChangedAction.Reset"/> event.
+    /// </summary>
     [Fact]
     public void ReplaceFileItems_ChangedProjection_RaisesExactlyOneReset()
     {
@@ -553,6 +700,10 @@ public class BaseViewModelCollectionTests
         Assert.Equal(NotifyCollectionChangedAction.Reset, raised.Action);
     }
 
+    /// <summary>
+    /// Verifies that when a real rebuild happens and the previously selected file is still present in
+    /// the new projection, <see cref="BaseViewModel.SelectedFile"/> remains the same instance.
+    /// </summary>
     [Fact]
     public void ReplaceFileItems_RealRebuild_SelectedFileStillPresent_RemainsSelected()
     {
@@ -567,4 +718,14 @@ public class BaseViewModelCollectionTests
 
         Assert.Same(itemA, vm.SelectedFile);
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static Mock<IIconProvider> BuildIconProviderMock()
+    {
+        var iconMock = new Mock<IIconProvider>();
+        iconMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((System.Windows.Media.ImageSource)null!);
+        return iconMock;
+    }
+
+    private static BaseViewModel BuildVm() => new MutableViewModel(BuildIconProviderMock().Object);
 }

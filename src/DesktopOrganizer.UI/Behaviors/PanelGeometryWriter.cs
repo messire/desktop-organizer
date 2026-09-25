@@ -6,7 +6,7 @@ namespace DesktopOrganizer.UI.Behaviors;
 
 /// <summary>
 /// The single point that writes a panel's on-screen bounds — <see cref="Window.Left"/>/<see cref="Window.Top"/>/
-/// <see cref="Window.Width"/>/<see cref="Window.Height"/> — AND the corresponding
+/// <see cref="FrameworkElement.Width"/>/<see cref="FrameworkElement.Height"/> — AND the corresponding
 /// <see cref="ChildWindowModel"/> fields (<see cref="ChildWindowModel.Position"/>/<see cref="ChildWindowModel.Size"/>,
 /// and — for a <see cref="PanelGeometryMode.GridAligned"/> write — the span/monitor id) in one atomic
 /// act (docs/PLANS/workspace-grid-03-04-integration.md §1.5).
@@ -38,8 +38,8 @@ public sealed class PanelGeometryWriter(Window window, Func<ChildWindowModel?> g
     /// <summary>
     /// <see langword="true"/> for the duration of a call to <see cref="Apply"/> — including while any
     /// WPF layout callback (<c>OnLocationChanged</c>/<c>OnRenderSizeChanged</c>) fires synchronously as
-    /// a side effect of the <see cref="Window.Left"/>/<see cref="Window.Top"/>/<see cref="Window.Width"/>/
-    /// <see cref="Window.Height"/> assignments inside it.
+    /// a side effect of the <see cref="Window.Left"/>/<see cref="Window.Top"/>/<see cref="FrameworkElement.Width"/>/
+    /// <see cref="FrameworkElement.Height"/> assignments inside it.
     /// </summary>
     public bool IsApplying => _applying;
 
@@ -71,7 +71,7 @@ public sealed class PanelGeometryWriter(Window window, Func<ChildWindowModel?> g
     /// <summary>
     /// Position-only sibling of <see cref="Apply"/> (P03): writes <see cref="Window.Left"/>/<see cref="Window.Top"/>
     /// and <see cref="ChildWindowModel.Position"/> (plus <paramref name="span"/>/<paramref name="monitorDeviceId"/>
-    /// when supplied) and deliberately leaves <see cref="Window.Width"/>/<see cref="Window.Height"/> and
+    /// when supplied) and deliberately leaves <see cref="FrameworkElement.Width"/>/<see cref="FrameworkElement.Height"/> and
     /// <see cref="ChildWindowModel.Size"/> untouched — used by every P03 path, all of which MOVE a panel
     /// without resizing it (drop-time snap, cross-monitor <c>MonitorDeviceId</c> update, "Align to
     /// workspace grid" on a rolled-up panel).
@@ -79,7 +79,7 @@ public sealed class PanelGeometryWriter(Window window, Func<ChildWindowModel?> g
     /// <remarks>
     /// Needed as its own entry point rather than "call <see cref="Apply"/> with the current size" for two
     /// reasons a move-only caller cannot work around: (1) while a panel is rolled up,
-    /// <see cref="Window.Height"/> is the collapsed header height and <see cref="ChildWindowModel.Size"/>
+    /// <see cref="FrameworkElement.Height"/> is the collapsed header height and <see cref="ChildWindowModel.Size"/>
     /// deliberately still holds the EXPANDED height for restore (<c>ChildWindow.OnRenderSizeChanged</c>
     /// skips its write while <see cref="ChildWindowModel.IsRolledUp"/>) — feeding the live height back
     /// through <see cref="Apply"/> would overwrite that saved expanded height with the collapsed one;

@@ -20,13 +20,11 @@ public class SingleInstanceActivationHandlerTests
     // anyway" — see the ctor remarks on SingleInstanceActivationHandler's uiInvoke parameter.
     private int _uiInvokeCallCount;
 
-    private void UiInvoke(Action action)
-    {
-        _uiInvokeCallCount++;
-        action();
-    }
-
-    // T-ACT-01
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceActivationHandler.Handle"/> for
+    /// <see cref="ActivationCommand.ActivateSettings"/> calls only
+    /// <see cref="IWindowManager.ShowMainWindow"/> and nothing else on the window manager (T-ACT-01).
+    /// </summary>
     [Fact]
     public void Handle_ActivateSettings_CallsShowMainWindow_AndNothingElse()
     {
@@ -39,7 +37,11 @@ public class SingleInstanceActivationHandlerTests
         _windowManagerMock.VerifyNoOtherCalls();
     }
 
-    // T-ACT-02
+    /// <summary>
+    /// Verifies that <see cref="SingleInstanceActivationHandler.Handle"/> for
+    /// <see cref="ActivationCommand.ActivateSettings"/> marshals the work through the injected
+    /// <c>uiInvoke</c> delegate rather than running it in-place (T-ACT-02).
+    /// </summary>
     [Fact]
     public void Handle_ActivateSettings_MarshalsThroughUiInvoke()
     {
@@ -65,5 +67,11 @@ public class SingleInstanceActivationHandlerTests
 
         _windowManagerMock.VerifyNoOtherCalls();
         Assert.Equal(0, _uiInvokeCallCount);
+    }
+
+    private void UiInvoke(Action action)
+    {
+        _uiInvokeCallCount++;
+        action();
     }
 }

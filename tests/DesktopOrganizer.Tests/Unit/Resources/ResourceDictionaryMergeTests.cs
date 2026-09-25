@@ -51,7 +51,8 @@ namespace DesktopOrganizer.Tests.Unit.Resources;
 /// <c>Application</c> itself instead, it deliberately leaves it (and the last, high-contrast, merge)
 /// alive rather than tearing it down — see <see cref="RunOnStaThread{T}"/>'s remarks for why.
 /// <see cref="HighContrastState.IsActive"/> is likewise restored, and this class shares
-/// <see cref="HighContrastStateTests"/>' collection so the two never race on that same static.
+/// <see cref="DesktopOrganizer.Tests.Unit.Theming.HighContrastStateTests"/>' collection so the two
+/// never race on that same static.
 /// <para>
 /// M-2 fix (P08 fix cycle 2): "did THIS call construct <c>Application.Current</c>" is decided by
 /// reference-comparing <c>WpfApplicationHost.EnsureApplication()</c>'s return value against whatever
@@ -67,6 +68,11 @@ namespace DesktopOrganizer.Tests.Unit.Resources;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class ResourceDictionaryMergeTests
 {
+    /// <summary>
+    /// Verifies that merging and materializing every resource dictionary — in both the normal and
+    /// Windows-High-Contrast merge orders — never throws (the CRITICAL-1 regression class described in
+    /// this class's own remarks).
+    /// </summary>
     [Fact]
     public void LoadResourceDictionaries_NormalAndHighContrastModes_MaterializeEveryResourceWithoutThrowing()
     {
@@ -302,7 +308,7 @@ public class ResourceDictionaryMergeTests
     /// <c>PART_AccentStroke</c>, <c>PART_InteractionOverlay</c>, and <c>PART_GlowFallback</c> — has
     /// <see cref="UIElement.SnapsToDevicePixels"/> = <see langword="true"/> in the real template. A
     /// 1-DIP <see cref="Border.BorderThickness"/> that straddles a device-pixel boundary at a non-integer
-    /// DPI scale renders as a blurred ~1.5px smear instead of a crisp hairline; <see cref="FrameworkElement.SnapsToDevicePixels"/>
+    /// DPI scale renders as a blurred ~1.5px smear instead of a crisp hairline; <see cref="UIElement.SnapsToDevicePixels"/>
     /// is what keeps every one of these concentric rings crisp against every other (plan §3's own "crisp
     /// hairline rings" requirement).
     /// </summary>
@@ -388,6 +394,7 @@ public class ResourceDictionaryMergeTests
     }
 
     /// <summary>T-R5 (content geometry): content width/top-offset, PART_SurfaceLayer's own rect, and PART_HitCatcher's own rect, all in PanelChrome-local coordinates.</summary>
+    /// <param name="width">The chrome width to lay out with.</param>
     [Theory]
     [InlineData(200d)]
     [InlineData(344d)]
@@ -477,7 +484,7 @@ public class ResourceDictionaryMergeTests
     /// a silently-unresolved <c>Color="{Binding AccentBrush.Color, RelativeSource={RelativeSource
     /// TemplatedParent}}"</c> binding inside a <see cref="Freezable"/> (plan R-2), which would otherwise
     /// leave the glow permanently black without throwing. Also pins zero <see cref="Effect"/>s in
-    /// <c>GridViewTemplate</c>/<c>ListViewTemplate</c>'s <see cref="DataTemplate.LoadContent"/> and in
+    /// <c>GridViewTemplate</c>/<c>ListViewTemplate</c>'s <see cref="FrameworkTemplate.LoadContent"/> and in
     /// <c>PanelItemContainerStyle</c>'s own <see cref="ControlTemplate"/> (plan D-9 "no per-item effects").
     /// </summary>
     /// <remarks>
@@ -579,6 +586,7 @@ public class ResourceDictionaryMergeTests
     /// Contrast turned on) — proving the later-declared HC trigger (Panels.xaml's own trigger-order remarks)
     /// still wins the tie and keeps <c>PART_GlowFallback</c> Collapsed too, never Visible.
     /// </remarks>
+    /// <param name="glowEffectEnabledOverride">The forced value of <see cref="ChromeEffectsPolicy.OverrideIsGlowEffectEnabled"/> for this case.</param>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -818,10 +826,9 @@ public class ResourceDictionaryMergeTests
             }
         });
 
-        Assert.True(
-            labelWidth <= availableWidth,
-            $"List-mode label TextBlock ({labelWidth:F1}) must stay within the item's available width " +
-            $"({availableWidth:F1}) even for a very long DisplayName.");
+        var message = $"List-mode label TextBlock ({labelWidth:F1}) must stay within the item's available width " +
+            $"({availableWidth:F1}) even for a very long DisplayName.";
+        Assert.True(labelWidth <= availableWidth, message);
     }
 
     /// <summary>
@@ -916,15 +923,14 @@ public class ResourceDictionaryMergeTests
             }
         });
 
-        Assert.True(
-            containerWidth <= availableWidth + 0.5,
-            $"The real generated ListBoxItem container ({containerWidth:F1}) must not overflow the " +
+        var containerMessage = $"The real generated ListBoxItem container ({containerWidth:F1}) must not overflow the " +
             $"ListBox's own available width ({availableWidth:F1}) — a wider container means a horizontal " +
-            "scrollbar/clip instead of the intended ellipsis.");
-        Assert.True(
-            labelWidth <= availableWidth,
-            $"List-mode label TextBlock ({labelWidth:F1}) must stay within the item's available width " +
-            $"({availableWidth:F1}) even for a very long DisplayName, through the REAL ListBox/ScrollViewer pipeline.");
+            "scrollbar/clip instead of the intended ellipsis.";
+        Assert.True(containerWidth <= availableWidth + 0.5, containerMessage);
+
+        var labelMessage = $"List-mode label TextBlock ({labelWidth:F1}) must stay within the item's available width " +
+            $"({availableWidth:F1}) even for a very long DisplayName, through the REAL ListBox/ScrollViewer pipeline.";
+        Assert.True(labelWidth <= availableWidth, labelMessage);
     }
 
     /// <summary>
@@ -1103,7 +1109,7 @@ public class ResourceDictionaryMergeTests
     }
 
     /// <summary>
-    /// <see cref="DataTemplate.LoadContent"/> is what actually materializes
+    /// <see cref="FrameworkTemplate.LoadContent"/> is what actually materializes
     /// <c>PanelItemContainerStyle</c>'s <c>ControlTemplate</c> (reached via <c>ListViewTemplate</c>/
     /// <c>GridViewTemplate</c>'s <c>ItemContainerStyle="{StaticResource PanelItemContainerStyle}"</c>) —
     /// a plain key lookup (<see cref="TouchAllResourceKeys"/>) alone is not enough to reproduce

@@ -12,15 +12,21 @@ namespace DesktopOrganizer.UI.State.Dto;
 /// </summary>
 internal sealed class PanelStateDto
 {
+    /// <summary>The panel's stable identifier.</summary>
     public Guid Id { get; set; }
 
+    /// <summary>The panel's display title.</summary>
     public string Title { get; set; } = string.Empty;
 
+    /// <summary>The identifier of the page this panel belongs to.</summary>
     public string PageId { get; set; } = "default";
 
+    /// <summary>The panel's position, size, monitor binding and window-state fields.</summary>
     public PanelGeometryDto Geometry { get; set; } = new();
 
+    /// <summary>The panel's accent/text color, surface style/opacity and icon-size fields.</summary>
     public PanelAppearanceDto Appearance { get; set; } = new();
 
+    /// <summary>What the panel shows and how it is arranged.</summary>
     public PanelContentDto Content { get; set; } = new();
 }

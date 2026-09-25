@@ -24,6 +24,12 @@ public class WorkspaceLayoutPolicyResizeClampTests
     // ── The exact review repro: work area 1920x1040, panel Left=1600 W=280, drag Right +200. ────────
     // Pre-fix the frame stayed 480 wide (Right = 2080, 160 DIP past the wall) and mouse-up's SafeClamp
     // "fixed" it by moving Left from 1600 to 1440. Post-fix the frame itself stops at the wall.
+
+    /// <summary>
+    /// Verifies the exact MAJOR-1 review repro: dragging the right edge past the work area shrinks
+    /// the resulting span to stop exactly at the wall, leaving the anchor (left edge) untouched,
+    /// rather than the old post-fix "translate the whole rectangle back inside" behavior.
+    /// </summary>
     [Fact]
     public void RightEdge_GrowingPastTheWorkArea_ShrinksTheSpan_AndNeverMovesTheAnchor()
     {
@@ -39,12 +45,20 @@ public class WorkspaceLayoutPolicyResizeClampTests
     }
 
     // ── All 8 edges, each pushed against the wall(s) it can actually reach. ──────────────────────────
+
+    /// <summary>Supplies every <see cref="ResizeEdge"/> value for theories exercised across all eight resize edges.</summary>
     public static TheoryData<ResizeEdge> EightEdges => new()
     {
         ResizeEdge.Left, ResizeEdge.Right, ResizeEdge.Top, ResizeEdge.Bottom,
         ResizeEdge.TopLeft, ResizeEdge.TopRight, ResizeEdge.BottomLeft, ResizeEdge.BottomRight,
     };
 
+    /// <summary>
+    /// Verifies, for every one of the eight resize edges, that an absurd overshoot past the work area
+    /// is clamped fully inside it, the anchor edge never moves, and the result is still a whole grid
+    /// span at or above the minimum.
+    /// </summary>
+    /// <param name="edge">The resize edge being dragged, drawn from <see cref="EightEdges"/>.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void EveryEdge_IsKeptInsideTheWorkArea_WithTheAnchorFixed(ResizeEdge edge)
@@ -99,6 +113,13 @@ public class WorkspaceLayoutPolicyResizeClampTests
     }
 
     // ── And the whole point: after the clamp, the mouse-up SafeClamp has nothing left to translate. ──
+
+    /// <summary>
+    /// Verifies that once <see cref="WorkspaceLayoutPolicy.ClampResizeToWorkArea"/> has run, the
+    /// drop-time <see cref="WorkspaceLayoutPolicy.SafeClamp"/> is a no-op — there is nothing left for
+    /// it to translate.
+    /// </summary>
+    /// <param name="edge">The resize edge being dragged, drawn from <see cref="EightEdges"/>.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void AfterTheClamp_TheDropTimeSafeClamp_IsANoOp(ResizeEdge edge)
@@ -113,6 +134,13 @@ public class WorkspaceLayoutPolicyResizeClampTests
     }
 
     // ── A rectangle that already fits is returned bit-for-bit unchanged (no gratuitous re-quantising). ──
+
+    /// <summary>
+    /// Verifies that a rectangle already fully inside the work area is returned bit-for-bit unchanged
+    /// by <see cref="WorkspaceLayoutPolicy.ClampResizeToWorkArea"/>, for every resize edge — no
+    /// gratuitous re-quantising.
+    /// </summary>
+    /// <param name="edge">The resize edge passed in, drawn from <see cref="EightEdges"/>.</param>
     [Theory]
     [MemberData(nameof(EightEdges))]
     public void ARectangleThatAlreadyFits_IsReturnedUnchanged(ResizeEdge edge)
@@ -123,6 +151,11 @@ public class WorkspaceLayoutPolicyResizeClampTests
     }
 
     // ── "Floor wins": a work area narrower than MinSpan keeps the minimum rather than going below it. ──
+
+    /// <summary>
+    /// Verifies that when the work area itself is narrower than the minimum span, the clamp keeps the
+    /// minimum span's width rather than shrinking below it to fit the work area.
+    /// </summary>
     [Fact]
     public void AWorkAreaNarrowerThanTheMinimumSpan_KeepsTheMinimum()
     {
@@ -135,6 +168,11 @@ public class WorkspaceLayoutPolicyResizeClampTests
     }
 
     // ── Negative-origin monitor (secondary left of/above the primary) — nothing here is sign-sensitive. ──
+
+    /// <summary>
+    /// Verifies that a work area with negative-coordinate bounds clamps a resize against its own
+    /// (negative-coordinate) edges correctly, with nothing sign-sensitive breaking.
+    /// </summary>
     [Fact]
     public void ANegativeOriginWorkArea_ClampsAgainstItsOwnEdges()
     {
@@ -149,6 +187,11 @@ public class WorkspaceLayoutPolicyResizeClampTests
     }
 
     // ── Fail-safe: an unusable work area must never resize the panel. ────────────────────────────────
+
+    /// <summary>
+    /// Verifies that an empty (unusable) work area disables the clamp entirely — the candidate
+    /// rectangle is returned unchanged rather than being resized against a meaningless work area.
+    /// </summary>
     [Fact]
     public void AnEmptyWorkArea_DisablesTheClampEntirely()
     {

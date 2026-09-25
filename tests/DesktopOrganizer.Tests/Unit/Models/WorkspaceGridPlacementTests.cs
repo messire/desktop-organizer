@@ -25,10 +25,12 @@ public class WorkspaceGridPlacementTests
         (Display2, new Rect(-1366, -200, 1366, 768), new Rect(-1366, -160, 1366, 728)),
     ];
 
-    private static ChildWindowModel LegacyModel() => new() { GeometryMode = PanelGeometryMode.LegacyFreeform };
-
     // ── ExpandedBounds: never let a collapsed/unmeasured panel define a span ──────────────────────
 
+    /// <summary>
+    /// Verifies that for a normal (not rolled-up) panel, <see cref="WorkspaceGridPlacement.ExpandedBounds"/>
+    /// uses the given live measured size as-is.
+    /// </summary>
     [Fact]
     public void ExpandedBounds_NormalPanel_UsesTheLiveSize()
     {
@@ -39,6 +41,11 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(new Rect(10, 20, 248, 248), bounds);
     }
 
+    /// <summary>
+    /// Verifies that for a rolled-up panel, <see cref="WorkspaceGridPlacement.ExpandedBounds"/>
+    /// substitutes the model's persisted expanded height for the live (collapsed) measured height,
+    /// so a span is never derived from the collapsed header height.
+    /// </summary>
     [Fact]
     public void ExpandedBounds_RolledUpPanel_SubstitutesThePersistedExpandedHeight()
     {
@@ -52,6 +59,11 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(248d, bounds.Width);
     }
 
+    /// <summary>
+    /// Verifies that when the live measured size is degenerate (zero, i.e. never laid out),
+    /// <see cref="WorkspaceGridPlacement.ExpandedBounds"/> falls back to the model's own persisted
+    /// size.
+    /// </summary>
     [Fact]
     public void ExpandedBounds_NeverMeasuredPanel_FallsBackToThePersistedSize()
     {
@@ -62,6 +74,11 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(new Rect(10, 20, 248, 400), bounds);
     }
 
+    /// <summary>
+    /// Verifies that with neither a model nor a live measurement available,
+    /// <see cref="WorkspaceGridPlacement.ExpandedBounds"/> returns a degenerate (zero-size) rectangle,
+    /// and that <see cref="WorkspaceGridPlacement.TryAlign"/> correctly refuses that degenerate result.
+    /// </summary>
     [Fact]
     public void ExpandedBounds_NoModelAndNoMeasurement_IsDegenerateSoCallersRefuse()
     {
@@ -72,6 +89,10 @@ public class WorkspaceGridPlacementTests
         Assert.False(WorkspaceGridPlacement.TryAlign(new ChildWindowModel(), bounds, Monitors, [], out _));
     }
 
+    /// <summary>
+    /// Verifies that a rolled-up panel with no persisted size stays degenerate (height zero) rather
+    /// than falling back to persisting the collapsed live measurement as its span.
+    /// </summary>
     [Fact]
     public void ExpandedBounds_RolledUpPanelWithoutPersistedSize_StaysDegenerateRatherThanCollapsing()
     {
@@ -84,6 +105,11 @@ public class WorkspaceGridPlacementTests
 
     // ── TryAlign ──────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridPlacement.TryAlign"/> switches the model to
+    /// <see cref="PanelGeometryMode.GridAligned"/> and quantises the aligned position to the target
+    /// monitor's own work-area origin.
+    /// </summary>
     [Fact]
     public void TryAlign_SwitchesModeAndQuantisesPositionToTheMonitorOrigin()
     {
@@ -99,6 +125,10 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(Display1, aligned.MonitorDeviceId);
     }
 
+    /// <summary>
+    /// Verifies that aligning rounds the size UP to whole grid spans, so the aligned bounds are never
+    /// smaller than the original size in either dimension and match the span-derived bounds exactly.
+    /// </summary>
     [Fact]
     public void TryAlign_RoundsSizeUpToWholeSpans_NeverClippingContent()
     {
@@ -112,6 +142,10 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(WorkspaceLayoutPolicy.SpansToBounds(aligned.Span, U, G), aligned.Bounds.Size);
     }
 
+    /// <summary>
+    /// Verifies that aligning writes the resulting width/height span onto the model's own span
+    /// properties, matching the aligned result exactly.
+    /// </summary>
     [Fact]
     public void TryAlign_WritesSpansOntoTheModel_MatchingTheAlignedSize()
     {
@@ -123,6 +157,10 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(aligned.Span.HeightUnits, model.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that aligning a tiny panel never produces a span below
+    /// <see cref="WorkspaceGridMetrics.MinSpanExpanded"/> in either dimension.
+    /// </summary>
     [Fact]
     public void TryAlign_NeverGoesBelowTheMinimumSpan()
     {
@@ -135,6 +173,10 @@ public class WorkspaceGridPlacementTests
         Assert.True(aligned.Span.HeightUnits >= WorkspaceGridMetrics.MinSpanExpanded.HeightUnits);
     }
 
+    /// <summary>
+    /// Verifies that running <see cref="WorkspaceGridPlacement.TryAlign"/> a second time on its own
+    /// output bounds produces the same bounds and span — alignment is idempotent.
+    /// </summary>
     [Fact]
     public void TryAlign_IsIdempotent_RunningItTwiceChangesNothing()
     {
@@ -148,6 +190,10 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(first.Span, second.Span);
     }
 
+    /// <summary>
+    /// Verifies that aligning a panel whose current monitor has a negative-coordinate work area still
+    /// quantises the result relative to that monitor's own origin.
+    /// </summary>
     [Fact]
     public void TryAlign_NegativeCoordinateMonitor_AlignsToThatMonitorsOrigin()
     {
@@ -164,6 +210,11 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(Math.Round(offsetY), offsetY, 9);
     }
 
+    /// <summary>
+    /// Verifies that aligning a panel that would round up into a neighbour never introduces a NEW
+    /// overlap it did not already have — ADR-028 accepts the panel not reaching its ideal slot, but
+    /// never a new collision.
+    /// </summary>
     [Fact]
     public void TryAlign_DoesNotTeleportIntoANeighbour_StopsAtTheWall()
     {
@@ -179,6 +230,10 @@ public class WorkspaceGridPlacementTests
         Assert.False(PanelCollision.CreatesNewOverlap(before, aligned.Bounds, [neighbour]));
     }
 
+    /// <summary>
+    /// Verifies that aligning a panel hanging off the work area's edge pulls it back so the result
+    /// stays fully inside the work area.
+    /// </summary>
     [Fact]
     public void TryAlign_StaysInsideTheWorkArea()
     {
@@ -191,6 +246,13 @@ public class WorkspaceGridPlacementTests
         Assert.True(aligned.Bounds.Bottom <= PrimaryWorkArea.Bottom + 0.001);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridPlacement.TryAlign"/> refuses a degenerate (zero or NaN)
+    /// size, returning false and restoring the model's geometry mode to
+    /// <see cref="PanelGeometryMode.LegacyFreeform"/> rather than leaving it half-switched.
+    /// </summary>
+    /// <param name="width">A degenerate (zero or NaN) width to align against.</param>
+    /// <param name="height">A degenerate (zero or NaN) height to align against.</param>
     [Theory]
     [InlineData(0d, 100d)]
     [InlineData(100d, 0d)]
@@ -206,6 +268,11 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(default, aligned);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridPlacement.TryAlign"/> refuses when there are no monitors,
+    /// returning false and restoring the model's geometry mode to
+    /// <see cref="PanelGeometryMode.LegacyFreeform"/>.
+    /// </summary>
     [Fact]
     public void TryAlign_NoMonitors_RefusesAndRestoresTheMode()
     {
@@ -217,6 +284,11 @@ public class WorkspaceGridPlacementTests
 
     // ── ClearAlignment (OQ-3 = B, the "uncheck" direction) ────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="WorkspaceGridPlacement.ClearAlignment"/> drops the model back to
+    /// <see cref="PanelGeometryMode.LegacyFreeform"/>, clears its width/height spans, and leaves the
+    /// model's own position/size bounds untouched.
+    /// </summary>
     [Fact]
     public void ClearAlignment_DropsToLegacyFreeform_ClearsSpans_AndLeavesBoundsUntouched()
     {
@@ -240,6 +312,10 @@ public class WorkspaceGridPlacementTests
 
     // ── FindFreeSlot (P03-L3 / baseline M8) ───────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that on an empty workspace, <see cref="WorkspaceGridPlacement.FindFreeSlot"/> returns
+    /// the work area's own top-left origin as the first free slot.
+    /// </summary>
     [Fact]
     public void FindFreeSlot_EmptyWorkspace_ReturnsTheOrigin()
     {
@@ -248,6 +324,10 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(PrimaryWorkArea.TopLeft, slot);
     }
 
+    /// <summary>
+    /// Verifies that when the origin slot is already occupied, the next free slot found leaves at
+    /// least the required gap, stays on the grid, and stays inside the work area.
+    /// </summary>
     [Fact]
     public void FindFreeSlot_OriginTaken_ReturnsTheNextSlotWithAtLeastTheGap()
     {
@@ -265,6 +345,11 @@ public class WorkspaceGridPlacementTests
         Assert.True(placed.Right <= PrimaryWorkArea.Right);
     }
 
+    /// <summary>
+    /// Verifies that repeatedly placing panels via <see cref="WorkspaceGridPlacement.FindFreeSlot"/>,
+    /// feeding each result back as an obstacle for the next call, never produces an overlapping
+    /// placement.
+    /// </summary>
     [Fact]
     public void FindFreeSlot_SequentialPlacements_NeverOverlap()
     {
@@ -284,6 +369,10 @@ public class WorkspaceGridPlacementTests
         }
     }
 
+    /// <summary>
+    /// Verifies that calling <see cref="WorkspaceGridPlacement.FindFreeSlot"/> twice with identical
+    /// inputs returns the exact same slot.
+    /// </summary>
     [Fact]
     public void FindFreeSlot_IsDeterministic_SameInputSameAnswer()
     {
@@ -296,6 +385,10 @@ public class WorkspaceGridPlacementTests
         Assert.Equal(first, second);
     }
 
+    /// <summary>
+    /// Verifies that a panel size larger than the entire work area makes
+    /// <see cref="WorkspaceGridPlacement.FindFreeSlot"/> return null rather than an out-of-bounds slot.
+    /// </summary>
     [Fact]
     public void FindFreeSlot_PanelLargerThanTheWorkArea_ReturnsNull()
     {
@@ -304,6 +397,10 @@ public class WorkspaceGridPlacementTests
         Assert.Null(slot);
     }
 
+    /// <summary>
+    /// Verifies that when a single obstacle covers the entire work area,
+    /// <see cref="WorkspaceGridPlacement.FindFreeSlot"/> returns null.
+    /// </summary>
     [Fact]
     public void FindFreeSlot_NoRoomLeft_ReturnsNull()
     {
@@ -313,6 +410,11 @@ public class WorkspaceGridPlacementTests
         Assert.Null(WorkspaceGridPlacement.FindFreeSlot(workArea, new Size(248, 248), U, G, [occupied]));
     }
 
+    /// <summary>
+    /// Verifies that on a monitor with a negative-coordinate work area,
+    /// <see cref="WorkspaceGridPlacement.FindFreeSlot"/> returns that work area's own origin as the
+    /// first free slot, staying on that monitor's grid.
+    /// </summary>
     [Fact]
     public void FindFreeSlot_NegativeOriginMonitor_StaysOnThatMonitorsGrid()
     {
@@ -322,4 +424,7 @@ public class WorkspaceGridPlacementTests
 
         Assert.Equal(workArea.TopLeft, slot);
     }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static ChildWindowModel LegacyModel() => new() { GeometryMode = PanelGeometryMode.LegacyFreeform };
 }

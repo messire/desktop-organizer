@@ -12,6 +12,9 @@ namespace DesktopOrganizer.Tests.Unit.Interaction.Native;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class NativeSizingEdgeMapTests
 {
+    /// <summary>Verifies that <see cref="NativeSizingEdgeMap.ToResizeEdge"/> maps each of the eight <see cref="NativeSizingEdge"/> values to its matching <see cref="ResizeEdge"/>.</summary>
+    /// <param name="native">The native edge value to convert.</param>
+    /// <param name="expected">The expected <see cref="ResizeEdge"/> result.</param>
     [Theory]
     [InlineData(NativeSizingEdge.Left, ResizeEdge.Left)]
     [InlineData(NativeSizingEdge.Top, ResizeEdge.Top)]
@@ -26,12 +29,16 @@ public class NativeSizingEdgeMapTests
         Assert.Equal(expected, NativeSizingEdgeMap.ToResizeEdge(native));
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingEdgeMap.ToResizeEdge"/> maps <see cref="NativeSizingEdge.None"/> to <see langword="null"/>.</summary>
     [Fact]
     public void ToResizeEdge_None_ReturnsNull()
     {
         Assert.Null(NativeSizingEdgeMap.ToResizeEdge(NativeSizingEdge.None));
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingEdgeMap.FromResizeEdge"/> maps each of the eight <see cref="ResizeEdge"/> values to its matching <see cref="NativeSizingEdge"/>.</summary>
+    /// <param name="edge">The <see cref="ResizeEdge"/> value to convert.</param>
+    /// <param name="expected">The expected <see cref="NativeSizingEdge"/> result.</param>
     [Theory]
     [InlineData(ResizeEdge.Left, NativeSizingEdge.Left)]
     [InlineData(ResizeEdge.Top, NativeSizingEdge.Top)]
@@ -46,6 +53,9 @@ public class NativeSizingEdgeMapTests
         Assert.Equal(expected, NativeSizingEdgeMap.FromResizeEdge(edge));
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingEdgeMap.FromWmsz"/> maps each <c>WMSZ_*</c> constant (WinUser.h, 1..9) to its matching <see cref="NativeSizingEdge"/>.</summary>
+    /// <param name="wmsz">The raw <c>WMSZ_*</c> value.</param>
+    /// <param name="expected">The expected <see cref="NativeSizingEdge"/> result.</param>
     [Theory]
     [InlineData(1, NativeSizingEdge.Left)]
     [InlineData(2, NativeSizingEdge.Right)]
@@ -61,6 +71,8 @@ public class NativeSizingEdgeMapTests
         Assert.Equal(expected, NativeSizingEdgeMap.FromWmsz(wmsz));
     }
 
+    /// <summary>Verifies that <see cref="NativeSizingEdgeMap.FromWmsz"/> returns <see cref="NativeSizingEdge.None"/> for out-of-range <paramref name="wmsz"/> values.</summary>
+    /// <param name="wmsz">The out-of-range raw <c>WMSZ_*</c> value.</param>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

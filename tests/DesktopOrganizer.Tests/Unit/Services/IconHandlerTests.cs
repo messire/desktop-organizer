@@ -44,6 +44,10 @@ public class IconHandlerTests
         _iconHandler = new IconHandler(_nativeApiMock.Object, _diagnosticsLogMock.Object);
     }
 
+    /// <summary>
+    /// Gets the file-path/expected-handle pairs exercised by
+    /// <see cref="GetIconHandle_ReturnsExpectedHandle_ForGivenFilePath"/>.
+    /// </summary>
     public static IEnumerable<object[]> GetIconHandlerData => new List<object[]>
     {
         new object[] { ValidFilePath, ValidIconHandle },
@@ -53,6 +57,8 @@ public class IconHandlerTests
     /// <summary>
     /// Ensures that GetIconHandle returns the expected handle for valid and invalid file paths.
     /// </summary>
+    /// <param name="filePath">The file path passed to <see cref="IconHandler.GetIconHandle"/>.</param>
+    /// <param name="expectedHandle">The icon handle the native API mock is set up to return for that path.</param>
     [Theory]
     [MemberData(nameof(GetIconHandlerData))]
     public void GetIconHandle_ReturnsExpectedHandle_ForGivenFilePath(string filePath, IntPtr expectedHandle)
@@ -114,6 +120,7 @@ public class IconHandlerTests
     /// Ensures that DestroyIconHandle writes a diagnostics event when DestroyIcon returns false, and
     /// none when it succeeds (P00 baseline: previously <c>Console.Error</c>, silently discarded).
     /// </summary>
+    /// <param name="destroyResult">The value the mocked native <c>DestroyIcon</c> call is set up to return.</param>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

@@ -13,6 +13,10 @@ public class PanelItemSortComparerTests
 {
     // ── Directories before files ────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that a directory always sorts before a file, even when the directory's display name
+    /// is alphabetically later than the file's.
+    /// </summary>
     [Fact]
     public void Compare_DirectoryVsFile_DirectorySortsFirst_EvenWhenAlphabeticallyLater()
     {
@@ -34,6 +38,10 @@ public class PanelItemSortComparerTests
         }
     }
 
+    /// <summary>
+    /// Verifies that comparing two directories falls through to natural display-name order once the
+    /// directory-vs-file rule no longer distinguishes them.
+    /// </summary>
     [Fact]
     public void Compare_TwoDirectories_FallsThroughToNameOrder()
     {
@@ -57,6 +65,11 @@ public class PanelItemSortComparerTests
 
     // ── Tie-break by Path when DisplayName matches ──────────────────────────
 
+    /// <summary>
+    /// Verifies that two items sharing the same display name but different paths are ordered
+    /// deterministically by <see cref="FileItem.Path"/> (ordinal, case-insensitive), and that
+    /// reversing the comparison flips the sign exactly.
+    /// </summary>
     [Fact]
     public void Compare_SameDisplayName_TieBreaksByPath_Deterministically()
     {
@@ -76,6 +89,9 @@ public class PanelItemSortComparerTests
         Assert.Equal(-Math.Sign(cmp), Math.Sign(reverseCmp));
     }
 
+    /// <summary>
+    /// Verifies that two items with the same display name and the same path compare as equal.
+    /// </summary>
     [Fact]
     public void Compare_SameDisplayNameAndSamePath_ReturnsZero()
     {
@@ -87,6 +103,10 @@ public class PanelItemSortComparerTests
 
     // ── Sorts by DisplayName, not by Name ────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that ordering is driven by <see cref="FileItem.DisplayName"/> (the cosmetic override),
+    /// not by the on-disk <see cref="FileItem.Name"/>, when the two disagree.
+    /// </summary>
     [Fact]
     public void Compare_SortsByDisplayName_NotByRawName()
     {
@@ -108,6 +128,10 @@ public class PanelItemSortComparerTests
 
     // ── End-to-end sort ordering ─────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies the end-to-end sort order on a mixed set of directories and files: directories first,
+    /// each group then ordered naturally by display name.
+    /// </summary>
     [Fact]
     public void Sort_MixedDirectoriesAndFiles_DirectoriesFirstThenNaturalOrderByDisplayName()
     {

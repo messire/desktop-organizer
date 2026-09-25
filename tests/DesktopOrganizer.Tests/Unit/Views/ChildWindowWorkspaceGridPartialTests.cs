@@ -21,6 +21,10 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class ChildWindowWorkspaceGridPartialTests
 {
+    /// <summary>
+    /// Verifies that <c>ChildWindow</c>'s private <c>AlignToGridMenu_Click</c> handler exists with the
+    /// shape of a routed event handler.
+    /// </summary>
     [Fact]
     public void AlignToGridMenu_Click_Exists_AsPrivateInstanceRoutedEventHandler()
     {
@@ -31,6 +35,10 @@ public class ChildWindowWorkspaceGridPartialTests
         AssertIsRoutedEventHandlerShape(method!);
     }
 
+    /// <summary>
+    /// Verifies that <c>ChildWindow</c>'s private <c>SizePresetMenu_Click</c> handler exists with the
+    /// shape of a routed event handler.
+    /// </summary>
     [Fact]
     public void SizePresetMenu_Click_Exists_AsPrivateInstanceRoutedEventHandler()
     {

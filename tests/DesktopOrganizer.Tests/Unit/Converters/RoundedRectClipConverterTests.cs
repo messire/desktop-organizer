@@ -11,7 +11,7 @@ namespace DesktopOrganizer.Tests.Unit.Converters;
 /// "Border radius") — never throws, degrades to <see cref="Binding.DoNothing"/> on any garbage/
 /// not-yet-measured input, produces a frozen <see cref="RectangleGeometry"/> matching the requested
 /// size/radius otherwise. Same contract style as <see cref="PanelSurfaceBrushConverterTests"/>/
-/// <see cref="Converters.PanelSurfaceBrushConverter"/> and friends.
+/// <see cref="PanelSurfaceBrushConverter"/> and friends.
 /// </summary>
 [Trait(UnitTests, "UI")]
 public class RoundedRectClipConverterTests
@@ -19,6 +19,10 @@ public class RoundedRectClipConverterTests
     private static readonly RoundedRectClipConverter Converter = new();
     private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
 
+    /// <summary>
+    /// Verifies that valid width/height/corner-radius inputs produce a frozen <see cref="RectangleGeometry"/>
+    /// with the expected bounds and radius.
+    /// </summary>
     [Fact]
     public void Convert_ValidInputs_ReturnsFrozenRectangleGeometryWithExpectedBoundsAndRadius()
     {
@@ -31,6 +35,9 @@ public class RoundedRectClipConverterTests
         Assert.Equal(8, geometry.RadiusY);
     }
 
+    /// <summary>
+    /// Verifies that a zero corner radius still produces a valid <see cref="RectangleGeometry"/>.
+    /// </summary>
     [Fact]
     public void Convert_ZeroCornerRadius_StillProducesGeometry()
     {
@@ -41,6 +48,9 @@ public class RoundedRectClipConverterTests
         Assert.Equal(0, geometry.RadiusY);
     }
 
+    /// <summary>
+    /// Verifies that a non-uniform <see cref="CornerRadius"/> uses only the top-left value for both radius axes.
+    /// </summary>
     [Fact]
     public void Convert_NonUniformCornerRadius_UsesTopLeft()
     {
@@ -51,6 +61,12 @@ public class RoundedRectClipConverterTests
         Assert.Equal(3, geometry.RadiusY);
     }
 
+    /// <summary>
+    /// Verifies that non-positive or non-finite width/height values return <see cref="Binding.DoNothing"/>
+    /// instead of throwing.
+    /// </summary>
+    /// <param name="width">The width value under test.</param>
+    /// <param name="height">The height value under test.</param>
     [Theory]
     [InlineData(0.0, 100.0)]
     [InlineData(-10.0, 100.0)]
@@ -65,6 +81,10 @@ public class RoundedRectClipConverterTests
         Assert.Equal(Binding.DoNothing, result);
     }
 
+    /// <summary>
+    /// Verifies that fewer values than the converter expects returns <see cref="Binding.DoNothing"/> instead
+    /// of throwing.
+    /// </summary>
     [Fact]
     public void Convert_TooFewValues_ReturnsDoNothing_DoesNotThrow()
     {
@@ -73,6 +93,10 @@ public class RoundedRectClipConverterTests
         Assert.Equal(Binding.DoNothing, result);
     }
 
+    /// <summary>
+    /// Verifies that a <see langword="null"/> values array returns <see cref="Binding.DoNothing"/> instead
+    /// of throwing.
+    /// </summary>
     [Fact]
     public void Convert_NullValues_ReturnsDoNothing_DoesNotThrow()
     {
@@ -81,6 +105,10 @@ public class RoundedRectClipConverterTests
         Assert.Equal(Binding.DoNothing, result);
     }
 
+    /// <summary>
+    /// Verifies that values of the wrong type in the width/height slots return <see cref="Binding.DoNothing"/>
+    /// instead of throwing.
+    /// </summary>
     [Fact]
     public void Convert_WrongTypes_ReturnsDoNothing_DoesNotThrow()
     {
@@ -89,6 +117,9 @@ public class RoundedRectClipConverterTests
         Assert.Equal(Binding.DoNothing, result);
     }
 
+    /// <summary>
+    /// Verifies that a value of the wrong type in the corner-radius slot returns <see cref="Binding.DoNothing"/>.
+    /// </summary>
     [Fact]
     public void Convert_CornerRadiusSlotHoldsWrongType_ReturnsDoNothing()
     {
@@ -97,6 +128,10 @@ public class RoundedRectClipConverterTests
         Assert.Equal(Binding.DoNothing, result);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="RoundedRectClipConverter.ConvertBack"/> always throws
+    /// <see cref="NotSupportedException"/> because the conversion is one-way.
+    /// </summary>
     [Fact]
     public void ConvertBack_AlwaysThrowsNotSupportedException()
     {

@@ -176,9 +176,9 @@ internal sealed class V3ToV4Migration : ISettingsMigration
     /// <remarks>
     /// Every field that simply passes through (<c>backgroundOpacity</c> -&gt; <c>surfaceOpacity</c>,
     /// <c>textColor</c>, <c>iconSize</c>, and <c>backgroundColor</c> when it carries over verbatim as
-    /// <c>accentColor</c>) is preserved via <see cref="GetNodeOrDefault"/> — a <see cref="JsonNode.DeepClone"/>
+    /// <c>accentColor</c>) is preserved via <c>GetNodeOrDefault</c> — a <see cref="JsonNode.DeepClone"/>
     /// of the original node, not a round-trip through a CLR <see langword="double"/>/<see langword="string"/>
-    /// and back. <see cref="JsonValue.Create(double)"/> reformats e.g. the JSON literal <c>1.0</c> as
+    /// and back. <c>JsonValue.Create(double)</c> reformats e.g. the JSON literal <c>1.0</c> as
     /// <c>1</c>, which would make golden-fixture byte-for-byte comparisons fail on a value that never
     /// actually changed.
     /// </remarks>

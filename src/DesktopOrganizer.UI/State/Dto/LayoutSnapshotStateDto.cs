@@ -8,11 +8,18 @@ namespace DesktopOrganizer.UI.State.Dto;
 /// </summary>
 internal sealed class LayoutSnapshotStateDto
 {
+    /// <summary>The snapshot's stable identifier.</summary>
     public string Id { get; set; } = string.Empty;
 
+    /// <summary>The user-facing name given to this snapshot.</summary>
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>
+    /// When this snapshot was captured — LOCAL time (<see cref="DateTime.Now"/>), not UTC; persisted
+    /// verbatim and displayed without conversion.
+    /// </summary>
     public DateTime CreatedAt { get; set; }
 
+    /// <summary>The full panel set captured by this snapshot.</summary>
     public List<PanelStateDto> Panels { get; set; } = [];
 }

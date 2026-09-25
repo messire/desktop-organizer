@@ -9,14 +9,19 @@ namespace DesktopOrganizer.UI.State.Dto;
 /// </summary>
 internal sealed class PanelAppearanceDto
 {
+    /// <summary>Hex string for the panel's accent color.</summary>
     public string AccentColor { get; set; } = "#6B7280";
 
+    /// <summary>The panel surface's opacity — stored as-is; clamped to <c>[0.35, 1]</c> when rendered.</summary>
     public double SurfaceOpacity { get; set; } = 0.8;
 
+    /// <summary>Which of the ADR-025/ADR-030 surface treatments the panel renders.</summary>
     public PanelSurfaceStyle SurfaceStyle { get; set; } = PanelSurfaceStyle.Ambient;
 
+    /// <summary>Hex string for the panel's title/item text color.</summary>
     public string TextColor { get; set; } = "#DDDDDD";
 
+    /// <summary>The panel's icon size, in DIP.</summary>
     public double IconSize { get; set; } = 48;
 
     /// <summary>

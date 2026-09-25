@@ -22,6 +22,8 @@ public class ResizeGestureSessionSizeGridStepTests
 
     // ── LegacyFreeform gesture, GridSize=48: TryUpdate quantises per frame (not just at Apply's own
     // characterization level — this proves the session actually wires SizeGridStep through end to end). ──
+
+    /// <summary>Verifies that for a LegacyFreeform gesture with an active <c>GridSize</c>, <see cref="ResizeGestureSession.TryUpdate"/> quantises per frame end to end, not just at the <c>Apply</c> level.</summary>
     [Fact]
     public void LegacyFreeform_GridSizeActive_QuantisesPerFrame_ThroughTheRealSession()
     {
@@ -45,6 +47,8 @@ public class ResizeGestureSessionSizeGridStepTests
     // workspace U-grid AND the coarser GridSize lattice — Apply's SizeGridStep branch produces the
     // coarse value, and the subsequent U-based SnapBounds step is then a no-op on it (48 is already an
     // exact multiple of 8). ────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Verifies that for a grid-aligned gesture with a <c>GridSize</c> commensurate with the unit size, per-frame quantisation lands on both the workspace grid and the coarser GridSize lattice.</summary>
     [Fact]
     public void GridAligned_GridSizeCommensurateWithUnit_QuantisesToTheCoarserGridSizeLattice()
     {
@@ -67,6 +71,8 @@ public class ResizeGestureSessionSizeGridStepTests
     // SizeGridStep to 0 for this shape (see ResizeConstraintsFactorySizeGridStepTests) — this test proves
     // the SESSION-level result is then bit-for-bit IDENTICAL to the pre-amendment (GridSize<=1) behaviour,
     // i.e. pure U-grid quantisation, completely undisturbed by the incommensurate GridSize setting. ──────
+
+    /// <summary>Verifies that for a grid-aligned gesture with a <c>GridSize</c> NOT commensurate with the unit size, the session-level result is bit-for-bit identical to the pre-amendment (GridSize-off) behavior.</summary>
     [Fact]
     public void GridAligned_GridSizeNotCommensurateWithUnit_BehavesExactlyLikeGridSizeOff()
     {
@@ -88,6 +94,8 @@ public class ResizeGestureSessionSizeGridStepTests
     // ── Alt (widened gate): for a LegacyFreeform gesture with SizeGridStep active, Alt now suppresses
     // quantisation for that frame only — the edge tracks the cursor 1:1, exactly like ResizeGeometryCalculator
     // .Apply's OWN free/icon-grid path (i.e. as if SizeGridStep were 0 for this one frame). ───────────────
+
+    /// <summary>Verifies that for a LegacyFreeform gesture with an active <c>SizeGridStep</c>, holding Alt suppresses quantisation for that frame only, then re-engages on the very next frame.</summary>
     [Fact]
     public void AltHeld_SuppressesSizeGridStepQuantisation_ForLegacyFreeform_ForThatFrameOnly()
     {
@@ -117,6 +125,8 @@ public class ResizeGestureSessionSizeGridStepTests
     // ── The counterpart of ResizeGestureSessionFixCycleTests.ALegacyGesture_NeverAsksForTheModifier:
     // once SizeGridStep is active, a LegacyFreeform gesture DOES consult Alt every frame — the widened
     // IsFreeResizeFrame gate applies regardless of PanelGeometryMode. ─────────────────────────────────────
+
+    /// <summary>Verifies that once <c>SizeGridStep</c> is active, a LegacyFreeform gesture DOES consult the free-resize modifier every frame — the widened Alt gate applies regardless of geometry mode.</summary>
     [Fact]
     public void ALegacyGestureWithSizeGridStepActive_DoesAskForTheModifier()
     {
@@ -141,6 +151,8 @@ public class ResizeGestureSessionSizeGridStepTests
     // ── And the inverse sanity: with SizeGridStep == 0 (GridSize <= 1, the project default), a
     // LegacyFreeform gesture still never asks — the pre-amendment "pointless per-frame cost" guard is
     // unaffected for the overwhelmingly common (GridSize-off) case. ────────────────────────────────────
+
+    /// <summary>Verifies that with <c>SizeGridStep == 0</c> (the project default), a LegacyFreeform gesture still never consults the free-resize modifier.</summary>
     [Fact]
     public void ALegacyGestureWithoutSizeGridStep_StillNeverAsksForTheModifier()
     {

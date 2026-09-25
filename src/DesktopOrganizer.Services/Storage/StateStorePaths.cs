@@ -134,6 +134,7 @@ internal sealed class StateStorePaths
     /// (which the very next save rotates) or a quarantine file (capped by
     /// <see cref="AtomicJsonFileWriter.EnforceQuarantineRetention"/>'s 5-file retention).
     /// </summary>
+    /// <param name="fromSchemaVersion">The schema version the on-disk document was found at before migration.</param>
     public string PreMigrationBackupPath(int fromSchemaVersion) =>
         Path.Combine(StateDirectory, $"{PreMigrationBackupFileStem}{fromSchemaVersion}{PreMigrationBackupFileSuffix}");
 }

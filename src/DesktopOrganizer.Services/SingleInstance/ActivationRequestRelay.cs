@@ -49,6 +49,7 @@ internal sealed class ActivationRequestRelay
     /// property so the answer is decided under the same lock as the delivery itself and can never
     /// disagree with what actually happened.
     /// </returns>
+    /// <param name="request">The activation request to publish.</param>
     public bool Publish(ActivationRequest request)
     {
         lock (_gate)
@@ -69,6 +70,7 @@ internal sealed class ActivationRequestRelay
     /// drains anything buffered so far into it, in the order it was published. Once this returns,
     /// every subsequent <see cref="Publish"/> is delivered straight through without buffering.
     /// </summary>
+    /// <param name="sink">The delegate that receives every future (and currently buffered) request.</param>
     public void AttachSink(Action<ActivationRequest> sink)
     {
         ArgumentNullException.ThrowIfNull(sink);

@@ -15,6 +15,10 @@ namespace DesktopOrganizer.Tests.Unit.State;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class SystemIconsPanelStateMapperTests
 {
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelModel.IsEnabled"/> survives a
+    /// <see cref="SystemIconsPanelStateMapper.ToDto"/> -&gt; <see cref="SystemIconsPanelStateMapper.ApplyTo"/> round trip.
+    /// </summary>
     [Fact]
     public void RoundTrip_PreservesIsEnabled()
     {
@@ -25,6 +29,9 @@ public class SystemIconsPanelStateMapperTests
         Assert.True(roundTripped.IsEnabled);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelModel.ShowOnAllVirtualDesktops"/> survives a round trip.
+    /// </summary>
     [Fact]
     public void RoundTrip_PreservesShowOnAllVirtualDesktops()
     {
@@ -35,6 +42,9 @@ public class SystemIconsPanelStateMapperTests
         Assert.True(roundTripped.ShowOnAllVirtualDesktops);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelModel.IconSize"/> survives a round trip.
+    /// </summary>
     [Fact]
     public void RoundTrip_PreservesIconSize()
     {
@@ -45,6 +55,9 @@ public class SystemIconsPanelStateMapperTests
         Assert.Equal(SystemIconSize.Large, roundTripped.IconSize);
     }
 
+    /// <summary>
+    /// Verifies that a non-null <see cref="SystemIconsPanelModel.AnchorVirtualDesktopId"/> survives a round trip.
+    /// </summary>
     [Fact]
     public void RoundTrip_PreservesAnchorVirtualDesktopId()
     {
@@ -56,6 +69,9 @@ public class SystemIconsPanelStateMapperTests
         Assert.Equal(anchor, roundTripped.AnchorVirtualDesktopId);
     }
 
+    /// <summary>
+    /// Verifies that a null <see cref="SystemIconsPanelModel.AnchorVirtualDesktopId"/> stays null across a round trip.
+    /// </summary>
     [Fact]
     public void RoundTrip_NullAnchor_StaysNull()
     {
@@ -66,6 +82,11 @@ public class SystemIconsPanelStateMapperTests
         Assert.Null(roundTripped.AnchorVirtualDesktopId);
     }
 
+    /// <summary>
+    /// Verifies that an unparsable anchor virtual desktop id string in the DTO applies as a null
+    /// <see cref="SystemIconsPanelModel.AnchorVirtualDesktopId"/> without preventing the other fields
+    /// (<c>IsEnabled</c>, <c>IconSize</c>) from applying normally.
+    /// </summary>
     [Fact]
     public void ApplyTo_GarbageAnchorValue_AnchorIsNull_ButOtherFieldsApplyNormally()
     {
@@ -84,6 +105,10 @@ public class SystemIconsPanelStateMapperTests
         Assert.Equal(SystemIconSize.Large, model.IconSize);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelStateMapper.ApplyTo"/> restores each item's visibility
+    /// and order from the DTO while still yielding one model item per known <see cref="SystemIconKind"/>.
+    /// </summary>
     [Fact]
     public void ApplyTo_RestoresItemVisibilityAndOrder()
     {
@@ -105,6 +130,10 @@ public class SystemIconsPanelStateMapperTests
         Assert.Equal(Enum.GetValues<SystemIconKind>().Length, model.Items.Count);
     }
 
+    /// <summary>
+    /// Verifies that an empty <c>Items</c> list in the DTO leaves the model's default item collection
+    /// (all visible) untouched instead of clearing it.
+    /// </summary>
     [Fact]
     public void ApplyTo_EmptyItemsList_LeavesModelItemsUntouched()
     {

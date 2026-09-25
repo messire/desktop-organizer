@@ -40,7 +40,8 @@ internal class DesktopIconsService(INativeApi nativeApi) : IDesktopIconsService
         if (defView != IntPtr.Zero) return defView;
 
         IntPtr found = IntPtr.Zero;
-        nativeApi.EnumWindows((hwnd, _) =>
+        nativeApi.EnumWindows(
+            (hwnd, _) =>
         {
             var child = nativeApi.FindWindowEx(hwnd, IntPtr.Zero, "SHELLDLL_DefView", null);
             if (child != IntPtr.Zero) found = child;

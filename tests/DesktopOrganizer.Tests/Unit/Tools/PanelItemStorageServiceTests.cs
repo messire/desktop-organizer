@@ -12,9 +12,9 @@ namespace DesktopOrganizer.Tests.Unit.Tools;
 /// Covers the Move semantics that replaced the earlier Copy-based Import/ImportDirectory: dropping a
 /// file/folder into a panel now moves the original into app-managed storage (declutters the source
 /// immediately) instead of leaving a copy behind, and "Remove from panel" moves a managed item back to
-/// its original location via <see cref="PanelItemStorageService.Restore"/>. The regression this guards
+/// its original location via <see cref="PanelItemStorageService.Restore(string, bool)"/>. The regression this guards
 /// against — a panel item breaking because it referenced the original path instead of an independent
-/// copy — is why <see cref="PanelItemStorageService.MoveIn"/>/<see cref="PanelItemStorageService.MoveInDirectory"/>
+/// copy — is why <see cref="PanelItemStorageService.MoveIn(string, bool)"/>/<see cref="PanelItemStorageService.MoveInDirectory(string, bool)"/>
 /// still produce a storage-owned copy of the item, same as the old Import did; the difference is the
 /// source is now moved (removed), not just copied.
 ///
@@ -28,38 +28,12 @@ namespace DesktopOrganizer.Tests.Unit.Tools;
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class PanelItemStorageServiceTests
 {
-    private static (PanelItemStorageService Service, string Root) BuildService()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"DOrgStorage_{Guid.NewGuid():N}");
-        return (new PanelItemStorageService(root), root);
-    }
-
-    private static void SafeDeleteFile(string path)
-    {
-        try
-        {
-            if (File.Exists(path)) File.Delete(path);
-        }
-        catch (IOException)
-        {
-            // Best-effort cleanup; a still-locked handle from a test failure shouldn't mask the
-            // real assertion failure.
-        }
-    }
-
-    private static void SafeDeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-        }
-    }
-
     // ── D1: MoveIn same-volume ──────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.MoveIn(string, bool)"/> on the same volume
+    /// removes the source file and creates a managed copy with identical content (D1).
+    /// </summary>
     [Fact]
     public void MoveIn_SameVolume_RemovesSourceAndCreatesManaged()
     {
@@ -87,6 +61,10 @@ public class PanelItemStorageServiceTests
 
     // ── D2: MoveInDirectory same-volume, cap ignored ────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.MoveInDirectory(string, bool)"/> on the same
+    /// volume moves the whole source folder and ignores the cross-volume file-count safety cap (D2).
+    /// </summary>
     [Fact]
     public void MoveInDirectory_SameVolume_MovesAndIgnoresCap()
     {
@@ -121,6 +99,11 @@ public class PanelItemStorageServiceTests
 
     // ── D3: Cross-volume copy-then-delete-after-verified-success ───────────
 
+    /// <summary>
+    /// Verifies that a forced cross-volume <see cref="PanelItemStorageService.MoveIn(string, bool)"/>
+    /// copies the file to managed storage first and only deletes the original source after the copy is
+    /// verified complete (D3).
+    /// </summary>
     [Fact]
     public void MoveIn_CrossVolume_CopiesThenDeletesOriginalAfterSuccess()
     {
@@ -234,6 +217,10 @@ public class PanelItemStorageServiceTests
 
     // ── D6: Restore to original location ────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.Restore(string, bool)"/> moves a managed file
+    /// back to its original location and removes the managed copy (D6).
+    /// </summary>
     [Fact]
     public void Restore_ManagedFile_ReturnsToOriginalLocation()
     {
@@ -266,6 +253,10 @@ public class PanelItemStorageServiceTests
 
     // ── D7: Restore collision handling ──────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that restoring to a path already occupied by another file lands the restored file under
+    /// a collision-free name instead of overwriting the pre-existing file (D7).
+    /// </summary>
     [Fact]
     public void Restore_TargetNameTaken_UsesCollisionFreeName()
     {
@@ -301,6 +292,10 @@ public class PanelItemStorageServiceTests
 
     // ── D8: Restore recreates missing parent directory ──────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.Restore(string, bool)"/> recreates the original
+    /// parent directory if it was deleted before the restore happens (D8).
+    /// </summary>
     [Fact]
     public void Restore_MissingParentDir_RecreatesAndRestores()
     {
@@ -336,6 +331,11 @@ public class PanelItemStorageServiceTests
 
     // ── D9: Restore with no manifest entry (legacy/ADR-B) ───────────────────
 
+    /// <summary>
+    /// Verifies that restoring a managed path with no manifest entry (a legacy item imported before
+    /// Move semantics existed) returns <see cref="RestoreOutcome.OriginalPathUnknown"/> and leaves the
+    /// managed copy untouched (D9).
+    /// </summary>
     [Fact]
     public void Restore_NoManifestEntry_ReturnsUnknownAndKeepsFile()
     {
@@ -361,6 +361,10 @@ public class PanelItemStorageServiceTests
 
     // ── D10: Restore on a non-managed path ──────────────────────────────────
 
+    /// <summary>
+    /// Verifies that restoring a path outside the managed storage root is a no-op that returns
+    /// <see cref="RestoreOutcome.NotManaged"/> and leaves the file untouched (D10).
+    /// </summary>
     [Fact]
     public void Restore_PathOutsideStorage_NoOp()
     {
@@ -429,6 +433,11 @@ public class PanelItemStorageServiceTests
     // branch directly — deterministic in a single-volume CI environment. Real multi-volume behavior
     // remains manual verify (Win10/Win11) — see the plan's section 7.
 
+    /// <summary>
+    /// Verifies that a forced cross-volume <see cref="PanelItemStorageService.Restore(string, bool)"/>
+    /// copies the managed file back to its original location, deletes the managed copy, and cleans up
+    /// the manifest entry so a second restore attempt reports <see cref="RestoreOutcome.OriginalPathUnknown"/> (M2).
+    /// </summary>
     [Fact]
     public void Restore_CrossVolumeFallback_File_CopiesThenDeletesAndReturnsRestored()
     {
@@ -464,7 +473,7 @@ public class PanelItemStorageServiceTests
     }
 
     /// <summary>
-    /// Locks the managed file itself so <c>forceCrossVolume: true</c> — which skips <see cref="File.Move"/>
+    /// Locks the managed file itself so <c>forceCrossVolume: true</c> — which skips <see cref="File.Move(string, string)"/>
     /// entirely and goes straight to the copy-then-delete branch — fails at <c>File.Copy</c> (needs read
     /// access to the source). Proves the managed copy is left intact and its manifest entry survives.
     /// </summary>
@@ -508,6 +517,11 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a forced cross-volume <see cref="PanelItemStorageService.Restore(string, bool)"/>
+    /// on a managed directory copies the whole folder back to its original location and deletes the
+    /// managed copy (M2).
+    /// </summary>
     [Fact]
     public void Restore_CrossVolumeFallback_Directory_CopiesThenDeletesAndReturnsRestored()
     {
@@ -582,6 +596,11 @@ public class PanelItemStorageServiceTests
 
     // ── D14: Manifest survives across service instances ─────────────────────
 
+    /// <summary>
+    /// Verifies that the on-disk manifest survives across separate <see cref="PanelItemStorageService"/>
+    /// instances (simulating an app restart), so a second instance can still restore an item moved in by
+    /// the first (D14).
+    /// </summary>
     [Fact]
     public void Manifest_PersistsAcrossServiceInstances()
     {
@@ -616,6 +635,10 @@ public class PanelItemStorageServiceTests
 
     // ── IsManaged ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.IsManaged"/> returns true for a path nested
+    /// inside the storage root.
+    /// </summary>
     [Fact]
     public void IsManaged_PathInsideStorageRoot_ReturnsTrue()
     {
@@ -624,6 +647,10 @@ public class PanelItemStorageServiceTests
         Assert.True(service.IsManaged(path));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.IsManaged"/> returns false for a path outside
+    /// the storage root.
+    /// </summary>
     [Fact]
     public void IsManaged_PathOutsideStorageRoot_ReturnsFalse()
     {
@@ -631,6 +658,9 @@ public class PanelItemStorageServiceTests
         Assert.False(service.IsManaged(@"C:\Users\someone\Desktop\MyApp.lnk"));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.IsManaged"/> returns false for an empty path.
+    /// </summary>
     [Fact]
     public void IsManaged_EmptyPath_ReturnsFalse()
     {
@@ -644,7 +674,7 @@ public class PanelItemStorageServiceTests
     /// storage root as a string prefix — e.g. <c>...\PanelItems2\foo.txt</c> or
     /// <c>...\PanelItems_backup\bar.txt</c> when the root is <c>...\PanelItems</c> — was incorrectly
     /// treated as managed. That's dangerous because <see cref="PanelItemStorageService.Release"/> and
-    /// <see cref="PanelItemStorageService.Restore"/> both gate destructive/relocating filesystem
+    /// <see cref="PanelItemStorageService.Restore(string, bool)"/> both gate destructive/relocating filesystem
     /// operations on <c>IsManaged</c>: a false positive here could delete or move a directory the app
     /// doesn't own. The fix compares on a path-segment boundary (exact root match, or root + separator
     /// prefix) instead of a bare string prefix.
@@ -681,6 +711,10 @@ public class PanelItemStorageServiceTests
 
     // ── MoveIn / MoveInDirectory — validation ───────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.MoveIn(string, bool)"/> returns null for a
+    /// source path that does not exist.
+    /// </summary>
     [Fact]
     public void MoveIn_MissingSource_ReturnsNull()
     {
@@ -689,6 +723,10 @@ public class PanelItemStorageServiceTests
         Assert.Null(result);
     }
 
+    /// <summary>
+    /// Verifies that passing a directory to <see cref="PanelItemStorageService.MoveIn(string, bool)"/>
+    /// returns null and leaves the directory untouched.
+    /// </summary>
     [Fact]
     public void MoveIn_Directory_ReturnsNull()
     {
@@ -708,6 +746,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.MoveIn(string, bool)"/> returns null for an
+    /// empty path.
+    /// </summary>
     [Fact]
     public void MoveIn_EmptyPath_ReturnsNull()
     {
@@ -715,6 +757,10 @@ public class PanelItemStorageServiceTests
         Assert.Null(service.MoveIn(string.Empty));
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.MoveInDirectory(string, bool)"/> returns null
+    /// for a source folder that does not exist.
+    /// </summary>
     [Fact]
     public void MoveInDirectory_MissingSource_ReturnsNull()
     {
@@ -722,6 +768,10 @@ public class PanelItemStorageServiceTests
         Assert.Null(service.MoveInDirectory(@"C:\Definitely\Does\Not\Exist\ghostfolder"));
     }
 
+    /// <summary>
+    /// Verifies that passing a plain file to <see cref="PanelItemStorageService.MoveInDirectory(string, bool)"/>
+    /// returns null and leaves the file untouched.
+    /// </summary>
     [Fact]
     public void MoveInDirectory_PlainFile_ReturnsNull()
     {
@@ -741,6 +791,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that two source files that share the same file name from different origin folders
+    /// produce two distinct, independently readable managed destinations.
+    /// </summary>
     [Fact]
     public void MoveIn_TwoFilesWithSameName_ProduceDistinctDestinations()
     {
@@ -773,6 +827,9 @@ public class PanelItemStorageServiceTests
 
     // ── Release ──────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.Release"/> permanently deletes a managed file.
+    /// </summary>
     [Fact]
     public void Release_ManagedFile_DeletesIt()
     {
@@ -817,6 +874,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.Release"/> does not throw for a managed path
+    /// that does not exist on disk.
+    /// </summary>
     [Fact]
     public void Release_NonExistentManagedPath_DoesNotThrow()
     {
@@ -826,6 +887,9 @@ public class PanelItemStorageServiceTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.Release"/> recursively deletes a managed directory.
+    /// </summary>
     [Fact]
     public void Release_ManagedDirectory_DeletesItRecursively()
     {
@@ -1149,6 +1213,11 @@ public class PanelItemStorageServiceTests
 
     // ── B1: new {guid}\{originalName} storage layout (ADR-013 Decision 2) ───
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.MoveIn(string, bool)"/> stores each item under
+    /// a per-item GUID directory directly beneath the storage root, keeping the original file name
+    /// intact within that directory (ADR-013 Decision 2, B1).
+    /// </summary>
     [Fact]
     public void MoveIn_ProducesPerItemGuidDirectory_FileNameIsOriginal()
     {
@@ -1180,6 +1249,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.MoveInDirectory(string, bool)"/> stores a moved
+    /// folder under a per-item GUID directory, keeping the original folder name intact (ADR-013 Decision 2).
+    /// </summary>
     [Fact]
     public void MoveInDirectory_ProducesPerItemGuidDirectory_FolderNameIsOriginal()
     {
@@ -1207,6 +1280,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that two source files sharing the same original file name each get their own per-item
+    /// GUID directory, so both keep their original file name without collision.
+    /// </summary>
     [Fact]
     public void MoveIn_TwoFilesWithSameOriginalName_UseDistinctGuidDirectories_BothKeepOriginalName()
     {
@@ -1243,6 +1320,10 @@ public class PanelItemStorageServiceTests
 
     // ── B2: orphaned empty per-item GUID directory cleanup ───────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.Restore(string, bool)"/> deletes the now-empty
+    /// per-item GUID directory after restoring, while never deleting the storage root itself (B2).
+    /// </summary>
     [Fact]
     public void Restore_CleansUpTheNowEmptyPerItemGuidDirectory()
     {
@@ -1272,6 +1353,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.Release"/> deletes the now-empty per-item GUID
+    /// directory after releasing, while never deleting the storage root itself (B2).
+    /// </summary>
     [Fact]
     public void Release_CleansUpTheNowEmptyPerItemGuidDirectory()
     {
@@ -1298,6 +1383,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.Restore(string, bool)"/> never deletes the
+    /// per-item GUID directory if a stray, unmanaged file still lives alongside the restored item.
+    /// </summary>
     [Fact]
     public void Restore_PerItemGuidDirectoryNotEmpty_IsNotDeleted()
     {
@@ -1330,6 +1419,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.Release"/> never deletes the per-item GUID
+    /// directory if a stray, unmanaged file still lives alongside the released item.
+    /// </summary>
     [Fact]
     public void Release_PerItemGuidDirectoryNotEmpty_IsNotDeleted()
     {
@@ -1395,6 +1488,11 @@ public class PanelItemStorageServiceTests
 
     // ── B1: truncate-guard on destination path length (>240 chars) ──────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.MoveIn(string, bool)"/> truncates an overly
+    /// long base file name so the destination path stays within the 240-character guard, while
+    /// preserving the file extension (B1).
+    /// </summary>
     [Fact]
     public void MoveIn_LongFileName_TruncatesBaseNamePreservingExtension()
     {
@@ -1428,6 +1526,12 @@ public class PanelItemStorageServiceTests
 
     // ── C1/C2: RenameManaged (ADR-013 Decision 5) ────────────────────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.RenameManaged"/> moves the managed file to its
+    /// new name within the same per-item directory and updates the manifest so a subsequent
+    /// <see cref="PanelItemStorageService.Restore(string, bool)"/> places the file back under the new
+    /// name in the original directory (ADR-013 Decision 5).
+    /// </summary>
     [Fact]
     public void RenameManaged_HappyPath_MovesFileAndUpdatesManifestOriginalName()
     {
@@ -1470,6 +1574,11 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that renaming a legacy flat-layout managed item (stored directly in the storage root,
+    /// predating ADR-013 Decision 2) relocates it into a new per-item GUID directory rather than leaving
+    /// it flat.
+    /// </summary>
     [Fact]
     public void RenameManaged_LegacyFlatItem_RelocatesIntoNewGuidDirectory()
     {
@@ -1612,7 +1721,7 @@ public class PanelItemStorageServiceTests
     /// under its OLD managed path — no manual/rollback re-key that can itself fail and strand the
     /// manifest is involved anymore (see <see cref="PanelItemStorageService"/> "TryRenameManifestEntry"
     /// remarks). Before the fix, a failed rollback write here could leave the manifest keyed only to
-    /// the (never-created) new path, so <see cref="Restore"/> against the old (still physically
+    /// the (never-created) new path, so <see cref="PanelItemStorageService.Restore(string, bool)"/> against the old (still physically
     /// present, unchanged) managed path would return <see cref="RestoreOutcome.OriginalPathUnknown"/>
     /// — which calling code treats as "remove from panel", i.e. permanent data loss.
     /// </summary>
@@ -1659,6 +1768,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.RenameManaged"/> succeeds for a case-only rename
+    /// (e.g. "Report.lnk" to "report.lnk").
+    /// </summary>
     [Fact]
     public void RenameManaged_CaseOnlyRename_Succeeds()
     {
@@ -1691,7 +1804,7 @@ public class PanelItemStorageServiceTests
     /// N4 regression (found by code-quality-reviewer): when the truncate-guard shortens the
     /// requested name because the destination path would otherwise exceed the soft path-length cap,
     /// the manifest must record the SAME (truncated) name that actually landed on disk — not the
-    /// raw, untruncated name the caller asked for. Otherwise a later <see cref="Restore"/> would put
+    /// raw, untruncated name the caller asked for. Otherwise a later <see cref="PanelItemStorageService.Restore(string, bool)"/> would put
     /// the file back under a name that was never actually used for the managed copy.
     /// </summary>
     [Fact]
@@ -1734,6 +1847,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.RenameManaged"/> returns
+    /// <see cref="RenameOutcome.Failed"/> for a path outside the managed storage root, leaving it untouched.
+    /// </summary>
     [Fact]
     public void RenameManaged_PathNotManaged_ReturnsFailed()
     {
@@ -1755,6 +1872,11 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.RenameManaged"/> rejects a requested new name
+    /// containing a path traversal segment (<c>..\evil.lnk</c>) as <see cref="RenameOutcome.InvalidName"/>
+    /// (defense-in-depth), without touching the file.
+    /// </summary>
     [Fact]
     public void RenameManaged_NewNameContainsPathSeparator_ReturnsInvalidName()
     {
@@ -1779,6 +1901,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.RenameManaged"/> returns
+    /// <see cref="RenameOutcome.NotFound"/> when the managed path passed in does not actually exist on disk.
+    /// </summary>
     [Fact]
     public void RenameManaged_StoredPathDoesNotExistOnDisk_ReturnsNotFound()
     {
@@ -1802,6 +1928,10 @@ public class PanelItemStorageServiceTests
 
     // ── TryFindManagedPath (ADR-009 Amendment 2026-09-22, P08 stale-path resolution) ────────────
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.TryFindManagedPath"/> resolves the original
+    /// source path to its live managed copy (ADR-009 Amendment 2026-09-22, P08).
+    /// </summary>
     [Fact]
     public void TryFindManagedPath_OriginalHasLiveManagedCopy_ReturnsTrueAndManagedPath()
     {
@@ -1826,6 +1956,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.TryFindManagedPath"/> matches the original
+    /// source path case-insensitively.
+    /// </summary>
     [Fact]
     public void TryFindManagedPath_IsCaseInsensitive()
     {
@@ -1849,6 +1983,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.TryFindManagedPath"/> returns false for an
+    /// original path with no manifest entry.
+    /// </summary>
     [Fact]
     public void TryFindManagedPath_NoManifestEntry_ReturnsFalse()
     {
@@ -1867,6 +2005,11 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.TryFindManagedPath"/> returns false when the
+    /// manifest entry outlives its managed file (deleted outside this service), rather than handing back
+    /// a stale path.
+    /// </summary>
     [Fact]
     public void TryFindManagedPath_ManagedCopyMissingFromDisk_ReturnsFalse()
     {
@@ -1896,6 +2039,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.TryFindManagedPath"/> is read-only and never
+    /// mutates the on-disk manifest file, for both a hit and a miss.
+    /// </summary>
     [Fact]
     public void TryFindManagedPath_IsReadOnly_DoesNotMutateManifestFile()
     {
@@ -1923,6 +2070,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.TryFindManagedPath"/> returns false for an
+    /// empty or whitespace-only path.
+    /// </summary>
     [Fact]
     public void TryFindManagedPath_EmptyOrWhitespacePath_ReturnsFalse()
     {
@@ -1945,26 +2096,9 @@ public class PanelItemStorageServiceTests
     // ── FindManagedCandidates / TryFindManagedPath ambiguity (M1 fix, P08 fix cycle 1, 2026-09-22) ──
 
     /// <summary>
-    /// Directly seeds a manifest recording <paramref name="originalPath"/> against two DIFFERENT,
-    /// both-live managed paths — a scenario <see cref="PanelItemStorageService"/>'s own public API
-    /// can never produce on its own (each <c>MoveIn</c> call consumes its unique source), but one the
-    /// manifest's plain <c>Dictionary&lt;managedPath, originalPath&gt;</c> shape does not prevent, and
-    /// which a manually-edited/legacy-imported manifest could contain.
+    /// Verifies that <see cref="PanelItemStorageService.FindManagedCandidates"/> returns exactly the
+    /// one live managed copy for an original path with a single manifest entry.
     /// </summary>
-    private static (string ManagedA, string ManagedB) SeedAmbiguousManifest(string root, string originalPath)
-    {
-        Directory.CreateDirectory(root);
-        var managedA = Path.Combine(root, "candidate-a.lnk");
-        var managedB = Path.Combine(root, "candidate-b.lnk");
-        File.WriteAllText(managedA, "a");
-        File.WriteAllText(managedB, "b");
-
-        var manifest = new Dictionary<string, string> { [managedA] = originalPath, [managedB] = originalPath };
-        File.WriteAllText(Path.Combine(root, ".manifest.json"), JsonSerializer.Serialize(manifest));
-
-        return (managedA, managedB);
-    }
-
     [Fact]
     public void FindManagedCandidates_SingleLiveCandidate_ReturnsExactlyThatOne()
     {
@@ -1988,6 +2122,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.FindManagedCandidates"/> returns an empty
+    /// collection for an original path with no manifest entry.
+    /// </summary>
     [Fact]
     public void FindManagedCandidates_NoManifestEntry_ReturnsEmpty()
     {
@@ -2003,6 +2141,10 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.FindManagedCandidates"/> returns both live
+    /// managed copies when the manifest ambiguously maps one original path to two entries (M1, P08 fix cycle 1).
+    /// </summary>
     [Fact]
     public void FindManagedCandidates_AmbiguousManifest_ReturnsBothLiveCandidates()
     {
@@ -2025,6 +2167,11 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.TryFindManagedPath"/> refuses to resolve
+    /// (returns false) when the manifest ambiguously maps one original path to two live managed copies,
+    /// rather than silently guessing the first one by enumeration order (CRITICAL/MAJOR M1).
+    /// </summary>
     [Fact]
     public void TryFindManagedPath_AmbiguousManifest_TwoLiveCandidatesForSameOriginal_ReturnsFalse()
     {
@@ -2050,6 +2197,11 @@ public class PanelItemStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// Verifies that <see cref="PanelItemStorageService.FindManagedCandidates"/> filters out a ghosted
+    /// (deleted-without-Release) manifest entry, returning only the still-live candidate, and that
+    /// <see cref="PanelItemStorageService.TryFindManagedPath"/> then resolves unambiguously to it.
+    /// </summary>
     [Fact]
     public void FindManagedCandidates_OneOfTwoManifestEntriesGhosted_ReturnsOnlyTheLiveOne()
     {
@@ -2073,6 +2225,58 @@ public class PanelItemStorageServiceTests
         {
             SafeDeleteDirectory(root);
         }
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+    private static (PanelItemStorageService Service, string Root) BuildService()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"DOrgStorage_{Guid.NewGuid():N}");
+        return (new PanelItemStorageService(root), root);
+    }
+
+    private static void SafeDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a still-locked handle from a test failure shouldn't mask the
+            // real assertion failure.
+        }
+    }
+
+    private static void SafeDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Directly seeds a manifest recording <paramref name="originalPath"/> against two DIFFERENT,
+    /// both-live managed paths — a scenario <see cref="PanelItemStorageService"/>'s own public API
+    /// can never produce on its own (each <c>MoveIn</c> call consumes its unique source), but one the
+    /// manifest's plain <c>Dictionary&lt;managedPath, originalPath&gt;</c> shape does not prevent, and
+    /// which a manually-edited/legacy-imported manifest could contain.
+    /// </summary>
+    private static (string ManagedA, string ManagedB) SeedAmbiguousManifest(string root, string originalPath)
+    {
+        Directory.CreateDirectory(root);
+        var managedA = Path.Combine(root, "candidate-a.lnk");
+        var managedB = Path.Combine(root, "candidate-b.lnk");
+        File.WriteAllText(managedA, "a");
+        File.WriteAllText(managedB, "b");
+
+        var manifest = new Dictionary<string, string> { [managedA] = originalPath, [managedB] = originalPath };
+        File.WriteAllText(Path.Combine(root, ".manifest.json"), JsonSerializer.Serialize(manifest));
+
+        return (managedA, managedB);
     }
 
     private static void AssertManifestFileIsEmpty(string root)

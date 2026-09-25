@@ -17,6 +17,14 @@ namespace DesktopOrganizer.UI.Converters;
 /// <see cref="PanelVisualState.Idle"/>, a non-<see langword="bool"/> second value defaults to
 /// <see langword="false"/>.
 /// </summary>
+/// <remarks>
+/// ADR-030 (docs/PLANS/reference-panel-chrome.md §1 D-4) added a <c>"marker"</c> <c>parameter</c> reading:
+/// scales <see cref="PanelMetrics.AccentMarkerStrokeThickness"/> (the curved marker's
+/// <see cref="System.Windows.Shapes.Shape.StrokeThickness"/>) instead of
+/// <see cref="PanelMetrics.AccentIndicatorThickness"/> — same <see cref="LayoutEditVisuals.AccentEmphasisFor"/>
+/// multiplier either way. <see langword="null"/>/any other <c>parameter</c> keeps the original
+/// <see cref="PanelMetrics.AccentIndicatorThickness"/>-based behavior (regression-tested).
+/// </remarks>
 public sealed class EditAwareAccentIndicatorWidthConverter : IMultiValueConverter
 {
     /// <inheritdoc />
@@ -24,8 +32,15 @@ public sealed class EditAwareAccentIndicatorWidthConverter : IMultiValueConverte
     {
         var state = values.Length > 0 && values[0] is PanelVisualState s ? s : PanelVisualState.Idle;
         var isLayoutEditing = values.Length > 1 && values[1] is bool b && b;
+        var mode = (parameter as string)?.Trim();
 
-        return PanelMetrics.AccentIndicatorThickness * LayoutEditVisuals.AccentEmphasisFor(state, isLayoutEditing);
+        // string.Equals(..., OrdinalIgnoreCase) instead of ToLowerInvariant() — case-insensitive
+        // comparison without allocating a lowercased copy of `mode` on every Convert call.
+        var baseThickness = string.Equals(mode, "marker", StringComparison.OrdinalIgnoreCase)
+            ? PanelMetrics.AccentMarkerStrokeThickness
+            : PanelMetrics.AccentIndicatorThickness;
+
+        return baseThickness * LayoutEditVisuals.AccentEmphasisFor(state, isLayoutEditing);
     }
 
     /// <inheritdoc />

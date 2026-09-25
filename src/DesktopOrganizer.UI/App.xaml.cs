@@ -379,6 +379,32 @@ public partial class App : Application
         TrayIconManager.OnToggleMainWindowVisibilityRequested += ToggleSettingsWindow;
         TrayIconManager.OnExitRequested += (_, _) => Shutdown();
 
+        // Installer-initiated graceful shutdown (installer/DesktopOrganizer.iss): resolved and started
+        // here — never in ISingleInstanceCoordinator's own setup — because a listener must exist only
+        // for the process that actually is Primary, and StartApp itself only ever runs for Primary
+        // (ADR-023 D-2/D-3, same invariant _role documents at the top of this file). Disposed implicitly
+        // when _serviceProvider.Dispose() runs at the end of OnExit, same as every other IDisposable
+        // singleton.
+        //
+        // ShutdownRequested fires on a ThreadPool wait-callback thread (see
+        // InstallerShutdownRequestListener), so it must be marshalled onto the UI thread exactly like the
+        // named-pipe activation handler above — UiDispatch.TryBeginInvoke performs that marshal and is
+        // itself the guard against a shutdown-timing race: if the dispatcher's HasShutdownStarted/
+        // HasShutdownFinished is already set by the time the signal arrives, BeginInvoke is skipped
+        // entirely (returns false, no-op); if it arrives just before that flag flips, the queued Shutdown
+        // simply gets dropped along with the rest of the dispatcher's queue when it stops pumping. Either
+        // way this can never throw, so no extra try/catch is needed here.
+        //
+        // `Dispatcher` (this Application's own dispatcher property) is read HERE, on the UI thread where
+        // InitTrayIcon always runs, and captured by the closure below — not re-read as `Current.Dispatcher`
+        // from inside the closure, which would instead run on the listener's thread-pool callback thread
+        // at fire time. Application.Current is safe to read cross-thread today, but capturing the
+        // dispatcher reference once, up front, removes any dependency on that remaining true.
+        var dispatcher = Dispatcher;
+        var shutdownRequestListener = _serviceProvider.GetRequiredService<IShutdownRequestListener>();
+        shutdownRequestListener.ShutdownRequested += (_, _) => UiDispatch.TryBeginInvoke(dispatcher, Shutdown);
+        shutdownRequestListener.Start();
+
         // D-9 #1 — the tray is the one toggle point for the global layout edit mode that never depends
         // on WS_EX_NOACTIVATE. ITrayIconManager (DesktopOrganizer.Services) has no visibility into
         // ILayoutEditModeService (DesktopOrganizer.UI sits above it in the layering — see that

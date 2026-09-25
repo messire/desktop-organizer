@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Windows.Data;
+using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Theming;
 
 namespace DesktopOrganizer.UI.Converters;
@@ -19,6 +20,14 @@ namespace DesktopOrganizer.UI.Converters;
 /// defaults to <see langword="false"/>, and an unrecognized <c>parameter</c> defaults to the <c>"border"</c>
 /// reading.
 /// </summary>
+/// <remarks>
+/// ADR-030 (docs/PLANS/reference-panel-chrome.md §1 D-6) extended this converter with three more
+/// <c>parameter</c> readings — <c>"glow"</c>/<c>"accentStroke"</c>/<c>"neutralStroke"</c>, delegating to
+/// <see cref="LayeredChromeVisuals"/>'s own derived channels — plus <c>"glowFallback"</c> (D-9), the
+/// <c>"glow"</c> channel scaled by <c>PanelMetrics.GlowFallbackOpacityFactor</c> for
+/// <c>PART_GlowFallback</c>'s own opacity. The original <c>"chrome"</c>/<c>"border"</c>/unknown-parameter
+/// readings above are untouched (regression-tested).
+/// </remarks>
 public sealed class EditAwareVisualStateToDoubleConverter : IMultiValueConverter
 {
     /// <inheritdoc />
@@ -26,13 +35,23 @@ public sealed class EditAwareVisualStateToDoubleConverter : IMultiValueConverter
     {
         var state = values.Length > 0 && values[0] is PanelVisualState s ? s : PanelVisualState.Idle;
         var isLayoutEditing = values.Length > 1 && values[1] is bool b && b;
-        var mode = (parameter as string)?.Trim().ToLowerInvariant();
+        var mode = (parameter as string)?.Trim();
 
-        return mode switch
-        {
-            "chrome" => LayoutEditVisuals.ChromeOpacityFor(state, isLayoutEditing),
-            _ => LayoutEditVisuals.BorderOpacityFor(state, isLayoutEditing),
-        };
+        // string.Equals(..., OrdinalIgnoreCase) instead of ToLowerInvariant() — case-insensitive
+        // comparison without allocating a lowercased copy of `mode` on every Convert call (this runs on
+        // every VisualState/IsLayoutEditing change, for every panel).
+        if (string.Equals(mode, "chrome", StringComparison.OrdinalIgnoreCase))
+            return LayoutEditVisuals.ChromeOpacityFor(state, isLayoutEditing);
+        if (string.Equals(mode, "glow", StringComparison.OrdinalIgnoreCase))
+            return LayeredChromeVisuals.GlowOpacityFor(state, isLayoutEditing);
+        if (string.Equals(mode, "glowfallback", StringComparison.OrdinalIgnoreCase))
+            return LayeredChromeVisuals.GlowOpacityFor(state, isLayoutEditing) * PanelMetrics.GlowFallbackOpacityFactor;
+        if (string.Equals(mode, "accentstroke", StringComparison.OrdinalIgnoreCase))
+            return LayeredChromeVisuals.AccentStrokeOpacityFor(state, isLayoutEditing);
+        if (string.Equals(mode, "neutralstroke", StringComparison.OrdinalIgnoreCase))
+            return LayeredChromeVisuals.NeutralStrokeOpacityFor(state, isLayoutEditing);
+
+        return LayoutEditVisuals.BorderOpacityFor(state, isLayoutEditing);
     }
 
     /// <inheritdoc />

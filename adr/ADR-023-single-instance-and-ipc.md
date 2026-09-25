@@ -47,8 +47,9 @@ instance via a machine-global Named Pipe and exit without ever touching writable
 
 | Object | Name | Semantics | Consumer |
 |---|---|---|---|
-| detection | `DesktopOrganizerSingleInstanceMutex` (no prefix, verbatim literal) | "exists ⟺ the app process is alive" | `installer/DesktopOrganizer.iss` `AppMutex=` |
+| detection | `DesktopOrganizerSingleInstanceMutex` (no prefix, verbatim literal) | "exists ⟺ the app process is alive" | `installer/DesktopOrganizer.iss` `[Code]` `IsAppRunning`/`CheckForMutexes` (formerly `[Setup] AppMutex=` — see D-10 addendum) |
 | guard | `Local\DesktopOrganizer.SingleInstance.{sidHash}` | "owned ⟺ I am primary" | application only |
+| shutdown-request event | `DesktopOrganizerShutdownRequestEvent` (no prefix, verbatim literal) | "signaled ⟺ the installer asks the running Primary to exit gracefully" | `installer/DesktopOrganizer.iss` `[Code]` `RequestGracefulShutdown`/`SetEvent` (signaler) and `IShutdownRequestListener` (consumer, Primary only) — see D-10 addendum |
 
 These are deliberately **not** the same object: the installer's contract is *existence*, the guard's
 contract is *ownership*. Merging them would permanently forbid renaming/respecifying the guard without
@@ -253,9 +254,12 @@ panel load, desktop gestures) is unchanged.
 - The process entry point is now `Program.Main`, not WPF's auto-generated one; any future change to
   `DesktopOrganizer.UI.csproj`'s `<StartupObject>`/`ApplicationDefinition` wiring must preserve "a
   secondary process never constructs `App`" (R-1) or this ADR's central invariant is silently undone.
-- `installer/DesktopOrganizer.iss`'s `AppMutex=DesktopOrganizerSingleInstanceMutex` value is now a
-  cross-repo contract enforced by `InstallerMutexContractTests`, not just a comment — renaming
-  `SingleInstanceNaming.InstallerDetectionMutexName` without updating the installer breaks the test.
+- `installer/DesktopOrganizer.iss`'s `#define AppRunningMutexName "DesktopOrganizerSingleInstanceMutex"`
+  and `#define AppShutdownEventName "DesktopOrganizerShutdownRequestEvent"` values (formerly a single
+  `[Setup] AppMutex=` directive — see D-10 addendum) are now a cross-repo contract enforced by
+  `InstallerMutexContractTests`, not just a comment — renaming
+  `SingleInstanceNaming.InstallerDetectionMutexName`/`.InstallerShutdownRequestEventName` without
+  updating the installer breaks the test.
 - **R-15 — residual risk, deferred to Phase 4.** The pipe tie-breaker (D-4) closes the "two primaries in
   different FUS sessions of the same user" race at the *process* level, but does **not** add a file-level
   lock around `PanelItemStorageService`'s storage root. In the narrow window between a degraded-primary
@@ -311,3 +315,74 @@ completing before it proceeds. See `docs/Refactoring/Testing/sta-test-convention
 full rationale (including the unrelated `ChildWindowViewModel.OnFolderChanged`/`FolderWatcher` deadlock
 this same review found and fixed) and the regression tests
 (`Unit/Services/UiDispatchTests.cs`, `Unit/SingleInstance/ActivationRequestRelayTests.cs`).
+
+## Addendum (2026-09-25): D-10 — installer-initiated graceful shutdown replaces `[Setup] AppMutex=`
+
+**Problem.** `installer/DesktopOrganizer.iss` used to declare `[Setup] AppMutex=DesktopOrganizerSingleInstanceMutex`
+so Inno Setup could refuse to proceed while the app was running. That directive gives Inno its own
+hardcoded, non-closable "close the application and click OK to continue" prompt with **no `[Code]` hook
+to intervene** — the user has to go close the app by hand (tray → Exit) and click OK themselves; a
+silent/unattended install/uninstall (`/VERYSILENT`) simply fails outright if the app is running, since
+there is nothing `[Code]` can do to close it first.
+
+### D-10. Installer asks, then closes the running instance itself via a named event, then proceeds
+
+`AppMutex=` is removed from `[Setup]`. In its place:
+
+- `#define AppRunningMutexName "DesktopOrganizerSingleInstanceMutex"` — the **same** detection-mutex
+  literal D-1 already defined (verbatim, unprefixed, existence-only), now consumed from `[Code]`
+  (`IsAppRunning` / `CheckForMutexes`) instead of from `[Setup]`. The object and its contract are
+  unchanged; only the consumer moved from Inno's built-in blocking check to a scriptable one.
+- `#define AppShutdownEventName "DesktopOrganizerShutdownRequestEvent"` — a new, session-scoped,
+  unprefixed named `EventWaitHandle` (`AutoReset`). `[Code]`'s `RequestGracefulShutdown` opens it with
+  `EVENT_MODIFY_STATE` and calls `SetEvent`; the running Primary's `IShutdownRequestListener`
+  (`ThreadPool.RegisterWaitForSingleObject`, `executeOnlyOnce: true`, started only by Primary from
+  `App.InitTrayIcon`, ADR-023 D-2/D-3) wakes up and marshals onto the UI thread via
+  `UiDispatch.TryBeginInvoke(dispatcher, Shutdown)` — **the same `Application.Shutdown()` → `OnExit`
+  path the tray "Exit" command already uses** (state save, desktop icon restore, single-instance guard
+  release per D-9). No new shutdown path was introduced; the installer just gained a way to trigger the
+  existing one remotely.
+- `EnsureAppClosed` (shared by `PrepareToInstall` for install/upgrade and `InitializeUninstall` for
+  uninstall) is the ask → signal → wait loop: prompt (`SuppressibleMsgBox`, degrades to the *default*
+  button only under `/SILENT`or`/VERYSILENT` **plus** `/SUPPRESSMSGBOXES`, per Inno's own documented
+  contract) → `RequestGracefulShutdown` → `WaitForAppExit` (polls `IsAppRunning`, then additionally waits
+  for the `.exe` file itself to become writable, since releasing the detection mutex in
+  `_serviceProvider.Dispose()` and releasing the OS's hold on the file handle are not quite the same
+  instant) → on success, proceed; on failure, offer Retry/Cancel. A fully unattended run
+  (`/VERYSILENT /SUPPRESSMSGBOXES`) closes the running instance with no UI at all, and — new — relaunches
+  the app after install if `EnsureAppClosed` is the thing that closed it (`AppWasClosedByInstaller` flag,
+  `CurStepChanged`/`ssPostInstall`, `ExecAsOriginalUser` with `ewNoWait`), since the `[Run]` section's own
+  postinstall launch entry is `skipifsilent` and would otherwise leave a silently-upgraded install with
+  nothing running.
+- Restart Manager (`CloseApplicationsFilter=*.exe,*.dll`) is kept as belt-and-braces alongside D-10, not
+  replaced by it — it catches any other handle (not the main `.exe`) that might still be locking a file
+  DO-10 does not know about.
+
+**Contract enforcement.** `InstallerMutexContractTests` now parses `#define AppRunningMutexName`/
+`#define AppShutdownEventName` (previously only the `AppMutex=` literal) against
+`SingleInstanceNaming.InstallerDetectionMutexName`/`.InstallerShutdownRequestEventName`, asserts
+`[Setup]` no longer contains an `AppMutex=` directive (regression guard against silently reinstating the
+old blocking prompt), and asserts no line inside `[Code]` starts with `[` after trimming (guards against
+a `[Code]`-comment line being misparsed by Inno's line-based section scanner as a new section header —
+a real compile failure hit during this change).
+
+**Accepted risks:**
+
+- **Any process running as the same user, in the same interactive session, can signal
+  `DesktopOrganizerShutdownRequestEvent`** — it is an unprefixed, session-scoped, discoverable-by-name
+  event, and `SetEvent` only needs `EVENT_MODIFY_STATE`. Effect is limited to "the app closes gracefully
+  through its normal Exit path" (a DoS at worst, never data loss — the same shutdown sequence as tray
+  Exit runs every time). Accepted because a same-user, same-session process that wants to be disruptive
+  already has strictly more powerful options (killing the process outright, or emulating any UI
+  interaction); this adds no new capability, only a slightly more polite one.
+- **Older installed versions predate `IShutdownRequestListener`.** `OpenEventW` on a pre-D-10 running
+  instance returns a null handle (nothing was ever listening), so `RequestGracefulShutdown` fails and
+  `EnsureAppClosed` falls through to its Retry/Cancel prompt (`AppRunningCloseFailedRetry`: "close it
+  manually via tray → Exit, then click Retry") — i.e. D-10 degrades to exactly the pre-existing
+  manual-close UX for anyone upgrading from an older build, never to a hard failure or a silent skip.
+- **Restart Manager remains a second, independent line of defense**, not a fallback D-10 depends on —
+  it is unaffected by this change and continues to catch file-handle holders D-10's own mutex/event
+  contract does not know about.
+
+**Status:** Accepted. No change to ADR-024's persistence contour — `App.Shutdown()` runs the exact
+existing `OnExit` sequence; no new state, schema, or settings key was added.

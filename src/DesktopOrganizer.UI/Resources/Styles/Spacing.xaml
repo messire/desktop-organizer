@@ -47,6 +47,18 @@
     <CornerRadius x:Key="Radius.Control">3</CornerRadius>
     <CornerRadius x:Key="Radius.Popup">4</CornerRadius>
 
+    <!--
+        ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §2.2) —
+        the concentric INNER ring PART_AccentStroke draws just inside PART_NeutralStroke's own
+        Radius.Panel-radius ring (Resources/Styles/Panels.xaml): Radius.Panel - Thickness.Hairline
+        (8 - 1 = 7), so the two hairline strokes read as concentric rounded rectangles rather than one
+        slightly overhanging the other's own rounded corner. A hand-written literal (XAML has no
+        arithmetic markup extension to derive this from the other two tokens) — the equality is pinned
+        by a dedicated STA test reading both real resources, not merely asserted in this comment (the
+        exact class of drift this plan's own D-9/§9 calls out as a past review-cycle lesson).
+    -->
+    <CornerRadius x:Key="Radius.Panel.Inner">7</CornerRadius>
+
     <Thickness x:Key="Thickness.None">0</Thickness>
     <Thickness x:Key="Thickness.Hairline">1</Thickness>
     <Thickness x:Key="Thickness.PopupPadding">10,7,10,7</Thickness>

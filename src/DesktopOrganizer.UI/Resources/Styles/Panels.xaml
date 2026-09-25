@@ -33,18 +33,30 @@
          AccentIndicatorWidth above — MultiValueConverters over [VisualState, IsLayoutEditing] that
          delegate to LayoutEditVisuals (Theming/LayoutEditVisuals.cs) instead of InteractionVisualState
          directly. LayoutEditVisuals itself returns InteractionVisualState's exact values whenever
-         isLayoutEditing is false, so PART_InteractionOverlay/PART_HeaderActions/PART_AccentIndicator
-         below render byte-for-byte as they did in Phase 5 outside Edit Layout mode; the original two
-         single-value converters above are left untouched (still covered by their own dedicated tests). -->
+         isLayoutEditing is false, so PART_InteractionOverlay/PART_HeaderActions below render
+         byte-for-byte as they did in Phase 5 outside Edit Layout mode (their own geometry/brush are
+         unchanged by ADR-030); PART_AccentIndicator's underlying NUMBERS follow the identical
+         Phase-5-outside-Edit-Layout rule (its opacity/thickness MULTIPLIERS are untouched), but its own
+         rendered SHAPE is new — ADR-030 (D-4) replaced the rectangular strip with a curved Path, so
+         "byte-for-byte" no longer describes its pixels, only its state-driven math. The original two
+         single-value converters above are left untouched (still covered by their own dedicated tests).
+         ADR-030 (docs/PLANS/reference-panel-chrome.md §1 D-6) extended EditAwareVisualStateToDouble with
+         "glow"/"accentStroke"/"neutralStroke"/"glowFallback" parameter readings, and
+         EditAwareAccentIndicatorWidth with a "marker" reading — see those converters' own remarks. -->
     <conv:EditAwareVisualStateToDoubleConverter x:Key="EditAwareVisualStateToDouble"/>
     <conv:EditAwareAccentIndicatorWidthConverter x:Key="EditAwareAccentIndicatorWidth"/>
 
-    <!-- docs/PLANS/workspace-grid-07-visual.md "Border radius": clips PART_Chrome's own content
-         (header/content host) to the exact rounded rectangle its Background already paints — see the
-         converter's own remarks for why this is required BEFORE Radius.Panel (Spacing.xaml) could safely
-         be widened, and why it can never affect ResizeOverlay/native hit-testing (both are outside
-         PART_Chrome's subtree). -->
+    <!-- docs/PLANS/workspace-grid-07-visual.md "Border radius": clips content to the exact rounded
+         rectangle the chrome's own surface paints — see the converter's own remarks. ADR-030
+         (docs/PLANS/reference-panel-chrome.md §1 D-2/D-12) relocated the ONE consumer of this converter
+         from PART_Chrome to PART_SurfaceLayer (the layered template's own single clip owner — every
+         decorative layer inside it, including PART_Chrome itself, shares this one clip instead of each
+         layer clipping itself independently) — see PART_SurfaceLayer's own remarks below for why. -->
     <conv:RoundedRectClipConverter x:Key="RoundedRectClip"/>
+
+    <!-- ADR-030 (docs/PLANS/reference-panel-chrome.md §1 D-4): builds PART_AccentIndicator's curved
+         Path.Data from {StaticResource Radius.Panel} — see the converter's own remarks. -->
+    <conv:AccentMarkerGeometryConverter x:Key="AccentMarkerGeometry"/>
 
     <Style TargetType="{x:Type controls:PanelChrome}">
         <Setter Property="Background" Value="Transparent"/>
@@ -53,236 +65,409 @@
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type controls:PanelChrome}">
                     <!--
-                        PART_Chrome is the panel's actual visible surface — it replaces the outer
-                        <Border CornerRadius="6"> that used to live directly in ChildWindow.xaml (its
-                        Background was a ColorOpacityBrush MultiBinding over the now-removed
-                        Model.BackgroundColor/BackgroundOpacity; SurfaceBrush, from
-                        PanelSurfaceBrushConverter over Model.AccentColor/SurfaceOpacity/SurfaceStyle, is
-                        its direct replacement — same corner radius token, same role).
+                        ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md
+                        §3) — layered template, bottom to top:
+                          0. PART_HitCatcher     — spans the WHOLE window rect (plan D-5).
+                          1. PART_Glow           — shader-based accent glow ring, inset by ChromeOuterInset,
+                                                    UNDER PART_SurfaceLayer (plan D-2/D-9/D-10).
+                          1'. PART_GlowFallback  — shader-free substitute for PART_Glow, same inset ring
+                                                    (minus GlowFallbackRingOffset), Collapsed by default.
+                          2. PART_SurfaceLayer   — inset by ChromeOuterInset (2 DIP), single rounded-rect
+                             Clip owner, containing (in z-order):
+                             a. PART_Chrome            — the panel's actual visible surface; its own inner
+                                                         Grid's FIRST row-spanning child is
+                                                         PART_SurfaceHighlight, a very weak non-semantic
+                                                         top-to-bottom gradient UNDER PART_Header/
+                                                         PART_ContentHost (plan D-11).
+                             b. PART_NeutralStroke     — 1-DIP neutral rounded-rect ring, OVER PART_Chrome
+                                                         (D-1's "budget" table: there is no room for a
+                                                         stroke painted UNDER an opaque Solid surface within
+                                                         the 2-DIP inset).
+                             c. PART_AccentStroke      — thin accent-colored inner ring, same reason.
+                             d. PART_AccentIndicator   — the curved accent identity marker, hosted in
+                                                         PART_AccentIndicatorHost (a fixed-size overlay,
+                                                         plan D-4/D-7).
+                             e. PART_InteractionOverlay — unchanged behavior, PART_SurfaceLayer's own
+                                                         top-most child (covers the whole surface, including
+                                                         while rolled up) instead of the pre-ADR-030 two-row
+                                                         Grid's.
                     -->
-                    <Border x:Name="PART_Chrome"
-                            Background="{TemplateBinding SurfaceBrush}"
-                            CornerRadius="{StaticResource Radius.Panel}"
-                            SnapsToDevicePixels="True">
+                    <Grid>
                         <!--
-                            docs/PLANS/workspace-grid-07-visual.md "Border radius": clips this Border's
-                            own content (the Grid below — header, accent indicator, content host) to its
-                            own rounded rectangle. Without this, a Border only paints its OWN
-                            Background/BorderBrush with rounded corners; square-cornered descendants
-                            (the ListBox's scrollbar, a selection rectangle flush against an edge) can
-                            render straight past the rounded corner into the transparent area outside it
-                            — invisible at the previous CornerRadius=6 (barely a few tenths of a DIP of
-                            overhang) but visibly wrong at the new, wider radius (see Spacing.xaml's
-                            Radius.Panel remarks) without this fix. RelativeSource Self (not
-                            TemplatedParent): this binds to PART_Chrome's OWN ActualWidth/ActualHeight/
-                            CornerRadius, the exact rectangle its Background already paints — not
-                            PanelChrome's (the templated control's) size, which happens to be identical
-                            here (PART_Chrome fills its templated parent) but is the wrong THING to name
-                            in the binding regardless. This Clip cannot reach ResizeOverlay's OWN WPF
-                            hit-test routing (a sibling, outside this Border's subtree) or the native
-                            WM_NCHITTEST path (which has no notion of corner radius at all) — but see
-                            RoundedRectClipConverter's own remarks for a SEPARATE, real risk this does NOT
-                            rule out: AllowsTransparency="True" routes clicks on a fully alpha-0 pixel
-                            straight to the desktop at the OS level, regardless of what WPF element sits
-                            there — mitigated (MAJOR-1, docs/PLANS/workspace-grid-07-visual.md fix-cycle 1)
-                            by widening ResizeOverlay's own corner strips to match Radius.Panel.
+                            PART_HitCatcher (plan D-5). AllowsTransparency="True" (ChildWindow.xaml) is a
+                            LAYERED window: the OS routes a mouse-down by the FINAL COMPOSITED PIXEL ALPHA
+                            at each screen location, entirely independent of WPF's own hit-test tree. Once
+                            the chrome inset makes the outer 2 DIP ring nearly transparent (only a faint
+                            glow tail paints there), a click there would be routed straight through to the
+                            desktop, bypassing the resize Thumbs (ChildWindow.xaml's ResizeOverlay, a
+                            SIBLING of this control) entirely — the very risk ADR-025 MAJOR-1 already
+                            documented for the panel's rounded corners. This Border spans the WHOLE window
+                            rect (no Margin) with a near-invisible (alpha=1/255) but OPAQUE fill, so the OS
+                            always routes the click to this window; IsHitTestVisible="False" keeps it out of
+                            WPF's OWN hit-test tree, so routing within this window still falls through to
+                            whichever WPF element (a Thumb, a header button) actually sits at that point.
                         -->
-                        <Border.Clip>
-                            <MultiBinding Converter="{StaticResource RoundedRectClip}">
-                                <Binding Path="ActualWidth" RelativeSource="{RelativeSource Self}"/>
-                                <Binding Path="ActualHeight" RelativeSource="{RelativeSource Self}"/>
-                                <Binding Path="CornerRadius" RelativeSource="{RelativeSource Self}"/>
-                            </MultiBinding>
-                        </Border.Clip>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <!--
-                                    Fixed at 8 (MAJOR-1 fix, widened again for the Edit Layout emphasis
-                                    channel — see below) — NOT Auto sized to PART_AccentIndicator's own
-                                    bound Width below. PART_AccentIndicator's Width is ALWAYS bound through
-                                    the EditAwareAccentIndicatorWidth MultiBinding (below), never directly
-                                    through AccentIndicatorWidthConverter (MINOR fix, fix-cycle round 2 —
-                                    corrected from an earlier version of this comment): EditAwareAccentIndicatorWidth
-                                    delegates to LayoutEditVisuals.AccentEmphasisFor(state, isLayoutEditing),
-                                    which itself calls InteractionVisualState.AccentEmphasisFor(state) — the
-                                    same baseline that ranges 1.0 (Idle) .. 1.7 (Resizing), i.e. the strip's
-                                    rendered width varies between 3.0px and 5.1px as VisualState changes when
-                                    isLayoutEditing is false. While Edit Layout mode IS active,
-                                    LayoutEditVisuals.AccentEmphasisFor layers a further AccentEmphasis
-                                    multiplier (1.35x, Theming/LayoutEditVisuals.cs) on top of that SAME
-                                    InteractionVisualState baseline, so the true combined maximum is
-                                    3.0 * 1.7 * 1.35 = 6.885px (Resizing while IsLayoutEditing=true — Edit
-                                    Layout mode permits resize, so this combination is reachable, not just
-                                    theoretical). An Auto column tracks that varying desired width exactly,
-                                    which resized PART_ContentHost (the * column next door — the whole icon
-                                    grid/file list) sideways by up to ~2.1px on every hover/drag/resize
-                                    transition (MAJOR-1, review round 3). 8 is a fixed upper bound
-                                    comfortably above the 6.885px combined max, so the column's width — and
-                                    therefore every sibling element's position — never moves; only the strip
-                                    drawn inside it grows/shrinks. Border.Width (below) is itself a double,
-                                    so x:Static/the converter binding assigns it directly with no
-                                    GridLength conversion needed at all.
+                        <Border x:Name="PART_HitCatcher"
+                                Background="{StaticResource Brush.HitTest.Catcher}"
+                                IsHitTestVisible="False"/>
 
-                                    P05/ADR-029 (F-3 fix): the "8" here is no longer JUST a resize-jitter
-                                    fix constant — it is also the exact width the icon-grid snap-time math
-                                    (GridMetrics.FileListHPadding, PanelResizeController/
-                                    NativePanelResizeController.SnapWidthToGrid) now subtracts from
-                                    Window.Width before computing RowCapacity, via the single source of
-                                    truth PanelMetrics.ContentLeftInset. Unlike AccentIndicatorWidth
-                                    (a double, bindable to Border.Width directly with no conversion),
-                                    ColumnDefinition.Width is a GridLength with no double->GridLength
-                                    TypeConverter — a bare x:Static of a double still cannot be assigned
-                                    here. PanelMetrics.ContentLeftInsetColumnWidth (a real GridLength
-                                    constant, the same "wrap the double in a GridLength" pattern as
-                                    HeaderRowHeight below) closes that gap, so this column and
-                                    GridMetrics.FileListHPadding now read the same literal "8" from one
-                                    place instead of two independently-maintained copies.
-                                -->
-                                <ColumnDefinition Width="{x:Static models:PanelMetrics.ContentLeftInsetColumnWidth}"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <!--
-                                    PanelMetrics.HeaderRowHeight (a real GridLength), not
-                                    TemplateBinding HeaderHeight (a double): RowDefinition.Height has no
-                                    double->GridLength auto-conversion (GridLengthConverter only accepts a
-                                    string), so binding it directly would be a binding error that only
-                                    shows up at runtime, never at `dotnet build`. HeaderRowHeight is the
-                                    exact GridLength PanelMetrics.cs itself documents as "for direct use in
-                                    a RowDefinition" — it also keeps this row's height tied to the SAME
-                                    fixed constant RollUpBehavior's collapsed target height uses (D-11),
-                                    rather than to a per-instance-overridable DP that could silently
-                                    desync from it.
-                                -->
-                                <RowDefinition Height="{x:Static models:PanelMetrics.HeaderRowHeight}"/>
-                                <RowDefinition Height="*"/>
-                            </Grid.RowDefinitions>
+                        <!--
+                            PART_Glow (plan D-2/D-9/D-10) — the shader-based accent glow. An empty ring
+                            (Border, BorderThickness = hairline, no children/Background — the
+                            DropShadowEffect below is what actually paints the visible glow, not this
+                            Border's own stroke) inset by the SAME ChromeOuterInsetThickness
+                            PART_SurfaceLayer uses, so the glow's own un-blurred edge sits exactly at the
+                            surface's outer boundary. Exactly ONE Effect on the whole control (T-R6/G-3):
+                              - ShadowDepth="0" (a semantic constant — "no offset", not a magic number; the
+                                sole literal permitted by G-2b) keeps the shadow centered on the ring rather
+                                than cast to one side;
+                              - BlurRadius/Opacity are tokens (PanelMetrics.GlowBlurRadius/GlowEffectOpacity,
+                                D-10's own residual-alpha-at-the-window-edge model, pinned by
+                                PanelMetricsTests);
+                              - RenderingBias="Performance" trades a little visual fidelity for the effect's
+                                own render cost (plan D-9's performance budget);
+                              - Color binds to AccentBrush.Color (TemplatedParent) — AccentBrush is always a
+                                real SolidColorBrush from the caching AccentBrushConverter (D-9's own note),
+                                so this Freezable-inside-a-Style binding always resolves; T-R6 catches a
+                                silent resolution failure by asserting the REAL rendered Color after
+                                assigning a known AccentBrush.
+                            State-driven expressiveness lives entirely in THIS Border's own
+                            UIElement.Opacity (LayeredChromeVisuals.GlowOpacityFor via the "glow" parameter)
+                            — the DropShadowEffect's own parameters never change per state, so the effect is
+                            never recreated.
+                        -->
+                        <Border x:Name="PART_Glow"
+                                Margin="{x:Static models:PanelMetrics.ChromeOuterInsetThickness}"
+                                BorderBrush="{TemplateBinding AccentBrush}"
+                                BorderThickness="{StaticResource Thickness.Hairline}"
+                                CornerRadius="{StaticResource Radius.Panel}"
+                                IsHitTestVisible="False">
+                            <Border.Effect>
+                                <DropShadowEffect ShadowDepth="0"
+                                                   BlurRadius="{x:Static models:PanelMetrics.GlowBlurRadius}"
+                                                   Opacity="{x:Static models:PanelMetrics.GlowEffectOpacity}"
+                                                   RenderingBias="Performance"
+                                                   Color="{Binding AccentBrush.Color, RelativeSource={RelativeSource TemplatedParent}}"/>
+                            </Border.Effect>
+                            <!-- D-6: MultiBinding over [VisualState, IsLayoutEditing] — see
+                                 EditAwareVisualStateToDoubleConverter's remarks above; "glow" reads
+                                 LayeredChromeVisuals.GlowOpacityFor. -->
+                            <Border.Opacity>
+                                <MultiBinding Converter="{StaticResource EditAwareVisualStateToDouble}" ConverterParameter="glow">
+                                    <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                    <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                </MultiBinding>
+                            </Border.Opacity>
+                        </Border>
+
+                        <!--
+                            PART_GlowFallback (plan D-9) — a pre-computed soft stroke with NO Effect at
+                            all, shown instead of PART_Glow when Theming.ChromeEffectsPolicy.IsGlowEffectEnabled
+                            is false (software/RDP render tier). In Windows High Contrast this part stays
+                            Collapsed too — the separate HC DataTrigger below collapses it outright, so it
+                            never actually becomes visible there. Margin = GlowFallbackMarginThickness
+                            (ChromeOuterInset - GlowFallbackRingOffset, 1 DIP outside PART_Chrome's own
+                            surface). Opacity reads the SAME "glow" channel scaled by
+                            PanelMetrics.GlowFallbackOpacityFactor (the "glowFallback" parameter — see
+                            EditAwareVisualStateToDoubleConverter's remarks). Collapsed by default; the
+                            fallback DataTrigger below is what reveals it.
+                        -->
+                        <Border x:Name="PART_GlowFallback"
+                                SnapsToDevicePixels="True"
+                                Margin="{x:Static models:PanelMetrics.GlowFallbackMarginThickness}"
+                                BorderBrush="{TemplateBinding AccentBrush}"
+                                BorderThickness="{StaticResource Thickness.Hairline}"
+                                CornerRadius="{StaticResource Radius.Panel}"
+                                IsHitTestVisible="False"
+                                Visibility="Collapsed">
+                            <Border.Opacity>
+                                <MultiBinding Converter="{StaticResource EditAwareVisualStateToDouble}" ConverterParameter="glowFallback">
+                                    <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                    <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                </MultiBinding>
+                            </Border.Opacity>
+                        </Border>
+
+                        <!--
+                            PART_SurfaceLayer (plan D-1/D-2/D-5/D-12). Margin = ChromeOuterInsetThickness
+                            (2 DIP uniform) is the entire chrome-inset budget (D-1's exhaustive constraint
+                            table — bounded above by the rolled-up header-button fit, the existing
+                            ContentLeftInset horizontal chrome, the resize hit-test strip width, and
+                            GridMetrics.FileListVPadding's own reserve; see PanelMetricsTests). Everything
+                            INSIDE this Grid renders in "inset content" coordinates; PART_HitCatcher/
+                            PART_Glow/PART_GlowFallback above render in full window-rect coordinates.
+
+                            Single Clip owner (D-12): a Grid has no CornerRadius of its own to bind
+                            RelativeSource Self against (unlike the old PART_Chrome-owned Clip this
+                            replaces), so this MultiBinding's third input is the SAME {StaticResource
+                            Radius.Panel} PART_Chrome/PART_NeutralStroke/PART_InteractionOverlay below all
+                            already read directly — one shared radius value, one shared Clip, instead of
+                            each decorative ring clipping itself independently (which would have to
+                            individually re-derive its own inset-adjusted radius/size).
+                        -->
+                        <Grid x:Name="PART_SurfaceLayer" Margin="{x:Static models:PanelMetrics.ChromeOuterInsetThickness}">
+                            <Grid.Clip>
+                                <MultiBinding Converter="{StaticResource RoundedRectClip}">
+                                    <Binding Path="ActualWidth" RelativeSource="{RelativeSource Self}"/>
+                                    <Binding Path="ActualHeight" RelativeSource="{RelativeSource Self}"/>
+                                    <Binding Source="{StaticResource Radius.Panel}"/>
+                                </MultiBinding>
+                            </Grid.Clip>
 
                             <!--
-                                Accent indicator (§5.3): a thin strip along the panel's left edge, spanning
-                                the HEADER row only (2026-09-23, per the Ambient Accent reference: the bright
-                                accent strip is exactly header-tall; below the header the panel edge is just the
-                                dim border — measured on the reference at lum ~120 inside the header vs ~55
-                                below it). Previously it spanned both rows (full panel height). Still a
-                                persistent, LOCAL identifier (never a full-panel fill; see
-                                SurfaceComposer.ComposeSurface's own Solid-ignores-accent contract) that stays
-                                visible whether the panel is expanded or rolled up — the header row is the one
-                                row a rolled-up panel keeps.
-
-                                Width (MAJOR-B fix) is no longer the fixed x:Static PanelMetrics.AccentIndicatorThickness
-                                literal — it is bound through the EditAwareAccentIndicatorWidth MultiBinding
-                                (below), which scales that SAME base thickness by
-                                InteractionVisualState.AccentEmphasisFor(VisualState) (and, while Edit Layout
-                                mode is active, a further LayoutEditVisuals.AccentEmphasisFor multiplier —
-                                see the column comment above), so the strip visibly thickens through
-                                Idle -> Hover -> Editing -> Dragging -> Resizing. This is the "third channel"
-                                (alongside PART_InteractionOverlay's border opacity and PART_HeaderActions'
-                                chrome opacity below) the phase spec's DoD relies on — previously computed by
-                                AccentEmphasisFor but never actually bound to anything in this file.
-
-                                HorizontalAlignment="Left" (MAJOR-1 fix) is load-bearing now that the column
-                                itself is a fixed Width="8" (above) rather than Auto: WPF centers a
-                                FrameworkElement with an explicit Width inside whatever space its column
-                                actually gives it unless told otherwise, so without this the strip would grow
-                                from its CENTER as VisualState changes — nudging its left edge into
-                                PART_Chrome's own rounded corner/border by up to ~1.05px per side — instead of
-                                growing from a fixed left edge flush against the panel's own edge, which is
-                                the actual visual the accent indicator is meant to give (a persistent stripe
-                                anchored to the panel's edge, not a bar that expands outward in both
-                                directions).
+                                PART_Chrome — the panel's actual visible surface (unchanged role from
+                                Phase 5; its own Clip moved to PART_SurfaceLayer above, D-12). Fills
+                                PART_SurfaceLayer entirely (no Margin/explicit size — default Grid child
+                                Stretch alignment).
                             -->
-                            <Border x:Name="PART_AccentIndicator"
-                                    Grid.Column="0" Grid.Row="0"
-                                    HorizontalAlignment="Left"
-                                    Background="{TemplateBinding AccentBrush}">
-                                <!-- D-6: MultiBinding over [VisualState, IsLayoutEditing] — see
-                                     EditAwareAccentIndicatorWidthConverter's remarks above. -->
-                                <Border.Width>
-                                    <MultiBinding Converter="{StaticResource EditAwareAccentIndicatorWidth}">
-                                        <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
-                                        <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
-                                    </MultiBinding>
-                                </Border.Width>
+                            <Border x:Name="PART_Chrome"
+                                    Background="{TemplateBinding SurfaceBrush}"
+                                    CornerRadius="{StaticResource Radius.Panel}"
+                                    SnapsToDevicePixels="True">
+                                <!--
+                                    Inner content grid — three columns (pad | * | pad, D-3) replacing the
+                                    old fixed 8-DIP LEFT-only accent-indicator column: the accent identity
+                                    now lives in the overlaid PART_AccentIndicator marker below, not a
+                                    layout column, so the same 8-DIP total horizontal chrome
+                                    (ContentLeftInset, unchanged — GridMetrics.FileListHPadding/every
+                                    analytical snap-time formula reads the SAME constant, see
+                                    PanelMetrics.ContentLeftInset's own remarks) splits symmetrically
+                                    instead. Three rows (header-inner | gap | *) replacing the old
+                                    HeaderRowHeight | * split — ChromeOuterInset + HeaderInnerHeight +
+                                    HeaderContentGap reconstructs the exact same HeaderHeight (32 DIP)
+                                    screen offset the pre-ADR-030 template used (PanelMetricsTests T-M1),
+                                    so ChildWindow.xaml's RollUpBehavior/content-row math need no changes.
+                                -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="{x:Static models:PanelMetrics.ContentSidePaddingLength}"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="{x:Static models:PanelMetrics.ContentSidePaddingLength}"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="{x:Static models:PanelMetrics.HeaderInnerRowHeight}"/>
+                                        <RowDefinition Height="{x:Static models:PanelMetrics.HeaderContentGapLength}"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <!--
+                                        PART_SurfaceHighlight (plan D-11) — a very weak, non-semantic
+                                        top-to-bottom gradient over PART_Chrome's own SurfaceBrush fill,
+                                        FIRST child of this Grid (lowest z-order — under PART_Header/
+                                        PART_ContentHost, matching §3's diagram: over the surface fill,
+                                        under the header/content). Spans every row/column so it covers the
+                                        whole surface, rolled-up included. Brush.Chrome.SurfaceHighlight
+                                        (Brushes.xaml) is a single frozen LinearGradientBrush shared by
+                                        every panel — no per-panel allocation. Not accent-tinted, not a
+                                        PanelSurfaceStyle, not persisted (plan D-11's own "non-semantic"
+                                        framing) — purely a static highlight token.
+                                    -->
+                                    <Border x:Name="PART_SurfaceHighlight"
+                                            Grid.Row="0" Grid.RowSpan="3" Grid.Column="0" Grid.ColumnSpan="3"
+                                            Background="{StaticResource Brush.Chrome.SurfaceHighlight}"
+                                            IsHitTestVisible="False"/>
+
+                                    <!--
+                                        Header (§5.4): icon (optional) | title/rename editor (star) |
+                                        rolled-up item count (optional) | header actions. PART_Header is
+                                        layout-only — it never attaches its own interaction handlers (see
+                                        this control's class remarks and R-5/R-6/R-7): the ContextMenu and
+                                        title-bar drag handlers live on the actual element ChildWindow.xaml
+                                        supplies via PanelChrome.TitleEditor, which THAT file declares (and
+                                        can therefore wire to its own code-behind), not on anything declared
+                                        in this ResourceDictionary.
+                                    -->
+                                    <Grid x:Name="PART_Header" Grid.Row="0" Grid.Column="1" ToolTip="{TemplateBinding Title}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- §5.4 "optional semantic icon" — reserved, no current consumer sets SemanticIcon (see the DP's doc comment). -->
+                                        <TextBlock x:Name="PART_SemanticIcon"
+                                                   Grid.Column="0"
+                                                   Text="{TemplateBinding SemanticIcon}"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="12"
+                                                   Foreground="{StaticResource Brush.Text.Secondary}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="8,0,0,0"/>
+
+                                        <ContentPresenter Grid.Column="1"
+                                                           Content="{TemplateBinding TitleEditor}"
+                                                           VerticalAlignment="Stretch"/>
+
+                                        <!-- §5.6 rolled-up state: "Accent | Title | optional item count | expand control" — visible only while IsRolledUp (trigger below). -->
+                                        <TextBlock x:Name="PART_ItemCount"
+                                                   Grid.Column="2"
+                                                   Text="{Binding ItemCount, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ItemCountToText}}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0"
+                                                   Style="{StaticResource Typography.Caption}"
+                                                   Visibility="Collapsed"/>
+
+                                        <!--
+                                            "Actions muted in idle" (§5.4 DoD): opacity driven by VisualState via
+                                            VisualStateToDoubleConverter (parameter="chrome" -> InteractionVisualState.ChromeOpacityFor),
+                                            not a hardcoded number here, so it can never drift out of sync with
+                                            InteractionVisualStateTests' own asserted values (C2).
+                                        -->
+                                        <ContentPresenter x:Name="PART_HeaderActions"
+                                                           Grid.Column="3"
+                                                           Content="{TemplateBinding HeaderActions}"
+                                                           VerticalAlignment="Center">
+                                            <!-- D-6: MultiBinding over [VisualState, IsLayoutEditing] — see
+                                                 EditAwareVisualStateToDoubleConverter's remarks above; "chrome"
+                                                 forces full opacity for Idle while editing (LayoutEditVisuals.ChromeOpacityFor). -->
+                                            <ContentPresenter.Opacity>
+                                                <MultiBinding Converter="{StaticResource EditAwareVisualStateToDouble}" ConverterParameter="chrome">
+                                                    <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                                    <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                                </MultiBinding>
+                                            </ContentPresenter.Opacity>
+                                        </ContentPresenter>
+                                    </Grid>
+
+                                    <!-- Content host (§5.3) — hosts ChildWindow.xaml's existing FileListHost, supplied as this control's Content. -->
+                                    <ContentPresenter x:Name="PART_ContentHost" Grid.Row="2" Grid.Column="1"/>
+                                </Grid>
                             </Border>
 
                             <!--
-                                Header (§5.4): icon (optional) | title/rename editor (star) | rolled-up item
-                                count (optional) | header actions. PART_Header is layout-only — it never
-                                attaches its own interaction handlers (see this control's class remarks and
-                                R-5/R-6/R-7): the ContextMenu and title-bar drag handlers live on the actual
-                                element ChildWindow.xaml supplies via PanelChrome.TitleEditor, which THAT file
-                                declares (and can therefore wire to its own code-behind), not on anything
-                                declared in this ResourceDictionary.
+                                PART_NeutralStroke (plan D-2/D-6/§3): a 1-DIP neutral (non-accent) rounded
+                                rectangle OVER PART_Chrome's own surface — painted under an opaque Solid
+                                surface, a stroke on the outer edge would be entirely invisible, and there
+                                is no room left OUTSIDE PART_Chrome within the 2-DIP inset for a separate
+                                ring (D-1's budget). Reuses Brush.Border.Default (already overridden for
+                                High Contrast, Colors.HighContrast.xaml) so the base border stays a system
+                                color there without a separate HC brush.
+
+                                PART_InteractionOverlay below paints the SAME Brush.Border.Default hairline,
+                                on the SAME pixels, for the Solid/Ambient SurfaceStyles — identical
+                                BorderThickness/CornerRadius, both direct children of PART_SurfaceLayer.
+                                (Under the Glass SurfaceStyle trigger below, PART_InteractionOverlay's own
+                                BorderThickness widens to 1.5 DIP, so only the outer 1 DIP of its ring still
+                                coincides with THIS ring's own 1-DIP stroke — the combined-opacity math
+                                referenced below is therefore an approximation, not an exact pixel match,
+                                under Glass.) This is deliberate duplication, not an oversight: the two rings
+                                answer different questions and each is independently load-bearing. THIS ring
+                                is ADR-030 §3's own "always-readable neutral panel outline" — the chrome's
+                                base identity, present (at some opacity) in every VisualState, never fully
+                                absent. The ring below is the PRE-EXISTING ADR-025/026 interaction-state
+                                feedback channel (D-6's "border" reading) — unchanged by ADR-030, still
+                                doing the job it always did. Their effective combined opacity, as actually
+                                seen on screen (both draw the identical brush at the identical location, for
+                                Solid/Ambient), is <c>1 - (1 - overlayOpacity) * (1 - neutralOpacity)</c> —
+                                see Theming/LayeredChromeVisuals.cs's CombinedNeutralBorderOpacityFor
+                                (test-only: nothing in this template reads it; each ring below keeps
+                                computing its OWN Opacity independently).
                             -->
-                            <Grid x:Name="PART_Header" Grid.Row="0" Grid.Column="1" ToolTip="{TemplateBinding Title}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
+                            <Border x:Name="PART_NeutralStroke"
+                                    SnapsToDevicePixels="True"
+                                    BorderBrush="{StaticResource Brush.Border.Default}"
+                                    BorderThickness="{StaticResource Thickness.Hairline}"
+                                    CornerRadius="{StaticResource Radius.Panel}"
+                                    IsHitTestVisible="False">
+                                <Border.Opacity>
+                                    <MultiBinding Converter="{StaticResource EditAwareVisualStateToDouble}" ConverterParameter="neutralStroke">
+                                        <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                        <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                    </MultiBinding>
+                                </Border.Opacity>
+                            </Border>
 
-                                <!-- §5.4 "optional semantic icon" — reserved, no current consumer sets SemanticIcon (see the DP's doc comment). -->
-                                <TextBlock x:Name="PART_SemanticIcon"
-                                           Grid.Column="0"
-                                           Text="{TemplateBinding SemanticIcon}"
-                                           FontFamily="Segoe MDL2 Assets"
-                                           FontSize="12"
-                                           Foreground="{StaticResource Brush.Text.Secondary}"
-                                           VerticalAlignment="Center"
-                                           Margin="8,0,0,0"/>
+                            <!--
+                                PART_AccentStroke (plan D-2/D-6/§3): a thin, ACCENT-colored ring drawn
+                                CONCENTRICALLY just inside PART_NeutralStroke's own ring — Margin =
+                                Thickness.Hairline (1 DIP, the same width PART_NeutralStroke's own stroke
+                                occupies) and CornerRadius = Radius.Panel.Inner (Radius.Panel - 1, so the
+                                two hairline rings read as concentric rounded rectangles, not one slightly
+                                overhanging the other's corner — Spacing.xaml's own remarks). Deliberately
+                                MUCH weaker than PART_AccentIndicator's own marker (T-P4:
+                                AccentStrokeOpacityMax * hairline &lt; AccentMarkerStrokeThickness / 2) —
+                                ADR-030 §3's own "accent stroke must not compete with the marker" rule.
+                            -->
+                            <Border x:Name="PART_AccentStroke"
+                                    SnapsToDevicePixels="True"
+                                    Margin="{StaticResource Thickness.Hairline}"
+                                    BorderBrush="{TemplateBinding AccentBrush}"
+                                    BorderThickness="{StaticResource Thickness.Hairline}"
+                                    CornerRadius="{StaticResource Radius.Panel.Inner}"
+                                    IsHitTestVisible="False">
+                                <Border.Opacity>
+                                    <MultiBinding Converter="{StaticResource EditAwareVisualStateToDouble}" ConverterParameter="accentStroke">
+                                        <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                        <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                    </MultiBinding>
+                                </Border.Opacity>
+                            </Border>
 
-                                <ContentPresenter Grid.Column="1"
-                                                   Content="{TemplateBinding TitleEditor}"
-                                                   VerticalAlignment="Stretch"/>
+                            <!--
+                                PART_AccentIndicator (plan D-4/D-7 item 2): the accent identity marker, a
+                                curved Path tracing the panel's own top-left rounded corner — vertical stem
+                                down the left edge, quarter-circle arc around the corner, short horizontal
+                                tail along the top edge (AccentMarkerGeometryConverter, keyed off the SAME
+                                {StaticResource Radius.Panel} PART_Chrome/PART_SurfaceLayer's own Clip
+                                already read, so the marker always traces the exact corner the surface
+                                itself paints). Hosted in a FIXED-size Grid (Width/Height from
+                                PanelMetrics.AccentMarkerHostWidth/Height — computed, not Auto, from the
+                                geometry's own bounds inflated by half the marker's maximum combined
+                                StrokeThickness — plan D-7's "no layout jitter": a state-driven
+                                StrokeThickness change never resizes this host, so it can never perturb
+                                PanelChrome's own DesiredSize or nudge any sibling). Anchored top-left within
+                                PART_SurfaceLayer (no Margin) — the same corner the marker's own curved
+                                geometry traces (AccentMarkerGeometryConverter's remarks).
 
-                                <!-- §5.6 rolled-up state: "Accent | Title | optional item count | expand control" — visible only while IsRolledUp (trigger below). -->
-                                <TextBlock x:Name="PART_ItemCount"
-                                           Grid.Column="2"
-                                           Text="{Binding ItemCount, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ItemCountToText}}"
-                                           VerticalAlignment="Center"
-                                           Margin="0,0,6,0"
-                                           Style="{StaticResource Typography.Caption}"
-                                           Visibility="Collapsed"/>
-
-                                <!--
-                                    "Actions muted in idle" (§5.4 DoD): opacity driven by VisualState via
-                                    VisualStateToDoubleConverter (parameter="chrome" -> InteractionVisualState.ChromeOpacityFor),
-                                    not a hardcoded number here, so it can never drift out of sync with
-                                    InteractionVisualStateTests' own asserted values (C2).
-                                -->
-                                <ContentPresenter x:Name="PART_HeaderActions"
-                                                   Grid.Column="3"
-                                                   Content="{TemplateBinding HeaderActions}"
-                                                   VerticalAlignment="Center">
-                                    <!-- D-6: MultiBinding over [VisualState, IsLayoutEditing] — see
-                                         EditAwareVisualStateToDoubleConverter's remarks above; "chrome"
-                                         forces full opacity for Idle while editing (LayoutEditVisuals.ChromeOpacityFor). -->
-                                    <ContentPresenter.Opacity>
-                                        <MultiBinding Converter="{StaticResource EditAwareVisualStateToDouble}" ConverterParameter="chrome">
+                                Stretch="None" — the Path's own Data coordinates are already in DIP (the
+                                converter bakes AccentMarkerStemLength/AccentMarkerTailLength directly into
+                                the geometry), so no additional scale/fit transform is wanted. Round
+                                line caps/join (plan D-4) give the stroke's start/end and its one corner a
+                                soft, rounded finish rather than a hard-edged rectangular cut.
+                            -->
+                            <Grid x:Name="PART_AccentIndicatorHost"
+                                  HorizontalAlignment="Left" VerticalAlignment="Top"
+                                  Width="{x:Static models:PanelMetrics.AccentMarkerHostWidth}"
+                                  Height="{x:Static models:PanelMetrics.AccentMarkerHostHeight}"
+                                  IsHitTestVisible="False">
+                                <Path x:Name="PART_AccentIndicator"
+                                      Stretch="None"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      Stroke="{TemplateBinding AccentBrush}"
+                                      IsHitTestVisible="False">
+                                    <Path.Data>
+                                        <Binding Source="{StaticResource Radius.Panel}" Converter="{StaticResource AccentMarkerGeometry}"/>
+                                    </Path.Data>
+                                    <!-- D-6/D-4: MultiBinding over [VisualState, IsLayoutEditing], "marker"
+                                         parameter — see EditAwareAccentIndicatorWidthConverter's remarks above. -->
+                                    <Path.StrokeThickness>
+                                        <MultiBinding Converter="{StaticResource EditAwareAccentIndicatorWidth}" ConverterParameter="marker">
                                             <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
                                             <Binding Path="IsLayoutEditing" RelativeSource="{RelativeSource TemplatedParent}"/>
                                         </MultiBinding>
-                                    </ContentPresenter.Opacity>
-                                </ContentPresenter>
+                                    </Path.StrokeThickness>
+                                </Path>
                             </Grid>
-
-                            <!-- Content host (§5.3) — hosts ChildWindow.xaml's existing FileListHost, supplied as this control's Content. -->
-                            <ContentPresenter x:Name="PART_ContentHost" Grid.Row="1" Grid.Column="1"/>
 
                             <!--
                                 Interaction overlay (D-6): purely visual border feedback for the resolved
                                 VisualState. IsHitTestVisible="False" is load-bearing (R-5) — this element
-                                sits on top of the whole chrome (last child = highest z-order within this
-                                Grid) and must never intercept a mouse event ChildWindow.xaml's own
-                                ResizeOverlay/drag/drop siblings, or this template's own header buttons/title
-                                editor, need to receive.
+                                sits on top of the whole chrome (last child = highest z-order within
+                                PART_SurfaceLayer) and must never intercept a mouse event ChildWindow.xaml's
+                                own ResizeOverlay/drag/drop siblings, or this template's own header
+                                buttons/title editor, need to receive. Relocated (ADR-030) from the old
+                                two-row Grid (Grid.RowSpan="2") to PART_SurfaceLayer directly (its parent's
+                                own single cell already spans the whole inset area, rolled-up included) —
+                                same coverage, one fewer indirection.
                             -->
                             <Border x:Name="PART_InteractionOverlay"
-                                    Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Grid.ColumnSpan="2"
+                                    SnapsToDevicePixels="True"
                                     IsHitTestVisible="False"
                                     BorderBrush="{StaticResource Brush.Border.Default}"
-                                    BorderThickness="1"
+                                    BorderThickness="{StaticResource Thickness.Hairline}"
                                     CornerRadius="{StaticResource Radius.Panel}">
                                 <!-- D-6: MultiBinding over [VisualState, IsLayoutEditing] — see
                                      EditAwareVisualStateToDoubleConverter's remarks above; "border" applies
@@ -295,7 +480,7 @@
                                 </Border.Opacity>
                             </Border>
                         </Grid>
-                    </Border>
+                    </Grid>
 
                     <ControlTemplate.Triggers>
                         <Trigger Property="SemanticIcon" Value="">
@@ -310,6 +495,57 @@
                         <Trigger Property="SurfaceStyle" Value="Glass">
                             <Setter TargetName="PART_InteractionOverlay" Property="BorderThickness" Value="1.5"/>
                         </Trigger>
+
+                        <!--
+                            ADR-030 shader-free fallback (plan D-9): this DataTrigger binds
+                            ChromeEffectsPolicy.IsGlowEffectEnabled via a Binding with Mode=OneTime — which
+                            defers evaluation from XAML-parse time to whenever the binding is actually
+                            attached (here, whenever a panel's own ControlTemplate is first applied), the
+                            same "resolve per-instance, at template-application time" idiom the High
+                            Contrast trigger just below uses for HighContrastState.IsActive. When the real
+                            render tier is below 2 (software/RDP rendering) — or this policy's own future
+                            kill-switch is flipped — PART_Glow's shader-based DropShadowEffect never
+                            executes at all (Effect={x:Null}, not just Opacity=0 — an unused Effect object
+                            still costs a composited intermediate surface even at Opacity 0) and
+                            PART_GlowFallback's plain, effect-free ring takes over. Declared BEFORE the High
+                            Contrast trigger below: HC's own Setters for these same two parts must win when
+                            BOTH conditions are true (HC panels never show a fallback ring either) — later
+                            Setters win ties in WPF's ControlTemplate.Triggers, so ordering here is
+                            load-bearing, not stylistic.
+                        -->
+                        <DataTrigger Binding="{Binding Path=(theming:ChromeEffectsPolicy.IsGlowEffectEnabled), Mode=OneTime}" Value="False">
+                            <Setter TargetName="PART_Glow" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="PART_Glow" Property="Effect" Value="{x:Null}"/>
+                            <Setter TargetName="PART_GlowFallback" Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+
+                        <!--
+                            ADR-030 High Contrast strategy (plan D-8): a Binding with Mode=OneTime against
+                            HighContrastState.IsActive — resolved once, when a panel's template is first
+                            applied, NOT at XAML-parse time (unlike the "{x:Static
+                            theming:HighContrastState.IsActive}"-as-Binding.Source idiom
+                            HighContrastState's own remarks document for its OTHER consumer,
+                            ChildWindow.xaml's PanelSurfaceBrush MultiBinding — that idiom resolves once,
+                            at parse time, for the whole process; THIS trigger's Mode=OneTime Binding
+                            resolves once PER PanelChrome instance, at template-application time), so a
+                            test can flip the flag before constructing a PanelChrome without reloading any
+                            resource dictionary. Decorative-only parts collapse; PART_NeutralStroke's own opacity is forced to 1
+                            (its brush is already a system color via Colors.HighContrast.xaml). Declared
+                            AFTER the fallback trigger above so ITS Setters for PART_Glow/PART_GlowFallback
+                            win when both are true (see that trigger's own remarks). PART_SurfaceHighlight
+                            (plan D-11) is collapsed here too — Colors.HighContrast.xaml ALSO overrides its
+                            own gradient endpoint colors to Transparent (MAJOR-A "every chrome color gets an
+                            HC override"), so this Setter is a belt-and-suspenders redundancy for a consumer
+                            that only checks Visibility.
+                        -->
+                        <DataTrigger Binding="{Binding Path=(theming:HighContrastState.IsActive), Mode=OneTime}" Value="True">
+                            <Setter TargetName="PART_Glow" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="PART_Glow" Property="Effect" Value="{x:Null}"/>
+                            <Setter TargetName="PART_GlowFallback" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="PART_AccentStroke" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="PART_NeutralStroke" Property="Opacity" Value="1"/>
+                            <Setter TargetName="PART_SurfaceHighlight" Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

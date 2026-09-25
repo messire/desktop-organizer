@@ -198,6 +198,28 @@ public class DiConfigTests
         Assert.Null(exception);
     }
 
+    /// <summary>
+    /// <see cref="IShutdownRequestListener"/> (installer-initiated graceful shutdown) must resolve as a
+    /// singleton, same as <see cref="ISingleInstanceCoordinator"/> right above — <c>App.xaml.cs</c>
+    /// resolves it once in <c>StartApp</c> and relies on the same instance being disposed automatically
+    /// with the root <see cref="ServiceProvider"/> in <c>OnExit</c>. Merely resolving it must never start
+    /// listening on its own (that only happens on an explicit <see cref="IShutdownRequestListener.Start"/>
+    /// call, which this test deliberately does not make) and must never throw.
+    /// </summary>
+    [Fact]
+    public void RegisterServices_IShutdownRequestListener_ResolvesAsSingleton()
+    {
+        var services = new ServiceCollection();
+        services.RegisterServices();
+        using var serviceProvider = services.BuildServiceProvider();
+
+        var first = serviceProvider.GetRequiredService<IShutdownRequestListener>();
+        var second = serviceProvider.GetRequiredService<IShutdownRequestListener>();
+
+        Assert.NotNull(first);
+        Assert.Same(first, second);
+    }
+
     // ── DesktopOrganizer.UI's DiConfig ──────────────────────────────────────
     //
     // UiDiConfig.ConfigureServices() builds the full UI service collection (ViewModels, windows,

@@ -1,3 +1,6 @@
+using System.Windows;
+using DesktopOrganizer.UI.Converters;
+using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Theming;
 
 namespace DesktopOrganizer.Tests.Unit.Theming;
@@ -11,6 +14,33 @@ namespace DesktopOrganizer.Tests.Unit.Theming;
 [Trait(UnitTests, "UI")]
 public class HoverOverlayPolicyTests
 {
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.1, T-C2)
+    // — PART_SurfaceHighlight (D-11) must not change HoverOverlayPolicy's own darken/lighten DECISION.
+    // Same "duplicated by hand, real production constants where they exist" convention
+    // AmbientAccentContrastAuditTests already establishes for its own NeutralSurfaceBase/AccentNeutral
+    // mirrors — this class had none of its own before, since it never previously needed
+    // SurfaceComposer/AccentPalette. Placed at the very top of the class (fields/static members before
+    // the pre-existing instance [Theory]/[Fact] tests below) to satisfy StyleCop's static-before-instance
+    // member ordering.
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    private static readonly Color NeutralSurfaceBase =
+        (Color)ColorConverter.ConvertFromString(PanelSurfaceBrushConverter.NeutralSurfaceHex)!;
+
+    private static readonly Color HighlightTop = LoadColorChromeHighlightTop();
+
+    public static IEnumerable<object[]> AccentStyleCombinations()
+    {
+        var accents = new List<string> { AccentPalette.Neutral };
+        accents.AddRange(AccentPalette.Presets);
+
+        foreach (var accent in accents)
+        {
+            foreach (PanelSurfaceStyle style in Enum.GetValues<PanelSurfaceStyle>())
+                yield return new object[] { accent, style };
+        }
+    }
+
     [Theory]
     [InlineData(0.0)]
     [InlineData(0.1)]
@@ -50,5 +80,50 @@ public class HoverOverlayPolicyTests
         // Colors.xaml's Color.Overlay.Hover = #1AFFFFFF — kept in sync by comment, same duplication
         // convention AmbientAccentContrastAuditTests already uses for its own XAML-only token mirrors.
         Assert.Equal(System.Windows.Media.Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF), HoverOverlayPolicy.LightenWash);
+    }
+
+    /// <summary>
+    /// T-C2: for the same 21 accent×style combinations <see cref="AmbientAccentContrastAuditTests"/>'
+    /// own T-C1 sweeps (opacity is irrelevant here — <see cref="HoverOverlayPolicy.For"/> only ever reads
+    /// <see cref="ContrastCalculator.RelativeLuminance"/> of the panel's own RGB mix, which
+    /// <see cref="SurfaceComposer.ComposeSurface"/> never varies by opacity, per this class' own remarks
+    /// above), compositing <see cref="HighlightTop"/> over the panel's own resting surface colour (the
+    /// same "ignore the surface's own alpha, read RGB only" convention <see cref="HoverOverlayPolicy"/>'s
+    /// own remarks document) must not flip the darken/lighten decision <see cref="HoverOverlayPolicy.For"/>
+    /// returns.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AccentStyleCombinations))]
+    public void HoverOverlayDirection_IsUnaffectedBySurfaceHighlight(string accentHex, PanelSurfaceStyle style)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+        var surface = SurfaceComposer.ComposeSurface(NeutralSurfaceBase, accent, style, 0.8);
+        var highlighted = ContrastCalculator.CompositeOverOpaque(HighlightTop, surface);
+
+        var baselineWash = HoverOverlayPolicy.For(ContrastCalculator.RelativeLuminance(surface));
+        var highlightedWash = HoverOverlayPolicy.For(ContrastCalculator.RelativeLuminance(highlighted));
+
+        Assert.Equal(
+            baselineWash,
+            highlightedWash);
+    }
+
+    /// <summary>
+    /// ADR-030 T-C2 — loads the REAL <c>Color.Chrome.Highlight.Top</c> resource from the compiled
+    /// Colors.xaml (same convention <c>AmbientAccentContrastAuditTests</c>' own identically-named helper
+    /// uses). Declared last (private, StyleCop's public-before-private method ordering).
+    /// </summary>
+    private static Color LoadColorChromeHighlightTop()
+    {
+        return StaTestRunner.Run(() =>
+        {
+            WpfApplicationHost.EnsureApplication();
+
+            var colors = new ResourceDictionary
+            {
+                Source = new Uri("/DesktopOrganizer.UI;component/Resources/Styles/Colors.xaml", UriKind.Relative),
+            };
+            return (Color)colors["Color.Chrome.Highlight.Top"];
+        });
     }
 }

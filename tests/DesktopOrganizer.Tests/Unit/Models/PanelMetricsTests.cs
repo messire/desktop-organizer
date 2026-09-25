@@ -232,4 +232,199 @@ public class PanelMetricsTests
             overlapFraction > 0d,
             "This residual overlap is expected to be nonzero within this fix cycle's scope — if it is ever exactly zero, update this test's own documentation (it would mean FileListHost gained a margin elsewhere).");
     }
+
+    // ------------------------------------------------------------------
+    // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.1,
+    // T-M1..T-M6) — the 2-DIP chrome inset budget and the glow/stroke/marker tokens it bounds.
+    // ------------------------------------------------------------------
+
+    /// <summary>T-M1: the rolled-up header row still fits a header button after two insets, and the inner row split reconstructs HeaderHeight exactly.</summary>
+    [Fact]
+    public void ChromeOuterInset_HeaderRowSplit_FitsHeaderButtonAndReconstructsHeaderHeight()
+    {
+        Assert.True(
+            PanelMetrics.HeaderHeight - (2 * PanelMetrics.ChromeOuterInset) >= PanelMetrics.HeaderButtonSize,
+            $"HeaderHeight ({PanelMetrics.HeaderHeight}) minus 2x ChromeOuterInset ({PanelMetrics.ChromeOuterInset}) must be >= HeaderButtonSize ({PanelMetrics.HeaderButtonSize}).");
+
+        Assert.Equal(
+            PanelMetrics.HeaderHeight,
+            PanelMetrics.ChromeOuterInset + PanelMetrics.HeaderInnerHeight + PanelMetrics.HeaderContentGap);
+    }
+
+    /// <summary>T-M2: the new symmetric side-padding decomposition sums to exactly the same ContentLeftInset/FileListHPadding total as before ADR-030 (F-3 invariant preserved).</summary>
+    [Fact]
+    public void ChromeOuterInset_ContentSidePaddingSplit_EqualsContentLeftInsetAndFileListHPadding()
+    {
+        var reconstructed = (2 * PanelMetrics.ChromeOuterInset) + (2 * PanelMetrics.ContentSidePadding);
+
+        Assert.Equal(PanelMetrics.ContentLeftInset, reconstructed);
+        Assert.Equal(GridMetrics.FileListHPadding, reconstructed);
+    }
+
+    /// <summary>T-M3: every inset pixel lies inside the resize hit-test strip on both edges and corners.</summary>
+    [Fact]
+    public void ChromeOuterInset_IsWithinResizeHitTestStrips()
+    {
+        Assert.True(
+            PanelMetrics.ChromeOuterInset < PanelMetrics.ResizeEdgeThickness,
+            $"ChromeOuterInset ({PanelMetrics.ChromeOuterInset}) must be strictly less than ResizeEdgeThickness ({PanelMetrics.ResizeEdgeThickness}).");
+        Assert.True(
+            PanelMetrics.ChromeOuterInset <= PanelMetrics.ResizeCornerThickness,
+            $"ChromeOuterInset ({PanelMetrics.ChromeOuterInset}) must be at most ResizeCornerThickness ({PanelMetrics.ResizeCornerThickness}).");
+    }
+
+    /// <summary>T-M4: the bottom inset fits inside GridMetrics.FileListVPadding's already-reserved vertical chrome (F-1's unused reserve).</summary>
+    [Fact]
+    public void ChromeOuterInset_FitsWithinFileListVPadding()
+    {
+        Assert.True(
+            PanelMetrics.ChromeOuterInset <= GridMetrics.FileListVPadding,
+            $"ChromeOuterInset ({PanelMetrics.ChromeOuterInset}) must be at most GridMetrics.FileListVPadding ({GridMetrics.FileListVPadding}).");
+    }
+
+    /// <summary>T-M5: the glow's modeled residual edge alpha (D-10) stays at/under GlowEdgeResidualMax, and the fallback ring never sits farther out than the inset itself.</summary>
+    [Fact]
+    public void Glow_ResidualEdgeAlpha_StaysUnderGlowEdgeResidualMax()
+    {
+        var sigma = PanelMetrics.GlowBlurRadius / 3d;
+        var residual = PanelMetrics.GlowEffectOpacity * PanelMetrics.GlowOpacityMax
+            * Math.Exp(-(PanelMetrics.ChromeOuterInset * PanelMetrics.ChromeOuterInset) / (2d * sigma * sigma));
+
+        Assert.True(
+            residual <= PanelMetrics.GlowEdgeResidualMax,
+            $"Modeled glow residual edge alpha ({residual:F4}) must be <= GlowEdgeResidualMax ({PanelMetrics.GlowEdgeResidualMax}).");
+
+        Assert.True(
+            PanelMetrics.GlowFallbackRingOffset <= PanelMetrics.ChromeOuterInset,
+            $"GlowFallbackRingOffset ({PanelMetrics.GlowFallbackRingOffset}) must be <= ChromeOuterInset ({PanelMetrics.ChromeOuterInset}).");
+    }
+
+    /// <summary>T-M6: every new Thickness/GridLength wrapper token wraps its own underlying double exactly — same pattern as ContentLeftInsetColumnWidth_WrapsContentLeftInset above.</summary>
+    [Fact]
+    public void ChromeOuterInsetThickness_WrapsChromeOuterInset()
+    {
+        Assert.Equal(new Thickness(PanelMetrics.ChromeOuterInset), PanelMetrics.ChromeOuterInsetThickness);
+    }
+
+    [Fact]
+    public void ContentSidePaddingLength_WrapsContentSidePadding()
+    {
+        Assert.Equal(new GridLength(PanelMetrics.ContentSidePadding), PanelMetrics.ContentSidePaddingLength);
+        Assert.Equal(GridUnitType.Pixel, PanelMetrics.ContentSidePaddingLength.GridUnitType);
+    }
+
+    [Fact]
+    public void HeaderInnerRowHeight_WrapsHeaderInnerHeight()
+    {
+        Assert.Equal(new GridLength(PanelMetrics.HeaderInnerHeight), PanelMetrics.HeaderInnerRowHeight);
+        Assert.Equal(GridUnitType.Pixel, PanelMetrics.HeaderInnerRowHeight.GridUnitType);
+    }
+
+    [Fact]
+    public void HeaderContentGapLength_WrapsHeaderContentGap()
+    {
+        Assert.Equal(new GridLength(PanelMetrics.HeaderContentGap), PanelMetrics.HeaderContentGapLength);
+        Assert.Equal(GridUnitType.Pixel, PanelMetrics.HeaderContentGapLength.GridUnitType);
+    }
+
+    [Fact]
+    public void GlowFallbackMarginThickness_WrapsChromeOuterInsetMinusGlowFallbackRingOffset()
+    {
+        Assert.Equal(
+            new Thickness(PanelMetrics.ChromeOuterInset - PanelMetrics.GlowFallbackRingOffset),
+            PanelMetrics.GlowFallbackMarginThickness);
+    }
+
+    /// <summary>D-4 collision requirement (б): the marker host's own computed Height must not push its bottom edge past HeaderInnerHeight (else it would visually overflow into the content row — Grid does not clip children to a row's own bounds by default).</summary>
+    [Fact]
+    public void AccentMarkerHostHeight_DoesNotExceedHeaderInnerHeight()
+    {
+        Assert.True(
+            PanelMetrics.AccentMarkerHostHeight <= PanelMetrics.HeaderInnerHeight,
+            $"AccentMarkerHostHeight ({PanelMetrics.AccentMarkerHostHeight}) must be <= HeaderInnerHeight ({PanelMetrics.HeaderInnerHeight}).");
+    }
+
+    /// <summary>Sanity: the marker host is a finite, positive, non-NaN size — a fixed host size (not Auto) is what keeps a per-state StrokeThickness change from ever perturbing PanelChrome's own DesiredSize (plan D-7).</summary>
+    [Fact]
+    public void AccentMarkerHost_WidthAndHeight_AreFinitePositiveNumbers()
+    {
+        Assert.True(PanelMetrics.AccentMarkerHostWidth is > 0 and not double.NaN);
+        Assert.True(PanelMetrics.AccentMarkerHostHeight is > 0 and not double.NaN);
+        Assert.False(double.IsInfinity(PanelMetrics.AccentMarkerHostWidth));
+        Assert.False(double.IsInfinity(PanelMetrics.AccentMarkerHostHeight));
+    }
+
+    /// <summary>T-P4 (accent-stroke-vs-marker weight, ADR-030 §3): the accent stroke's own maximum opacity times a hairline must be visibly weaker than the marker's own base stroke half-width.</summary>
+    [Fact]
+    public void AccentStrokeOpacityMax_TimesHairline_IsLessThanAccentMarkerStrokeThicknessHalf()
+    {
+        Assert.True(
+            PanelMetrics.AccentStrokeOpacityMax * 1d < PanelMetrics.AccentMarkerStrokeThickness / 2d,
+            "AccentStrokeOpacityMax * hairline must be strictly less than AccentMarkerStrokeThickness / 2.");
+    }
+
+    /// <summary>Radius.Panel.Inner (Spacing.xaml) must equal the real Radius.Panel minus a real hairline Thickness — read from the compiled XAML resources, not hand-copied literals.</summary>
+    [Fact]
+    public void RadiusPanelInner_EqualsRadiusPanelMinusHairline()
+    {
+        var (radiusPanel, radiusPanelInner, hairline) = StaTestRunner.Run(() =>
+        {
+            WpfApplicationHost.EnsureApplication();
+
+            var spacing = new ResourceDictionary
+            {
+                Source = new Uri("/DesktopOrganizer.UI;component/Resources/Styles/Spacing.xaml", UriKind.Relative),
+            };
+
+            var panel = ((CornerRadius)spacing["Radius.Panel"]).TopLeft;
+            var panelInner = ((CornerRadius)spacing["Radius.Panel.Inner"]).TopLeft;
+            var hairlineThickness = ((Thickness)spacing["Thickness.Hairline"]).Left;
+            return (panel, panelInner, hairlineThickness);
+        });
+
+        Assert.Equal(radiusPanel - hairline, radiusPanelInner);
+    }
+
+    /// <summary>
+    /// ADR-030 fix cycle 1 (MINOR 6): <see cref="PanelMetrics.AccentMarkerCornerRadiusBudget"/> is a
+    /// hand-written mirror of <c>Spacing.xaml</c>'s <c>Radius.Panel</c> (XAML has no C# counterpart this
+    /// class could read at compile time) — this pins the equality against the REAL compiled resource,
+    /// same "read from the real resource, not a hand-copied literal" pattern as
+    /// <see cref="RadiusPanelInner_EqualsRadiusPanelMinusHairline"/> above.
+    /// </summary>
+    [Fact]
+    public void AccentMarkerCornerRadiusBudget_EqualsRadiusPanel()
+    {
+        var radiusPanel = StaTestRunner.Run(() =>
+        {
+            WpfApplicationHost.EnsureApplication();
+
+            var spacing = new ResourceDictionary
+            {
+                Source = new Uri("/DesktopOrganizer.UI;component/Resources/Styles/Spacing.xaml", UriKind.Relative),
+            };
+
+            return ((CornerRadius)spacing["Radius.Panel"]).TopLeft;
+        });
+
+        Assert.Equal(PanelMetrics.AccentMarkerCornerRadiusBudget, radiusPanel);
+    }
+
+    /// <summary>
+    /// ADR-030 fix cycle 1 (MINOR 6): <see cref="PanelMetrics.AccentMarkerMaxStrokeThickness"/> must equal
+    /// the REAL <see cref="DesktopOrganizer.UI.Theming.InteractionVisualState.AccentEmphasisFor"/>/
+    /// <see cref="DesktopOrganizer.UI.Theming.LayoutEditVisuals.AccentEmphasis"/> formula it is now
+    /// computed from (no more hand-copied <c>1.7</c>/<c>1.35</c> mirror constants) — same formula
+    /// <c>ResourceDictionaryMergeTests</c>' own T-R4 test independently cross-checks against the marker
+    /// host's real size.
+    /// </summary>
+    [Fact]
+    public void AccentMarkerMaxStrokeThickness_EqualsRealAccentEmphasisFormula()
+    {
+        var expected = PanelMetrics.AccentMarkerStrokeThickness
+            * DesktopOrganizer.UI.Theming.InteractionVisualState.AccentEmphasisFor(DesktopOrganizer.UI.Theming.PanelVisualState.Resizing)
+            * DesktopOrganizer.UI.Theming.LayoutEditVisuals.AccentEmphasis;
+
+        Assert.Equal(expected, PanelMetrics.AccentMarkerMaxStrokeThickness, precision: 10);
+    }
 }

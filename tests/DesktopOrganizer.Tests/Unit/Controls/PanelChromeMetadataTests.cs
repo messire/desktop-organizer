@@ -124,7 +124,17 @@ public class PanelChromeMetadataTests
     {
         Assert.Equal("PART_Header", PanelChrome.PartHeader);
         Assert.Equal("PART_AccentIndicator", PanelChrome.PartAccentIndicator);
+        Assert.Equal("PART_AccentIndicatorHost", PanelChrome.PartAccentIndicatorHost);
         Assert.Equal("PART_ContentHost", PanelChrome.PartContentHost);
         Assert.Equal("PART_InteractionOverlay", PanelChrome.PartInteractionOverlay);
+
+        // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §3)
+        Assert.Equal("PART_HitCatcher", PanelChrome.PartHitCatcher);
+        Assert.Equal("PART_Glow", PanelChrome.PartGlow);
+        Assert.Equal("PART_GlowFallback", PanelChrome.PartGlowFallback);
+        Assert.Equal("PART_SurfaceLayer", PanelChrome.PartSurfaceLayer);
+        Assert.Equal("PART_SurfaceHighlight", PanelChrome.PartSurfaceHighlight);
+        Assert.Equal("PART_NeutralStroke", PanelChrome.PartNeutralStroke);
+        Assert.Equal("PART_AccentStroke", PanelChrome.PartAccentStroke);
     }
 }

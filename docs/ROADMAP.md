@@ -1000,6 +1000,33 @@ MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§1
 > VIS-MV/ICO-MV/MIG-MV, объединяет план P03/P04 §7, ADR-029 manual verify, P07-visual §9/§11, P08
 > findings, P02b rollback); известный/задокументированный долг — [docs/REVIEWS/workspace-grid-debt.md](REVIEWS/workspace-grid-debt.md).
 
+- [x] **ADR-030 — Reference-Style Layered Panel Chrome** (ветка `feature/reference-chrome`, мастер-план
+      [docs/PLANS/reference-panel-chrome.md](PLANS/reference-panel-chrome.md)). Слоистый `PanelChrome`
+      поверх Ambient Accent (ADR-025) без нового persisted-состояния: `PART_HitCatcher` (закрывает
+      OS-level click-through-линзу угла, ADR-025 MAJOR-1, на обоих путях ресайза), единственный
+      `DropShadowEffect` (`PART_Glow`) с shader-free fallback по `RenderCapability.Tier`
+      (`Theming/ChromeEffectsPolicy`), neutral/accent hairline-кольца (`PART_NeutralStroke`/
+      `PART_AccentStroke`), non-semantic surface highlight (`PART_SurfaceHighlight`), изогнутый accent
+      marker (`PART_AccentIndicator` теперь `Path`). Бюджет прозрачного inset ограничен 2 DIP уже
+      существующим чромом (rolled-up панель — связывающее ограничение); внешний ореол уже референса —
+      сознательный trade-off, решён в пользу варианта A (не трогать persisted-геометрию, `adr/ADR-030-*.md`
+      Amendment 2026-09-25 Q-1). `dotnet build`/`dotnet test` — 0 errors, 0 warnings, 3459/3459 ×3.
+      Архитектурное решение — [ADR-030](../adr/ADR-030-reference-panel-chrome.md) (Accepted), короткий
+      amendment к [ADR-025](../adr/ADR-025-ambient-accent-visual-language.md). Новый долг —
+      `docs/Refactoring/BACKLOG.md` DO-022 (doc-drift `FileListHost.Margin`), DO-023
+      (`SystemIconsPanelWindow` без `PanelChrome`), DO-024 (широкий ореол — открытый продуктовый вопрос),
+      DO-025 (`RenderCapability.Tier` не отслеживается на лету).
+
+> ⚠️ **Manual verify (Win10/Win11) — не выполнено, среда разработки ограничена `dotnet build`/`dotnet
+> test`.** Полная матрица MV-1…MV-15 —
+> [docs/PLANS/reference-panel-chrome.md](PLANS/reference-panel-chrome.md) §6 и ADR-030's собственный раздел
+> «Manual verify». Наивысший приоритет: отсутствие «линии среза» glow на 100–175% DPI (MV-2); hairline-рамки
+> не размыты на дробном DPI (MV-3); ноль layout jitter в реальном жесте (MV-4); hit catcher реально ловит
+> клик на внешних 2 DIP и в геометрическом углу на обоих путях ресайза (MV-5/MV-6); сохранённая раскладка
+> (≥5 панелей) не теряет колонки и не переписывает `application-state.json` только из-за загрузки (MV-10);
+> все 4 темы High Contrast (MV-11); 10/20 панелей без заметного падения FPS, включая скролл/hover в большой
+> панели (MV-12, glow пересчитывается на любую перерисовку внутри панели, не только resize).
+
 ---
 
 ## Сквозные задачи

@@ -12,11 +12,17 @@ namespace DesktopOrganizer.UI.Converters;
 /// <see cref="Border.BorderBrush"/> with rounded corners natively, but does NOT clip arbitrary CHILD
 /// content to that same rounded shape — a square-cornered descendant (a
 /// <see cref="System.Windows.Controls.ListBox"/>'s scrollbar, a selection rectangle sitting flush
-/// against the edge) can render past the rounded corner into the transparent area outside it. Bound to
-/// <c>PART_Chrome</c>'s own <see cref="UIElement.Clip"/> (<c>Resources/Styles/Panels.xaml</c>), this
-/// converter is the fix: it makes that CONTENT obey the exact same rounded rectangle the chrome's own
-/// background already draws, which is what makes widening <c>Radius.Panel</c> (Spacing.xaml) safe in
-/// the first place.
+/// against the edge) can render past the rounded corner into the transparent area outside it.
+/// <para>
+/// ADR-030 (docs/PLANS/reference-panel-chrome.md §1 D-2/D-12) moved this converter's ONE consumer from
+/// <c>PART_Chrome</c>'s own <see cref="UIElement.Clip"/> to <c>PART_SurfaceLayer</c>'s
+/// (<c>Resources/Styles/Panels.xaml</c>) — the layered template's single shared clip owner: every
+/// decorative layer inside <c>PART_SurfaceLayer</c> (<c>PART_Chrome</c> included) now obeys ONE rounded
+/// rectangle instead of each layer clipping itself independently. This converter's own output is
+/// unchanged either way; it makes whatever it is bound to obey the exact same rounded rectangle the
+/// chrome's own background paints, which is what makes widening <c>Radius.Panel</c> (Spacing.xaml) safe
+/// in the first place.
+/// </para>
 /// </summary>
 /// <remarks>
 /// <para>
@@ -49,6 +55,15 @@ namespace DesktopOrganizer.UI.Converters;
 /// <c>Radius.Panel</c> widened 6 -&gt; 8 in this same fix-cycle; widening the resize grip to match (also
 /// this fix-cycle) does not shrink that lens, but does shrink the fraction of the grip's own footprint it
 /// occupies, so most of a diagonal-resize gesture's initial mouse-down still lands on a live pixel.
+/// </para>
+/// <para>
+/// <b>ADR-030 update (D-5):</b> <c>PART_HitCatcher</c> (<c>Resources/Styles/Panels.xaml</c>, a
+/// near-invisible but OPAQUE <see cref="Border"/> spanning the WHOLE window rect, underneath everything
+/// else) closes this always-transparent lens on BOTH the WPF <c>Thumb</c> path and the native
+/// <c>WM_NCHITTEST</c> path: the OS now always finds a non-zero-alpha pixel to route the click to,
+/// regardless of where the panel's own rounded corner leaves the composited bitmap transparent. The
+/// click-through risk this remark describes is therefore closed at the WINDOW level, not by anything this
+/// converter's own output does.
 /// </para>
 /// <para>
 /// Same defensive contract as the other Ambient Accent converters (never throws): missing/wrongly-typed

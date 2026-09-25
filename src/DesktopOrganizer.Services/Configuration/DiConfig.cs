@@ -178,6 +178,17 @@ public static class DiConfig
                 sessionId: sessionId,
                 diagnostics: () => sp.GetRequiredService<IDiagnosticsLog>());
         });
+
+        // Installer-initiated graceful shutdown. The event name is a contract with
+        // installer/DesktopOrganizer.iss's "#define AppShutdownEventName" (pinned by
+        // InstallerMutexContractTests) — SetEvent there is what this listener wakes up for. Singleton so
+        // App.OnExit's container disposal is what tears it down; unlike ISingleInstanceCoordinator above,
+        // IDiagnosticsLog is resolved eagerly (not through a lazy Func) because this listener only ever
+        // exists in a process that is already Primary (App.StartApp only runs there), so there is no
+        // ADR-023 R-12 concern about a burst of Secondary launches materializing the JSONL writer.
+        services.AddSingleton<IShutdownRequestListener>(sp => new InstallerShutdownRequestListener(
+            SingleInstanceNaming.InstallerShutdownRequestEventName,
+            sp.GetRequiredService<IDiagnosticsLog>()));
     }
 
     /// <summary>

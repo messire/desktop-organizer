@@ -23,6 +23,23 @@ public static class SingleInstanceNaming
     public const string InstallerDetectionMutexName = "DesktopOrganizerSingleInstanceMutex";
 
     /// <summary>
+    /// Name of the shutdown-request event whose sole contract is "the installer signals this ⟺ it is
+    /// asking the running Primary to exit gracefully". Consumed by
+    /// <c>installer/DesktopOrganizer.iss</c> (<c>#define AppShutdownEventName</c>) via <c>SetEvent</c>,
+    /// and by the application's <see cref="DesktopOrganizer.Services.Abstractions.IShutdownRequestListener"/>,
+    /// which waits on it and triggers the same shutdown path as the tray "Exit" command.
+    /// </summary>
+    /// <remarks>
+    /// This value must never change without updating the same literal in the <c>.iss</c> file in the
+    /// same change — pinned by <c>InstallerMutexContractTests</c>, which parses the <c>.iss</c> file and
+    /// compares the literal there against this constant. Like <see cref="InstallerDetectionMutexName"/>,
+    /// deliberately unprefixed (no <c>Local\</c>/<c>Global\</c>) — a session-scoped name is correct here
+    /// because the installer always runs in the same interactive session as the application it is
+    /// updating/removing.
+    /// </remarks>
+    public const string InstallerShutdownRequestEventName = "DesktopOrganizerShutdownRequestEvent";
+
+    /// <summary>
     /// Name of the guard mutex whose contract is "ownership ⟺ I am primary". Deliberately a
     /// different object from <see cref="InstallerDetectionMutexName"/> (ADR-023 D-1): the installer's
     /// contract is existence, the guard's contract is ownership — conflating them would forever

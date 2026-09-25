@@ -113,4 +113,23 @@
     <Color x:Key="Color.Settings.TextMuted">#666666</Color>
     <Color x:Key="Color.Settings.SwatchBorder">#888</Color>
     <Color x:Key="Color.Settings.Warning">#B8860B</Color>
+
+    <!--
+        ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §2.3) —
+        non-semantic surface-highlight gradient endpoints (D-11) and the hit-test-catcher's
+        near-invisible-but-opaque fill (D-5). Both are pure chrome, never accent — see
+        Colors.HighContrast.xaml for their HC overrides (Highlight.* -> Transparent;
+        HitTest.Catcher deliberately left un-overridden, see that file's own remarks).
+    -->
+    <Color x:Key="Color.Chrome.Highlight.Top">#0FFFFFFF</Color>
+    <Color x:Key="Color.Chrome.Highlight.Bottom">#00FFFFFF</Color>
+
+    <!--
+        Alpha=1 (not 0): a fully-transparent (alpha 0) pixel on a layered (AllowsTransparency="True")
+        window is routed by the OS straight through to whatever is beneath it, bypassing this window's
+        WPF hit-test tree entirely (ADR-025 MAJOR-1's own click-through-lens finding). Alpha=1 is
+        visually indistinguishable from fully transparent but keeps the OS routing the click to THIS
+        window (plan D-5) — PART_HitCatcher's whole reason to exist.
+    -->
+    <Color x:Key="Color.HitTest.Catcher">#01000000</Color>
 </ResourceDictionary>

@@ -391,6 +391,52 @@ public class EditAwareVisualStateToDoubleConverterTests
         Assert.Throws<NotSupportedException>(
             () => Converter.ConvertBack(0.5, new[] { typeof(PanelVisualState), typeof(bool) }, "border", AnyCulture));
     }
+
+    // ------------------------------------------------------------------
+    // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.1, T-K1) —
+    // "glow"/"accentStroke"/"neutralStroke"/"glowFallback" parameters, delegating to LayeredChromeVisuals.
+    // ------------------------------------------------------------------
+    [Theory]
+    [InlineData("glow")]
+    [InlineData("accentStroke")]
+    [InlineData("neutralStroke")]
+    public void Convert_LayeredChromeParameters_MatchLayeredChromeVisualsExactly(string parameter)
+    {
+        foreach (var state in new[] { PanelVisualState.Idle, PanelVisualState.Hover, PanelVisualState.Resizing })
+        {
+            foreach (var isLayoutEditing in new[] { false, true })
+            {
+                var expected = parameter switch
+                {
+                    "glow" => LayeredChromeVisuals.GlowOpacityFor(state, isLayoutEditing),
+                    "accentStroke" => LayeredChromeVisuals.AccentStrokeOpacityFor(state, isLayoutEditing),
+                    _ => LayeredChromeVisuals.NeutralStrokeOpacityFor(state, isLayoutEditing),
+                };
+
+                var actual = Converter.Convert(new object?[] { state, isLayoutEditing }, typeof(double), parameter, AnyCulture);
+
+                Assert.Equal(expected, actual);
+            }
+        }
+    }
+
+    [Fact]
+    public void Convert_GlowFallbackParameter_EqualsGlowChannelTimesGlowFallbackOpacityFactor()
+    {
+        var expected = LayeredChromeVisuals.GlowOpacityFor(PanelVisualState.Hover, false) * PanelMetrics.GlowFallbackOpacityFactor;
+        var actual = Converter.Convert(new object?[] { PanelVisualState.Hover, false }, typeof(double), "glowFallback", AnyCulture);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void Convert_UnknownParameterAfterAddingNewOnes_StillFallsBackToBorder()
+    {
+        var expected = LayoutEditVisuals.BorderOpacityFor(PanelVisualState.Idle, false);
+        var actual = Converter.Convert(new object?[] { PanelVisualState.Idle, false }, typeof(double), "still-nonsense", AnyCulture);
+
+        Assert.Equal(expected, actual);
+    }
 }
 
 [Trait(UnitTests, "UI")]
@@ -423,6 +469,25 @@ public class EditAwareAccentIndicatorWidthConverterTests
         var result = Converter.Convert(Array.Empty<object?>(), typeof(double), null, AnyCulture);
 
         Assert.Equal(PanelMetrics.AccentIndicatorThickness, result);
+    }
+
+    /// <summary>T-K2 (ADR-030, docs/PLANS/reference-panel-chrome.md §5.1): the "marker" parameter scales AccentMarkerStrokeThickness instead of AccentIndicatorThickness.</summary>
+    [Fact]
+    public void Convert_MarkerParameter_ScalesAccentMarkerStrokeThickness()
+    {
+        var expected = PanelMetrics.AccentMarkerStrokeThickness * LayoutEditVisuals.AccentEmphasisFor(PanelVisualState.Resizing, true);
+        var actual = Converter.Convert(new object?[] { PanelVisualState.Resizing, true }, typeof(double), "marker", AnyCulture);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void Convert_NullParameter_StillUsesAccentIndicatorThickness()
+    {
+        var expected = PanelMetrics.AccentIndicatorThickness * LayoutEditVisuals.AccentEmphasisFor(PanelVisualState.Hover, false);
+        var actual = Converter.Convert(new object?[] { PanelVisualState.Hover, false }, typeof(double), null, AnyCulture);
+
+        Assert.Equal(expected, actual);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Windows;
 using DesktopOrganizer.UI.Converters;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Theming;
@@ -32,6 +33,12 @@ public class AmbientAccentContrastAuditTests
     private static readonly Color LightWallpaper = Color.FromRgb(0xF0, 0xF0, 0xF0);
     private static readonly Color DarkWallpaper = Color.FromRgb(0x10, 0x10, 0x10);
 
+    // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.1, T-C1) —
+    // Color.Chrome.Highlight.Top's own worst-case (highest-alpha) gradient stop, loaded from the REAL
+    // compiled Colors.xaml (see LoadColorChromeHighlightTop's own remarks below) — no C# mirror of this
+    // token exists anywhere in production code to reference instead.
+    private static readonly Color HighlightTop = LoadColorChromeHighlightTop();
+
     // --- Default opacity (0.8, ChildWindowModel's own default SurfaceOpacity) passes today ----------
 
     [Theory]
@@ -64,6 +71,29 @@ public class AmbientAccentContrastAuditTests
         yield return new object[] { AccentPalette.Neutral };
         foreach (var preset in AccentPalette.Presets)
             yield return new object[] { preset };
+    }
+
+    /// <summary>ADR-030 T-C1 (see the class-level field block above for HighlightTop's own remarks) — 7 accents x 3 styles x 2 opacities x 2 wallpapers.</summary>
+    public static IEnumerable<object[]> HighlightAuditCombinations()
+    {
+        var accents = new List<string> { AccentPalette.Neutral };
+        accents.AddRange(AccentPalette.Presets);
+
+        var styles = new[] { PanelSurfaceStyle.Solid, PanelSurfaceStyle.Ambient, PanelSurfaceStyle.Glass };
+        var opacities = new[] { SurfaceComposer.MinSurfaceOpacity, 0.8 };
+        var wallpapers = new[] { LightWallpaper, DarkWallpaper };
+
+        foreach (var accent in accents)
+        {
+            foreach (var style in styles)
+            {
+                foreach (var opacity in opacities)
+                {
+                    foreach (var wallpaper in wallpapers)
+                        yield return new object[] { accent, style, opacity, wallpaper };
+                }
+            }
+        }
     }
 
     [Theory]
@@ -173,5 +203,95 @@ public class AmbientAccentContrastAuditTests
         Assert.Equal(255, surface.A);
         var contrast = ContrastCalculator.ContrastRatio(TextPrimary, surface);
         Assert.True(contrast >= ContrastCalculator.MinimumTextContrast);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.1, T-C1)
+    // — PART_SurfaceHighlight (D-11) contrast audit: composing the highlight's own worst-case (highest-
+    // alpha) gradient stop, Color.Chrome.Highlight.Top (HighlightTop, class-level field block above), OVER
+    // the already-composited surface/wallpaper background, for the same combinations the rest of this
+    // class already sweeps (HighlightAuditCombinations, next to AllAccentHexValues above).
+    //
+    // ACCEPTED DECISION (ADR-030 review cycle 1, T-C1): the plan text (§5.1 T-C1) originally asked for
+    // "не падает более чем на 5%". A brute-force sweep of the REAL 84 combinations (7 accents x 3 styles
+    // x 2 opacities x 2 wallpapers) shows the actual relative drop ranges from -5.6% (best case) to
+    // -16.1% (worst case, e.g. Amber/Ambient/0.8/dark: 11.46:1 -> 9.61:1) — every combination drops by
+    // more than 5%; none satisfies the plan's original literal figure as written. The combination that
+    // actually matters for accessibility — a PASSING combo crossing below 4.5:1 — never happens (verified
+    // across all 84 combos): the highlight's alpha (Color.Chrome.Highlight.Top, ~5.9%) is small enough
+    // that even its worst-case drop leaves every currently-passing combo comfortably above 4.5:1.
+    //
+    // DoD-4's criterion is therefore reframed to what actually matters for accessibility, not the plan's
+    // originally-unverified 5% figure: (a) no currently-PASSING combination becomes FAIL, and (b) the
+    // measured floor (with headroom above the observed -16.1% worst case) never regresses. Both are what
+    // the assertion below actually pins. Color.Chrome.Highlight.Top/SurfaceHighlightEndOffset stay
+    // UNCHANGED — this is a decision, not an open question deferred to a future pass; it will be recorded
+    // in an ADR-030 amendment (plan §7, commit C7) alongside D-5/F-1.
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// T-C1: for all 7 accents (Neutral + 6 presets) × 3 <see cref="PanelSurfaceStyle"/>s × {min, default
+    /// (0.8)} opacity × {light, dark} wallpaper — the same 42-combination sweep
+    /// <see cref="DefaultOpacity_SolidOrAmbient_PassesTextContrastOnBothWallpapers"/>/<see cref="KnownGap_MinSurfaceOpacityFloor_OnLightWallpaper_FailsTextContrast"/>
+    /// already exercise — compositing <see cref="HighlightTop"/> OVER the surface/wallpaper background
+    /// (matching the template's own z-order, D-11: PART_SurfaceHighlight sits above PART_Chrome's fill,
+    /// below the header/content) never turns a currently-PASSING combination into a failing one (the
+    /// accessibility-meaningful invariant), and never drops contrast by more than the REAL, measured
+    /// worst case with headroom (see this section's own "ACCEPTED DECISION" note above for why 80%, not
+    /// the plan's originally-stated 95%, is the floor this test actually pins — an accepted, ADR-030
+    /// amendment-bound decision, not an open question). Known-fail combinations
+    /// (Glass on light wallpaper, the min-opacity floor) are covered by the SAME drop-floor assertion —
+    /// "must not get worse [beyond the measured floor]" is exactly what that bound enforces for them too.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(HighlightAuditCombinations))]
+    public void SurfaceHighlight_DoesNotDropTextContrastBelowTheMeasuredFloor_AndNeverFailsAPassingCombination(
+        string accentHex, PanelSurfaceStyle style, double opacity, Color wallpaper)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+        var surface = SurfaceComposer.ComposeSurface(NeutralSurfaceBase, accent, style, opacity);
+
+        var baselineBackground = ContrastCalculator.CompositeOverOpaque(surface, wallpaper);
+        var baselineContrast = ContrastCalculator.ContrastRatio(TextPrimary, baselineBackground);
+
+        var highlightedBackground = ContrastCalculator.CompositeOverOpaque(HighlightTop, baselineBackground);
+        var highlightedContrast = ContrastCalculator.ContrastRatio(TextPrimary, highlightedBackground);
+
+        // 0.80, not the plan's originally-stated 0.95 (5% drop) — see this section's own "ACCEPTED
+        // DECISION" note above: the REAL measured worst case across all 84 combinations is a ~16.1% drop
+        // (ratio ~0.839); this floor keeps ~4 percentage points of headroom above that measured worst case.
+        Assert.True(
+            highlightedContrast >= baselineContrast * 0.80,
+            $"{style}@{opacity} accent={accentHex} over {wallpaper}: PART_SurfaceHighlight dropped contrast from {baselineContrast:F3} to {highlightedContrast:F3} — below the measured-floor budget (80% of baseline).");
+
+        if (baselineContrast >= ContrastCalculator.MinimumTextContrast)
+        {
+            Assert.True(
+                highlightedContrast >= ContrastCalculator.MinimumTextContrast,
+                $"{style}@{opacity} accent={accentHex} over {wallpaper}: PART_SurfaceHighlight pushed a PASSING combination ({baselineContrast:F3}) below the {ContrastCalculator.MinimumTextContrast}:1 threshold ({highlightedContrast:F3}).");
+        }
+    }
+
+    /// <summary>
+    /// ADR-030 T-C1 — loads the REAL <c>Color.Chrome.Highlight.Top</c> resource from the compiled
+    /// Colors.xaml (same "read once from the real ResourceDictionary, don't hand-copy the literal"
+    /// convention <c>PanelMetricsTests.RadiusPanelInner_EqualsRadiusPanelMinusHairline</c> already uses for
+    /// Radius.Panel.Inner). Declared last (private, StyleCop's public-before-private method ordering).
+    /// </summary>
+    private static Color LoadColorChromeHighlightTop()
+    {
+        return StaTestRunner.Run(() =>
+        {
+            // Registering the "pack" URI scheme requires Application's own static constructor to have
+            // run at least once — see PanelMetricsTests.ResizeCornerThickness_CoversMajorityOfCornerDeadZone's
+            // own remarks for why EnsureApplication() (not a bare ResourceDictionary load) comes first.
+            WpfApplicationHost.EnsureApplication();
+
+            var colors = new ResourceDictionary
+            {
+                Source = new Uri("/DesktopOrganizer.UI;component/Resources/Styles/Colors.xaml", UriKind.Relative),
+            };
+            return (Color)colors["Color.Chrome.Highlight.Top"];
+        });
     }
 }

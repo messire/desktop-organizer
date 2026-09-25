@@ -42,8 +42,26 @@ public class PanelChrome : ContentControl
     /// <summary>The header row: icon/title/item-count/actions layout (§5.4).</summary>
     public const string PartHeader = "PART_Header";
 
-    /// <summary>The thin accent strip along the panel's edge (§5.3).</summary>
+    /// <summary>
+    /// The accent identity marker (§5.3). Pre-ADR-030: a rectangular <see cref="Border"/> strip filling a
+    /// dedicated layout column. ADR-030 (docs/PLANS/reference-panel-chrome.md §1 D-4) replaced its visual
+    /// with a curved <see cref="System.Windows.Shapes.Path"/> tracing the panel's own top-left rounded
+    /// corner, hosted in a fixed-size overlay (<see cref="PartAccentIndicatorHost"/>, no longer a layout
+    /// column) inside <see cref="PartSurfaceLayer"/> — the template part NAME is unchanged (ADR-030
+    /// explicitly permits renaming template parts, but this one's semantics — accent identity +
+    /// emphasis-by-state — are preserved, so the name stays), and tests that locate it by name
+    /// (<c>chrome.Template.FindName(PartAccentIndicator, chrome)</c>) keep working unmodified.
+    /// </summary>
     public const string PartAccentIndicator = "PART_AccentIndicator";
+
+    /// <summary>
+    /// The fixed-size overlay hosting <see cref="PartAccentIndicator"/> (plan D-4/D-7) — a direct child of
+    /// <see cref="PartSurfaceLayer"/>, sized from <c>PanelMetrics.AccentMarkerHostWidth</c>/
+    /// <c>AccentMarkerHostHeight</c> so a per-state <see cref="System.Windows.Shapes.Shape.StrokeThickness"/>
+    /// change on the marker never perturbs this control's own <see cref="System.Windows.UIElement.DesiredSize"/>
+    /// (D-7's "no layout jitter").
+    /// </summary>
+    public const string PartAccentIndicatorHost = "PART_AccentIndicatorHost";
 
     /// <summary><see cref="ContentPresenter"/> hosting <see cref="ContentControl.Content"/> (the file list host).</summary>
     public const string PartContentHost = "PART_ContentHost";
@@ -56,6 +74,41 @@ public class PanelChrome : ContentControl
     /// same window), and file drag/drop.
     /// </summary>
     public const string PartInteractionOverlay = "PART_InteractionOverlay";
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────
+    // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §3) — the
+    // layered template's new decorative parts. Every one of these MUST render with
+    // <see cref="UIElement.IsHitTestVisible"/> = <see langword="false"/> in the default style
+    // (<c>Resources/Styles/Panels.xaml</c>) — same R-5 rationale as <see cref="PartInteractionOverlay"/>
+    // above: none of them may ever intercept a mouse event the title-bar drag, the resize
+    // <see cref="System.Windows.Controls.Primitives.Thumb"/>s, or file drag/drop need to receive. The one
+    // deliberate EXCEPTION to "purely decorative" is <see cref="PartHitCatcher"/> itself, whose entire
+    // purpose is to keep the OS routing clicks to this window (plan D-5) — it is still
+    // <c>IsHitTestVisible="False"</c> for WPF's OWN hit-test tree (so it never steals a click from a real
+    // WPF element sitting above it), while remaining opaque enough (alpha ≥ 1) for the OS-level layered-
+    // window compositor to route the click here at all.
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Bottom-most layer, spanning the whole window rect — keeps the OS routing clicks to this window across the transparent chrome inset (plan D-5).</summary>
+    public const string PartHitCatcher = "PART_HitCatcher";
+
+    /// <summary>The accent-colored shader-based glow ring, drawn inside the chrome inset (plan D-2/D-9).</summary>
+    public const string PartGlow = "PART_Glow";
+
+    /// <summary>The shader-free substitute for <see cref="PartGlow"/>, shown instead of it when <see cref="Theming.ChromeEffectsPolicy.IsGlowEffectEnabled"/> is <see langword="false"/> (plan D-9).</summary>
+    public const string PartGlowFallback = "PART_GlowFallback";
+
+    /// <summary>The inset, clipped layer hosting <see cref="PartHeader"/>/<see cref="PartContentHost"/>/the strokes/the marker — the single rounded-rect <see cref="UIElement.Clip"/> owner (plan D-2/D-12).</summary>
+    public const string PartSurfaceLayer = "PART_SurfaceLayer";
+
+    /// <summary>The very weak non-semantic top-to-bottom gradient over the panel surface (plan D-11).</summary>
+    public const string PartSurfaceHighlight = "PART_SurfaceHighlight";
+
+    /// <summary>The 1-DIP neutral (non-accent) rounded-rect stroke around the panel surface (plan D-2/D-6).</summary>
+    public const string PartNeutralStroke = "PART_NeutralStroke";
+
+    /// <summary>The thin, deliberately weaker-than-the-marker accent-colored inner stroke (plan D-2/D-6).</summary>
+    public const string PartAccentStroke = "PART_AccentStroke";
 
     public static readonly DependencyProperty TitleProperty = DependencyProperty.Register(
         nameof(Title),

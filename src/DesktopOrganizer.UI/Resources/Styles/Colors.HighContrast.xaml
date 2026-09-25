@@ -74,4 +74,27 @@
     <x:Static x:Key="Color.Settings.TextMuted" Member="sysc:SystemColors.GrayTextColor"/>
     <x:Static x:Key="Color.Settings.SwatchBorder" Member="sysc:SystemColors.ActiveBorderColor"/>
     <x:Static x:Key="Color.Settings.Warning" Member="sysc:SystemColors.HighlightColor"/>
+
+    <!--
+        ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md D-8): the
+        non-semantic surface highlight is decorative-only — it is fully collapsed by a ControlTemplate
+        trigger in High Contrast mode (Resources/Styles/Panels.xaml's PART_SurfaceHighlight), but these
+        color overrides exist anyway (MAJOR-A rule "every chrome color gets an HC override", see this
+        file's own top-of-file remarks) so a future consumer of Color.Chrome.Highlight.* that forgets to
+        also check HighContrastState.IsActive still degrades to fully transparent instead of a stray
+        translucent-white wash over a HC system color.
+    -->
+    <Color x:Key="Color.Chrome.Highlight.Top">Transparent</Color>
+    <Color x:Key="Color.Chrome.Highlight.Bottom">Transparent</Color>
+
+    <!--
+        Color.HitTest.Catcher is DELIBERATELY NOT overridden here — the documented exception to the
+        MAJOR-A "every chrome color gets an HC override" rule (plan D-5). PART_HitCatcher's alpha=1
+        fill exists purely so the OS routes a click to this window at all (ADR-025 MAJOR-1's
+        click-through-lens finding) — it is never actually visible at alpha=1/255 in EITHER mode, so
+        there is no readability concern an HC system color would fix, and painting it with an opaque
+        system color (e.g. SystemColors.WindowColor) would make an otherwise-invisible 2-DIP ring
+        around every panel visibly colored in High Contrast mode — a real regression, not a fix.
+        Pinned by a dedicated test asserting Color.A == 1 in BOTH merge orders.
+    -->
 </ResourceDictionary>

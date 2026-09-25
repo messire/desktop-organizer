@@ -555,3 +555,31 @@ scrollbar/header-button overlap): confirm a diagonal mouse-down at the panel's l
 DEFAULT (Thumb-based, `NativePanelSizing=False`) path — this is the specific, previously-silently-broken
 behavior this fix restores; a screen recording/zoomed screenshot comparing the corner grip's actual
 catchable area before/after, at 100%/125%/150% DPI, is the highest-value manual check for this fix.
+
+---
+
+## Amendment 2026-09-25 (ADR-030)
+
+Короткая сверка после `adr/ADR-030-reference-panel-chrome.md` (Accepted, ветка `feature/reference-chrome`,
+`af2c235` + round-2 polish) — full detail в этом ADR-030, не повторяется здесь. Не переоткрывает ничего из
+решений этого документа выше.
+
+- **D-5 (ADR-030) закрывает click-through-линзу MAJOR-1 на обоих путях.** Fix-cycle 1's MAJOR-1 finding
+  above (OS-level per-pixel-alpha click-through у угла скруглённого `Border` на `AllowsTransparency="True"`
+  окне) был смягчен только шириной resize-грипа. ADR-030's `PART_HitCatcher` (почти прозрачный,
+  alpha=1/255, `IsHitTestVisible=False`, во весь прямоугольник окна) закрывает саму линзу целиком — и на
+  WPF `Thumb`-пути, и на нативном (`NativeHitTestMapper`) пути — независимо от ширины грипа.
+- **Колонка акцента 8 DIP → симметричные отступы 2|*|2.** `PART_AccentIndicator`'s прежняя фиксированная
+  LEFT-only `ColumnDefinition.Width=8` (MAJOR-1 этой фазы, «сама широкая колонка с запасом под 6.885»)
+  удалена из раскладки колонок. Тот же суммарный горизонтальный чром (`ContentLeftInset=8`,
+  `GridMetrics.FileListHPadding` — не изменились численно) теперь распределён как `ChromeOuterInset (2) +
+  ContentSidePadding (2)` с каждой стороны — контент визуально сдвинут на 4 DIP влево относительно
+  прежнего асимметричного варианта, но ширина/snap-математика не изменились.
+- **`PART_AccentIndicator` теперь `Path`, не прямоугольник.** Имя части шаблона сохранено; вместо
+  прямоугольной полосы — изогнутая геометрия (вертикальный ствол + четверть окружности `Radius.Panel` +
+  короткий хвост), клипованная той же скруглённой геометрией, что и поверхность. Толщина по-прежнему через
+  `LayoutEditVisuals.AccentEmphasisFor` (тот же канал, что дал 3.0→4.5→5.1px выше).
+- **F-1 doc-drift (найдено, не исправлено в ADR-030's scope).** Комментарий `GridMetrics.FileListVPadding`
+  и комментарий в `ChildWindow.xaml` над `FileListHost` описывают `Margin="0,0,0,4"`; фактический XAML —
+  `Margin="0,0,0,0"`. Не относится к решениям этого ADR-025, зафиксировано как `docs/Refactoring/BACKLOG.md`
+  DO-022.

@@ -4,9 +4,11 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Controls;
+using DesktopOrganizer.UI.Converters;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Theming;
 
@@ -128,31 +130,25 @@ public class ResourceDictionaryMergeTests
     }
 
     /// <summary>
-    /// Regression pin (fix-cycle round 1 CRITICAL, fixed in d16aab6): <c>Panels.xaml</c>'s
-    /// <c>PART_AccentIndicator</c> host <see cref="ColumnDefinition"/> is a fixed literal
-    /// (<c>Width="8"</c>) chosen because it comfortably exceeds the combined maximum the strip's own
-    /// bound width can reach — <see cref="PanelMetrics.AccentIndicatorThickness"/> (3.0) *
-    /// <see cref="InteractionVisualState.AccentEmphasisFor"/>'s maximum, <see cref="PanelVisualState.Resizing"/>
-    /// (1.7) * <see cref="LayoutEditVisuals.AccentEmphasis"/> (1.35) = 6.885. Nothing machine-checks that
-    /// relationship — a future change bumping any of those three constants without also widening the XAML
-    /// literal would silently clip/overflow the strip at runtime, invisible to every other test (this is
-    /// exactly how the original CRITICAL made it past `dotnet build`+`dotnet test`). Reuses this class's
-    /// own STA/resource-merge infrastructure (<see cref="RunOnStaThread{T}"/>/<see cref="MergeResourceDictionaries"/>)
-    /// to build a real <see cref="PanelChrome"/>, apply its actual template, and read the REAL
-    /// <see cref="ColumnDefinition.Width"/> that ends up hosting <c>PART_AccentIndicator</c> — not a
-    /// hand-copied literal — so this test fails the moment the XAML value and the three constants above
-    /// drift out of the required relationship, regardless of which side changes.
-    /// </summary>
-    /// <summary>
-    /// 2026-09-23 (Ambient Accent reference): the bright accent strip is HEADER-tall only — on the reference
-    /// it reads at lum ~120 inside the header row and drops to the dim ~55 border below it. Pins that
-    /// <c>PART_AccentIndicator</c> occupies row 0 with no row span (it used to span both rows, i.e. the
-    /// full panel height), so a future template edit cannot silently bring the full-height strip back.
+    /// T-R4 (docs/PLANS/reference-panel-chrome.md §5.2) — FINAL replacement (commit C4) for both
+    /// <c>PanelChromeTemplate_AccentIndicator_SpansTheHeaderRowOnly</c> (fix-cycle round 1 CRITICAL,
+    /// fixed in d16aab6) and <c>PanelChromeTemplate_AccentIndicatorColumn_WidthCoversMaxCombinedAccentEmphasis</c>
+    /// — retired for good reason: D-4 replaced the fixed accent-indicator Grid COLUMN with a curved
+    /// <see cref="System.Windows.Shapes.Path"/> in a fixed-size overlay host
+    /// (<c>PART_AccentIndicatorHost</c>), so there is no column width left to measure. This test instead
+    /// pins D-7's real "no layout jitter" contract for that host: explicit, finite, non-<see cref="double.NaN"/>
+    /// Width/Height, at least as large as the REAL <see cref="AccentMarkerGeometryConverter"/> output's own
+    /// <see cref="Geometry.Bounds"/> (for the REAL <c>Radius.Panel</c> resource) inflated by half the
+    /// marker's own real maximum combined <see cref="System.Windows.Shapes.Shape.StrokeThickness"/> (read
+    /// from <see cref="InteractionVisualState"/>/<see cref="LayoutEditVisuals"/>/<see cref="PanelMetrics"/>
+    /// directly, never a hand-copied literal) — and that the host's own inflated vertical extent never
+    /// exceeds <see cref="PanelMetrics.HeaderInnerHeight"/> (plan D-4 collision requirement (б): the
+    /// marker's round end-cap must never overflow into the content row).
     /// </summary>
     [Fact]
-    public void PanelChromeTemplate_AccentIndicator_SpansTheHeaderRowOnly()
+    public void PanelChromeTemplate_AccentIndicatorHost_HasFiniteBoundsThatCoverTheRealMarkerGeometry_AndNeverExceedsHeaderInnerHeight()
     {
-        var (row, rowSpan) = RunOnStaThread(() =>
+        var (hostWidth, hostHeight, geometryBounds) = RunOnStaThread(() =>
         {
             var originalHighContrast = HighContrastState.IsActive;
             var beforeEnsure = Application.Current;
@@ -169,8 +165,19 @@ public class ResourceDictionaryMergeTests
                 var chrome = new PanelChrome { Style = style };
                 chrome.ApplyTemplate();
 
-                var accentIndicator = (FrameworkElement)chrome.Template.FindName("PART_AccentIndicator", chrome)!;
-                return (Grid.GetRow(accentIndicator), Grid.GetRowSpan(accentIndicator));
+                var host = (FrameworkElement)chrome.Template.FindName(PanelChrome.PartAccentIndicatorHost, chrome)!;
+                var accentIndicator = (System.Windows.Shapes.Path)chrome.Template.FindName("PART_AccentIndicator", chrome)!;
+
+                // Real converter output, for the REAL Radius.Panel resource — not a hand-copied radius.
+                var radiusPanel = (CornerRadius)app.Resources["Radius.Panel"];
+                var geometryConverter = (AccentMarkerGeometryConverter)app.Resources["AccentMarkerGeometry"];
+                var geometry = (Geometry)geometryConverter.Convert(radiusPanel, typeof(Geometry), null, System.Globalization.CultureInfo.InvariantCulture);
+
+                Assert.Same(host, VisualTreeHelper.GetParent(accentIndicator));
+                var surfaceLayer = (FrameworkElement)chrome.Template.FindName("PART_SurfaceLayer", chrome)!;
+                Assert.Same(surfaceLayer, VisualTreeHelper.GetParent(host));
+
+                return (host.Width, host.Height, geometry.Bounds);
             }
             finally
             {
@@ -181,55 +188,579 @@ public class ResourceDictionaryMergeTests
             }
         });
 
-        Assert.Equal(0, row);      // the header row (PanelMetrics.HeaderRowHeight)
-        Assert.Equal(1, rowSpan);  // header only — NOT the full panel height
-    }
+        Assert.False(double.IsNaN(hostWidth), "PART_AccentIndicatorHost.Width must be an explicit, finite value (not Auto/NaN).");
+        Assert.False(double.IsNaN(hostHeight), "PART_AccentIndicatorHost.Height must be an explicit, finite value (not Auto/NaN).");
+        Assert.False(double.IsInfinity(hostWidth));
+        Assert.False(double.IsInfinity(hostHeight));
 
-    [Fact]
-    public void PanelChromeTemplate_AccentIndicatorColumn_WidthCoversMaxCombinedAccentEmphasis()
-    {
-        var columnWidth = RunOnStaThread(() =>
-        {
-            var originalHighContrast = HighContrastState.IsActive;
-            var beforeEnsure = Application.Current;
-            var app = WpfApplicationHost.EnsureApplication();
-            var ownsApplication = !ReferenceEquals(app, beforeEnsure);
-            var originalResources = ownsApplication ? null : app.Resources;
-
-            try
-            {
-                app.Resources = new ResourceDictionary();
-                MergeResourceDictionaries(app, highContrast: false);
-
-                var style = (Style)app.Resources[typeof(PanelChrome)];
-                var chrome = new PanelChrome { Style = style };
-                chrome.ApplyTemplate();
-
-                var accentIndicator = (FrameworkElement)chrome.Template.FindName("PART_AccentIndicator", chrome)!;
-                var columnIndex = Grid.GetColumn(accentIndicator);
-                var hostGrid = (Grid)VisualTreeHelper.GetParent(accentIndicator);
-
-                return hostGrid.ColumnDefinitions[columnIndex].Width.Value;
-            }
-            finally
-            {
-                HighContrastState.IsActive = originalHighContrast;
-
-                if (!ownsApplication)
-                    app.Resources = originalResources!;
-            }
-        });
-
-        var maxCombinedAccentWidth = PanelMetrics.AccentIndicatorThickness
+        var maxCombinedStroke = PanelMetrics.AccentMarkerStrokeThickness
             * InteractionVisualState.AccentEmphasisFor(PanelVisualState.Resizing)
             * LayoutEditVisuals.AccentEmphasis;
+        var halfMaxStroke = maxCombinedStroke / 2d;
+
+        var inflatedRight = geometryBounds.Right + halfMaxStroke;
+        var inflatedBottom = geometryBounds.Bottom + halfMaxStroke;
 
         Assert.True(
-            columnWidth >= maxCombinedAccentWidth,
-            $"PART_AccentIndicator's host column width ({columnWidth}) must be >= the combined maximum " +
-            $"accent-emphasis width ({maxCombinedAccentWidth} = AccentIndicatorThickness * " +
-            "InteractionVisualState.AccentEmphasisFor(Resizing) * LayoutEditVisuals.AccentEmphasis), or the " +
-            "strip will visually clip/overflow at the Resizing+IsLayoutEditing combination.");
+            hostWidth >= inflatedRight,
+            $"PART_AccentIndicatorHost.Width ({hostWidth}) must be >= the real marker geometry's own bounds inflated by half the max combined stroke ({inflatedRight}).");
+        Assert.True(
+            hostHeight >= inflatedBottom,
+            $"PART_AccentIndicatorHost.Height ({hostHeight}) must be >= the real marker geometry's own bounds inflated by half the max combined stroke ({inflatedBottom}).");
+
+        Assert.True(
+            inflatedBottom <= PanelMetrics.HeaderInnerHeight + 0.001,
+            $"The marker's own inflated bottom edge ({inflatedBottom}) must not exceed HeaderInnerHeight ({PanelMetrics.HeaderInnerHeight}) — plan D-4 collision requirement (б).");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.2,
+    // T-R1/T-R2/T-R3/T-R5) — real-template regression pins for the layered chrome commit (C3).
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>T-R1 (root layer order): PART_HitCatcher renders before (i.e. UNDER, lower z-order) PART_SurfaceLayer in the template root Grid.</summary>
+    [Fact]
+    public void PanelChromeTemplate_RootGrid_ChildrenOrder_HitCatcherBeforeSurfaceLayer()
+    {
+        var (hitCatcherIndex, surfaceLayerIndex) = WithRealChrome(
+            highContrast: false,
+            width: 400,
+            height: 300,
+            state: PanelVisualState.Idle,
+            isLayoutEditing: false,
+            surfaceStyle: PanelSurfaceStyle.Ambient,
+            body: chrome =>
+            {
+                var hitCatcher = (FrameworkElement)chrome.Template.FindName("PART_HitCatcher", chrome)!;
+                var surfaceLayer = (FrameworkElement)chrome.Template.FindName("PART_SurfaceLayer", chrome)!;
+                var root = (Grid)VisualTreeHelper.GetParent(hitCatcher);
+
+                Assert.Same(root, VisualTreeHelper.GetParent(surfaceLayer));
+                return (root.Children.IndexOf(hitCatcher), root.Children.IndexOf(surfaceLayer));
+            });
+
+        Assert.True(hitCatcherIndex < surfaceLayerIndex, "PART_HitCatcher must render before (under) PART_SurfaceLayer.");
+    }
+
+    /// <summary>T-R1 (PART_SurfaceLayer's own child order): matches §3's diagram — PART_Chrome, PART_NeutralStroke, PART_AccentStroke, PART_AccentIndicator, PART_InteractionOverlay, bottom to top.</summary>
+    [Fact]
+    public void PanelChromeTemplate_SurfaceLayerChildrenOrder_MatchesPlanDiagram()
+    {
+        var order = WithRealChrome(
+            highContrast: false,
+            width: 400,
+            height: 300,
+            state: PanelVisualState.Idle,
+            isLayoutEditing: false,
+            surfaceStyle: PanelSurfaceStyle.Ambient,
+            body: chrome =>
+            {
+                var surfaceLayer = (Grid)chrome.Template.FindName("PART_SurfaceLayer", chrome)!;
+                return surfaceLayer.Children.OfType<FrameworkElement>().Select(e => e.Name).ToArray();
+            });
+
+        Assert.Equal(
+            new[] { "PART_Chrome", "PART_NeutralStroke", "PART_AccentStroke", PanelChrome.PartAccentIndicatorHost, "PART_InteractionOverlay" },
+            order);
+    }
+
+    /// <summary>T-R2: every decorative layer added/relocated by C3 is IsHitTestVisible=false.</summary>
+    [Fact]
+    public void PanelChromeTemplate_DecorativeParts_AreNotHitTestVisible()
+    {
+        var flags = WithRealChrome(
+            highContrast: false,
+            width: 400,
+            height: 300,
+            state: PanelVisualState.Idle,
+            isLayoutEditing: false,
+            surfaceStyle: PanelSurfaceStyle.Ambient,
+            body: chrome =>
+            {
+                bool IsHitTestVisible(string name) => ((UIElement)chrome.Template.FindName(name, chrome)!).IsHitTestVisible;
+
+                return new Dictionary<string, bool>
+                {
+                    ["PART_HitCatcher"] = IsHitTestVisible("PART_HitCatcher"),
+                    ["PART_Glow"] = IsHitTestVisible("PART_Glow"),
+                    ["PART_GlowFallback"] = IsHitTestVisible("PART_GlowFallback"),
+                    ["PART_SurfaceHighlight"] = IsHitTestVisible("PART_SurfaceHighlight"),
+                    ["PART_NeutralStroke"] = IsHitTestVisible("PART_NeutralStroke"),
+                    ["PART_AccentStroke"] = IsHitTestVisible("PART_AccentStroke"),
+                    ["PART_AccentIndicator"] = IsHitTestVisible("PART_AccentIndicator"),
+                    ["PART_InteractionOverlay"] = IsHitTestVisible("PART_InteractionOverlay"),
+                };
+            });
+
+        foreach (var (name, isHitTestVisible) in flags)
+            Assert.False(isHitTestVisible, $"{name} must be IsHitTestVisible=false.");
+    }
+
+    /// <summary>
+    /// M-1 regression pin: every hairline-stroked decorative <see cref="Border"/> the layered chrome draws
+    /// directly over <c>PART_Chrome</c>'s own surface — <c>PART_Chrome</c> itself, <c>PART_NeutralStroke</c>,
+    /// <c>PART_AccentStroke</c>, <c>PART_InteractionOverlay</c>, and <c>PART_GlowFallback</c> — has
+    /// <see cref="UIElement.SnapsToDevicePixels"/> = <see langword="true"/> in the real template. A
+    /// 1-DIP <see cref="Border.BorderThickness"/> that straddles a device-pixel boundary at a non-integer
+    /// DPI scale renders as a blurred ~1.5px smear instead of a crisp hairline; <see cref="FrameworkElement.SnapsToDevicePixels"/>
+    /// is what keeps every one of these concentric rings crisp against every other (plan §3's own "crisp
+    /// hairline rings" requirement).
+    /// </summary>
+    [Fact]
+    public void PanelChromeTemplate_HairlineStrokedParts_SnapToDevicePixels()
+    {
+        var flags = WithRealChrome(
+            highContrast: false,
+            width: 400,
+            height: 300,
+            state: PanelVisualState.Idle,
+            isLayoutEditing: false,
+            surfaceStyle: PanelSurfaceStyle.Ambient,
+            body: chrome =>
+            {
+                bool SnapsToDevicePixels(string name) => ((UIElement)chrome.Template.FindName(name, chrome)!).SnapsToDevicePixels;
+
+                return new Dictionary<string, bool>
+                {
+                    ["PART_Chrome"] = SnapsToDevicePixels("PART_Chrome"),
+                    [PanelChrome.PartNeutralStroke] = SnapsToDevicePixels(PanelChrome.PartNeutralStroke),
+                    [PanelChrome.PartAccentStroke] = SnapsToDevicePixels(PanelChrome.PartAccentStroke),
+                    [PanelChrome.PartInteractionOverlay] = SnapsToDevicePixels(PanelChrome.PartInteractionOverlay),
+                    [PanelChrome.PartGlowFallback] = SnapsToDevicePixels(PanelChrome.PartGlowFallback),
+                };
+            });
+
+        foreach (var (name, snapsToDevicePixels) in flags)
+            Assert.True(snapsToDevicePixels, $"{name} must have SnapsToDevicePixels=true.");
+    }
+
+    /// <summary>T-R3 (no layout jitter): for all 5 states x {editing false/true} x {Ambient, Glass}, PART_SurfaceLayer/PART_Header/PART_ContentHost/PART_AccentIndicatorHost's own TranslatePoint(0,0)/ActualWidth/ActualHeight, and PanelChrome's own DesiredSize, stay byte-for-byte equal to the Idle/false/Ambient baseline.</summary>
+    [Fact]
+    public void PanelChromeTemplate_NoLayoutJitter_AcrossStatesEditingAndSurfaceStyle()
+    {
+        PartSnapshot baselineSurfaceLayer = default;
+        PartSnapshot baselineHeader = default;
+        PartSnapshot baselineContent = default;
+        PartSnapshot baselineMarkerHost = default;
+        var baselineDesired = default(Size);
+        var first = true;
+
+        foreach (PanelVisualState state in Enum.GetValues<PanelVisualState>())
+        {
+            foreach (var isLayoutEditing in new[] { false, true })
+            {
+                foreach (var surfaceStyle in new[] { PanelSurfaceStyle.Ambient, PanelSurfaceStyle.Glass })
+                {
+                    var (surfaceLayer, header, content, markerHost, desired) = WithRealChrome(
+                        highContrast: false,
+                        width: 400,
+                        height: 300,
+                        state: state,
+                        isLayoutEditing: isLayoutEditing,
+                        surfaceStyle: surfaceStyle,
+                        body: chrome => (
+                            SnapshotPart(chrome, "PART_SurfaceLayer"),
+                            SnapshotPart(chrome, "PART_Header"),
+                            SnapshotPart(chrome, "PART_ContentHost"),
+                            SnapshotPart(chrome, PanelChrome.PartAccentIndicatorHost),
+                            chrome.DesiredSize));
+
+                    if (first)
+                    {
+                        baselineSurfaceLayer = surfaceLayer;
+                        baselineHeader = header;
+                        baselineContent = content;
+                        baselineMarkerHost = markerHost;
+                        baselineDesired = desired;
+                        first = false;
+                        continue;
+                    }
+
+                    var combo = $"state={state}, isLayoutEditing={isLayoutEditing}, surfaceStyle={surfaceStyle}";
+                    Assert.True(baselineSurfaceLayer.Equals(surfaceLayer), $"PART_SurfaceLayer jitter at {combo}: baseline={baselineSurfaceLayer}, actual={surfaceLayer}");
+                    Assert.True(baselineHeader.Equals(header), $"PART_Header jitter at {combo}: baseline={baselineHeader}, actual={header}");
+                    Assert.True(baselineContent.Equals(content), $"PART_ContentHost jitter at {combo}: baseline={baselineContent}, actual={content}");
+                    Assert.True(baselineMarkerHost.Equals(markerHost), $"{PanelChrome.PartAccentIndicatorHost} jitter at {combo}: baseline={baselineMarkerHost}, actual={markerHost}");
+                    Assert.True(baselineDesired.Equals(desired), $"PanelChrome.DesiredSize jitter at {combo}: baseline={baselineDesired}, actual={desired}");
+                }
+            }
+        }
+    }
+
+    /// <summary>T-R5 (content geometry): content width/top-offset, PART_SurfaceLayer's own rect, and PART_HitCatcher's own rect, all in PanelChrome-local coordinates.</summary>
+    [Theory]
+    [InlineData(200d)]
+    [InlineData(344d)]
+    [InlineData(400d)]
+    public void PanelChromeTemplate_ContentGeometry_MatchesInsetAndFileListHPadding(double width)
+    {
+        const double height = 300d;
+
+        var (contentWidth, contentTopY, surfaceLayerRect, hitCatcherRect) = WithRealChrome(
+            highContrast: false,
+            width: width,
+            height: height,
+            state: PanelVisualState.Idle,
+            isLayoutEditing: false,
+            surfaceStyle: PanelSurfaceStyle.Ambient,
+            body: chrome =>
+            {
+                var contentHost = (FrameworkElement)chrome.Template.FindName("PART_ContentHost", chrome)!;
+                var surfaceLayer = (FrameworkElement)chrome.Template.FindName("PART_SurfaceLayer", chrome)!;
+                var hitCatcher = (FrameworkElement)chrome.Template.FindName("PART_HitCatcher", chrome)!;
+
+                var contentTopLeft = contentHost.TranslatePoint(new Point(0, 0), chrome);
+                var surfaceLayerTopLeft = surfaceLayer.TranslatePoint(new Point(0, 0), chrome);
+                var hitCatcherTopLeft = hitCatcher.TranslatePoint(new Point(0, 0), chrome);
+
+                return (
+                    contentHost.ActualWidth,
+                    contentTopLeft.Y,
+                    new Rect(surfaceLayerTopLeft, new Size(surfaceLayer.ActualWidth, surfaceLayer.ActualHeight)),
+                    new Rect(hitCatcherTopLeft, new Size(hitCatcher.ActualWidth, hitCatcher.ActualHeight)));
+            });
+
+        Assert.Equal(width - GridMetrics.FileListHPadding, contentWidth, precision: 6);
+        Assert.Equal(PanelMetrics.HeaderHeight, contentTopY, precision: 6);
+        Assert.Equal(
+            new Rect(PanelMetrics.ChromeOuterInset, PanelMetrics.ChromeOuterInset, width - (2 * PanelMetrics.ChromeOuterInset), height - (2 * PanelMetrics.ChromeOuterInset)),
+            surfaceLayerRect);
+        Assert.Equal(new Rect(0, 0, width, height), hitCatcherRect);
+    }
+
+    /// <summary>T-R5: Brush.HitTest.Catcher has Color.A == 1 in BOTH merge orders (D-5's documented HC exception — Colors.HighContrast.xaml deliberately does not override Color.HitTest.Catcher).</summary>
+    [Fact]
+    public void HitTestCatcherBrush_HasAlphaOfOne_InBothMergeOrders()
+    {
+        foreach (var highContrast in new[] { true, false })
+        {
+            var alpha = RunOnStaThread(() =>
+            {
+                var originalHighContrast = HighContrastState.IsActive;
+                var beforeEnsure = Application.Current;
+                var app = WpfApplicationHost.EnsureApplication();
+                var ownsApplication = !ReferenceEquals(app, beforeEnsure);
+                var originalResources = ownsApplication ? null : app.Resources;
+
+                try
+                {
+                    app.Resources = new ResourceDictionary();
+                    MergeResourceDictionaries(app, highContrast);
+
+                    var brush = (SolidColorBrush)app.Resources["Brush.HitTest.Catcher"];
+                    return brush.Color.A;
+                }
+                finally
+                {
+                    HighContrastState.IsActive = originalHighContrast;
+
+                    if (!ownsApplication)
+                        app.Resources = originalResources!;
+                }
+            });
+
+            Assert.Equal((byte)1, alpha);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.2,
+    // T-R6/T-R7/T-R8) — the glow effect / shader-free fallback / High Contrast regression pins (C5).
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// T-R6: exactly one element with a non-null <see cref="UIElement.Effect"/> exists anywhere in
+    /// <see cref="PanelChrome"/>'s real template tree — <c>PART_Glow</c>, a real
+    /// <see cref="DropShadowEffect"/> with the documented token values. After assigning a known
+    /// <see cref="SolidColorBrush"/> to <see cref="PanelChrome.AccentBrush"/> and forcing layout, the
+    /// EFFECT'S OWN <see cref="DropShadowEffect.Color"/> equals that brush's <see cref="Color"/> — catches
+    /// a silently-unresolved <c>Color="{Binding AccentBrush.Color, RelativeSource={RelativeSource
+    /// TemplatedParent}}"</c> binding inside a <see cref="Freezable"/> (plan R-2), which would otherwise
+    /// leave the glow permanently black without throwing. Also pins zero <see cref="Effect"/>s in
+    /// <c>GridViewTemplate</c>/<c>ListViewTemplate</c>'s <see cref="DataTemplate.LoadContent"/> and in
+    /// <c>PanelItemContainerStyle</c>'s own <see cref="ControlTemplate"/> (plan D-9 "no per-item effects").
+    /// </summary>
+    /// <remarks>
+    /// Explicitly forces <see cref="ChromeEffectsPolicy.OverrideIsGlowEffectEnabled"/> = <see langword="true"/>
+    /// in a <see langword="try"/>/<see langword="finally"/> — this test is about <c>PART_Glow</c> ITSELF
+    /// rendering with a real effect, which requires the shader-based path to be enabled; it must not depend
+    /// on the real (test-host) <see cref="System.Windows.Media.RenderCapability.Tier"/> (a software-
+    /// rendering CI agent would otherwise make this fail for a reason unrelated to what it actually tests)
+    /// or on some earlier test in this same process having already cached a different value into
+    /// <see cref="ChromeEffectsPolicy.IsGlowEffectEnabled"/>'s static cache.
+    /// </remarks>
+    [Fact]
+    public void PanelChromeTemplate_ExactlyOneEffect_IsPartGlowWithTokenValuesAndResolvedAccentColor()
+    {
+        var knownAccent = Color.FromRgb(0x11, 0x22, 0x33);
+        var originalOverride = ChromeEffectsPolicy.OverrideIsGlowEffectEnabled;
+
+        (int effectCount, string glowName, bool hasEffect, double shadowDepth, double blurRadius, double effectOpacity, Color effectColor, int itemEffectCount) result;
+        try
+        {
+            ChromeEffectsPolicy.OverrideIsGlowEffectEnabled = true;
+
+            result = WithRealChrome(
+                highContrast: false,
+                width: 400,
+                height: 300,
+                state: PanelVisualState.Idle,
+                isLayoutEditing: false,
+                surfaceStyle: PanelSurfaceStyle.Ambient,
+                body: chrome =>
+                {
+                    chrome.AccentBrush = new SolidColorBrush(knownAccent);
+                    chrome.Measure(new Size(400, 300));
+                    chrome.Arrange(new Rect(0, 0, 400, 300));
+                    chrome.UpdateLayout();
+
+                    var effects = CountEffectsInSubtree(chrome);
+                    var glowElement = (FrameworkElement)chrome.Template.FindName("PART_Glow", chrome)!;
+                    var glowEffect = glowElement.Effect as DropShadowEffect;
+
+                    var app = System.Windows.Application.Current;
+                    var gridTemplate = (DataTemplate)app.Resources["GridViewTemplate"];
+                    var listTemplate = (DataTemplate)app.Resources["ListViewTemplate"];
+                    var itemStyle = (Style)app.Resources["PanelItemContainerStyle"];
+                    var itemControl = new ListBoxItem { Style = itemStyle };
+                    itemControl.ApplyTemplate();
+
+                    var itemEffects = CountEffectsInSubtree(gridTemplate.LoadContent())
+                        + CountEffectsInSubtree(listTemplate.LoadContent())
+                        + CountEffectsInSubtree(itemControl);
+
+                    return (
+                        effects,
+                        glowElement.Name,
+                        glowEffect is not null,
+                        glowEffect?.ShadowDepth ?? double.NaN,
+                        glowEffect?.BlurRadius ?? double.NaN,
+                        glowEffect?.Opacity ?? double.NaN,
+                        glowEffect?.Color ?? default,
+                        itemEffects);
+                });
+        }
+        finally
+        {
+            ChromeEffectsPolicy.OverrideIsGlowEffectEnabled = originalOverride;
+        }
+
+        Assert.Equal(1, result.effectCount);
+        Assert.Equal("PART_Glow", result.glowName);
+        Assert.True(result.hasEffect, "PART_Glow must have a real DropShadowEffect assigned.");
+        Assert.Equal(0d, result.shadowDepth);
+        Assert.Equal(PanelMetrics.GlowBlurRadius, result.blurRadius);
+        Assert.Equal(PanelMetrics.GlowEffectOpacity, result.effectOpacity);
+        Assert.Equal(knownAccent, result.effectColor);
+        Assert.Equal(0, result.itemEffectCount);
+    }
+
+    /// <summary>
+    /// T-R7 (full — plan §5.2): HC-merge + <c>IsActive=true</c> BEFORE constructing the instance —
+    /// <c>PART_Glow</c> is Collapsed with <c>Effect == null</c>; <c>PART_GlowFallback</c>/
+    /// <c>PART_AccentStroke</c>/<c>PART_SurfaceHighlight</c> are Collapsed; <c>PART_NeutralStroke.Opacity
+    /// == 1</c>; <c>PART_AccentIndicator</c> stays visible (ADR-025 deliberately does not neutralize accent
+    /// identity in High Contrast).
+    /// </summary>
+    /// <remarks>
+    /// Explicitly forces <see cref="ChromeEffectsPolicy.OverrideIsGlowEffectEnabled"/> to a known value in a
+    /// <see langword="try"/>/<see langword="finally"/> — same reasoning as T-R6 above — rather than depending
+    /// on the real (test-host) <see cref="System.Windows.Media.RenderCapability.Tier"/> or on some earlier
+    /// test in this same process having already cached a different value into
+    /// <see cref="ChromeEffectsPolicy.IsGlowEffectEnabled"/>'s static cache. Both <see cref="TheoryAttribute"/>
+    /// cases below must land on the exact SAME asserted state, which is the point: with
+    /// <paramref name="glowEffectEnabledOverride"/> = <see langword="true"/>, the shader-based path would
+    /// otherwise be enabled, so only the High Contrast <c>DataTrigger</c> (D-8) can be responsible for
+    /// collapsing <c>PART_Glow</c>/<c>PART_GlowFallback</c> here — proving that trigger wins entirely on its
+    /// own. With <paramref name="glowEffectEnabledOverride"/> = <see langword="false"/>, the shader-free-
+    /// fallback <c>DataTrigger</c> (D-9) ALSO collapses <c>PART_Glow</c> (for the unrelated software/RDP-
+    /// render-tier reason) and would normally reveal <c>PART_GlowFallback</c> — the real "High Contrast on a
+    /// software render tier" machine this codebase must actually run on (e.g. an RDP session with High
+    /// Contrast turned on) — proving the later-declared HC trigger (Panels.xaml's own trigger-order remarks)
+    /// still wins the tie and keeps <c>PART_GlowFallback</c> Collapsed too, never Visible.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void PanelChromeTemplate_HighContrast_CollapsesGlowFallbackAccentStrokeAndHighlight_KeepsMarkerVisible(bool glowEffectEnabledOverride)
+    {
+        var originalOverride = ChromeEffectsPolicy.OverrideIsGlowEffectEnabled;
+        (Visibility glowVisibility, Effect? glowEffect, Visibility glowFallbackVisibility, Visibility accentStrokeVisibility, Visibility surfaceHighlightVisibility, double neutralStrokeOpacity, Visibility markerVisibility) result;
+        try
+        {
+            ChromeEffectsPolicy.OverrideIsGlowEffectEnabled = glowEffectEnabledOverride;
+
+            result = WithRealChrome(
+                highContrast: true,
+                width: 400,
+                height: 300,
+                state: PanelVisualState.Idle,
+                isLayoutEditing: false,
+                surfaceStyle: PanelSurfaceStyle.Ambient,
+                body: chrome =>
+                {
+                    var glow = (UIElement)chrome.Template.FindName("PART_Glow", chrome)!;
+                    var glowFallback = (UIElement)chrome.Template.FindName("PART_GlowFallback", chrome)!;
+                    var accentStroke = (UIElement)chrome.Template.FindName("PART_AccentStroke", chrome)!;
+                    var surfaceHighlight = (UIElement)chrome.Template.FindName("PART_SurfaceHighlight", chrome)!;
+                    var neutralStroke = (UIElement)chrome.Template.FindName("PART_NeutralStroke", chrome)!;
+                    var marker = (UIElement)chrome.Template.FindName("PART_AccentIndicator", chrome)!;
+
+                    return (
+                        glow.Visibility,
+                        glow.Effect,
+                        glowFallback.Visibility,
+                        accentStroke.Visibility,
+                        surfaceHighlight.Visibility,
+                        neutralStroke.Opacity,
+                        marker.Visibility);
+                });
+        }
+        finally
+        {
+            ChromeEffectsPolicy.OverrideIsGlowEffectEnabled = originalOverride;
+        }
+
+        Assert.Equal(Visibility.Collapsed, result.glowVisibility);
+        Assert.Equal(Visibility.Collapsed, result.surfaceHighlightVisibility);
+        Assert.Null(result.glowEffect);
+        Assert.Equal(Visibility.Collapsed, result.glowFallbackVisibility);
+        Assert.Equal(Visibility.Collapsed, result.accentStrokeVisibility);
+        Assert.Equal(1d, result.neutralStrokeOpacity);
+        Assert.Equal(Visibility.Visible, result.markerVisibility);
+    }
+
+    /// <summary>T-R8: with <see cref="ChromeEffectsPolicy.IsGlowEffectEnabled"/> forced <see langword="false"/> (non-HC), <c>PART_Glow</c> is Collapsed with a null Effect and <c>PART_GlowFallback</c> is Visible with no Effect.</summary>
+    [Fact]
+    public void PanelChromeTemplate_GlowEffectDisabledByPolicy_ShowsFallback_NoEffect()
+    {
+        var original = ChromeEffectsPolicy.OverrideIsGlowEffectEnabled;
+        try
+        {
+            ChromeEffectsPolicy.OverrideIsGlowEffectEnabled = false;
+
+            var (glowVisibility, glowEffect, fallbackVisibility, fallbackEffect) = WithRealChrome(
+                highContrast: false,
+                width: 400,
+                height: 300,
+                state: PanelVisualState.Idle,
+                isLayoutEditing: false,
+                surfaceStyle: PanelSurfaceStyle.Ambient,
+                body: chrome =>
+                {
+                    var glow = (UIElement)chrome.Template.FindName("PART_Glow", chrome)!;
+                    var glowFallback = (UIElement)chrome.Template.FindName("PART_GlowFallback", chrome)!;
+                    return (glow.Visibility, glow.Effect, glowFallback.Visibility, glowFallback.Effect);
+                });
+
+            Assert.Equal(Visibility.Collapsed, glowVisibility);
+            Assert.Null(glowEffect);
+            Assert.Equal(Visibility.Visible, fallbackVisibility);
+            Assert.Null(fallbackEffect);
+        }
+        finally
+        {
+            ChromeEffectsPolicy.OverrideIsGlowEffectEnabled = original;
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.2,
+    // T-R9/T-R10) — rolled-up geometry and the single clip-owner invariant.
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// T-R9 (rolled-up): <c>Arrange(400, PanelMetrics.HeaderHeight)</c> — the exact size a rolled-up
+    /// panel's window collapses to (<c>ChildWindow.xaml</c>'s <c>RollUpBehavior</c> collapses
+    /// <c>ContentRow</c> to 0, leaving only the header row, <see cref="PanelMetrics.HeaderHeight"/> tall —
+    /// see <see cref="PanelMetrics.HeaderContentGap"/>'s own remarks) — <c>PART_Header.ActualHeight</c>
+    /// still covers <see cref="PanelMetrics.HeaderButtonSize"/> (plan D-3's rolled-up row: the whole reason
+    /// <see cref="PanelMetrics.ChromeOuterInset"/> is capped at 2, not wider), <c>PART_Header</c>'s own
+    /// bottom edge never falls past <c>PART_SurfaceLayer</c>'s own bottom edge, and
+    /// <c>PART_InteractionOverlay</c> still spans the WHOLE <c>PART_SurfaceLayer</c> (D-2's "moved from the
+    /// old two-row Grid to PART_SurfaceLayer directly ... same coverage" claim, pinned for the rolled-up
+    /// size specifically, since that is the one size where the pre-ADR-030 template's two GridRows would
+    /// have collapsed one of them to zero).
+    /// </summary>
+    [Fact]
+    public void PanelChromeTemplate_RolledUpSize_HeaderCoversButtonSize_AndInteractionOverlaySpansWholeSurfaceLayer()
+    {
+        var (headerActualHeight, headerBottom, surfaceLayerRect, overlayTopLeft, overlayWidth, overlayHeight) = WithRealChrome(
+            highContrast: false,
+            width: 400,
+            height: PanelMetrics.HeaderHeight,
+            state: PanelVisualState.Idle,
+            isLayoutEditing: false,
+            surfaceStyle: PanelSurfaceStyle.Ambient,
+            body: chrome =>
+            {
+                var header = (FrameworkElement)chrome.Template.FindName("PART_Header", chrome)!;
+                var surfaceLayer = (FrameworkElement)chrome.Template.FindName("PART_SurfaceLayer", chrome)!;
+                var overlay = (FrameworkElement)chrome.Template.FindName("PART_InteractionOverlay", chrome)!;
+
+                var headerBottomInChrome = header.TranslatePoint(new Point(0, header.ActualHeight), chrome).Y;
+                var surfaceLayerTopLeft = surfaceLayer.TranslatePoint(new Point(0, 0), chrome);
+                var surfaceRect = new Rect(surfaceLayerTopLeft, new Size(surfaceLayer.ActualWidth, surfaceLayer.ActualHeight));
+                var overlayTopLeftInSurfaceLayer = overlay.TranslatePoint(new Point(0, 0), surfaceLayer);
+
+                return (header.ActualHeight, headerBottomInChrome, surfaceRect, overlayTopLeftInSurfaceLayer, overlay.ActualWidth, overlay.ActualHeight);
+            });
+
+        Assert.True(
+            headerActualHeight >= PanelMetrics.HeaderButtonSize,
+            $"PART_Header.ActualHeight ({headerActualHeight}) must be >= HeaderButtonSize ({PanelMetrics.HeaderButtonSize}) when rolled up.");
+
+        Assert.True(
+            headerBottom <= surfaceLayerRect.Bottom + 0.01,
+            $"PART_Header's own bottom ({headerBottom}) must not fall past PART_SurfaceLayer's own bottom ({surfaceLayerRect.Bottom}) when rolled up.");
+
+        Assert.Equal(0d, overlayTopLeft.X, precision: 6);
+        Assert.Equal(0d, overlayTopLeft.Y, precision: 6);
+        Assert.Equal(surfaceLayerRect.Width, overlayWidth, precision: 6);
+        Assert.Equal(surfaceLayerRect.Height, overlayHeight, precision: 6);
+    }
+
+    /// <summary>
+    /// T-R10 (single clip owner, plan D-12): <c>PART_SurfaceLayer.Clip</c> is a
+    /// <see cref="RectangleGeometry"/> with <c>(RadiusX, RadiusY) == Radius.Panel</c> (the REAL compiled
+    /// resource, not a hand-copied literal) and a <see cref="RectangleGeometry.Rect"/> sized
+    /// <c>(ActualWidth - 2*ChromeOuterInset, ActualHeight - 2*ChromeOuterInset)</c> — i.e. the window rect
+    /// shrunk once by the inset (the SAME <c>Grid.Clip</c> MultiBinding <c>Panels.xaml</c>'s own remarks
+    /// describe). <c>PART_Chrome.Clip</c> is <see langword="null"/> — its own former Clip moved to
+    /// <c>PART_SurfaceLayer</c>, so there is exactly ONE rounded-rect clip on the whole panel, not one per
+    /// decorative layer.
+    /// </summary>
+    [Fact]
+    public void PanelChromeTemplate_SurfaceLayerIsTheSoleClipOwner_PartChromeHasNoClipOfItsOwn()
+    {
+        const double width = 400d;
+        const double height = 300d;
+
+        var (surfaceLayerClip, partChromeClip, radiusPanel) = WithRealChrome(
+            highContrast: false,
+            width: width,
+            height: height,
+            state: PanelVisualState.Idle,
+            isLayoutEditing: false,
+            surfaceStyle: PanelSurfaceStyle.Ambient,
+            body: chrome =>
+            {
+                var surfaceLayer = (FrameworkElement)chrome.Template.FindName("PART_SurfaceLayer", chrome)!;
+                var partChrome = (FrameworkElement)chrome.Template.FindName("PART_Chrome", chrome)!;
+                var resources = System.Windows.Application.Current!.Resources;
+                var realRadiusPanel = (CornerRadius)resources["Radius.Panel"];
+
+                return (surfaceLayer.Clip, partChrome.Clip, realRadiusPanel);
+            });
+
+        var clipGeometry = Assert.IsType<RectangleGeometry>(surfaceLayerClip);
+        Assert.Equal(radiusPanel.TopLeft, clipGeometry.RadiusX);
+        Assert.Equal(radiusPanel.TopLeft, clipGeometry.RadiusY);
+        Assert.Equal(
+            new Rect(0, 0, width - (2 * PanelMetrics.ChromeOuterInset), height - (2 * PanelMetrics.ChromeOuterInset)),
+            clipGeometry.Rect);
+
+        Assert.Null(partChromeClip);
     }
 
     /// <summary>
@@ -466,6 +997,95 @@ public class ResourceDictionaryMergeTests
 
     private static ResourceDictionary LoadResourceDictionary(string relativePackUri)
         => new() { Source = new Uri($"/DesktopOrganizer.UI;component{relativePackUri}", UriKind.Relative) };
+
+    /// <summary>Depth-first count of descendants (visual tree) with a non-null <see cref="UIElement.Effect"/>, including <paramref name="root"/> itself.</summary>
+    private static int CountEffectsInSubtree(DependencyObject root)
+    {
+        var count = root is UIElement { Effect: not null } ? 1 : 0;
+
+        var childCount = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < childCount; i++)
+            count += CountEffectsInSubtree(VisualTreeHelper.GetChild(root, i));
+
+        return count;
+    }
+
+    /// <summary>
+    /// ADR-030 (docs/PLANS/reference-panel-chrome.md §5.2) shared harness — builds a real
+    /// <see cref="PanelChrome"/> against the real merged resource chain, applies its actual (implicit,
+    /// type-keyed) default style/template, sets the requested visual-state/editing/surface-style/size
+    /// inputs, forces a real Measure/Arrange/UpdateLayout pass, and runs <paramref name="body"/> against
+    /// it — all on a dedicated STA thread, with the same HighContrastState/app.Resources restore-in-finally
+    /// convention every other test in this class follows. <see cref="PanelChrome.AccentBrush"/> is always a
+    /// real, non-default <see cref="SolidColorBrush"/> (not the DP's own <see cref="Brushes.Transparent"/>
+    /// default) — several consumers (PART_AccentStroke's <c>BorderBrush</c>, PART_AccentIndicator's own
+    /// fill/stroke) would otherwise render invisibly, masking a real binding failure as a false pass.
+    /// </summary>
+    private static T WithRealChrome<T>(
+        bool highContrast,
+        double width,
+        double height,
+        PanelVisualState state,
+        bool isLayoutEditing,
+        PanelSurfaceStyle surfaceStyle,
+        Func<PanelChrome, T> body)
+    {
+        return RunOnStaThread(() =>
+        {
+            var originalHighContrast = HighContrastState.IsActive;
+            var beforeEnsure = Application.Current;
+            var app = WpfApplicationHost.EnsureApplication();
+            var ownsApplication = !ReferenceEquals(app, beforeEnsure);
+            var originalResources = ownsApplication ? null : app.Resources;
+
+            try
+            {
+                app.Resources = new ResourceDictionary();
+                MergeResourceDictionaries(app, highContrast);
+
+                var style = (Style)app.Resources[typeof(PanelChrome)];
+                var chrome = new PanelChrome
+                {
+                    Style = style,
+                    VisualState = state,
+                    IsLayoutEditing = isLayoutEditing,
+                    SurfaceStyle = surfaceStyle,
+                    AccentBrush = new SolidColorBrush(Colors.Red),
+
+                    // A real, fixed-size Content/TitleEditor — without these, PART_ContentHost/PART_Header
+                    // have nothing to measure, so PanelChrome.DesiredSize would instead be dominated by the
+                    // decorative strokes/marker's own tiny, LEGITIMATELY state-varying sizes (their opacity/
+                    // thickness ARE meant to change per state — that is not the "content moved" jitter T-R3
+                    // guards against). Fixed, oversized content keeps DesiredSize's own dominant term stable.
+                    Content = new Border { Width = 200, Height = 150 },
+                    TitleEditor = new TextBlock { Text = "Sample", Width = 100, Height = 16 },
+                };
+
+                chrome.ApplyTemplate();
+                chrome.Measure(new Size(width, height));
+                chrome.Arrange(new Rect(0, 0, width, height));
+                chrome.UpdateLayout();
+
+                return body(chrome);
+            }
+            finally
+            {
+                HighContrastState.IsActive = originalHighContrast;
+
+                if (!ownsApplication)
+                    app.Resources = originalResources!;
+            }
+        });
+    }
+
+    /// <summary>A named template part's own origin (in the owning <see cref="PanelChrome"/>'s local coordinates) and size — T-R3's jitter-comparison unit.</summary>
+    private readonly record struct PartSnapshot(Point Origin, double Width, double Height);
+
+    private static PartSnapshot SnapshotPart(PanelChrome chrome, string partName)
+    {
+        var element = (FrameworkElement)chrome.Template.FindName(partName, chrome)!;
+        return new PartSnapshot(element.TranslatePoint(new Point(0, 0), chrome), element.ActualWidth, element.ActualHeight);
+    }
 
     /// <summary>
     /// Walks every merged dictionary in the chain (recursively, in case any of them nest their own

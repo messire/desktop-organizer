@@ -74,6 +74,13 @@
     <x:Static x:Key="Color.Settings.TextMuted" Member="sysc:SystemColors.GrayTextColor"/>
     <x:Static x:Key="Color.Settings.SwatchBorder" Member="sysc:SystemColors.ActiveBorderColor"/>
     <x:Static x:Key="Color.Settings.Warning" Member="sysc:SystemColors.HighlightColor"/>
+    <!-- ADR-031 settings-window shell tokens (see Colors.xaml). -->
+    <x:Static x:Key="Color.Settings.TextPrimary" Member="sysc:SystemColors.WindowTextColor"/>
+    <x:Static x:Key="Color.Settings.CardBackground" Member="sysc:SystemColors.WindowColor"/>
+    <x:Static x:Key="Color.Settings.CardBorder" Member="sysc:SystemColors.ActiveBorderColor"/>
+    <x:Static x:Key="Color.Settings.HoverOverlay" Member="sysc:SystemColors.ControlLightColor"/>
+    <x:Static x:Key="Color.Settings.ToggleTrackOff" Member="sysc:SystemColors.GrayTextColor"/>
+    <x:Static x:Key="Color.Settings.ToggleThumb" Member="sysc:SystemColors.WindowColor"/>
 
     <!--
         ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md D-8): the

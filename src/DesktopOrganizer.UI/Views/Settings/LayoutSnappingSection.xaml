@@ -1,0 +1,174 @@
+<UserControl x:Class="DesktopOrganizer.UI.Views.Settings.LayoutSnappingSection"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
+             mc:Ignorable="d"
+             d:DesignWidth="460">
+    <StackPanel>
+        <TextBlock Text="Layout &amp; snapping" Style="{StaticResource Settings.PageHeader}"/>
+
+        <!-- Snap panel position to grid — toggle + step (GridStep/GridSize, GlobalDefaultsViewModel). -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                        <TextBlock Text="Snap panel position to grid" Style="{StaticResource Settings.CardHeader}"/>
+                        <TextBlock Style="{StaticResource Settings.CardDescription}"
+                                   Text="Quantizes a dragged panel's position to a fixed step. Turning this off does not affect icon spacing inside a panel."/>
+                    </StackPanel>
+                    <CheckBox Grid.Column="1" VerticalAlignment="Center"
+                              Style="{StaticResource Settings.ToggleCheckBox}"
+                              AutomationProperties.Name="Snap panel position to grid"
+                              IsChecked="{Binding SnapToGridEnabled, Mode=TwoWay}"/>
+                </Grid>
+
+                <!-- M-6 fix (docs/prompts/settings-window-redesign.md fix-cycle): Minimum is 2 (not 4) so a
+                     legacy GridSize of 2 or 3 — persisted before this window existed — is shown unchanged
+                     instead of the Slider silently coercing it up to 4 and writing that back on open (see
+                     GlobalDefaultsViewModelTests.LegacyGridSizeTwoOrThree_IsShownUnchanged). Delay=300 on
+                     the binding means dragging only commits (and saves) once the drag settles, not once
+                     per pixel of travel. -->
+                <Grid Margin="0,10,0,0" IsEnabled="{Binding SnapToGridEnabled}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="50"/>
+                    </Grid.ColumnDefinitions>
+                    <Slider Grid.Column="0" Minimum="2" Maximum="128" TickFrequency="4"
+                            SmallChange="1" LargeChange="4"
+                            AutomationProperties.Name="Grid step"
+                            Value="{Binding GridStep, Mode=TwoWay, Delay=300}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <TextBlock Grid.Column="1" Text="{Binding GridStep, StringFormat={}{0} px}"
+                               VerticalAlignment="Center" TextAlignment="Right"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- Magnet distance while dragging — enabled only while snapping is on. -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="50"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2">
+                    <TextBlock Text="Magnet distance while dragging" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Style="{StaticResource Settings.CardDescription}"
+                               Visibility="{Binding SnapToGridEnabled, Converter={StaticResource BooleanToVisibility}}"
+                               Text="Distance at which a dragged panel snaps to the grid, in pixels. 0 disables the live magnet; snapping still applies on drop."/>
+                    <TextBlock Text="Requires &quot;Snap panel position to grid&quot; to be on.">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SnapToGridEnabled}" Value="False">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+
+                <!-- Same slider-row shape as the grid-step card above: slider left, "N px" readout in a
+                     fixed 50px column on the right, so the two readouts line up vertically. -->
+                <Slider Grid.Row="1" Grid.Column="0" Margin="0,10,12,0"
+                        Minimum="0" Maximum="64" TickFrequency="4"
+                        SmallChange="1" LargeChange="4"
+                        AutomationProperties.Name="Magnet distance while dragging"
+                        Value="{Binding GridSnapDistance, Mode=TwoWay}"
+                        IsEnabled="{Binding SnapToGridEnabled}"
+                        VerticalAlignment="Center"/>
+                <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,10,0,0"
+                           Text="{Binding GridSnapDistance, StringFormat={}{0} px}"
+                           VerticalAlignment="Center" TextAlignment="Right"/>
+            </Grid>
+        </Border>
+
+        <!-- Snap panel size to icon grid -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock Text="Snap panel size to icon grid" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Style="{StaticResource Settings.CardDescription}"
+                               Text="Resizing a panel snaps its dimensions to the icon-grid cell size in real time."/>
+                </StackPanel>
+                <CheckBox Grid.Column="1" VerticalAlignment="Center"
+                          Style="{StaticResource Settings.ToggleCheckBox}"
+                          AutomationProperties.Name="Snap panel size to icon grid"
+                          IsChecked="{Binding SnapResizeToIconGrid, Mode=TwoWay}"/>
+            </Grid>
+        </Border>
+
+        <!-- Lock layout -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock Text="Lock layout" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Style="{StaticResource Settings.CardDescription}"
+                               Text="Prevents panels from being moved or resized until unlocked. Roll up/down, renaming, and file operations are unaffected. Also available from the tray icon."/>
+                </StackPanel>
+                <CheckBox Grid.Column="1" VerticalAlignment="Center"
+                          Style="{StaticResource Settings.ToggleCheckBox}"
+                          AutomationProperties.Name="Lock layout"
+                          IsChecked="{Binding IsLayoutLocked, Mode=TwoWay}"/>
+            </Grid>
+        </Border>
+
+        <!-- Move/resize outside Edit layout mode — RadioButton group over the 3 NormalModeLayoutGestures values. -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <StackPanel>
+                <TextBlock Text="Move/resize outside Edit layout mode" Style="{StaticResource Settings.CardHeader}"/>
+                <TextBlock Style="{StaticResource Settings.CardDescription}"
+                           Text="Which panel move/resize gestures stay available while Edit layout mode is off."/>
+                <StackPanel Margin="0,6,0,0">
+                    <RadioButton GroupName="NormalModeLayoutGestures" Style="{StaticResource Settings.RadioOption}"
+                                 Content="{x:Static models:NormalModeLayoutGestures.MoveAndResize}"
+                                 ContentTemplate="{StaticResource Settings.EnumRadioLabel}"
+                                 AutomationProperties.Name="Move and resize">
+                        <RadioButton.IsChecked>
+                            <Binding Path="NormalModeLayoutGestures" Converter="{StaticResource EnumToBoolean}"
+                                     ConverterParameter="{x:Static models:NormalModeLayoutGestures.MoveAndResize}"/>
+                        </RadioButton.IsChecked>
+                    </RadioButton>
+                    <RadioButton GroupName="NormalModeLayoutGestures" Style="{StaticResource Settings.RadioOption}"
+                                 Content="{x:Static models:NormalModeLayoutGestures.MoveOnly}"
+                                 ContentTemplate="{StaticResource Settings.EnumRadioLabel}"
+                                 AutomationProperties.Name="Move only">
+                        <RadioButton.IsChecked>
+                            <Binding Path="NormalModeLayoutGestures" Converter="{StaticResource EnumToBoolean}"
+                                     ConverterParameter="{x:Static models:NormalModeLayoutGestures.MoveOnly}"/>
+                        </RadioButton.IsChecked>
+                    </RadioButton>
+                    <RadioButton GroupName="NormalModeLayoutGestures" Style="{StaticResource Settings.RadioOption}"
+                                 Content="{x:Static models:NormalModeLayoutGestures.None}"
+                                 ContentTemplate="{StaticResource Settings.EnumRadioLabel}"
+                                 AutomationProperties.Name="None (Edit layout mode only)">
+                        <RadioButton.IsChecked>
+                            <Binding Path="NormalModeLayoutGestures" Converter="{StaticResource EnumToBoolean}"
+                                     ConverterParameter="{x:Static models:NormalModeLayoutGestures.None}"/>
+                        </RadioButton.IsChecked>
+                    </RadioButton>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

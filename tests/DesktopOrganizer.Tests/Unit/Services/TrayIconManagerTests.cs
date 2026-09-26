@@ -22,6 +22,7 @@ public class TrayIconManagerTests
 {
     private const string EditLayoutHeader = "Edit layout";
     private const string LockLayoutHeader = "Lock layout";
+    private const string ShowDesktopIconsHeader = "Show desktop icons";
 
     private readonly Mock<INotifyIconAdapter> _notifyIconAdapterMock = new();
     private readonly TrayIconManager _sut;
@@ -129,6 +130,75 @@ public class TrayIconManagerTests
 
         Assert.Contains(menu.Items.Cast<ToolStripItem>(), i => i.Text == "Settings");
         Assert.Contains(menu.Items.Cast<ToolStripItem>(), i => i.Text == "Exit");
+    }
+
+    /// <summary>
+    /// D-6: verifies the "Show desktop icons" item is present, positioned between "Lock layout" and the
+    /// separator preceding "Exit".
+    /// </summary>
+    [Fact]
+    public void ContextMenu_ShowDesktopIconsItem_PresentBetweenLockLayoutAndExitSeparator()
+    {
+        _sut.Initialize();
+        var items = _capturedMenu!.Items.Cast<ToolStripItem>().ToList();
+
+        var lockLayoutIndex = items.FindIndex(i => i.Text == LockLayoutHeader);
+        var showDesktopIconsIndex = items.FindIndex(i => i.Text == ShowDesktopIconsHeader);
+        var exitIndex = items.FindIndex(i => i.Text == "Exit");
+
+        Assert.True(lockLayoutIndex >= 0 && showDesktopIconsIndex >= 0 && exitIndex >= 0);
+        Assert.True(showDesktopIconsIndex > lockLayoutIndex);
+        Assert.True(showDesktopIconsIndex < exitIndex);
+        Assert.IsType<ToolStripSeparator>(items[exitIndex - 1]);
+    }
+
+    /// <summary>
+    /// Verifies that clicking the "Show desktop icons" menu item raises
+    /// <see cref="TrayIconManager.ToggleDesktopIconsRequested"/>.
+    /// </summary>
+    [Fact]
+    public void ShowDesktopIconsItem_Click_RaisesToggleDesktopIconsRequested()
+    {
+        _sut.Initialize();
+        var raised = false;
+        _sut.ToggleDesktopIconsRequested += (_, _) => raised = true;
+
+        FindItem(_capturedMenu!, ShowDesktopIconsHeader).PerformClick();
+
+        Assert.True(raised);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="TrayIconManager.SetDesktopIconsVisible"/> reflects the given value onto
+    /// the "Show desktop icons" item's checkmark, independently of the layout-edit snapshot
+    /// <see cref="TrayIconManager.UpdateContextMenu"/> owns.
+    /// </summary>
+    /// <param name="visible">The visibility value to set and expect reflected on the checkmark.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SetDesktopIconsVisible_ReflectsValue_OnShowDesktopIconsItem(bool visible)
+    {
+        _sut.Initialize();
+
+        _sut.SetDesktopIconsVisible(visible);
+
+        var item = FindItem(_capturedMenu!, ShowDesktopIconsHeader);
+        Assert.Equal(visible, item.Checked);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="TrayIconManager.SetDesktopIconsVisible"/> lazily builds the context menu
+    /// (mirrors <see cref="TrayIconManager.UpdateContextMenu"/>'s own contract) rather than requiring
+    /// <see cref="TrayIconManager.Initialize"/> to have run first.
+    /// </summary>
+    [Fact]
+    public void SetDesktopIconsVisible_BuildsContextMenu_WhenCalledBeforeInitialize()
+    {
+        _sut.SetDesktopIconsVisible(true);
+
+        Assert.NotNull(_capturedMenu);
+        Assert.True(FindItem(_capturedMenu!, ShowDesktopIconsHeader).Checked);
     }
 
     /// <summary>

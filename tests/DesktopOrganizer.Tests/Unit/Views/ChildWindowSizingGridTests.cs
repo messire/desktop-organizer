@@ -447,7 +447,8 @@ public class ChildWindowSizingGridTests
                 Mock.Of<INativePanelSizingService>(),
                 layoutEditMode.Object,
                 monitors.Object,
-                Mock.Of<IConfirmationService>());
+                Mock.Of<IConfirmationService>(),
+                Mock.Of<IPanelCustomizeService>());
 
             var harness = new Harness(app, originalResources, ownsApplication, window);
             harnessBox[0] = harness;

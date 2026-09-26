@@ -30,6 +30,8 @@ public class ChildWindowModel : INotifyPropertyChanged
     private int? _heightSpanUnits;
     private PanelSizingMode _sizingMode = PanelSizingMode.Manual;
     private IconLayoutPolicy _iconLayoutPolicy = IconLayoutPolicy.LegacyStretch;
+    private string? _sourceFolderPath;
+    private List<string> _filePaths = [];
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -234,14 +236,41 @@ public class ChildWindowModel : INotifyPropertyChanged
 
     /// <summary>
     /// If set, the panel mirrors the contents of this folder (a "portal", e.g. the Desktop)
-    /// instead of a manually curated list. When set, <see cref="FilePaths"/> is not persisted.
+    /// instead of a manually curated list. <see cref="FilePaths"/> IS still persisted while set — it is
+    /// simply not kept in sync with the portal's live mirrored contents for as long as it's active
+    /// (<c>ChildWindow.SyncToModel</c> skips writing it while a portal is attached), so it keeps
+    /// whatever manually-curated snapshot the panel held right before becoming a portal. Clearing
+    /// <see cref="SourceFolderPath"/> (FIX-B fix-cycle minor finding 13 — this doc comment previously
+    /// read "FilePaths is not persisted", which is what actually misled the "Clear" semantics review)
+    /// restores exactly those items, per P-B4 (docs/PLANS/settings-window-redesign.md §3.2).
+    /// Raises <see cref="PropertyChanged"/> (settings-window-redesign.md D-4) so
+    /// <see cref="DesktopOrganizer.UI.ViewModels.ChildWindowViewModel"/> can attach/detach its Folder
+    /// Portal watcher purely in reaction to this property changing — the "Customize panel…" dialog
+    /// (and any other future caller) only ever needs to assign this property, never orchestrate the
+    /// watcher itself.
     /// </summary>
-    public string? SourceFolderPath { get; set; }
+    public string? SourceFolderPath
+    {
+        get => _sourceFolderPath;
+        set => SetField(ref _sourceFolderPath, value);
+    }
 
     /// <summary>
-    /// File paths persisted to settings. Used for serialization.
+    /// File paths persisted to settings. Used for serialization. Raises <see cref="PropertyChanged"/>
+    /// (FIX round 2 MAJOR-1) so the settings window's Panels list subtitle — bound through
+    /// <c>PanelSubtitleConverter</c> to <c>FilePaths.Count</c> in <c>PanelsSection.xaml</c> — stays
+    /// live while the settings window (a hidden DI singleton, never recreated) is open, instead of only
+    /// refreshing whenever some unrelated notification happens to touch the bound
+    /// <see cref="ChildWindowModel"/> instance. Every real caller (<c>ChildWindow.SyncToModel</c>, the
+    /// portal attach/detach paths in <see cref="DesktopOrganizer.UI.ViewModels.ChildWindowViewModel"/>)
+    /// already assigns a freshly built list rather than mutating this one in place, so the reference-
+    /// equality guard in <c>SetField</c> only ever suppresses a genuinely redundant re-assignment.
     /// </summary>
-    public List<string> FilePaths { get; set; } = [];
+    public List<string> FilePaths
+    {
+        get => _filePaths;
+        set => SetField(ref _filePaths, value);
+    }
 
     /// <summary>
     /// Runtime collection of file items. Not persisted — populated from <see cref="FilePaths"/> on load.

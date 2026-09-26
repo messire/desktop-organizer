@@ -61,6 +61,17 @@ public static class DiConfig
         services.AddSingleton<LayoutSnapshotsViewModel>();  // Snapshots section VM
 
         services.AddSingleton<IConfirmationService, ConfirmationService>();
+        services.AddSingleton<IInputDialogService, InputDialogService>();
+
+        // "Customize panel…" dialog (docs/prompts/settings-window-redesign.md D-3, WP-B): the VM/window
+        // are transient (a fresh one is built the first time the dialog opens, or after it was closed),
+        // but IPanelCustomizeService itself is a singleton that keeps at most one open window alive and
+        // re-targets it on a later Show() call — see PanelCustomizeService's own remarks.
+        services.AddSingleton<IFolderPickerService, FolderPickerService>();
+        services.AddTransient<PanelCustomizeViewModel>();
+        services.AddTransient<PanelCustomizeWindow>();
+        services.AddSingleton<IPanelCustomizeService>(sp =>
+            new PanelCustomizeService(() => sp.GetRequiredService<PanelCustomizeWindow>(), sp.GetRequiredService<IWindowManager>()));
 
         // Transient: one instance per ChildWindow (itself transient), so per-gesture throttling state
         // never needs to be keyed by panel — see GestureDiagnostics' remarks.

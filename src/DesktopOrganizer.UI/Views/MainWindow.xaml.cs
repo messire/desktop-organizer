@@ -35,6 +35,19 @@ public partial class MainWindow : Window
         InputBindings.Add(new KeyBinding(
             _viewModel.ToggleEditLayoutCommand,
             new KeyGesture(Key.E, ModifierKeys.Control)));
+
+        // MINOR-6 (FIX round 2): refresh transient, externally-mutable settings state (currently just
+        // HasOneTimeHintsToReset) every time this window becomes visible or gains focus again — this
+        // ViewModel is a DI singleton and the window is Hidden/re-Shown rather than recreated (see
+        // OnClosing below), so without this the General section could keep showing stale state from
+        // whenever it last happened to raise a notification, across an entire hide/show cycle. Both
+        // IsVisibleChanged (Show()/ShowMainWindow()) and Activated (regaining focus while already
+        // visible) are covered — either can be the moment the user next looks at that section.
+        IsVisibleChanged += (_, e) =>
+        {
+            if (e.NewValue is true) _viewModel.RefreshTransientState();
+        };
+        Activated += (_, _) => _viewModel.RefreshTransientState();
     }
 
     /// <inheritdoc />

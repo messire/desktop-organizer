@@ -36,6 +36,7 @@ public static class WpfApplicationHost
         "/Resources/Styles/Typography.xaml",
         "/Resources/Styles/Icons.xaml",
         "/Resources/Styles/Controls.xaml",
+        "/Resources/Styles/Settings.xaml",
         "/Resources/Styles/Panels.xaml",
         "/Resources/Templates.xaml",
     ];

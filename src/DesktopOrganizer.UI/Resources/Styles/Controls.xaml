@@ -288,47 +288,6 @@
     </Style>
 
     <!--
-        DO-003 / ADR-025 D-9 (C7): Settings window (MainWindow.xaml) page-tab chrome, hoisted verbatim
-        out of its former inline Button.Style (same triggers, same behavior). The Settings window stays
-        the light, system-styled window it always was (D-9) — these two styles consume only
-        Color.Settings.*/Brush.Settings.* tokens, never the dark Ambient Accent ones above.
-
-        The active-tab DataTrigger's MultiBinding.Converter is instantiated inline rather than via
-        {StaticResource EqualityToBool}: that converter is registered in Templates.xaml, which merges
-        AFTER this dictionary (D-1's forward-only StaticResource order) — an inline converter instance
-        sidesteps that ordering constraint entirely instead of relying on it.
-    -->
-    <Style x:Key="Settings.PageTabButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="0"/>
-        <Style.Triggers>
-            <DataTrigger Value="True">
-                <DataTrigger.Binding>
-                    <MultiBinding>
-                        <MultiBinding.Converter>
-                            <conv:EqualityToBoolConverter/>
-                        </MultiBinding.Converter>
-                        <Binding/>
-                        <Binding Path="DataContext.CurrentPage" RelativeSource="{RelativeSource AncestorType=Window}"/>
-                    </MultiBinding>
-                </DataTrigger.Binding>
-                <Setter Property="Background" Value="{StaticResource Brush.Settings.TabActiveBackground}"/>
-            </DataTrigger>
-        </Style.Triggers>
-    </Style>
-
-    <!-- Remove button — hidden for the "default" page (DataContext is the page id string itself). -->
-    <Style x:Key="Settings.PageTabCloseButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Settings.IconMuted}"/>
-        <Style.Triggers>
-            <DataTrigger Binding="{Binding}" Value="default">
-                <Setter Property="Visibility" Value="Collapsed"/>
-            </DataTrigger>
-        </Style.Triggers>
-    </Style>
-
-    <!--
         Overlay scrollbar (docs/prompts/scrollbar-pack, spec 04): the three styles below replace ONLY the
         visual template of the stock WPF ScrollBar -> Track -> Thumb/RepeatButton chain. The scrolling
         mechanics are untouched: PART_Track is a real Track (page-scroll semantics via the two

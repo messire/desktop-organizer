@@ -62,6 +62,12 @@
     <SolidColorBrush x:Key="Brush.Settings.TextMuted" Color="{StaticResource Color.Settings.TextMuted}" po:Freeze="True"/>
     <SolidColorBrush x:Key="Brush.Settings.SwatchBorder" Color="{StaticResource Color.Settings.SwatchBorder}" po:Freeze="True"/>
     <SolidColorBrush x:Key="Brush.Settings.Warning" Color="{StaticResource Color.Settings.Warning}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.Settings.TextPrimary" Color="{StaticResource Color.Settings.TextPrimary}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.Settings.CardBackground" Color="{StaticResource Color.Settings.CardBackground}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.Settings.CardBorder" Color="{StaticResource Color.Settings.CardBorder}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.Settings.HoverOverlay" Color="{StaticResource Color.Settings.HoverOverlay}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.Settings.ToggleTrackOff" Color="{StaticResource Color.Settings.ToggleTrackOff}" po:Freeze="True"/>
+    <SolidColorBrush x:Key="Brush.Settings.ToggleThumb" Color="{StaticResource Color.Settings.ToggleThumb}" po:Freeze="True"/>
 
     <!--
         ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §2.3, D-11 /

@@ -17,6 +17,30 @@ namespace DesktopOrganizer.UI.Services;
 public static class PanelDefaults
 {
     /// <summary>
+    /// Creates a brand-new panel model with its title, page assignment, and every appearance/
+    /// workspace-mode default already applied (fix-cycle finding 11,
+    /// docs/prompts/settings-window-redesign.md): the single source of truth both
+    /// <c>MainWindowViewModel.AddPanel</c> (toolbar/tray "Add panel") and <c>App.xaml.cs</c>'s
+    /// <c>NewPanelWithDefaults</c> (lasso gesture) now call, so page assignment and appearance defaults
+    /// can never drift apart into two independently maintained copies again — <see cref="Apply"/> already
+    /// closed that gap for the appearance half alone. Never assigns <see cref="ChildWindowModel.Position"/>/
+    /// <see cref="ChildWindowModel.Size"/> — same contract as <see cref="Apply"/>; call
+    /// <see cref="ReconcileGridAlignedSpans"/> afterwards once the caller has finished with those, if it
+    /// assigns them at all.
+    /// </summary>
+    /// <param name="settings">The global application settings providing the defaults.</param>
+    /// <param name="pageId">The page the new panel is created on.</param>
+    /// <returns>The newly created, not-yet-registered panel model.</returns>
+    public static ChildWindowModel CreateNew(IAppSettings settings, string pageId)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var model = new ChildWindowModel { Title = "New Panel", PageId = pageId };
+        Apply(model, settings);
+        return model;
+    }
+
+    /// <summary>
     /// Applies every appearance/workspace-mode default from <paramref name="settings"/> onto
     /// <paramref name="model"/>: accent/text colour, surface opacity/style, icon size, and the
     /// <see cref="ChildWindowModel.GeometryMode"/>/<see cref="ChildWindowModel.IconLayoutPolicy"/> pair

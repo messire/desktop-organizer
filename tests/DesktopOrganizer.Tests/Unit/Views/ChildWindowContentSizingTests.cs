@@ -950,7 +950,8 @@ public class ChildWindowContentSizingTests
                 Mock.Of<INativePanelSizingService>(),
                 layoutEditModeMock.Object,
                 monitorServiceMock.Object,
-                confirmationMock.Object);
+                confirmationMock.Object,
+                Mock.Of<IPanelCustomizeService>());
 
             return new ChildWindowContentSizingHarness(app, originalResources, ownsApplication, window, viewModel, windowManagerMock, confirmationMock, layoutEditModeMock, monitorServiceMock, diagnosticsMock);
         }

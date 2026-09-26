@@ -1,0 +1,186 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+                    xmlns:models="clr-namespace:DesktopOrganizer.UI.Models">
+    <!--
+        Settings-window redesign (docs/prompts/settings-window-redesign.md, D-2/D-9). Merged app-wide by
+        App.xaml.cs LoadResourceDictionaries() (after Controls.xaml): the section UserControls are created
+        through DataTemplates and parsed BEFORE they join MainWindow's visual tree, so a Window-local merge
+        is invisible to their StaticResource lookups (see SettingsSectionsInitializeTests).
+        Palette: everything here uses Brush.Settings.* (light, system-styled window) — the dark Ambient
+        Accent tokens (Brush.Surface.*/Brush.Text.*/Brush.Border.*/Brush.Overlay.*) belong to desktop panels.
+
+        "Settings card" pattern (D-9): a Settings.CardBorder wrapping a two-column Grid — a left
+        StackPanel with a Settings.CardHeader + Settings.CardDescription (the description replaces what
+        used to be a ToolTip), and the actual control docked to the right column. Not every card fits a
+        strict two-column shape (e.g. a slider-with-readout, a RadioButton group, or a list+toolbar) —
+        those stack the description above the control instead, inside the same Settings.CardBorder.
+    -->
+    <conv:EnumToBooleanConverter x:Key="EnumToBoolean"/>
+    <conv:EnumDisplayNameConverter x:Key="EnumDisplayName"/>
+    <BooleanToVisibilityConverter x:Key="BooleanToVisibility"/>
+
+    <!-- ── Sidebar navigation ─────────────────────────────────────────────────────────────────── -->
+
+    <DataTemplate x:Key="Settings.SidebarItemTemplate" DataType="{x:Type models:SettingsSectionInfo}">
+        <StackPanel Orientation="Horizontal" Margin="2,0">
+            <!-- Fallback font list (fix-cycle finding 12): "Segoe Fluent Icons" ships the same PUA glyph
+                 codepoints on Windows 11 and is used if "Segoe MDL2 Assets" isn't installed, so a system
+                 missing one of the two never renders these as an empty box. -->
+            <TextBlock Text="{Binding Glyph}"
+                       FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons"
+                       FontSize="14"
+                       Width="20"
+                       Margin="0,0,10,0"
+                       VerticalAlignment="Center"
+                       Foreground="{StaticResource Brush.Settings.IconMuted}"/>
+            <TextBlock Text="{Binding Title}" FontSize="12" VerticalAlignment="Center"/>
+        </StackPanel>
+    </DataTemplate>
+
+    <!-- Shared chrome (hover/selected wash) for both the sidebar ListBoxItems and the standalone
+         "About" ToggleButton pinned below them, so the two read as one continuous nav list. -->
+    <Style x:Key="Settings.SidebarListBoxItem" TargetType="ListBoxItem">
+        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="Margin" Value="6,2"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="Chrome"
+                            Background="Transparent"
+                            CornerRadius="{StaticResource Radius.Control}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Brush.Settings.TabActiveBackground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="Settings.SidebarListBox" TargetType="ListBox">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled"/>
+        <Setter Property="ItemContainerStyle" Value="{StaticResource Settings.SidebarListBoxItem}"/>
+        <Setter Property="ItemTemplate" Value="{StaticResource Settings.SidebarItemTemplate}"/>
+    </Style>
+
+    <!-- The pinned "About" entry is a standalone ToggleButton (not a ListBox item): its IsChecked is a
+         one-way reflection of SelectedSection == About, and clicking it always re-issues
+         SelectSectionCommand — see MainWindow.xaml's remarks on why this is more robust here than a
+         second one-item ListBox sharing SelectedValue with the first. -->
+    <Style x:Key="Settings.SidebarAboutToggle" TargetType="ToggleButton">
+        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="Margin" Value="6,6"/>
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Chrome"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="{StaticResource Radius.Control}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Brush.Settings.TabActiveBackground}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ── Section content ────────────────────────────────────────────────────────────────────── -->
+
+    <Style x:Key="Settings.PageHeader" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="18"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource Brush.Settings.TextPrimary}"/>
+        <Setter Property="Margin" Value="0,0,0,12"/>
+    </Style>
+
+    <Style x:Key="Settings.CardBorder" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource Brush.Settings.CardBackground}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Settings.CardBorder}"/>
+        <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
+        <Setter Property="CornerRadius" Value="{StaticResource Radius.Control}"/>
+        <Setter Property="Padding" Value="14,12"/>
+        <Setter Property="Margin" Value="0,0,0,10"/>
+    </Style>
+
+    <Style x:Key="Settings.CardHeader" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource Brush.Settings.TextPrimary}"/>
+    </Style>
+
+    <Style x:Key="Settings.CardDescription" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Foreground" Value="{StaticResource Brush.Settings.TextMuted}"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="Margin" Value="0,4,0,0"/>
+    </Style>
+
+    <!-- Toggle-style CheckBox (D-9: "toggle для on/off"). Track/thumb colours come from the LIGHT
+         Color.Settings.* tokens (Brushes.xaml) — never from the dark panel palette. -->
+    <Style x:Key="Settings.ToggleCheckBox" TargetType="CheckBox">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Grid VerticalAlignment="Center" Width="36" Height="20">
+                        <Border x:Name="Track"
+                                CornerRadius="10"
+                                Background="{StaticResource Brush.Settings.ToggleTrackOff}"/>
+                        <Ellipse x:Name="Thumb"
+                                 Width="14" Height="14"
+                                 Fill="{StaticResource Brush.Settings.ToggleThumb}"
+                                 HorizontalAlignment="Left"
+                                 VerticalAlignment="Center"
+                                 Margin="3,0,0,0"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Track" Property="Background" Value="{StaticResource Brush.Accent.Blue}"/>
+                            <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/>
+                            <Setter TargetName="Thumb" Property="Margin" Value="0,0,3,0"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="Settings.RadioOption" TargetType="RadioButton">
+        <Setter Property="Margin" Value="0,6,0,0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+
+    <!-- Renders an enum value passed as a RadioButton/ComboBoxItem's Content through
+         EnumDisplayNameConverter, so every enum-backed control in this window shows the same
+         human-readable label instead of the raw C# member name. -->
+    <DataTemplate x:Key="Settings.EnumRadioLabel">
+        <TextBlock Text="{Binding Converter={StaticResource EnumDisplayName}}"/>
+    </DataTemplate>
+</ResourceDictionary>

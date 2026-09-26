@@ -21,6 +21,7 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
     private ContextMenuStrip? _contextMenuStrip;
     private ToolStripMenuItem? _editLayoutItem;
     private ToolStripMenuItem? _lockLayoutItem;
+    private ToolStripMenuItem? _showDesktopIconsItem;
 
     /// <inheritdoc />
     public event EventHandler? OnExitRequested;
@@ -36,6 +37,9 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
 
     /// <inheritdoc />
     public event EventHandler? OnLockLayoutToggleRequested;
+
+    /// <inheritdoc />
+    public event EventHandler? ToggleDesktopIconsRequested;
 
     /// <summary>
     /// Absolute path of the tray icon, anchored at the application's own install directory
@@ -69,6 +73,7 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
         _contextMenuStrip = null;
         _editLayoutItem = null;
         _lockLayoutItem = null;
+        _showDesktopIconsItem = null;
     }
 
     /// <inheritdoc />
@@ -96,6 +101,13 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
         _lockLayoutItem!.Checked = isLockLayoutChecked;
     }
 
+    /// <inheritdoc />
+    public void SetDesktopIconsVisible(bool visible)
+    {
+        EnsureContextMenuBuilt();
+        _showDesktopIconsItem!.Checked = visible;
+    }
+
     private void EnsureContextMenuBuilt()
     {
         if (_contextMenuStrip is not null)
@@ -118,11 +130,20 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
         lockLayoutItem.Click += LockLayoutToggleRequested;
         contextMenu.Items.Add(lockLayoutItem);
 
+        // D-6: same event-plus-refresh shape as Edit layout/Lock layout above — CheckOnClick is
+        // deliberately false because this item's checked state must also track the desktop double-click
+        // gesture, a second entry point this menu item's own click can never see (see
+        // ToggleDesktopIconsRequested's and SetDesktopIconsVisible's remarks).
+        var showDesktopIconsItem = new ToolStripMenuItem("Show desktop icons") { CheckOnClick = false };
+        showDesktopIconsItem.Click += DesktopIconsToggleRequested;
+        contextMenu.Items.Add(showDesktopIconsItem);
+
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add("Exit", null, ExitRequested);
 
         _editLayoutItem = editLayoutItem;
         _lockLayoutItem = lockLayoutItem;
+        _showDesktopIconsItem = showDesktopIconsItem;
         _contextMenuStrip = contextMenu;
 
         // Assigned to the adapter exactly once — subsequent UpdateContextMenu calls mutate these
@@ -144,4 +165,7 @@ public class TrayIconManager(INotifyIconAdapter notifyIconAdapter) : ITrayIconMa
 
     private void LockLayoutToggleRequested(object? sender, EventArgs e)
         => OnLockLayoutToggleRequested?.Invoke(sender, e);
+
+    private void DesktopIconsToggleRequested(object? sender, EventArgs e)
+        => ToggleDesktopIconsRequested?.Invoke(sender, e);
 }

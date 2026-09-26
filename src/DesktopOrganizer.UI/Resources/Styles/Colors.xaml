@@ -115,6 +115,20 @@
     <Color x:Key="Color.Settings.Warning">#B8860B</Color>
 
     <!--
+        ADR-031 settings-window redesign: the sidebar/card shell of the (light) settings window. These
+        exist because the first cut of Settings.xaml borrowed Surface.Elevated/Text.Primary/Border.* from
+        the DARK Ambient Accent palette above, which rendered near-black cards with light text inside a
+        light, system-styled window. Everything the settings window and its dialogs paint must come from
+        Color.Settings.*, never from the panel palette.
+    -->
+    <Color x:Key="Color.Settings.TextPrimary">#1B1B1B</Color>
+    <Color x:Key="Color.Settings.CardBackground">White</Color>
+    <Color x:Key="Color.Settings.CardBorder">#E0E0E0</Color>
+    <Color x:Key="Color.Settings.HoverOverlay">#14000000</Color>
+    <Color x:Key="Color.Settings.ToggleTrackOff">#9A9A9A</Color>
+    <Color x:Key="Color.Settings.ToggleThumb">White</Color>
+
+    <!--
         ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §2.3) —
         non-semantic surface-highlight gradient endpoints (D-11) and the hit-test-catcher's
         near-invisible-but-opaque fill (D-5). Both are pure chrome, never accent — see

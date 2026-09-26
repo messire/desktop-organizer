@@ -261,7 +261,8 @@ public class ResizeOverlayGeometryTests
                 Mock.Of<INativePanelSizingService>(),
                 (ILayoutEditModeService)app.Resources["LayoutEditMode"],
                 Mock.Of<IMonitorService>(),
-                Mock.Of<IConfirmationService>());
+                Mock.Of<IConfirmationService>(),
+                Mock.Of<IPanelCustomizeService>());
 
             return new ResizeOverlayHarness(app, originalResources, ownsApplication, window);
         }

@@ -863,9 +863,135 @@ public class WindowManagerTests
         applicationStateServiceMock.Verify(s => s.ReportPartialLoad(It.IsAny<string>()), Times.Never);
     }
 
+    // ── MovePanelToPage (docs/prompts/settings-window-redesign.md D-10, Panels section "Move to page ▾") ──
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.MovePanelToPage"/> updates
+    /// <see cref="ChildWindowModel.PageId"/>, sets <see cref="ChildWindowModel.IsVisible"/> to whether
+    /// the destination is the current page, and persists synchronously.
+    /// </summary>
+    /// <param name="destinationPageId">The page to move the panel to.</param>
+    /// <param name="expectedVisible">The expected resulting <see cref="ChildWindowModel.IsVisible"/>.</param>
+    [Theory]
+    [InlineData("default", true)]
+    [InlineData("work", false)]
+    public void MovePanelToPage_UpdatesPageIdAndVisibilityAndSaves(string destinationPageId, bool expectedVisible)
+    {
+        var manager = BuildWindowManager(out var applicationStateServiceMock, out _, currentPage: "default");
+        var panel = new ChildWindowModel { PageId = "other", IsVisible = false };
+
+        manager.MovePanelToPage(panel, destinationPageId);
+
+        Assert.Equal(destinationPageId, panel.PageId);
+        Assert.Equal(expectedVisible, panel.IsVisible);
+        applicationStateServiceMock.Verify(s => s.SaveNow(), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.MovePanelToPage"/> is a no-op when the panel is already on
+    /// the destination page.
+    /// </summary>
+    [Fact]
+    public void MovePanelToPage_AlreadyOnDestinationPage_NoOp()
+    {
+        var manager = BuildWindowManager(out var applicationStateServiceMock, out _, currentPage: "default");
+        var panel = new ChildWindowModel { PageId = "work", IsVisible = true };
+
+        manager.MovePanelToPage(panel, "work");
+
+        applicationStateServiceMock.Verify(s => s.SaveNow(), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.MovePanelToPage"/> is a no-op for a blank/whitespace-only
+    /// destination page identifier — it never mutates the panel or saves.
+    /// </summary>
+    /// <param name="destinationPageId">The blank/whitespace-only page identifier under test.</param>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void MovePanelToPage_BlankPageId_NoOp(string destinationPageId)
+    {
+        var manager = BuildWindowManager(out var applicationStateServiceMock, out _, currentPage: "default");
+        var panel = new ChildWindowModel { PageId = "work", IsVisible = true };
+
+        manager.MovePanelToPage(panel, destinationPageId);
+
+        Assert.Equal("work", panel.PageId);
+        applicationStateServiceMock.Verify(s => s.SaveNow(), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="WindowManager.MovePanelToPage"/> rejects a <see langword="null"/> panel.
+    /// </summary>
+    [Fact]
+    public void MovePanelToPage_NullPanel_Throws()
+    {
+        var manager = BuildWindowManager(out _, out _, currentPage: "default");
+
+        Assert.Throws<ArgumentNullException>(() => manager.MovePanelToPage(null!, "work"));
+    }
+
+    /// <summary>
+    /// Fix-cycle finding 10: verifies that <see cref="WindowManager.MovePanelToPage"/> is a no-op for a
+    /// destination page id that isn't one of <see cref="IPageManager.Pages"/>'s existing pages — it never
+    /// mutates the panel's <see cref="ChildWindowModel.PageId"/>/<see cref="ChildWindowModel.IsVisible"/>
+    /// or saves.
+    /// </summary>
+    [Fact]
+    public void MovePanelToPage_UnknownPageId_NoOp()
+    {
+        var manager = BuildWindowManager(out var applicationStateServiceMock, out var pageManagerMock, currentPage: "default");
+        pageManagerMock.SetupGet(p => p.Pages).Returns(["default", "work"]);
+        var panel = new ChildWindowModel { PageId = "work", IsVisible = true };
+
+        manager.MovePanelToPage(panel, "no-such-page");
+
+        Assert.Equal("work", panel.PageId);
+        Assert.True(panel.IsVisible);
+        applicationStateServiceMock.Verify(s => s.SaveNow(), Times.Never);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
     private static MonitorInfo BuildMonitor(Rect workArea) =>
         new("\\\\.\\DISPLAY1", workArea, workArea, IsPrimary: true);
+
+    /// <summary>
+    /// Same shape as the other <c>BuildWindowManager</c> overloads, but also stubs <see cref="IPageManager"/>
+    /// behind the mocked <see cref="IServiceProvider"/> — required only by <see cref="WindowManager.MovePanelToPage"/>,
+    /// which lazily resolves <c>IPageManager.CurrentPage</c> through it (breaking the WindowManager ↔
+    /// PageManagerService circular DI dependency, see <c>WindowManager.PageManager</c>'s remarks).
+    /// </summary>
+    private static WindowManager BuildWindowManager(
+        out Mock<IApplicationStateService> applicationStateServiceMock,
+        out Mock<IPageManager> pageManagerMock,
+        string currentPage)
+    {
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        var monitorServiceMock = new Mock<IMonitorService>();
+        var itemStorageMock = new Mock<IPanelItemStorageService>();
+        applicationStateServiceMock = new Mock<IApplicationStateService>();
+        applicationStateServiceMock.SetupGet(s => s.Panels).Returns([]);
+
+        pageManagerMock = new Mock<IPageManager>();
+        pageManagerMock.SetupGet(p => p.CurrentPage).Returns(currentPage);
+
+        // MovePanelToPage's "known destination page" guard (fix-cycle finding 10) needs Pages to contain
+        // every destination the other MovePanelToPage tests already move a panel to; MovePanelToPage_
+        // UnknownPageId_NoOp overrides this with its own narrower list.
+        pageManagerMock.SetupGet(p => p.Pages).Returns(["default", "work", "other"]);
+        serviceProviderMock.Setup(p => p.GetService(typeof(IPageManager))).Returns(pageManagerMock.Object);
+
+        var appSettingsMock = new Mock<IAppSettings>();
+        appSettingsMock.SetupGet(s => s.GridSize).Returns(1);
+
+        return new WindowManager(
+            serviceProviderMock.Object,
+            monitorServiceMock.Object,
+            itemStorageMock.Object,
+            applicationStateServiceMock.Object,
+            appSettingsMock.Object);
+    }
 
     private static WindowManager BuildWindowManager(IReadOnlyList<ChildWindowModel>? panels = null)
         => BuildWindowManager(out _, panels);

@@ -115,6 +115,33 @@ public class PanelDefaultsTests
         Assert.Equal(new DrawingSize(111, 222), model.Size);
     }
 
+    // ── CreateNew — fix-cycle finding 11 (docs/prompts/settings-window-redesign.md) ─────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="PanelDefaults.CreateNew"/> sets the new panel's title and page
+    /// assignment, and applies every appearance default from <see cref="PanelDefaults.Apply"/>
+    /// (spot-checked via the accent colour) — the single-call replacement for the two call sites that used
+    /// to construct the model and call <see cref="PanelDefaults.Apply"/> separately.
+    /// </summary>
+    [Fact]
+    public void CreateNew_SetsTitleAndPageIdAndAppliesDefaults()
+    {
+        var settings = BuildSettings(backgroundColor: "#445566");
+
+        var model = PanelDefaults.CreateNew(settings.Object, "work");
+
+        Assert.Equal("New Panel", model.Title);
+        Assert.Equal("work", model.PageId);
+        Assert.Equal("#445566", model.AccentColor);
+    }
+
+    /// <summary>Verifies that <see cref="PanelDefaults.CreateNew"/> rejects a <see langword="null"/> settings instance.</summary>
+    [Fact]
+    public void CreateNew_NullSettings_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => PanelDefaults.CreateNew(null!, "default"));
+    }
+
     // ── ReconcileGridAlignedSpans — MAJOR-1(b) ──────────────────────────────────────────────────────
 
     /// <summary>

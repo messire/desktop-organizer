@@ -1707,15 +1707,329 @@ public class ChildWindowViewModelTests
         }
     }
 
-    // NOTE (ui-polishing-1 §4.3): SelectSourceFolder() — the third of the three call sites replaced
-    // with NotifySortModeChanged() — is not independently unit-testable. It calls
-    // `new Microsoft.Win32.OpenFolderDialog().ShowDialog()` inline with no injectable seam, and no
-    // existing test in this suite exercises SelectSourceFolderCommand for exactly that reason (a real
-    // dialog abstraction would need its own interface/DI seam — an architectural change out of scope
-    // for this block). Its notification correctness is verified by code review: it is byte-for-byte
-    // the same `NotifySortModeChanged();` call as the two paths covered above, at the same two
-    // call-sites (entering and leaving the portal) that used to carry the CRITICAL-2 manual
-    // `OnPropertyChanged(nameof(EffectiveSortMode))` calls before this change.
+    // ── settings-window-redesign.md D-4: Model.SourceFolderPath is now the single, directly
+    //    assignable trigger for attaching/detaching a Folder Portal — the "Customize panel…" dialog
+    //    (WP-B) only ever sets this property; ChildWindowViewModel.HandleSourceFolderPathChanged reacts
+    //    to it via OnModelPropertyChanged. This replaces the previous SelectSourceFolder()/
+    //    SelectSourceFolderCommand, which opened `Microsoft.Win32.OpenFolderDialog` inline with no
+    //    injectable seam and was therefore never independently unit-testable — the property-driven
+    //    reaction below has no such seam problem. ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that assigning <see cref="ChildWindowModel.SourceFolderPath"/> on an already-loaded
+    /// (non-portal) panel attaches a watcher, immediately mirrors the folder's contents, and flips
+    /// <see cref="ChildWindowViewModel.IsPortal"/> to <see langword="true"/>.
+    /// </summary>
+    [Fact]
+    public void ModelSourceFolderPathAssigned_OnLoadedPanel_AttachesWatcherAndMirrorsFolder()
+    {
+        var portalDir = NewTempDirPath();
+        File.WriteAllText(Path.Combine(portalDir, "a.txt"), "a");
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            var model = new ChildWindowModel();
+            sut.LoadFromModel(model);
+            Assert.False(sut.IsPortal);
+
+            var filesChangedRaised = false;
+            sut.FilesChanged += (_, _) => filesChangedRaised = true;
+
+            model.SourceFolderPath = portalDir;
+
+            Assert.True(sut.IsPortal);
+            Assert.True(filesChangedRaised);
+            Assert.Equal(Path.Combine(portalDir, "a.txt"), Assert.Single(sut.FileItems).Path);
+            watcherMock.Verify(w => w.Start(portalDir), Times.Once);
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that clearing <see cref="ChildWindowModel.SourceFolderPath"/> back to <see langword="null"/>
+    /// on a live Folder Portal panel detaches (disposes) the watcher and flips
+    /// <see cref="ChildWindowViewModel.IsPortal"/> back to <see langword="false"/>.
+    /// </summary>
+    [Fact]
+    public void ModelSourceFolderPathCleared_OnPortalPanel_DetachesWatcher()
+    {
+        var portalDir = NewTempDirPath();
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            var model = new ChildWindowModel { SourceFolderPath = portalDir };
+            sut.LoadFromModel(model);
+            Assert.True(sut.IsPortal);
+
+            model.SourceFolderPath = null;
+
+            Assert.False(sut.IsPortal);
+            watcherMock.Verify(w => w.Dispose(), Times.Once);
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Verifies P-B4 (docs/PLANS/settings-window-redesign.md §3.2): a panel that had its own managed
+    /// items before becoming a Folder Portal gets those items back — not the folder's mirrored
+    /// contents — once <see cref="ChildWindowModel.SourceFolderPath"/> is cleared. Regression guard for
+    /// the pre-dialog behavior, where clearing left the mirrored folder items in
+    /// <see cref="BaseViewModel.FileItems"/>, so the next <c>SyncToModel()</c> silently overwrote
+    /// <see cref="ChildWindowModel.FilePaths"/> with them and orphaned the panel's real items.
+    /// </summary>
+    [Fact]
+    public void ModelSourceFolderPathCleared_OnPortalPanel_RestoresPanelsOwnFilePaths()
+    {
+        var ownedFile = NewTempFilePath();
+        File.WriteAllText(ownedFile, "owned");
+        var portalDir = NewTempDirPath();
+        File.WriteAllText(Path.Combine(portalDir, "mirrored.txt"), "mirrored");
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            var model = new ChildWindowModel { FilePaths = [ownedFile] };
+            sut.LoadFromModel(model);
+            Assert.Equal(ownedFile, Assert.Single(sut.FileItems).Path);
+
+            model.SourceFolderPath = portalDir;
+            Assert.Equal(Path.Combine(portalDir, "mirrored.txt"), Assert.Single(sut.FileItems).Path);
+
+            model.SourceFolderPath = null;
+
+            Assert.Equal(ownedFile, Assert.Single(sut.FileItems).Path);
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+            File.Delete(ownedFile);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that assigning <see cref="ChildWindowModel.SourceFolderPath"/> to enter a Folder Portal
+    /// raises <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/> for both
+    /// <see cref="ChildWindowViewModel.EffectiveSortMode"/> and <see cref="ChildWindowViewModel.IsSortedByName"/>
+    /// — the same CRITICAL-2 contract already verified for <see cref="ChildWindowViewModel.LoadFromModel"/>
+    /// above, now also covering the live property-change path.
+    /// </summary>
+    [Fact]
+    public void ModelSourceFolderPathAssigned_RaisesBothEffectiveSortModeAndIsSortedByName()
+    {
+        var portalDir = NewTempDirPath();
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            var model = new ChildWindowModel();
+            sut.LoadFromModel(model);
+
+            var raised = new List<string>();
+            sut.PropertyChanged += (_, e) => raised.Add(e.PropertyName!);
+
+            model.SourceFolderPath = portalDir;
+
+            Assert.Contains(nameof(ChildWindowViewModel.EffectiveSortMode), raised);
+            Assert.Contains(nameof(ChildWindowViewModel.IsSortedByName), raised);
+            Assert.True(sut.IsSortedByName);
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that assigning a non-existent folder path behaves like "no portal": no watcher is
+    /// created and <see cref="ChildWindowViewModel.IsPortal"/> stays <see langword="false"/>.
+    /// </summary>
+    [Fact]
+    public void ModelSourceFolderPathAssigned_PathDoesNotExist_DoesNotAttachWatcherOrBecomePortal()
+    {
+        using var sut = BuildSut();
+        var model = new ChildWindowModel();
+        sut.LoadFromModel(model);
+
+        model.SourceFolderPath = @"C:\this\path\does\not\exist\at\all";
+
+        Assert.False(sut.IsPortal);
+        _watcherFactoryMock.Verify(f => f.Create(), Times.Never);
+    }
+
+    // ── FIX round 2 MINOR-1: snapshot Model.FilePaths onto the pre-portal item set BEFORE the mirrored
+    //    folder contents overwrite AllItems, so an item added since the last save is not silently
+    //    dropped if SourceFolderPath is cleared again inside the same debounce window. ──────────────────
+
+    /// <summary>
+    /// Verifies that transitioning a panel from non-portal to portal snapshots
+    /// <see cref="ChildWindowModel.FilePaths"/> onto the panel's CURRENT in-memory item set — including
+    /// an item added live since <see cref="ChildWindowViewModel.LoadFromModel"/> that was never synced
+    /// back via <c>ChildWindow.SyncToModel</c> — before the mirrored folder contents replace it.
+    /// </summary>
+    [Fact]
+    public void ModelSourceFolderPathAssigned_FromNonPortal_SnapshotsCurrentItemsOntoFilePaths()
+    {
+        var ownedFile = NewTempFilePath();
+        File.WriteAllText(ownedFile, "owned");
+        var portalDir = NewTempDirPath();
+        File.WriteAllText(Path.Combine(portalDir, "mirrored.txt"), "mirrored");
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            var model = new ChildWindowModel(); // FilePaths starts empty.
+            sut.LoadFromModel(model);
+
+            // An item added live (e.g. drag-drop) after load — nothing has synced it back to
+            // Model.FilePaths yet, since that only happens on window close or a debounced save.
+            sut.AddFiles([ownedFile]);
+            Assert.Empty(model.FilePaths);
+
+            model.SourceFolderPath = portalDir;
+
+            Assert.Equal([ownedFile], model.FilePaths);
+            Assert.Equal(Path.Combine(portalDir, "mirrored.txt"), Assert.Single(sut.FileItems).Path);
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+            File.Delete(ownedFile);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that re-assigning the SAME already-attached portal folder — a no-op at the
+    /// <see cref="ChildWindowModel.SourceFolderPath"/> property level, since <c>SetField</c>'s equality
+    /// guard means the private handler reacting to it never even runs again — leaves
+    /// <see cref="ChildWindowModel.FilePaths"/> completely untouched, i.e. the MINOR-1 snapshot only ever
+    /// fires for a genuine non-portal -&gt; portal transition.
+    /// </summary>
+    [Fact]
+    public void ModelSourceFolderPathAssigned_SameFolderAgain_DoesNotTouchFilePaths()
+    {
+        var portalDir = NewTempDirPath();
+        File.WriteAllText(Path.Combine(portalDir, "mirrored.txt"), "mirrored");
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+
+        using var sut = BuildSut();
+
+        try
+        {
+            var model = new ChildWindowModel { SourceFolderPath = portalDir };
+            sut.LoadFromModel(model);
+            model.FilePaths = ["C:\\sentinel\\untouched.txt"];
+
+            model.SourceFolderPath = portalDir; // Same value — SetField no-ops, handler never re-runs.
+
+            Assert.Equal(["C:\\sentinel\\untouched.txt"], model.FilePaths);
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Regression guard for FIX round 2 MAJOR-1: <see cref="ChildWindowModel.FilePaths"/> becoming an
+    /// INPC-backed property must not create a feedback loop — <see cref="ChildWindowViewModel"/> has no
+    /// <c>OnModelPropertyChanged</c> case for it, so assigning a fresh <see cref="ChildWindowModel.FilePaths"/>
+    /// list (as <c>ChildWindow.SyncToModel</c> does on every close/save) must not itself trigger
+    /// <see cref="ChildWindowViewModel.FilesChanged"/> or rebuild <see cref="BaseViewModel.FileItems"/>.
+    /// </summary>
+    [Fact]
+    public void ModelFilePathsAssigned_DoesNotRaiseFilesChangedOrRebuildItems()
+    {
+        using var sut = BuildSut();
+        var model = new ChildWindowModel();
+        sut.LoadFromModel(model);
+
+        var filesChangedRaised = false;
+        sut.FilesChanged += (_, _) => filesChangedRaised = true;
+        var fileItemsResetRaised = false;
+        sut.FileItems.CollectionChanged += (_, _) => fileItemsResetRaised = true;
+
+        model.FilePaths = ["C:\\fake\\a.txt", "C:\\fake\\b.txt"];
+
+        Assert.False(filesChangedRaised);
+        Assert.False(fileItemsResetRaised);
+    }
+
+    // ── FIX round 2 MINOR-2: clearing a portal path that never actually attached (e.g. it pointed at a
+    //    missing folder) must still raise FilesChanged, so the clear itself gets persisted. ────────────
+
+    /// <summary>
+    /// Verifies that clearing <see cref="ChildWindowModel.SourceFolderPath"/> back to blank, after it had
+    /// pointed at a folder that never existed (so no watcher was ever attached), still raises
+    /// <see cref="ChildWindowViewModel.FilesChanged"/> — the clear itself is a real state change that
+    /// needs to be persisted, even though there is no watcher to detach.
+    /// </summary>
+    [Fact]
+    public void ModelSourceFolderPathCleared_AfterBrokenPortalPath_RaisesFilesChanged()
+    {
+        using var sut = BuildSut();
+        var model = new ChildWindowModel();
+        sut.LoadFromModel(model);
+
+        model.SourceFolderPath = @"C:\this\path\does\not\exist\at\all";
+        Assert.False(sut.IsPortal);
+
+        var filesChangedRaised = false;
+        sut.FilesChanged += (_, _) => filesChangedRaised = true;
+
+        model.SourceFolderPath = null;
+
+        Assert.True(filesChangedRaised);
+        _watcherFactoryMock.Verify(f => f.Create(), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that clearing <see cref="ChildWindowModel.SourceFolderPath"/> when it was ALREADY blank
+    /// (the genuinely idempotent case — e.g. a re-entrant call reacting to
+    /// <see cref="ChildWindowViewModel.LoadFromModel"/>) still does not raise
+    /// <see cref="ChildWindowViewModel.FilesChanged"/>, preserving the original idempotency guard this
+    /// fix must not regress.
+    /// </summary>
+    [Fact]
+    public void ModelSourceFolderPathCleared_AlreadyBlank_DoesNotRaiseFilesChanged()
+    {
+        using var sut = BuildSut();
+        var model = new ChildWindowModel();
+        sut.LoadFromModel(model);
+
+        var filesChangedRaised = false;
+        sut.FilesChanged += (_, _) => filesChangedRaised = true;
+
+        // Blank -> blank: SetField still raises (a different string value than the null default), so the
+        // handler runs once more — but both the pre- and post-transition state are "no portal", so this
+        // must still be treated as idempotent.
+        model.SourceFolderPath = string.Empty;
+
+        Assert.False(filesChangedRaised);
+    }
 
     /// <summary>
     /// Verifies that changing <see cref="ChildWindowModel.SortMode"/> directly raises

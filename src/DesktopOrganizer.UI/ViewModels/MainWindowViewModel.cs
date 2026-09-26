@@ -1,8 +1,11 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
 using System.Windows;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
@@ -10,15 +13,20 @@ using DesktopOrganizer.UI.Services;
 namespace DesktopOrganizer.UI.ViewModels;
 
 /// <summary>
-/// ViewModel for the Settings/Config window. Owns the panel/page collection and CRUD, autostart, and
-/// desktop-icons-visibility; delegates per-concern settings to sub-ViewModels extracted per
-/// REFACTORING_PLAN.md §5.3: <see cref="SelectedPanelSettings"/> (selected panel's editable
-/// appearance/sort settings), <see cref="GlobalDefaults"/> (grid/snap/default-appearance settings), and
-/// <see cref="SystemIconsSettings"/> (the System Icons Panel feature). All three are constructed
-/// internally (not DI-injected) and their identically-named properties are forwarded 1:1 by this class,
-/// with their <see cref="INotifyPropertyChanged.PropertyChanged"/> notifications re-raised verbatim —
-/// so <c>MainWindow.xaml</c>'s existing flat bindings against the root ViewModel, and this class's own
-/// public surface/constructor signature, are unchanged by the extraction.
+/// ViewModel for the Settings/Config window. Owns the panel/page collection and CRUD, autostart, and the
+/// sidebar navigation (<see cref="SelectedSection"/>, docs/prompts/settings-window-redesign.md); delegates
+/// per-concern settings to sub-ViewModels extracted per REFACTORING_PLAN.md §5.3:
+/// <see cref="GlobalDefaults"/> (grid/snap/default-appearance settings) and <see cref="SystemIconsSettings"/>
+/// (the System Icons Panel feature). Per-panel appearance/sort editing (title, colours, opacity, icon
+/// size, view/sort mode) moved entirely out of this class into the "Customize panel…" dialog's own
+/// <c>PanelCustomizeViewModel</c> (docs/prompts/settings-window-redesign.md) — this class only tracks
+/// <see cref="SelectedPanel"/> itself, for the Panels section's list selection and the commands that act
+/// on it (<see cref="CustomizePanelCommand"/>/<see cref="MovePanelToPageCommand"/>/
+/// <see cref="RemovePanelCommand"/>/<see cref="TakeDefaultsFromSelectedPanelCommand"/>). Both remaining
+/// sub-ViewModels are constructed internally (not DI-injected) and their identically-named properties are
+/// forwarded 1:1 by this class, with their <see cref="INotifyPropertyChanged.PropertyChanged"/>
+/// notifications re-raised verbatim — so <c>MainWindow.xaml</c>'s existing flat bindings against the root
+/// ViewModel, and this class's own public surface/constructor signature, are unchanged by the extraction.
 /// </summary>
 public class MainWindowViewModel : INotifyPropertyChanged
 {
@@ -28,19 +36,15 @@ public class MainWindowViewModel : INotifyPropertyChanged
     private readonly IPageManager _pageManager;
     private readonly IConfirmationService _confirmation;
     private readonly IPanelItemStorageService _itemStorage;
-    private readonly IDesktopIconsService _desktopIcons;
     private readonly ILayoutEditModeService _layoutEditMode;
+    private readonly IPanelCustomizeService _panelCustomizeService;
     private ChildWindowModel? _selectedPanel;
+    private SettingsSection _selectedSection = SettingsSection.General;
 
     /// <summary>
     /// ViewModel for the "Layout snapshots" section.
     /// </summary>
     public LayoutSnapshotsViewModel LayoutSnapshots { get; }
-
-    /// <summary>
-    /// Property proxy for the selected panel's editable settings (REFACTORING_PLAN.md §5.3).
-    /// </summary>
-    public SelectedPanelSettingsViewModel SelectedPanelSettings { get; }
 
     /// <summary>
     /// Global default settings for new panels and grid/snap behavior (REFACTORING_PLAN.md §5.3).
@@ -55,28 +59,68 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    // ── Settings-window sidebar navigation (docs/prompts/settings-window-redesign.md D-1/D-2) ──────
+    // This ViewModel is a DI singleton (Configuration/DiConfig.cs), so SelectedSection simply lives as
+    // an in-memory field: it survives MainWindow being Hidden/re-Shown (the settings window is never
+    // recreated) without needing to be written to IAppSettings/user.config (D-1 — persistence is frozen
+    // and the last-open section is explicitly NOT one of the things this feature persists).
+
+    /// <summary>The seven sections shown in the sidebar's main scrolling list, in display order.</summary>
+    public IReadOnlyList<SettingsSectionInfo> Sections => SettingsSectionCatalog.Primary;
+
+    /// <summary>The "About" entry, rendered as a separate control pinned to the bottom of the sidebar.</summary>
+    public SettingsSectionInfo AboutSectionInfo => SettingsSectionCatalog.About;
+
+    /// <summary>The section currently shown in the settings window's content area.</summary>
+    public SettingsSection SelectedSection
+    {
+        get => _selectedSection;
+        set
+        {
+            if (_selectedSection == value) return;
+            _selectedSection = value;
+            OnPropertyChanged(nameof(SelectedSection));
+        }
+    }
+
+    /// <summary>
+    /// Selects a sidebar section. Exists (rather than binding <see cref="SelectedSection"/> directly)
+    /// only for the pinned "About" entry, which is a standalone <c>ToggleButton</c>, not a
+    /// <c>ListBoxItem</c> whose <c>SelectedValue</c> binding could set the property itself.
+    /// </summary>
+    public ICommand SelectSectionCommand { get; }
+
     /// <summary>
     /// Collection of all desktop panels.
     /// </summary>
     public ObservableCollection<ChildWindowModel> Panels { get; } = [];
 
     /// <summary>
+    /// The subset of <see cref="Panels"/> whose <see cref="ChildWindowModel.PageId"/> is
+    /// <see cref="CurrentPage"/> — what the Panels settings section actually lists. Refreshed by
+    /// <see cref="RefreshPanelsOnCurrentPage"/> whenever <see cref="Panels"/>, the current page, or a
+    /// panel's page assignment changes.
+    /// </summary>
+    public ObservableCollection<ChildWindowModel> PanelsOnCurrentPage { get; } = [];
+
+    /// <summary>
     /// Ordered collection of page identifiers shown as tabs in the UI.
     /// </summary>
     public ObservableCollection<string> Pages { get; } = [];
 
-    /// <summary>
-    /// Available view modes for the panel view-mode selector.
-    /// </summary>
-    public IReadOnlyList<PanelViewMode> ViewModes { get; } = Enum.GetValues<PanelViewMode>();
-
-    /// <summary>
-    /// Available sort modes for the panel sort-order selector.
-    /// </summary>
-    public IReadOnlyList<PanelSortMode> SortModes { get; } = Enum.GetValues<PanelSortMode>();
-
     /// <summary>The currently active page identifier.</summary>
     public string CurrentPage => _pageManager.CurrentPage;
+
+    /// <summary>
+    /// Two-way facade over <see cref="CurrentPage"/> for the Panels section's page selector
+    /// <c>ComboBox</c>: reads <see cref="CurrentPage"/>, and setting it runs
+    /// <see cref="SwitchPageCommand"/> — the same page-switch semantics the old page-tab strip used.
+    /// </summary>
+    public string SelectedPage
+    {
+        get => CurrentPage;
+        set => SwitchPageCommand.Execute(value);
+    }
 
     /// <summary>
     /// The panel currently selected in the settings list.
@@ -89,78 +133,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
             if (_selectedPanel == value) return;
             _selectedPanel = value;
             OnPropertyChanged(nameof(SelectedPanel));
-            SelectedPanelSettings.SetPanel(value);
         }
     }
-
-    /// <summary>Whether a panel is selected (drives enabled state of the editor section).</summary>
-    public bool HasSelectedPanel => SelectedPanelSettings.HasSelectedPanel;
-
-    /// <summary>Title of the selected panel.</summary>
-    public string SelectedPanelTitle
-    {
-        get => SelectedPanelSettings.SelectedPanelTitle;
-        set => SelectedPanelSettings.SelectedPanelTitle = value;
-    }
-
-    /// <summary>Accent colour (hex) of the selected panel.</summary>
-    public string SelectedPanelAccentColor
-    {
-        get => SelectedPanelSettings.SelectedPanelAccentColor;
-        set => SelectedPanelSettings.SelectedPanelAccentColor = value;
-    }
-
-    /// <summary>Text colour (hex) of the selected panel.</summary>
-    public string SelectedPanelTextColor
-    {
-        get => SelectedPanelSettings.SelectedPanelTextColor;
-        set => SelectedPanelSettings.SelectedPanelTextColor = value;
-    }
-
-    /// <summary>Surface opacity (0–1) of the selected panel.</summary>
-    public double SelectedPanelSurfaceOpacity
-    {
-        get => SelectedPanelSettings.SelectedPanelSurfaceOpacity;
-        set => SelectedPanelSettings.SelectedPanelSurfaceOpacity = value;
-    }
-
-    /// <summary>How the selected panel's surface blends with its accent colour.</summary>
-    public PanelSurfaceStyle SelectedPanelSurfaceStyle
-    {
-        get => SelectedPanelSettings.SelectedPanelSurfaceStyle;
-        set => SelectedPanelSettings.SelectedPanelSurfaceStyle = value;
-    }
-
-    /// <summary>Available surface styles for the selected-panel surface-style selector.</summary>
-    public IReadOnlyList<PanelSurfaceStyle> SurfaceStyles => SelectedPanelSettings.SurfaceStyles;
-
-    /// <summary>Icon size (px) of the selected panel.</summary>
-    public double SelectedPanelIconSize
-    {
-        get => SelectedPanelSettings.SelectedPanelIconSize;
-        set => SelectedPanelSettings.SelectedPanelIconSize = value;
-    }
-
-    /// <summary>View mode of the selected panel.</summary>
-    public PanelViewMode SelectedPanelViewMode
-    {
-        get => SelectedPanelSettings.SelectedPanelViewMode;
-        set => SelectedPanelSettings.SelectedPanelViewMode = value;
-    }
-
-    /// <summary>Sort order of the selected panel.</summary>
-    public PanelSortMode SelectedPanelSortMode
-    {
-        get => SelectedPanelSettings.SelectedPanelSortMode;
-        set => SelectedPanelSettings.SelectedPanelSortMode = value;
-    }
-
-    /// <summary>
-    /// Whether the selected panel supports a manual (drag-to-reorder) sort order. Folder Portal panels
-    /// always sort by name (ADR-014 Decision 7) — there's nowhere to persist a manual order for them —
-    /// so the sort-order selector is disabled while a folder source is assigned.
-    /// </summary>
-    public bool SelectedPanelSupportsManualOrder => SelectedPanelSettings.SelectedPanelSupportsManualOrder;
 
     /// <summary>
     /// Snap-to-grid cell size in pixels. 1 = no snapping, 4–128 = snap.
@@ -210,32 +184,28 @@ public class MainWindowViewModel : INotifyPropertyChanged
         set => GlobalDefaults.NormalModeLayoutGestures = value;
     }
 
-    /// <summary>Available options for the <see cref="NormalModeLayoutGestures"/> selector.</summary>
-    public IReadOnlyList<NormalModeLayoutGestures> NormalModeLayoutGesturesOptions => GlobalDefaults.NormalModeLayoutGesturesOptions;
+    /// <summary>The "Snap panel position to grid" toggle (Layout &amp; snapping section).</summary>
+    public bool SnapToGridEnabled
+    {
+        get => GlobalDefaults.SnapToGridEnabled;
+        set => GlobalDefaults.SnapToGridEnabled = value;
+    }
+
+    /// <summary>The grid step shown by the "Snap panel position to grid" card's slider.</summary>
+    public int GridStep
+    {
+        get => GlobalDefaults.GridStep;
+        set => GlobalDefaults.GridStep = value;
+    }
 
     // ── Layout editing (docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #3) ─────────────────────────────
     // Forwards directly to the injected ILayoutEditModeService singleton — unlike GridSize/NativePanelSizing
     // above, there is no per-concern sub-ViewModel wrapping it (the service already owns its own
     // persistence for IsLayoutLocked and its own INotifyPropertyChanged — see OnLayoutEditModePropertyChanged
-    // below, which re-raises those notifications on this ViewModel exactly like SelectedPanelSettings/
-    // GlobalDefaults/SystemIconsSettings do for their own sub-ViewModels).
-
-    /// <summary>
-    /// Whether the app-global Edit Layout mode (<see cref="ILayoutEditModeService"/>) is currently active.
-    /// Setting <see langword="true"/> attempts <see cref="ILayoutEditModeService.TryEnterEditLayout"/>
-    /// (silently no-ops while <see cref="IsLayoutLocked"/>); setting <see langword="false"/> calls
-    /// <see cref="ILayoutEditModeService.ExitEditLayout"/>. Stays in sync with the tray icon, a panel's
-    /// context menu, and <c>Ctrl+E</c> via the service's own <see cref="INotifyPropertyChanged"/>.
-    /// </summary>
-    public bool IsEditingLayout
-    {
-        get => _layoutEditMode.IsEditing;
-        set
-        {
-            if (value) _layoutEditMode.TryEnterEditLayout(LayoutModeChangeSource.SettingsWindow);
-            else _layoutEditMode.ExitEditLayout(LayoutModeChangeSource.SettingsWindow);
-        }
-    }
+    // below, which re-raises that notification on this ViewModel exactly like GlobalDefaults/
+    // SystemIconsSettings do for their own sub-ViewModels). The settings window itself no longer exposes
+    // an "editing" toggle (docs/prompts/settings-window-redesign.md §3 — that checkbox left the window
+    // entirely; only Ctrl+E and IsLayoutLocked below remain here).
 
     /// <summary>Whether panel geometry (move/resize) is currently fixed ("Lock layout", D-3).</summary>
     public bool IsLayoutLocked
@@ -244,10 +214,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
         set => _layoutEditMode.IsLayoutLocked = value;
     }
 
-    /// <summary><see langword="true"/> iff <see cref="IsLayoutLocked"/> is <see langword="false"/> — whether <see cref="IsEditingLayout"/> can currently be set to <see langword="true"/>.</summary>
-    public bool CanEnterEditLayout => _layoutEditMode.CanEnterEditLayout;
-
-    /// <summary>Toggles <see cref="IsEditingLayout"/> — bound to <c>Ctrl+E</c> in <c>MainWindow.xaml.cs</c> (D-9 #3).</summary>
+    /// <summary>Toggles Edit Layout mode — bound to <c>Ctrl+E</c> in <c>MainWindow.xaml.cs</c> (D-9 #3).</summary>
     public ICommand ToggleEditLayoutCommand { get; }
 
     /// <summary>Default background colour (hex) for new panels.</summary>
@@ -277,6 +244,16 @@ public class MainWindowViewModel : INotifyPropertyChanged
         get => GlobalDefaults.DefaultIconSize;
         set => GlobalDefaults.DefaultIconSize = value;
     }
+
+    /// <summary>Default <see cref="PanelSurfaceStyle"/> for new panels (New panel defaults section).</summary>
+    public PanelSurfaceStyle DefaultSurfaceStyle
+    {
+        get => GlobalDefaults.DefaultSurfaceStyle;
+        set => GlobalDefaults.DefaultSurfaceStyle = value;
+    }
+
+    /// <summary>Available options for the default-surface-style selector (settings window).</summary>
+    public IReadOnlyList<PanelSurfaceStyle> SurfaceStyleOptions => GlobalDefaults.SurfaceStyleOptions;
 
     /// <summary>
     /// Default <see cref="PanelGeometryMode"/> for new panels (ADR-028; P06, <c>docs/fix-prompts/06-fit-content.md</c>) —
@@ -319,18 +296,6 @@ public class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Whether the real desktop icons are currently visible.</summary>
-    public bool DesktopIconsVisible
-    {
-        get => _desktopIcons.AreIconsVisible;
-        set
-        {
-            if (_desktopIcons.AreIconsVisible == value) return;
-            _desktopIcons.SetIconsVisible(value);
-            OnPropertyChanged(nameof(DesktopIconsVisible));
-        }
-    }
-
     /// <summary>
     /// Command to add a new desktop panel.
     /// </summary>
@@ -364,6 +329,49 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// Cannot remove the <c>"default"</c> page.
     /// </summary>
     public ICommand RemovePageCommand { get; }
+
+    /// <summary>
+    /// Opens the "Customize panel…" dialog (<see cref="IPanelCustomizeService"/>) for the given panel, or
+    /// <see cref="SelectedPanel"/> when the parameter is <see langword="null"/> (the Panels section's own
+    /// "Customize…" button always passes <see langword="null"/> and relies on this fallback).
+    /// </summary>
+    public ICommand CustomizePanelCommand { get; }
+
+    /// <summary>
+    /// Moves <see cref="SelectedPanel"/> to a different page. Parameter is the destination page
+    /// identifier (string) — the Panels section's "Move to page ▾" menu.
+    /// </summary>
+    public ICommand MovePanelToPageCommand { get; }
+
+    /// <summary>
+    /// Copies <see cref="SelectedPanel"/>'s appearance/geometry into <see cref="GlobalDefaults"/>
+    /// (New panel defaults section's "Take from selected panel" button). Disabled when no panel is
+    /// selected.
+    /// </summary>
+    public ICommand TakeDefaultsFromSelectedPanelCommand { get; }
+
+    /// <summary>
+    /// Clears every one-time UI hint flag (currently just <see cref="IAppSettings.HasShownMoveHint"/>) so
+    /// it is shown again — General section's Advanced sub-panel "Reset one-time hints" button. Disabled
+    /// (<see cref="HasOneTimeHintsToReset"/> is <see langword="false"/>) when there is nothing to reset.
+    /// </summary>
+    public ICommand ResetOneTimeHintsCommand { get; }
+
+    /// <summary>
+    /// Whether at least one one-time UI hint is currently marked "already shown" — backs
+    /// <see cref="ResetOneTimeHintsCommand"/>'s enabled state and the General section's "There are no
+    /// hints to reset." disabled-reason text.
+    /// </summary>
+    public bool HasOneTimeHintsToReset => _appSettings.HasShownMoveHint;
+
+    /// <summary>Opens <see cref="StorageFolderPath"/> in Windows Explorer — About section.</summary>
+    public ICommand OpenStorageFolderCommand { get; }
+
+    /// <summary>The app's informational version string, for the About section.</summary>
+    public string AppVersion { get; } = ResolveAppVersion();
+
+    /// <summary>The per-user storage root (<c>%LOCALAPPDATA%\DesktopOrganizer</c>), for the About section.</summary>
+    public string StorageFolderPath { get; } = AppStorageRoot.Default;
 
     // ── System Icons Panel ───────────────────────────────────────────────────
 
@@ -416,8 +424,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <param name="systemIconsPanelManager">Manages the system-icons panel's lifecycle and persisted state.</param>
     /// <param name="confirmation">Gates destructive actions (e.g. removing a panel/page) behind a user confirmation prompt.</param>
     /// <param name="itemStorage">Provides app-managed item storage used when removing panels.</param>
-    /// <param name="desktopIcons">Toggles native desktop icon visibility.</param>
     /// <param name="layoutEditMode">The application-global Edit Layout mode service.</param>
+    /// <param name="panelCustomizeService">Opens the "Customize panel…" dialog (WP-B).</param>
     public MainWindowViewModel(
         IWindowManager windowManager,
         IAppSettings appSettings,
@@ -427,8 +435,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
         ISystemIconsPanelManager systemIconsPanelManager,
         IConfirmationService confirmation,
         IPanelItemStorageService itemStorage,
-        IDesktopIconsService desktopIcons,
-        ILayoutEditModeService layoutEditMode)
+        ILayoutEditModeService layoutEditMode,
+        IPanelCustomizeService panelCustomizeService)
     {
         _windowManager = windowManager;
         _appSettings = appSettings;
@@ -436,19 +444,17 @@ public class MainWindowViewModel : INotifyPropertyChanged
         _pageManager = pageManager;
         _confirmation = confirmation;
         _itemStorage = itemStorage;
-        _desktopIcons = desktopIcons;
         _layoutEditMode = layoutEditMode;
+        _panelCustomizeService = panelCustomizeService;
         LayoutSnapshots = layoutSnapshots;
 
-        SelectedPanelSettings = new SelectedPanelSettingsViewModel(windowManager);
         GlobalDefaults = new GlobalDefaultsViewModel(appSettings, windowManager);
         SystemIconsSettings = new SystemIconsSettingsViewModel(systemIconsPanelManager);
 
         // Re-raise every sub-ViewModel's own PropertyChanged verbatim on this ViewModel — the property
         // names match exactly (see the forwarding properties above), so no name translation is needed.
-        // Never unsubscribed: all three sub-ViewModels are owned for the lifetime of this (DI-singleton)
+        // Never unsubscribed: both sub-ViewModels are owned for the lifetime of this (DI-singleton)
         // ViewModel.
-        SelectedPanelSettings.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName!);
         GlobalDefaults.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName!);
         SystemIconsSettings.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName!);
 
@@ -466,6 +472,12 @@ public class MainWindowViewModel : INotifyPropertyChanged
         SwitchPageCommand = new RelayCommand<string>(SwitchPage);
         AddPageCommand = new RelayCommand(AddPage);
         RemovePageCommand = new RelayCommand<string>(RemovePage, CanRemovePage);
+        SelectSectionCommand = new RelayCommand<SettingsSection>(section => SelectedSection = section);
+        CustomizePanelCommand = new RelayCommand<ChildWindowModel>(CustomizePanel, CanCustomizePanel);
+        MovePanelToPageCommand = new RelayCommand<string>(MovePanelToPage, CanMovePanelToPage);
+        TakeDefaultsFromSelectedPanelCommand = new RelayCommand(TakeDefaultsFromSelectedPanel, () => _selectedPanel is not null);
+        ResetOneTimeHintsCommand = new RelayCommand(ResetOneTimeHints, () => _appSettings.HasShownMoveHint);
+        OpenStorageFolderCommand = new RelayCommand(OpenStorageFolder);
 
         _windowManager.OnChildWindowAdded += OnPanelAdded;
         _windowManager.OnChildWindowRemoved += OnPanelRemoved;
@@ -483,6 +495,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
         Panels.Clear();
         foreach (var model in _windowManager.GetAllChildWindows())
             Panels.Add(model);
+
+        RefreshPanelsOnCurrentPage();
     }
 
     /// <summary>
@@ -496,20 +510,99 @@ public class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Re-raises <see cref="PropertyChanged"/> for every property that reads live, externally-mutable
+    /// settings state but otherwise has no notification source of its own (MINOR-6, FIX round 2) —
+    /// currently just <see cref="HasOneTimeHintsToReset"/>. This ViewModel is a DI singleton
+    /// (Configuration/DiConfig.cs) whose <c>MainWindow</c> is hidden, not recreated, across Settings
+    /// window open/close cycles (ADR-002), so a change to <see cref="IAppSettings.HasShownMoveHint"/>
+    /// made while the window was hidden — the only other writer besides
+    /// <see cref="ResetOneTimeHintsCommand"/> itself is <c>ChildWindowViewModel.MaybeRaiseMoveHint</c>,
+    /// reachable from any panel regardless of whether this settings window is open — would otherwise
+    /// leave the General section's "Reset one-time hints" button/disabled-reason showing whatever state
+    /// was true the last time this ViewModel happened to raise that notification, until the user toggled
+    /// something else in the same session. Called from <c>MainWindow.xaml.cs</c> whenever the window
+    /// becomes visible/activated, i.e. exactly when a user could next look at that button.
+    /// </summary>
+    public void RefreshTransientState() => OnPropertyChanged(nameof(HasOneTimeHintsToReset));
+
+    /// <summary>
     /// Notifies about property changes.
     /// </summary>
     /// <param name="propertyName">Name of the property that was changed.</param>
     protected virtual void OnPropertyChanged(string propertyName)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
+    private static string ResolveAppVersion()
+    {
+        var infoVersion = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+        return string.IsNullOrWhiteSpace(infoVersion) ? "unknown" : infoVersion;
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="PanelsOnCurrentPage"/> from <see cref="Panels"/>/<see cref="CurrentPage"/>.
+    /// </summary>
+    /// <remarks>
+    /// M-7 fix (docs/prompts/settings-window-redesign.md fix-cycle): updates the collection in place
+    /// (remove/add only the panels that actually left/joined the current page) instead of
+    /// <c>Clear()</c>-then-refill. A <c>Clear()</c> deselects the bound <c>ListBox</c> for one
+    /// collection-changed tick — and since <c>Selector.SelectedItem</c> binds two-way by default, that
+    /// momentary deselection writes <see langword="null"/> straight into <see cref="SelectedPanel"/>
+    /// before the correct panel is re-added a moment later, permanently losing the selection on every
+    /// single refresh (adding another panel, a page-unrelated <see cref="Panels"/> change, etc.).
+    /// Preserving already-present panel instances keeps their <c>ListBoxItem</c> — and therefore any live
+    /// selection — untouched. <see cref="SelectedPanel"/> is explicitly cleared only when it is no longer
+    /// one of the panels on the current page (e.g. it just got moved to a different page, or the page was
+    /// switched away from it) — a real, needed reset rather than an accidental byproduct of rebuilding.
+    /// <para>
+    /// MINOR-4 (FIX round 2): after the removal pass, the insertion pass below also keeps
+    /// <see cref="PanelsOnCurrentPage"/>'s ORDER in sync with <see cref="Panels"/> (the authoritative
+    /// order, e.g. after a drag-reorder in the Panels list) instead of leaving an already-present panel
+    /// wherever it happened to be. It walks the desired sequence by index and, for any position that
+    /// doesn't already hold the right panel, either <see cref="ObservableCollection{T}.Move"/>s the
+    /// existing item into place or inserts a brand-new one — never
+    /// removes-then-re-adds an existing item (which is exactly what would drop the very selection this
+    /// method's in-place removal/add split was written to protect). A panel moved away and back to the
+    /// current page therefore lands at its <see cref="Panels"/>-order position, not appended at the end.
+    /// </para>
+    /// </remarks>
+    private void RefreshPanelsOnCurrentPage()
+    {
+        var currentPage = CurrentPage;
+        var stillOnCurrentPage = Panels.Where(p => p.PageId == currentPage).ToList();
+
+        for (var i = PanelsOnCurrentPage.Count - 1; i >= 0; i--)
+        {
+            if (!stillOnCurrentPage.Contains(PanelsOnCurrentPage[i]))
+                PanelsOnCurrentPage.RemoveAt(i);
+        }
+
+        for (var i = 0; i < stillOnCurrentPage.Count; i++)
+        {
+            var panel = stillOnCurrentPage[i];
+            if (i < PanelsOnCurrentPage.Count && ReferenceEquals(PanelsOnCurrentPage[i], panel))
+                continue;
+
+            var existingIndex = PanelsOnCurrentPage.IndexOf(panel);
+            if (existingIndex >= 0)
+                PanelsOnCurrentPage.Move(existingIndex, i);
+            else
+                PanelsOnCurrentPage.Insert(i, panel);
+        }
+
+        if (_selectedPanel is not null && !stillOnCurrentPage.Contains(_selectedPanel))
+            SelectedPanel = null;
+    }
+
     private void AddPanel()
     {
-        var model = new ChildWindowModel { Title = "New Panel", PageId = _pageManager.CurrentPage };
-
-        // Shared with App.xaml.cs's lasso-gesture creation path (fix-cycle 1 MINOR finding,
-        // docs/PLANS/workspace-grid-migration.md §10.5): one source of truth for the appearance/
-        // workspace-grid defaults instead of two independently maintained copies.
-        PanelDefaults.Apply(model, _appSettings);
+        // PanelDefaults.CreateNew (fix-cycle finding 11, docs/prompts/settings-window-redesign.md) is
+        // shared with App.xaml.cs's lasso-gesture creation path: one source of truth for both the page
+        // assignment and the appearance/workspace-grid defaults, instead of two independently maintained
+        // copies (fix-cycle 1 MINOR finding, docs/PLANS/workspace-grid-migration.md §10.5, had already
+        // unified the defaults half of this; this unifies the page-assignment half too).
+        var model = PanelDefaults.CreateNew(_appSettings, _pageManager.CurrentPage);
 
         // MAJOR-1(b): this action never assigns Position/Size itself (unlike the lasso gesture) — see
         // PanelDefaults.ReconcileGridAlignedSpans's remarks for how it seeds a preset size in that case.
@@ -598,29 +691,75 @@ public class MainWindowViewModel : INotifyPropertyChanged
     private void OnPageChanged(string newPage)
     {
         OnPropertyChanged(nameof(CurrentPage));
+        OnPropertyChanged(nameof(SelectedPage));
+        RefreshPanelsOnCurrentPage();
+    }
+
+    private void CustomizePanel(ChildWindowModel? panel)
+    {
+        var target = panel ?? _selectedPanel;
+        if (target is null) return;
+        _panelCustomizeService.Show(target);
+    }
+
+    private bool CanCustomizePanel(ChildWindowModel? panel) => (panel ?? _selectedPanel) is not null;
+
+    private void MovePanelToPage(string? pageId)
+    {
+        if (_selectedPanel is null || string.IsNullOrWhiteSpace(pageId)) return;
+
+        _windowManager.MovePanelToPage(_selectedPanel, pageId);
+        RefreshPanelsOnCurrentPage();
+    }
+
+    private bool CanMovePanelToPage(string? pageId)
+        => _selectedPanel is not null && !string.IsNullOrWhiteSpace(pageId) && pageId != _selectedPanel.PageId;
+
+    private void TakeDefaultsFromSelectedPanel()
+    {
+        if (_selectedPanel is null) return;
+        GlobalDefaults.ApplyFromPanel(_selectedPanel);
+    }
+
+    private void ResetOneTimeHints()
+    {
+        _appSettings.HasShownMoveHint = false;
+        _appSettings.Save();
+        OnPropertyChanged(nameof(HasOneTimeHintsToReset));
+    }
+
+    /// <summary>
+    /// Opens <see cref="StorageFolderPath"/> in Explorer. Failures (e.g. Explorer unavailable) are
+    /// logged, never surfaced as a crash — opening a folder is a convenience action, not a critical path.
+    /// </summary>
+    private void OpenStorageFolder()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = StorageFolderPath,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            Console.Error.WriteLine($"Failed to open storage folder '{StorageFolderPath}': {ex.Message}");
+        }
     }
 
     /// <summary>
     /// Re-raises <see cref="ILayoutEditModeService"/>'s own <see cref="INotifyPropertyChanged.PropertyChanged"/>
-    /// as this ViewModel's forwarding properties (D-9 #3), so <c>MainWindow</c>'s Edit-layout checkbox
-    /// stays in sync even when the mode/lock was changed elsewhere (tray, panel menu, <c>Ctrl+E</c>).
-    /// <see cref="ILayoutEditModeService.Mode"/> itself is not forwarded — no property here exposes it
-    /// directly — but every transition through it also raises <c>IsEditing</c> (see
-    /// <see cref="LayoutEditModeService.TransitionTo"/>), which <see cref="IsEditingLayout"/> already
-    /// covers, including the forced-exit-while-locking case (D-3/R-9).
+    /// as this ViewModel's own <see cref="IsLayoutLocked"/> forwarding property (D-9 #3), so
+    /// <c>MainWindow</c>'s "Lock layout" toggle stays in sync even when the lock was changed elsewhere
+    /// (tray, panel menu). The settings window no longer exposes an "editing" toggle of its own — see this
+    /// class's remarks — so <see cref="ILayoutEditModeService.IsEditing"/> changes have nothing left here
+    /// to forward to.
     /// </summary>
     private void OnLayoutEditModePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        switch (e.PropertyName)
-        {
-            case nameof(ILayoutEditModeService.IsEditing):
-                OnPropertyChanged(nameof(IsEditingLayout));
-                break;
-            case nameof(ILayoutEditModeService.IsLayoutLocked):
-                OnPropertyChanged(nameof(IsLayoutLocked));
-                OnPropertyChanged(nameof(CanEnterEditLayout));
-                break;
-        }
+        if (e.PropertyName == nameof(ILayoutEditModeService.IsLayoutLocked))
+            OnPropertyChanged(nameof(IsLayoutLocked));
     }
 
     private void RemovePanel()
@@ -657,7 +796,11 @@ public class MainWindowViewModel : INotifyPropertyChanged
 
     private bool CanRemovePanel() => _selectedPanel is not null;
 
-    private void OnPanelAdded(object? sender, ChildWindowModel model) => Panels.Add(model);
+    private void OnPanelAdded(object? sender, ChildWindowModel model)
+    {
+        Panels.Add(model);
+        RefreshPanelsOnCurrentPage();
+    }
 
     private void OnPanelRemoved(object? sender, ChildWindowModel model)
     {
@@ -667,5 +810,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
 
         if (_selectedPanel?.Id == model.Id)
             SelectedPanel = null;
+
+        RefreshPanelsOnCurrentPage();
     }
 }

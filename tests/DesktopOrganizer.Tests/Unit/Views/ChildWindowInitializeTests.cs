@@ -350,7 +350,8 @@ public class ChildWindowInitializeTests
                 Mock.Of<INativePanelSizingService>(),
                 (ILayoutEditModeService)app.Resources["LayoutEditMode"],
                 Mock.Of<IMonitorService>(),
-                Mock.Of<IConfirmationService>());
+                Mock.Of<IConfirmationService>(),
+                Mock.Of<IPanelCustomizeService>());
 
             return new ChildWindowHarness(app, originalResources, ownsApplication, window);
         }

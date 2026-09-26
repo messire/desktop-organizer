@@ -338,7 +338,8 @@ public class PanelChromeLayeredGeometryTests
                 Mock.Of<INativePanelSizingService>(),
                 (ILayoutEditModeService)app.Resources["LayoutEditMode"],
                 Mock.Of<IMonitorService>(),
-                Mock.Of<IConfirmationService>());
+                Mock.Of<IConfirmationService>(),
+                Mock.Of<IPanelCustomizeService>());
 
             return new LayeredChromeHarness(app, originalResources, ownsApplication, window);
         }

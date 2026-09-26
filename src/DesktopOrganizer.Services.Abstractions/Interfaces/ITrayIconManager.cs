@@ -41,6 +41,19 @@ public interface ITrayIconManager : IDisposable
     event EventHandler? OnLockLayoutToggleRequested;
 
     /// <summary>
+    /// Event triggered when the checkable "Show desktop icons" tray menu item is clicked. Mirrors
+    /// <see cref="OnEditLayoutToggleRequested"/>'s event-plus-refresh shape even though
+    /// <c>IDesktopIconsService</c> is itself reachable from this layer: the desktop double-click gesture
+    /// is a second, independent entry point that toggles the very same visibility (see
+    /// <see cref="SetDesktopIconsVisible"/>'s remarks), so the tray's checkmark cannot simply flip its own
+    /// state locally on click — it must always be handed the authoritative post-toggle value from
+    /// whichever caller (the subscriber here, or the double-click handler) actually performed the toggle.
+    /// The subscriber is expected to call <c>IDesktopIconsService.Toggle()</c> and then
+    /// <see cref="SetDesktopIconsVisible"/> with the resulting <c>AreIconsVisible</c> value.
+    /// </summary>
+    event EventHandler? ToggleDesktopIconsRequested;
+
+    /// <summary>
     /// Initializes the system tray icon.
     /// </summary>
     void Initialize();
@@ -57,4 +70,17 @@ public interface ITrayIconManager : IDisposable
     /// <param name="canEnterEditLayout">Whether the "Edit layout" item should be enabled (mirrors <c>ILayoutEditModeService.CanEnterEditLayout</c>; disabled while the layout is locked).</param>
     /// <param name="isLockLayoutChecked">Whether the "Lock layout" item's checkmark should be shown (mirrors <c>ILayoutEditModeService.IsLayoutLocked</c>).</param>
     void UpdateContextMenu(bool isMainWindowVisible, bool isEditLayoutChecked, bool canEnterEditLayout, bool isLockLayoutChecked);
+
+    /// <summary>
+    /// Sets the "Show desktop icons" item's checkmark to <paramref name="visible"/>. A standalone method
+    /// rather than another <see cref="UpdateContextMenu"/> parameter (D-6): desktop icon visibility is
+    /// process-wide UI state, not layout-edit state, and — unlike Edit layout/Lock layout, which only ever
+    /// change from tray clicks or the settings window — it also changes from the desktop double-click
+    /// gesture, a caller with no reason to also resupply the three unrelated layout-edit snapshot values
+    /// <see cref="UpdateContextMenu"/> requires. Callers are expected to invoke this after every toggle
+    /// from any entry point (this item's own click, and the double-click gesture) and once at startup, so
+    /// the checkmark never goes stale.
+    /// </summary>
+    /// <param name="visible"><see langword="true"/> if desktop icons are currently visible.</param>
+    void SetDesktopIconsVisible(bool visible);
 }

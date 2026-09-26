@@ -5,7 +5,9 @@ using DesktopOrganizer.Services.Configuration;
 using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.UI.Diagnostics;
+using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State;
+using DesktopOrganizer.UI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using UiDiConfig = DesktopOrganizer.UI.Configuration.DiConfig;
 
@@ -361,6 +363,79 @@ public class DiConfigTests
 
             Assert.True(acquired);
             Assert.True(File.Exists(Path.Combine(storageRoot, ".storage-lock")));
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+            SafeDeleteDirectory(storageRoot);
+        }
+    }
+
+    // ── Settings-window redesign (docs/PLANS/settings-window-redesign.md §5.2 item 6): every new
+    // WP-A/WP-B/WP-C ViewModel/service must resolve end-to-end through the real UI service collection,
+    // not just under the hand-picked Moq graphs the unit tests above use. ──────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel"/> (the settings window's sidebar-navigation VM),
+    /// <see cref="IPanelCustomizeService"/> (the real implementation, not the pre-WP-B stub),
+    /// <see cref="IInputDialogService"/>, and <see cref="LayoutSnapshotsViewModel"/> all resolve without
+    /// throwing through the full UI service collection.
+    /// </summary>
+    [Fact]
+    public void UiConfigureServices_SettingsWindowRedesignRegistrations_ResolveCorrectly()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        var storageRoot = NewTempStorageRoot();
+        try
+        {
+            var services = new ServiceCollection();
+            UiDiConfig.ConfigureServices(services, tempDir, storageRoot);
+            using var serviceProvider = services.BuildServiceProvider();
+
+            var mainWindowViewModel = serviceProvider.GetRequiredService<MainWindowViewModel>();
+            var panelCustomizeService = serviceProvider.GetRequiredService<IPanelCustomizeService>();
+            var inputDialogService = serviceProvider.GetRequiredService<IInputDialogService>();
+            var layoutSnapshots = serviceProvider.GetRequiredService<LayoutSnapshotsViewModel>();
+
+            Assert.NotNull(mainWindowViewModel);
+            Assert.IsType<PanelCustomizeService>(panelCustomizeService);
+            Assert.NotNull(inputDialogService);
+            Assert.NotNull(layoutSnapshots);
+
+            // MainWindowViewModel is a singleton that composes LayoutSnapshotsViewModel via
+            // constructor injection (Configuration/DiConfig.cs) — the same singleton this test also
+            // resolved directly, not a second independent instance.
+            Assert.Same(layoutSnapshots, mainWindowViewModel.LayoutSnapshots);
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+            SafeDeleteDirectory(storageRoot);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel"/> and <see cref="LayoutSnapshotsViewModel"/> both
+    /// resolve as singletons (one settings window for the whole app).
+    /// </summary>
+    [Fact]
+    public void UiConfigureServices_MainWindowViewModelAndLayoutSnapshots_ResolveAsSingletons()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        var storageRoot = NewTempStorageRoot();
+        try
+        {
+            var services = new ServiceCollection();
+            UiDiConfig.ConfigureServices(services, tempDir, storageRoot);
+            using var serviceProvider = services.BuildServiceProvider();
+
+            var firstVm = serviceProvider.GetRequiredService<MainWindowViewModel>();
+            var secondVm = serviceProvider.GetRequiredService<MainWindowViewModel>();
+            var firstSnapshots = serviceProvider.GetRequiredService<LayoutSnapshotsViewModel>();
+            var secondSnapshots = serviceProvider.GetRequiredService<LayoutSnapshotsViewModel>();
+
+            Assert.Same(firstVm, secondVm);
+            Assert.Same(firstSnapshots, secondSnapshots);
         }
         finally
         {

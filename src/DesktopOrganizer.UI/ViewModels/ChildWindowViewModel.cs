@@ -5,7 +5,6 @@ using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Diagnostics;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
-using Microsoft.Win32;
 
 namespace DesktopOrganizer.UI.ViewModels;
 
@@ -39,6 +38,19 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private ChildWindowModel _model = new();
     private IFolderWatcher? _watcher;
     private string? _sourceFolderPath;
+
+    /// <summary>
+    /// The raw, non-blank <see cref="ChildWindowModel.SourceFolderPath"/> value this ViewModel last saw
+    /// <see cref="HandleSourceFolderPathChanged"/> process, or <see langword="null"/> once it went blank
+    /// — kept separately from <see cref="_sourceFolderPath"/> (MINOR-2, FIX round 2), which only ever
+    /// records a path that actually attached a watcher. A portal path pointing at a folder that doesn't
+    /// exist never attaches (see the final <see langword="else"/> branch below), so
+    /// <see cref="_sourceFolderPath"/> alone can't tell "this panel never had a portal" apart from
+    /// "this panel just had a broken one cleared" — the two need different <see cref="FilesChanged"/>
+    /// behavior (see <see cref="HandleSourceFolderPathChanged"/>'s remarks).
+    /// </summary>
+    private string? _lastAssignedSourceFolderPath;
+
     private bool _disposed;
     private FileItem? _editingItem;
     private string _editingName = string.Empty;
@@ -222,12 +234,6 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     public ICommand RemoveFileCommand { get; }
 
     /// <summary>
-    /// Opens a folder browser dialog and assigns the chosen folder as this panel's portal source.
-    /// Clears the portal when the user cancels or selects the same folder again.
-    /// </summary>
-    public ICommand SelectSourceFolderCommand { get; }
-
-    /// <summary>
     /// Sets the panel's content filter. Accepts a <see cref="PanelContentFilter"/> value as the command parameter.
     /// </summary>
     public ICommand SetContentFilterCommand { get; }
@@ -352,7 +358,6 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         OpenContainingFolderCommand = new RelayCommand<FileItem>(OpenContainingFolder);
         ShowPropertiesCommand = new RelayCommand<FileItem>(ShowProperties);
         RemoveFileCommand = new RelayCommand<FileItem>(RemoveFileItem, _ => !IsPortal);
-        SelectSourceFolderCommand = new RelayCommand(SelectSourceFolder);
         SetContentFilterCommand = new RelayCommand<PanelContentFilter>(filter => Model.ContentFilter = filter);
         SetSortModeCommand = new RelayCommand<PanelSortMode>(mode => Model.SortMode = mode, _ => !IsPortal);
         SetIconLayoutPolicyCommand = new RelayCommand<IconLayoutPolicy>(policy => Model.IconLayoutPolicy = policy);
@@ -386,8 +391,9 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// removed from its source location immediately (the whole point of dragging it in: decluttering
     /// the desktop) and the panel item survives independently of where it came from. A moved-in
     /// folder keeps its structure but is no longer live-linked to its old location — for a folder the
-    /// user wants kept in sync, a Folder Portal (<see cref="SelectSourceFolderCommand"/>) is the right
-    /// tool. Whatever <see cref="IPanelItemStorageService"/> can't or won't move (very large folders,
+    /// user wants kept in sync, a Folder Portal (<see cref="ChildWindowModel.SourceFolderPath"/>,
+    /// assignable from the "Customize panel…" dialog) is the right tool. Whatever
+    /// <see cref="IPanelItemStorageService"/> can't or won't move (very large folders,
     /// locked files, etc.) falls back to referencing the original path in place — same as before this
     /// fix, still trackable live via <see cref="FileItem.Refresh"/>.
     /// </summary>
@@ -684,47 +690,89 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
-    /// Opens a folder browser dialog and binds or unbinds the panel as a Folder Portal.
-    /// Saves state via <see cref="FilesChanged"/> so the caller can persist it.
+    /// Reacts to <see cref="ChildWindowModel.SourceFolderPath"/> changing — the single place a Folder
+    /// Portal is attached or detached (settings-window-redesign.md D-4). Every caller that binds or
+    /// unbinds a portal (the "Customize panel…" dialog's Browse…/Clear, or any future caller) only
+    /// ever needs to assign <see cref="ChildWindowModel.SourceFolderPath"/> on <see cref="Model"/>
+    /// itself — the watcher lifecycle and content-mirroring side effects below run purely as a
+    /// reaction to that assignment via <see cref="OnModelPropertyChanged"/>, keeping the model the
+    /// single source of truth (CLAUDE.md invariant) instead of duplicating this logic in every caller.
     /// </summary>
-    private void SelectSourceFolder()
+    private void HandleSourceFolderPathChanged()
     {
-        var dialog = new OpenFolderDialog
+        var path = Model.SourceFolderPath;
+
+        // MINOR-2 (FIX round 2): captured BEFORE this call updates it below, so the blank branch can
+        // tell "this panel never had a portal path at all" apart from "it just had one — possibly one
+        // that never actually attached a watcher — cleared to blank".
+        var previousAssignedPath = _lastAssignedSourceFolderPath;
+        _lastAssignedSourceFolderPath = string.IsNullOrWhiteSpace(path) ? null : path;
+
+        if (string.IsNullOrWhiteSpace(path))
         {
-            Title = "Select source folder for Folder Portal",
-            Multiselect = false,
-        };
+            // Idempotent: a caller that clears an already-unbound panel (or LoadFromModel re-entry)
+            // must not re-run the detach/re-project side effects for nothing. MINOR-2 (FIX round 2):
+            // this must NOT short-circuit when Model.SourceFolderPath just transitioned from a non-blank
+            // value to blank — even a portal path that never actually attached (the final `else` branch
+            // below: a folder that doesn't/no-longer exists) still needs FilesChanged raised here, so
+            // whichever caller just cleared it (the "Customize panel…" dialog) gets its debounced save
+            // requested instead of the clear silently never being persisted.
+            if (_watcher is null && _sourceFolderPath is null && previousAssignedPath is null) return;
 
-        if (dialog.ShowDialog() != true)
-            return;
-
-        var chosen = dialog.FolderName;
-
-        // Toggle off if the same folder is chosen again.
-        if (string.Equals(chosen, _sourceFolderPath, StringComparison.OrdinalIgnoreCase))
-        {
             DetachWatcher();
             _sourceFolderPath = null;
-            Model.SourceFolderPath = null;
+
+            // P-B4 (docs/PLANS/settings-window-redesign.md §3.2): Model.FilePaths was left untouched
+            // the whole time the portal was active — ChildWindow.SyncToModel skips writing it while
+            // SourceFolderPath is set — so the panel's own items are still there. Reload from it (the
+            // same source LoadFromModel itself reads for a non-portal panel) instead of leaving the
+            // mirrored folder's items in FileItems/AllItems, which SyncToModel would otherwise persist
+            // right over Model.FilePaths on the very next save and orphan the panel's real items.
+            ReplaceAll(ResolveManagedReplacements(GetSourceFiles(Model)));
 
             // EffectiveSortMode just switched from the portal's forced Name back to Model.SortMode —
             // re-project so the panel immediately reflects whichever mode that is, instead of staying
             // visually sorted-by-name until some unrelated rebuild happens to run.
             ApplyFilterAndSort();
         }
-        else
+        else if (Directory.Exists(path))
         {
-            AttachWatcher(chosen);
-            Model.SourceFolderPath = chosen;
+            // Idempotent: re-assigning the SAME already-attached folder (e.g. a defensive re-set from
+            // the dialog) must not re-mirror the folder or restart the watcher for nothing.
+            if (_watcher is not null && string.Equals(_sourceFolderPath, path, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            // MINOR-1 (FIX round 2): only relevant for a genuine non-portal -> portal transition (checked
+            // BEFORE AttachWatcher below overwrites _sourceFolderPath). ChildWindow.SyncToModel skips
+            // writing Model.FilePaths for as long as a portal is attached, so between this transition and
+            // whichever debounced save happens to run next, Model.FilePaths would otherwise still hold
+            // whatever it last held as a non-portal panel — stale the moment anything (e.g. a rapid
+            // attach/detach within the save-debounce window) reads it. Snapshotting the in-memory item
+            // list here, before ReplaceAll below discards it in favor of the mirrored folder contents,
+            // keeps Model.FilePaths an accurate "what this panel would restore to if un-portal'd right
+            // now" at every point, not just after a save happens to land.
+            var wasNonPortal = _sourceFolderPath is null;
+
+            AttachWatcher(path);
+
+            if (wasNonPortal)
+                Model.FilePaths = AllItems.Select(item => item.Path).ToList();
 
             // Immediately mirror the folder contents.
-            ReplaceAll(GetSafeEntries(chosen));
+            ReplaceAll(GetSafeEntries(path));
 
             // ReplaceAll already re-projects via OnSourceChanged, but at that point IsPortal (and
             // therefore EffectiveSortMode) hadn't flipped to Name yet — re-project again now that it
             // has, so the freshly mirrored folder shows sorted immediately (ADR-014 Decision 7),
             // instead of only sorting on the next unrelated rebuild.
             ApplyFilterAndSort();
+        }
+        else
+        {
+            // Assigned a folder that doesn't (or no longer) exist, e.g. a removable drive unplugged —
+            // behave like "no portal" rather than watching a non-existent path.
+            DetachWatcher();
+            _sourceFolderPath = null;
         }
 
         OnPropertyChanged(nameof(IsPortal));
@@ -1010,6 +1058,9 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     {
         if (e.PropertyName == nameof(ChildWindowModel.ViewMode))
             ApplyViewMode();
+
+        if (e.PropertyName == nameof(ChildWindowModel.SourceFolderPath))
+            HandleSourceFolderPathChanged();
 
         if (e.PropertyName == nameof(ChildWindowModel.ContentFilter))
         {

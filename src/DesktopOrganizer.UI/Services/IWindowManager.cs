@@ -213,4 +213,19 @@ public interface IWindowManager
     /// <c>GridSize</c> is deliberately left alone for that mode.
     /// </remarks>
     void NormalizePanelsToGrid();
+
+    /// <summary>
+    /// Moves <paramref name="panel"/> to a different page (Panels section's "Move to page ▾",
+    /// docs/prompts/settings-window-redesign.md D-10): sets <see cref="Models.ChildWindowModel.PageId"/>,
+    /// applies the resulting visibility (visible only when <paramref name="pageId"/> is the current
+    /// page — mirrors <c>IPageManager.SwitchTo</c>'s own show/hide rule), and persists synchronously
+    /// (a structural change, like every other panel create/delete/move call site). A no-op — the panel is
+    /// left exactly where it was — for a blank/whitespace-only <paramref name="pageId"/>, for a
+    /// <paramref name="pageId"/> equal to <paramref name="panel"/>'s current page, or for a
+    /// <paramref name="pageId"/> that isn't one of <c>IPageManager.Pages</c>'s existing pages (fix-cycle
+    /// finding 10: a stale/typo'd destination must never silently strand the panel on an unlisted page).
+    /// </summary>
+    /// <param name="panel">The panel to move.</param>
+    /// <param name="pageId">The destination page identifier.</param>
+    void MovePanelToPage(Models.ChildWindowModel panel, string pageId);
 }

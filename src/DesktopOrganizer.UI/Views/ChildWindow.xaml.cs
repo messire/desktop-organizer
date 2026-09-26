@@ -73,6 +73,11 @@ public partial class ChildWindow : Window
     // it receives input/activation normally regardless of this panel's own WS_EX_NOACTIVATE style.
     private readonly IConfirmationService _confirmation;
 
+    // docs/prompts/settings-window-redesign.md D-3/WP-B: backs CustomizePanelMenu_Click. Already a DI
+    // singleton (Configuration/DiConfig.cs) — the same instance MainWindowViewModel's own
+    // "Customize…" button (WP-A) resolves, so both entry points share the one open dialog instance.
+    private readonly IPanelCustomizeService _panelCustomize;
+
     private readonly PanelDragMoveBehavior _dragMoveBehavior;
 
     // docs/PLANS/phase-6-edit-layout-ux.md §1 D-5: the gate wraps whichever IResizeAffordance this
@@ -134,6 +139,7 @@ public partial class ChildWindow : Window
     /// <param name="layoutEditMode">The application-global Edit Layout mode service.</param>
     /// <param name="monitorService">Provides monitor topology for placement/anti-overlap/grid resolution.</param>
     /// <param name="confirmation">Gates destructive "apply to all panels" actions behind a user confirmation prompt.</param>
+    /// <param name="panelCustomize">Opens the modeless "Customize panel…" dialog for this panel.</param>
     public ChildWindow(
         ChildWindowViewModel viewModel,
         IWindowManager windowManager,
@@ -143,7 +149,8 @@ public partial class ChildWindow : Window
         INativePanelSizingService nativeSizingService,
         ILayoutEditModeService layoutEditMode,
         IMonitorService monitorService,
-        IConfirmationService confirmation)
+        IConfirmationService confirmation,
+        IPanelCustomizeService panelCustomize)
     {
         InitializeComponent();
         _viewModel = viewModel;
@@ -154,6 +161,7 @@ public partial class ChildWindow : Window
         _layoutEditMode = layoutEditMode;
         _monitorService = monitorService;
         _confirmation = confirmation;
+        _panelCustomize = panelCustomize;
         DataContext = _viewModel;
 
         // Phase 2 (docs/PLANS/phase-2-native-panel-sizing.md §1.6): decide once, here, which resize
@@ -611,6 +619,17 @@ public partial class ChildWindow : Window
     {
         _titleRename.BeginRename();
         _panelVisualState.Refresh();
+    }
+
+    /// <summary>
+    /// <c>HeaderContextMenu</c>'s "Customize panel…" item (docs/prompts/settings-window-redesign.md
+    /// D-3/WP-B): opens the modeless dialog for this panel's <see cref="ChildWindowModel"/>. Always
+    /// enabled — every field the dialog edits already applies live regardless of Edit Layout mode.
+    /// </summary>
+    private void CustomizePanelMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (_model is null) return;
+        _panelCustomize.Show(_model);
     }
 
     /// <summary>

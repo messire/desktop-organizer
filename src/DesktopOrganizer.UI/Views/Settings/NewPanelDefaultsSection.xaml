@@ -1,0 +1,162 @@
+<UserControl x:Class="DesktopOrganizer.UI.Views.Settings.NewPanelDefaultsSection"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignWidth="460">
+    <StackPanel>
+        <TextBlock Text="New panel defaults" Style="{StaticResource Settings.PageHeader}"/>
+        <TextBlock Style="{StaticResource Settings.CardDescription}" Margin="0,-6,0,10"
+                   Text="Seeds the appearance of every panel you create from here on. Existing panels are never affected."/>
+
+        <!-- Accent color -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Accent color" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
+                <TextBox Grid.Column="1" Width="90" VerticalAlignment="Center" Margin="0,0,8,0"
+                         AutomationProperties.Name="Accent color"
+                         Text="{Binding DefaultBackgroundColor, UpdateSourceTrigger=LostFocus}"/>
+                <Border Grid.Column="2" Width="24" Height="24" CornerRadius="3"
+                        BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
+                        Background="{Binding DefaultBackgroundColor, Converter={StaticResource HexBrush}}"/>
+            </Grid>
+        </Border>
+
+        <!-- Text color -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Text color" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
+                <TextBox Grid.Column="1" Width="90" VerticalAlignment="Center" Margin="0,0,8,0"
+                         AutomationProperties.Name="Text color"
+                         Text="{Binding DefaultTextColor, UpdateSourceTrigger=LostFocus}"/>
+                <Border Grid.Column="2" Width="24" Height="24" CornerRadius="3"
+                        BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
+                        Background="{Binding DefaultTextColor, Converter={StaticResource HexBrush}}"/>
+            </Grid>
+        </Border>
+
+        <!-- Opacity -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="140"/>
+                    <ColumnDefinition Width="40"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Opacity" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
+                <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="0" Maximum="1"
+                        AutomationProperties.Name="Opacity"
+                        Value="{Binding DefaultOpacity, Mode=TwoWay}"/>
+                <TextBlock Grid.Column="2" Text="{Binding DefaultOpacity, StringFormat={}{0:P0}}"
+                           VerticalAlignment="Center" TextAlignment="Right"/>
+            </Grid>
+        </Border>
+
+        <!-- Icon size -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="140"/>
+                    <ColumnDefinition Width="48"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Icon size" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
+                <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="16" Maximum="96"
+                        TickFrequency="4" IsSnapToTickEnabled="True"
+                        AutomationProperties.Name="Icon size"
+                        Value="{Binding DefaultIconSize, Mode=TwoWay}"/>
+                <TextBlock Grid.Column="2" Text="{Binding DefaultIconSize, StringFormat={}{0:F0} px}"
+                           VerticalAlignment="Center" TextAlignment="Right"/>
+            </Grid>
+        </Border>
+
+        <!-- Surface style -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="150"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock Text="Surface style" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Style="{StaticResource Settings.CardDescription}"
+                               Text="Glass reads best on dark wallpapers; for light wallpapers, Solid or Ambient stay more readable."/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" VerticalAlignment="Center"
+                          AutomationProperties.Name="Surface style"
+                          ItemsSource="{Binding SurfaceStyleOptions}"
+                          SelectedItem="{Binding DefaultSurfaceStyle, Mode=TwoWay}"
+                          ItemTemplate="{StaticResource Settings.EnumRadioLabel}"/>
+            </Grid>
+        </Border>
+
+        <!-- Panel geometry -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="150"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock Text="Panel geometry" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Style="{StaticResource Settings.CardDescription}"
+                               Text="Whether new panels snap to the workspace grid (Grid aligned) or resize/move freely (Free-form)."/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" VerticalAlignment="Center"
+                          AutomationProperties.Name="Panel geometry"
+                          ItemsSource="{Binding PanelGeometryModeOptions}"
+                          SelectedItem="{Binding DefaultPanelGeometryMode, Mode=TwoWay}"
+                          ItemTemplate="{StaticResource Settings.EnumRadioLabel}"/>
+            </Grid>
+        </Border>
+
+        <!-- Icon layout -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="150"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock Text="Icon layout" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Style="{StaticResource Settings.CardDescription}"
+                               Text="Whether new panels use a fixed gap between icons or stretch a full row to fill the panel's width."/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" VerticalAlignment="Center"
+                          AutomationProperties.Name="Icon layout"
+                          ItemsSource="{Binding IconLayoutPolicyOptions}"
+                          SelectedItem="{Binding DefaultIconLayoutPolicy, Mode=TwoWay}"
+                          ItemTemplate="{StaticResource Settings.EnumRadioLabel}"/>
+            </Grid>
+        </Border>
+
+        <!-- Take from selected panel -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock Text="Take from selected panel" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Style="{StaticResource Settings.CardDescription}"
+                               Text="Copies the panel selected in the Panels section into every default above. Select a panel there first."/>
+                </StackPanel>
+                <Button Grid.Column="1" Content="Take" Padding="12,6" VerticalAlignment="Center"
+                        AutomationProperties.Name="Take from selected panel"
+                        Command="{Binding TakeDefaultsFromSelectedPanelCommand}"/>
+            </Grid>
+        </Border>
+    </StackPanel>
+</UserControl>

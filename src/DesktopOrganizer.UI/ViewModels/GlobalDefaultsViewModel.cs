@@ -17,6 +17,13 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
     private readonly IAppSettings _appSettings;
     private readonly IWindowManager _windowManager;
 
+    // Settings-window redesign (docs/prompts/settings-window-redesign.md, "Layout & snapping"): the last
+    // non-1 GridSize the user had before toggling snapping off, so re-enabling the "Snap panel position
+    // to grid" toggle restores that step instead of always resetting to the same default. Deliberately
+    // in-memory only (not a new IAppSettings key — CLAUDE.md persistence freeze): losing this on restart
+    // just means the toggle-on default falls back to 16, not that anything the user saved is lost.
+    private int _lastNonOneGridSize = 16;
+
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -52,9 +59,49 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
         {
             if (_appSettings.GridSize == value) return;
             _appSettings.GridSize = value;
+            if (value > 1) _lastNonOneGridSize = value;
             _appSettings.Save();
             _windowManager.NormalizePanelsToGrid();
             OnPropertyChanged(nameof(GridSize));
+            OnPropertyChanged(nameof(SnapToGridEnabled));
+            OnPropertyChanged(nameof(GridStep));
+        }
+    }
+
+    /// <summary>
+    /// The "Snap panel position to grid" toggle (Layout &amp; snapping section): <see langword="true"/>
+    /// iff <see cref="GridSize"/> is currently greater than 1. Turning it off sets <see cref="GridSize"/>
+    /// to <c>1</c> (no snapping); turning it back on restores whatever non-1 step was last in effect
+    /// (<c>16</c> the first time, since <see cref="GridSize"/> defaults to <c>1</c>).
+    /// </summary>
+    public bool SnapToGridEnabled
+    {
+        get => GridSize > 1;
+        set
+        {
+            if (value == SnapToGridEnabled) return;
+
+            // Capture the step in effect right now — not just whatever the GridSize setter has tracked
+            // across its own prior calls — since GridSize may have started out >1 without ever passing
+            // through that setter (e.g. loaded from settings at startup).
+            if (!value && GridSize > 1) _lastNonOneGridSize = GridSize;
+
+            GridSize = value ? (_lastNonOneGridSize > 1 ? _lastNonOneGridSize : 16) : 1;
+        }
+    }
+
+    /// <summary>
+    /// The grid step shown by the "Snap panel position to grid" card's slider: <see cref="GridSize"/>
+    /// while snapping is on, or the remembered last step while it is off (D-9: a disabled control still
+    /// shows a meaningful value, never a misleading "1"). Setting it is a no-op while
+    /// <see cref="SnapToGridEnabled"/> is <see langword="false"/> — the slider is disabled in that state.
+    /// </summary>
+    public int GridStep
+    {
+        get => GridSize > 1 ? GridSize : _lastNonOneGridSize;
+        set
+        {
+            if (SnapToGridEnabled) GridSize = value;
         }
     }
 
@@ -135,18 +182,26 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Default <see cref="PanelSurfaceStyle"/> for new panels, as the persisted enum-name string
-    /// (<see cref="IAppSettings.DefaultSurfaceStyle"/>). No settings-window control binds to this yet
-    /// (ADR-025 D-10 leaves the global-defaults UI untouched); it exists so panel-creation call sites
-    /// (<see cref="MainWindowViewModel.AddPanel"/>, <c>App.xaml.cs</c>'s <c>NewPanelWithDefaults</c>) can
-    /// seed <see cref="Models.ChildWindowModel.SurfaceStyle"/> — parse with
-    /// <see cref="PanelSurfaceStyleParser.ParseOrAmbient"/>.
+    /// Default <see cref="PanelSurfaceStyle"/> for new panels, persisted as the enum member name via
+    /// <see cref="IAppSettings.DefaultSurfaceStyle"/> — parsed with
+    /// <see cref="PanelSurfaceStyleParser.ParseOrAmbient"/>, which never throws. Typed as
+    /// <see cref="PanelSurfaceStyle"/> (rather than the raw persisted string, as before the
+    /// settings-window redesign gave it its first control — docs/prompts/settings-window-redesign.md
+    /// item 6) for the same reason as <see cref="DefaultPanelGeometryMode"/>/<see cref="DefaultIconLayoutPolicy"/>
+    /// below: a ComboBox binds <c>SelectedItem</c> against the enum, not the persisted string.
     /// </summary>
-    public string DefaultSurfaceStyle
+    public PanelSurfaceStyle DefaultSurfaceStyle
     {
-        get => _appSettings.DefaultSurfaceStyle;
-        set => SetGlobal(v => _appSettings.DefaultSurfaceStyle = v, value, _appSettings.DefaultSurfaceStyle, nameof(DefaultSurfaceStyle));
+        get => PanelSurfaceStyleParser.ParseOrAmbient(_appSettings.DefaultSurfaceStyle);
+        set => SetGlobal(
+            v => _appSettings.DefaultSurfaceStyle = v.ToString(),
+            value,
+            DefaultSurfaceStyle,
+            nameof(DefaultSurfaceStyle));
     }
+
+    /// <summary>Available options for the default-surface-style selector (settings window).</summary>
+    public IReadOnlyList<PanelSurfaceStyle> SurfaceStyleOptions { get; } = Enum.GetValues<PanelSurfaceStyle>();
 
     /// <summary>
     /// Which panel move/resize gestures remain available while <see cref="ILayoutEditModeService.Mode"/>
@@ -209,12 +264,55 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
     /// <summary>Available options for the default-icon-layout-policy selector (settings window).</summary>
     public IReadOnlyList<IconLayoutPolicy> IconLayoutPolicyOptions { get; } = Enum.GetValues<IconLayoutPolicy>();
 
+    /// <summary>
+    /// Backs the "New panel defaults" section's "Take from selected panel" button
+    /// (docs/prompts/settings-window-redesign.md item 6): copies <paramref name="panel"/>'s
+    /// appearance/geometry into every default this class owns, so the next "Add panel"/lasso panel
+    /// starts out looking like it. Never touches <paramref name="panel"/> itself.
+    /// </summary>
+    /// <remarks>
+    /// Fix-cycle finding 13: writes every changed field first and calls <see cref="IAppSettings.Save"/>
+    /// at most once for the whole call, rather than once per one of the (up to seven) fields that
+    /// actually differ — <see cref="SetGlobal{T}"/> would otherwise persist the whole settings file up to
+    /// seven times for a single button click.
+    /// </remarks>
+    /// <param name="panel">The panel to copy defaults from.</param>
+    public void ApplyFromPanel(Models.ChildWindowModel panel)
+    {
+        ArgumentNullException.ThrowIfNull(panel);
+
+        var changed = false;
+        changed |= SetGlobalNoSave(v => _appSettings.DefaultBackgroundColor = v, panel.AccentColor, DefaultBackgroundColor, nameof(DefaultBackgroundColor));
+        changed |= SetGlobalNoSave(v => _appSettings.DefaultTextColor = v, panel.TextColor, DefaultTextColor, nameof(DefaultTextColor));
+        changed |= SetGlobalNoSave(v => _appSettings.DefaultOpacity = v, panel.SurfaceOpacity, DefaultOpacity, nameof(DefaultOpacity));
+        changed |= SetGlobalNoSave(v => _appSettings.DefaultSurfaceStyle = v.ToString(), panel.SurfaceStyle, DefaultSurfaceStyle, nameof(DefaultSurfaceStyle));
+        changed |= SetGlobalNoSave(v => _appSettings.DefaultIconSize = v, panel.IconSize, DefaultIconSize, nameof(DefaultIconSize));
+        changed |= SetGlobalNoSave(v => _appSettings.DefaultPanelGeometryMode = v.ToString(), panel.GeometryMode, DefaultPanelGeometryMode, nameof(DefaultPanelGeometryMode));
+        changed |= SetGlobalNoSave(v => _appSettings.DefaultIconLayoutPolicy = v.ToString(), panel.IconLayoutPolicy, DefaultIconLayoutPolicy, nameof(DefaultIconLayoutPolicy));
+
+        if (changed) _appSettings.Save();
+    }
+
+    /// <summary>
+    /// Applies <paramref name="apply"/> and raises <paramref name="propertyName"/>'s
+    /// <see cref="PropertyChanged"/> when <paramref name="newValue"/> differs from <paramref name="current"/>
+    /// — same equality guard as <see cref="SetGlobal{T}"/>, but leaves persisting the change to the
+    /// caller (<see cref="ApplyFromPanel"/>), which batches every field's write into a single
+    /// <see cref="IAppSettings.Save"/> call.
+    /// </summary>
+    /// <returns><see langword="true"/> iff the value actually changed (and was therefore applied).</returns>
+    private bool SetGlobalNoSave<T>(Action<T> apply, T newValue, T current, string propertyName)
+    {
+        if (EqualityComparer<T>.Default.Equals(current, newValue)) return false;
+        apply(newValue);
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+
     private void SetGlobal<T>(Action<T> apply, T newValue, T current, string propertyName)
     {
-        if (EqualityComparer<T>.Default.Equals(current, newValue)) return;
-        apply(newValue);
-        _appSettings.Save();
-        OnPropertyChanged(propertyName);
+        if (SetGlobalNoSave(apply, newValue, current, propertyName))
+            _appSettings.Save();
     }
 
     private void OnPropertyChanged(string propertyName)

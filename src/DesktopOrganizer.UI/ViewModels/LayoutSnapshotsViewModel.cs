@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Services;
@@ -14,6 +15,7 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
 {
     private readonly ILayoutSnapshotService _service;
     private readonly IConfirmationService _confirmation;
+    private readonly IInputDialogService _inputDialog;
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -25,7 +27,8 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
     public ObservableCollection<LayoutSnapshot> Snapshots { get; } = [];
 
     /// <summary>
-    /// Command: capture the current layout under an auto-generated name or user-provided name.
+    /// Command: prompts for a snapshot name (pre-filled with an auto-generated default, editable or
+    /// acceptable as-is) and, unless the user cancels the prompt, captures the current layout under it.
     /// </summary>
     public ICommand CaptureSnapshotCommand { get; }
 
@@ -43,11 +46,13 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
     /// Initializes a new instance of the <see cref="LayoutSnapshotsViewModel"/> class.
     /// </summary>
     /// <param name="service">Persists and restores layout snapshots.</param>
-    /// <param name="confirmation">Gates the delete command behind a user confirmation prompt.</param>
-    public LayoutSnapshotsViewModel(ILayoutSnapshotService service, IConfirmationService confirmation)
+    /// <param name="confirmation">Gates the restore/delete commands behind a user confirmation prompt.</param>
+    /// <param name="inputDialog">Prompts for the snapshot name when capturing.</param>
+    public LayoutSnapshotsViewModel(ILayoutSnapshotService service, IConfirmationService confirmation, IInputDialogService inputDialog)
     {
         _service = service;
         _confirmation = confirmation;
+        _inputDialog = inputDialog;
 
         CaptureSnapshotCommand = new RelayCommand(CaptureSnapshot);
         RestoreSnapshotCommand = new RelayCommand<string>(RestoreSnapshot);
@@ -59,7 +64,14 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
 
     private void CaptureSnapshot()
     {
-        var name = $"Layout {DateTime.Now:dd.MM HH:mm}";
+        var defaultName = $"Layout {DateTime.Now:dd.MM HH:mm}";
+        var name = _inputDialog.PromptText("Save snapshot", "Snapshot name:", defaultName);
+
+        // Cancel returns null by contract; a blank/whitespace-only name is treated the same way as a
+        // defense-in-depth guard (matching RestoreSnapshot/DeleteSnapshot's own IsNullOrWhiteSpace
+        // checks below) even though the real InputDialog's OK button is already disabled for blank input.
+        if (string.IsNullOrWhiteSpace(name)) return;
+
         _service.Capture(name);
         RefreshList();
     }
@@ -78,6 +90,14 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
     private void DeleteSnapshot(string? snapshotId)
     {
         if (string.IsNullOrWhiteSpace(snapshotId)) return;
+
+        var snapshot = _service.Snapshots.FirstOrDefault(s => s.Id == snapshotId);
+        var name = snapshot?.Name ?? "this snapshot";
+        if (!_confirmation.Confirm(
+                $"Delete snapshot “{name}”? This cannot be undone.",
+                "Delete snapshot",
+                MessageBoxImage.Warning)) return;
+
         _service.Delete(snapshotId);
         RefreshList();
     }

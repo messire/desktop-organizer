@@ -406,6 +406,24 @@ public class WindowManager : IWindowManager
         if (anyChanged) SaveWindowsStateNow();
     }
 
+    /// <inheritdoc />
+    public void MovePanelToPage(ChildWindowModel panel, string pageId)
+    {
+        ArgumentNullException.ThrowIfNull(panel);
+        if (string.IsNullOrWhiteSpace(pageId) || panel.PageId == pageId) return;
+
+        // Fix-cycle finding 10: reject an unknown destination instead of silently assigning PageId to a
+        // page IPageManager doesn't know about — the panel would still show in PanelsOnCurrentPage's
+        // "Move to page" menu targeting real pages, yet become permanently invisible/unreachable (no page
+        // switcher entry ever equals its new PageId again).
+        if (!PageManager.Pages.Contains(pageId)) return;
+
+        panel.PageId = pageId;
+        panel.IsVisible = pageId == PageManager.CurrentPage;
+        ApplyPanelVisibility(panel);
+        SaveWindowsStateNow();
+    }
+
     /// <summary>
     /// Releases every app-managed item copy referenced by <paramref name="model"/>'s
     /// <see cref="ChildWindowModel.FilePaths"/>. Folder Portal panels have no persisted

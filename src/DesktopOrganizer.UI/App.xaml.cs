@@ -42,9 +42,13 @@ public partial class App : Application
     private IGestureDiagnostics? _gestureDiagnostics;
     private IDiagnosticsLog? _diagnosticsLog;
     private IApplicationStateService? _applicationState;
+    private IPageManager? _pageManager;
 
     private ITrayIconManager TrayIconManager
         => (_trayIconManager ??= _serviceProvider.GetService<ITrayIconManager>())!;
+
+    private IPageManager PageManager
+        => (_pageManager ??= _serviceProvider.GetService<IPageManager>())!;
 
     private IWindowManager WindowManager
         => (_windowManager ??= _serviceProvider.GetService<IWindowManager>())!;
@@ -236,6 +240,7 @@ public partial class App : Application
         merged.Add(LoadResourceDictionary("/Resources/Styles/Typography.xaml"));
         merged.Add(LoadResourceDictionary("/Resources/Styles/Icons.xaml"));
         merged.Add(LoadResourceDictionary("/Resources/Styles/Controls.xaml"));
+        merged.Add(LoadResourceDictionary("/Resources/Styles/Settings.xaml"));   // settings window + section UserControls (ADR-031)
         merged.Add(LoadResourceDictionary("/Resources/Styles/Panels.xaml"));
         merged.Add(LoadResourceDictionary("/Resources/Templates.xaml"));
     }
@@ -351,10 +356,26 @@ public partial class App : Application
     // hazard here for UiDispatch to guard against.
     private void InitDesktopGestures()
     {
-        // Heavy work is deferred off the hook callback via the dispatcher.
-        DesktopGestures.DesktopDoubleClicked += (_, _) => Current.Dispatcher.BeginInvoke(DesktopIcons.Toggle);
+        // Heavy work is deferred off the hook callback via the dispatcher. D-6: the double-click gesture
+        // is a second entry point (besides the tray's own "Show desktop icons" click) that changes
+        // IDesktopIconsService's visibility, so it must refresh the tray checkmark too — see
+        // ITrayIconManager.SetDesktopIconsVisible's remarks — otherwise the checkmark goes stale the
+        // moment a user double-clicks the desktop instead of using the tray menu item.
+        DesktopGestures.DesktopDoubleClicked += (_, _) => Current.Dispatcher.BeginInvoke(ToggleDesktopIcons);
         DesktopGestures.LassoCompleted += (_, args) => Current.Dispatcher.BeginInvoke(() => CreateLassoPanel(args));
         DesktopGestures.Start();
+    }
+
+    /// <summary>
+    /// Toggles real desktop icon visibility and keeps the tray's "Show desktop icons" checkmark in sync.
+    /// The one place both the double-click gesture (<see cref="InitDesktopGestures"/>) and the tray menu
+    /// item's own click (<see cref="InitTrayIcon"/>) route through, so the checkmark can never go stale
+    /// relative to whichever entry point the user actually used (D-6).
+    /// </summary>
+    private void ToggleDesktopIcons()
+    {
+        DesktopIcons.Toggle();
+        TrayIconManager.SetDesktopIconsVisible(DesktopIcons.AreIconsVisible);
     }
 
     private void LoadPanels()
@@ -414,6 +435,16 @@ public partial class App : Application
         TrayIconManager.OnEditLayoutToggleRequested += (_, _) => layoutEditMode.Toggle(LayoutModeChangeSource.Tray);
         TrayIconManager.OnLockLayoutToggleRequested += (_, _) => layoutEditMode.IsLayoutLocked = !layoutEditMode.IsLayoutLocked;
 
+        // D-6: routes through the same ToggleDesktopIcons() helper the desktop double-click gesture uses
+        // (InitDesktopGestures), so the checkmark is refreshed identically regardless of which entry
+        // point the user clicked.
+        TrayIconManager.ToggleDesktopIconsRequested += (_, _) => ToggleDesktopIcons();
+
+        // Reflects whatever IDesktopIconsService's visibility already is at startup (restored, if
+        // necessary, from whatever RestoreDesktopIcons left it at on the previous exit) — mirrors
+        // RefreshTrayLayoutMenu() below doing the same for the layout-edit items.
+        TrayIconManager.SetDesktopIconsVisible(DesktopIcons.AreIconsVisible);
+
         // UpdateContextMenu takes a caller-supplied snapshot, not live state (see its remarks) — refresh
         // it every time anything it depends on changes, not just once at startup, so the tray checkmarks
         // never go stale relative to a change made from another entry point (panel menu, settings
@@ -443,7 +474,6 @@ public partial class App : Application
     private void CreateLassoPanel(DesktopLassoEventArgs args)
     {
         var model = NewPanelWithDefaults();
-        model.Title = "New Panel";
 
         // F-7 (P03-L1, ADR-028 «Lasso-создание панели: px vs DIP»): DesktopLassoEventArgs is in PHYSICAL
         // SCREEN PIXELS by contract, while ChildWindowModel.Position/Size are DIP — writing one into the
@@ -475,8 +505,12 @@ public partial class App : Application
 
     private ChildWindowModel NewPanelWithDefaults()
     {
-        var model = new ChildWindowModel();
-        PanelDefaults.Apply(model, AppSettings);
-        return model;
+        // D-7 fix: previously left at ChildWindowModel's own "default" literal, so every lasso-created
+        // panel landed on the "default" page regardless of which page the user was actually viewing when
+        // they drew the lasso — invisible (and, worse, silently reappearing later) the moment they
+        // switched away. PanelDefaults.CreateNew (fix-cycle finding 11) is the single source of truth for
+        // this page-assignment/defaults pairing, shared with MainWindowViewModel.AddPanel's "Add panel"
+        // button — both panel-creation entry points can no longer independently drift apart on it.
+        return PanelDefaults.CreateNew(AppSettings, PageManager.CurrentPage);
     }
 }

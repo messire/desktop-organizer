@@ -106,4 +106,119 @@ public class ChildWindowModelSerializationTests
 
         Assert.False(raised);
     }
+
+    // ── settings-window-redesign.md finding 2 (§3.1 R-9): SourceFolderPath moved from an
+    //    auto-property to the same SetField-backed INPC pattern as every other ChildWindowModel
+    //    property, so ChildWindowViewModel.HandleSourceFolderPathChanged can react to it directly. ──
+
+    /// <summary>
+    /// Verifies that setting <see cref="ChildWindowModel.SourceFolderPath"/> to a new value raises
+    /// <c>PropertyChanged</c> for that property.
+    /// </summary>
+    [Fact]
+    public void SourceFolderPath_Set_RaisesPropertyChanged()
+    {
+        var model = new ChildWindowModel();
+        var raisedProperties = new List<string?>();
+        model.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName);
+
+        model.SourceFolderPath = @"C:\fake\portal";
+
+        Assert.Contains(nameof(ChildWindowModel.SourceFolderPath), raisedProperties);
+    }
+
+    /// <summary>
+    /// Verifies that re-assigning <see cref="ChildWindowModel.SourceFolderPath"/> to its current value
+    /// (including the <see langword="null"/> default) is a no-op that does not raise
+    /// <c>PropertyChanged</c>, matching the <c>SetField</c> equality guard used by every other
+    /// <see cref="ChildWindowModel"/> property.
+    /// </summary>
+    [Fact]
+    public void SourceFolderPath_SetToSameValue_DoesNotRaisePropertyChanged()
+    {
+        var model = new ChildWindowModel { SourceFolderPath = @"C:\fake\portal" };
+        var raised = false;
+        model.PropertyChanged += (_, _) => raised = true;
+
+        model.SourceFolderPath = @"C:\fake\portal";
+
+        Assert.False(raised);
+    }
+
+    /// <summary>
+    /// Verifies that re-assigning the field-initializer default (<see langword="null"/>) without ever
+    /// having set <see cref="ChildWindowModel.SourceFolderPath"/> is also a no-op.
+    /// </summary>
+    [Fact]
+    public void SourceFolderPath_SetNullOnFreshModel_DoesNotRaisePropertyChanged()
+    {
+        var model = new ChildWindowModel();
+        var raised = false;
+        model.PropertyChanged += (_, _) => raised = true;
+
+        model.SourceFolderPath = null;
+
+        Assert.False(raised);
+    }
+
+    // ── FIX round 2 MAJOR-1: FilePaths moved from a plain auto-property to the same SetField-backed
+    //    INPC pattern as every other ChildWindowModel property, so the settings window's Panels list
+    //    subtitle (PanelsSection.xaml's PanelSubtitleConverter, bound through FilePaths.Count) stays live
+    //    while the settings window — a hidden DI singleton, never recreated — is open. ────────────────
+
+    /// <summary>
+    /// Verifies that assigning a new (reference-distinct) list to <see cref="ChildWindowModel.FilePaths"/>
+    /// raises <c>PropertyChanged</c> for that property — the case every real caller
+    /// (<c>ChildWindow.SyncToModel</c>, <c>ChildWindowViewModel</c>'s portal attach/detach paths) hits,
+    /// since all of them build a fresh list rather than mutating the existing one in place.
+    /// </summary>
+    [Fact]
+    public void FilePaths_SetToNewList_RaisesPropertyChanged()
+    {
+        var model = new ChildWindowModel();
+        var raisedProperties = new List<string?>();
+        model.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName);
+
+        model.FilePaths = ["C:\\fake\\a.txt"];
+
+        Assert.Contains(nameof(ChildWindowModel.FilePaths), raisedProperties);
+    }
+
+    /// <summary>
+    /// Verifies that re-assigning the EXACT SAME <see cref="List{T}"/> instance already held by
+    /// <see cref="ChildWindowModel.FilePaths"/> is a no-op that does not raise <c>PropertyChanged</c> —
+    /// <see cref="List{T}"/> has no value-equality override, so <c>SetField</c>'s
+    /// <see cref="EqualityComparer{T}.Default"/> guard here is reference equality specifically.
+    /// </summary>
+    [Fact]
+    public void FilePaths_SetToSameListInstance_DoesNotRaisePropertyChanged()
+    {
+        var list = new List<string> { "C:\\fake\\a.txt" };
+        var model = new ChildWindowModel { FilePaths = list };
+        var raised = false;
+        model.PropertyChanged += (_, _) => raised = true;
+
+        model.FilePaths = list;
+
+        Assert.False(raised);
+    }
+
+    /// <summary>
+    /// Verifies that assigning a DIFFERENT list instance with byte-for-byte identical CONTENTS still
+    /// raises <c>PropertyChanged</c> — reference equality, not content equality, is what
+    /// <see cref="ChildWindowModel.FilePaths"/>'s <c>SetField</c> guard checks, matching the "assigning
+    /// FilePaths raises PropertyChanged; same-reference assignment does not" contract (FIX round 2
+    /// MAJOR-1).
+    /// </summary>
+    [Fact]
+    public void FilePaths_SetToDifferentListWithSameContents_RaisesPropertyChanged()
+    {
+        var model = new ChildWindowModel { FilePaths = ["C:\\fake\\a.txt"] };
+        var raised = false;
+        model.PropertyChanged += (_, _) => raised = true;
+
+        model.FilePaths = ["C:\\fake\\a.txt"]; // A new List<string> instance, same contents.
+
+        Assert.True(raised);
+    }
 }

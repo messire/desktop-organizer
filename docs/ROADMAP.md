@@ -98,7 +98,10 @@
       **Папки при drop** (не изменилось этим циклом, актуально и для Move): рекурсивное
       перемещение/копирование папки — это перенос снэпшота на момент переноса, не живое зеркало: если
       исходная папка активно меняется параллельно, эти изменения сами не попадут в managed-копию (для
-      живого зеркалирования — используйте Folder Portal, `SelectSourceFolderCommand`).
+      живого зеркалирования — используйте Folder Portal через диалог «Customize panel…»).
+      **Уточнение 2026-09-26 (ADR-031):** упомянутая здесь `SelectSourceFolderCommand` удалена —
+      команда нигде не была привязана к контролу; Folder Portal теперь назначается из
+      `PanelCustomizeWindow` (Browse…/Clear), реактивно на `ChildWindowModel.SourceFolderPath`.
       Более «фенсовый» механизм — не копировать/перемещать файл физически, а прятать иконку на
       рабочем столе на месте (как для «Захвата иконок») — рассматривался и в этом цикле, и раньше;
       отклонён как более рискованный и объёмный кросс-процессный Win32-код, непроверяемый в этой среде
@@ -227,6 +230,15 @@ ADR-002 описал роль окна настроек; здесь — напо
 - [x] **Захват иконок** — `SourceFolderPath` в `ChildWindowModel`: панель-портал мирит содержимое папки.
       Пункт трея «Собрать значки рабочего стола» = панель папки Desktop (вид-плитка) + скрытие реальных иконок.
 
+> **Устарело, уточнено 2026-09-26 (ADR-031).** Пункты трея «Скрыть/показать значки» и «Собрать значки
+> рабочего стола», описанные выше, были убраны из трея в v0.2.0 (окно настроек взяло на себя чекбокс
+> «Show desktop icons», трей — только «Настройки»/«Выход»). ADR-031 вернул в трей checkable-пункт
+> **«Show desktop icons»** (синхронизирован с реальной видимостью через `ITrayIconManager
+> .SetDesktopIconsVisible`/`ToggleDesktopIconsRequested`) и одновременно убрал одноимённый чекбокс из
+> окна настроек — это сессионная команда, не преференция. «Собрать значки рабочего стола» («Захват
+> иконок» выше) в трей **не вернулся**: Folder Portal на папку Desktop настраивается через диалог
+> «Customize panel…» (Browse…), отдельного пункта трея для него нет.
+
 **Готово, когда:** панель создаётся жестом, иконки десктопа прячутся, панель умеет показывать реальные иконки рабочего стола.
 
 > ⚠️ Весь нативный код Фазы 4 непроверяем в этой среде (WPF/Windows-only, без `dotnet`) — обязательно
@@ -242,6 +254,9 @@ ADR-002 описал роль окна настроек; здесь — напо
 - [x] **Folder Portals** — панель live-отражает содержимое реальной папки (FileSystemWatcher).
       `IFolderWatcher`/`FolderWatcherFactory`, дебаунс 300 мс, фильтр desktop.ini/hidden, guard на shutdown.
       `SelectSourceFolderCommand`, блокировка ручных операций в портале. Persistence через `SourceFolderPath`.
+      **Команда удалена 2026-09-26 (ADR-031):** портал назначается из диалога «Customize panel…»
+      (Browse…/Clear), реактивно на изменение модели — см. раздел «Переустройство окна настроек
+      (ADR-031)» ниже.
 - [x] **Страницы / swipe** между раскладками панелей.
       `PageId` в `ChildWindowModel`, `IPageManager`/`PageManagerService`. UI-полоска, Ctrl+PgDown/PgUp.
       Persistence в `IAppSettings.Pages`/`CurrentPage`.
@@ -1026,6 +1041,57 @@ MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§1
 > (≥5 панелей) не теряет колонки и не переписывает `application-state.json` только из-за загрузки (MV-10);
 > все 4 темы High Contrast (MV-11); 10/20 панелей без заметного падения FPS, включая скролл/hover в большой
 > панели (MV-12, glow пересчитывается на любую перерисовку внутри панели, не только resize).
+
+---
+
+## Переустройство окна настроек (ADR-031, вне формальных Фаз)
+
+Источник — бриф `docs/prompts/settings-window-redesign.md` (решения D-1..D-10) и мастер-план
+[docs/PLANS/settings-window-redesign.md](PLANS/settings-window-redesign.md). Ветка
+`feature/settings-window-redesign` (от `rc/0.6.0`). Архитектурное решение —
+[ADR-031](../adr/ADR-031-settings-window-navigation-and-panel-customize.md) (Accepted, 2026-09-26).
+
+- [x] **Боковая навигация в `MainWindow`** — 8 разделов (`SettingsSection`: General, Layout & snapping,
+      Panels, New panel defaults, Pages, System icons, Backup, About) заменяют плоский список
+      `Expander`. Полоска вкладок страниц вверху окна удалена (страницы переключаются из раздела Panels
+      и Ctrl+PgUp/PgDn). Раздел помнится между Show/Hide в рамках процесса, сбрасывается на `General`
+      после рестарта — персистентности не добавлено (D-1, заморозка `CLAUDE.md` не нарушена).
+- [x] **Немодальный диалог `PanelCustomizeWindow`** (одно окно на приложение, live-редактирование
+      общего `ChildWindowModel`, без OK/Cancel/Apply) — открывается из `HeaderContextMenu` панели
+      («Customize…») и из раздела Panels. Переносит Title/Accent/Text color/Opacity/Surface
+      style/Icon size/View/Sort из прежнего инлайн-раздела «Selected panel settings», плюс впервые даёт
+      UI для Content filter/Icon layout/Auto-size/Folder Portal (Browse…/Clear).
+      **Известное отклонение от плана:** Align to workspace grid / Size presets / Fit to content в
+      диалог не перенесены — остались context-menu-only (`docs/Refactoring/BACKLOG.md` DO-027).
+- [x] **UI для ранее скрытых настроек модели**: Folder Portal (Browse…/Clear в диалоге), `PageId` панели
+      (Panels › Move to page ▾), `DefaultSurfaceStyle` (New panel defaults), «Take from selected panel».
+- [x] **Трей: «Show desktop icons» возвращён как checkable-пункт**, синхронизированный с реальной
+      видимостью иконок; одноимённый чекбокс убран из окна настроек (сессионная команда, не
+      преференция — amendment к [ADR-026](../adr/ADR-026-edit-layout-mode.md) D-9: одна из трёх точек
+      переключения режима заменена подсказкой, `Ctrl+E` в окне настроек сохранён).
+- [x] **Фикс `PageId` лассо-панели** — панель, созданная правым drag'ом на не-default странице, теперь
+      сразу видна на этой странице и остаётся там после рестарта (раньше «перескакивала» на `default`).
+- [x] **Именованные снапшоты и подтверждение удаления** — «Save as…» запрашивает имя
+      (`IInputDialogService`), «Delete» снапшота спрашивает подтверждение с именем.
+- [x] `SelectSourceFolderCommand` удалён как мёртвый код (см. Фазу 5 и «Сквозные задачи» выше —
+      аннотировано в местах упоминания).
+- [ ] **Follow-up (не в объёме этого захода):** `SettingsCard`-контрол вместо ручной разметки карточек
+      (`docs/Refactoring/BACKLOG.md` DO-026); Align/Size presets/Fit to content в диалоге (DO-027);
+      rename/reorder страниц, «волна 2» (DO-028); Export/Import снапшотов (существующий DO-012); color
+      picker для Accent/Text color вместо hex-поля.
+
+**Готово, когда:** ни одна настройка из инвентаря плана (§5.1) не потеряна, диалог живо редактирует
+`ChildWindowModel`, трей и окно настроек не дублируют сессионные команды. `dotnet build`/`dotnet test`
+на HEAD `d69bfdc` (после финального fix-раунда `fc64035`) — 0 errors, 0 warnings, 3589 тестов.
+
+> ⚠️ **Manual verify (Win10/Win11) — не выполнено, среда разработки ограничена `dotnet build`/`dotnet
+> test`.** Консолидированная матрица (план MV-1…MV-27 + дополнения MV-28…MV-39 по итогам FIX-A/FIX-B) —
+> [docs/PLANS/settings-window-redesign.md](PLANS/settings-window-redesign.md), раздел «Реализация vs
+> план». Наивысший приоритет: фокус диалога поверх `WS_EX_NOACTIVATE`-контекстного меню, в т.ч. после
+> Win+D (MV-3/MV-4/MV-28); retarget диалога между панелями без visual residue (MV-5/MV-29); лассо на
+> не-default странице переживает рестарт (MV-16); галка трея «Show desktop icons» не расходится с
+> реальностью (MV-19/MV-32); откат на v0.5.1 поверх данных этой ветки не даёт read-only-сессию (MV-27,
+> гейт инцидента 2026-09-24).
 
 ---
 

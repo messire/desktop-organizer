@@ -137,6 +137,14 @@
                                 <conv:NotBooleanConverter x:Key="Not"/>
                             </ContextMenu.Resources>
                             <MenuItem Header="Rename" Click="RenameMenu_Click"/>
+                            <!--
+                                docs/prompts/settings-window-redesign.md D-3/WP-B: opens the modeless
+                                "Customize panel…" dialog for THIS panel's Model — always enabled (unlike
+                                the geometry/sizing items below, it has nothing to do with
+                                CanEnterEditLayout/IsLayoutLocked; every field it edits already applies
+                                live regardless of Edit Layout mode, same as Rename above).
+                            -->
+                            <MenuItem Header="Customize panel…" Click="CustomizePanelMenu_Click"/>
                             <MenuItem Header="Roll up / down" Click="RollUpMenu_Click"/>
                             <!--
                                 Stage S (docs/PLANS/workspace-grid-03-04-integration.md §1.4) created both

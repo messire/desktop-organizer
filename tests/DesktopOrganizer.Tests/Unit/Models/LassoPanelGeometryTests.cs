@@ -1,4 +1,5 @@
 using System.Windows;
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Models;
 using DrawingPoint = System.Drawing.Point;
 
@@ -23,7 +24,14 @@ public class LassoPanelGeometryTests
         (Display2, new Rect(-1366, -200, 1366, 768), new Rect(-1366, -160, 1366, 728)),
     ];
 
-    // ── ToDip (D3-8) ──────────────────────────────────────────────────────────────────────────────
+    // ── ToDip (D3-8; release-hardening F, ADR-037) ───────────────────────────────────────────────────
+    //
+    // ToDip now takes a DesktopScaleModel instead of a bare scalar (F3: the conversion routes through
+    // the per-monitor snapshot's PxToDip, not a flat division). Every case below builds a UNIFORM
+    // snapshot (Embedded mode, no monitors) at the scale under test — DesktopScaleModel's own uniform
+    // fast path is `px / s` component-by-component, bit-identical to the pre-F scalar formula, so these
+    // are the exact same numbers this test file asserted before F3. Multi-monitor/anchored lasso
+    // conversion is additionally covered below (release-hardening F4).
 
     /// <summary>
     /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> divides every physical-pixel component by
@@ -32,7 +40,7 @@ public class LassoPanelGeometryTests
     [Fact]
     public void ToDip_At150Percent_DividesEveryComponentByTheScale()
     {
-        var dip = LassoPanelGeometry.ToDip(300, 300, 600, 600, dpiScale: 1.5d, minSize: MinSize);
+        var dip = LassoPanelGeometry.ToDip(new Rect(300, 300, 600, 600), UniformScale(1.5d), minSize: MinSize);
 
         Assert.Equal(new Rect(200, 200, 400, 400), dip);
     }
@@ -41,7 +49,7 @@ public class LassoPanelGeometryTests
     /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> divides every component by the DPI scale
     /// correctly across a table of scale factors, including a non-integral 175% scale.
     /// </summary>
-    /// <param name="scale">The DPI scale factor passed to <c>ToDip</c>.</param>
+    /// <param name="scale">The DPI scale factor under test.</param>
     /// <param name="x">The expected DIP x-coordinate.</param>
     /// <param name="y">The expected DIP y-coordinate.</param>
     /// <param name="width">The expected DIP width.</param>
@@ -52,7 +60,7 @@ public class LassoPanelGeometryTests
     [InlineData(1.75, 1600d / 7d, 1600d / 7d, 3200d / 7d, 2400d / 7d)]
     public void ToDip_ScaleTable(double scale, double x, double y, double width, double height)
     {
-        var dip = LassoPanelGeometry.ToDip(400, 400, 800, 600, scale, MinSize);
+        var dip = LassoPanelGeometry.ToDip(new Rect(400, 400, 800, 600), UniformScale(scale), MinSize);
 
         Assert.Equal(x, dip.X, 9);
         Assert.Equal(y, dip.Y, 9);
@@ -70,7 +78,7 @@ public class LassoPanelGeometryTests
     {
         // 150 physical px at 150% is 100 DIP -- below the 120 DIP floor. Applying the floor BEFORE the
         // conversion (the pre-P03 order) would have compared 150 px against 120 DIP and let it through.
-        var dip = LassoPanelGeometry.ToDip(0, 0, 150, 150, dpiScale: 1.5d, minSize: MinSize);
+        var dip = LassoPanelGeometry.ToDip(new Rect(0, 0, 150, 150), UniformScale(1.5d), minSize: MinSize);
 
         Assert.Equal(MinSize, dip.Width);
         Assert.Equal(MinSize, dip.Height);
@@ -78,9 +86,11 @@ public class LassoPanelGeometryTests
 
     /// <summary>
     /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> falls back to a 1:1 (no-op) scale for
-    /// degenerate scale values (zero, negative, NaN, or infinite) rather than producing garbage output.
+    /// degenerate scale values (zero, negative, NaN, or infinite) rather than producing garbage output —
+    /// <see cref="DesktopScaleModel.Create"/> itself sanitizes a degenerate reference/layer scale to
+    /// <c>1.0</c> (see its remarks).
     /// </summary>
-    /// <param name="scale">The degenerate DPI scale factor passed to <c>ToDip</c>.</param>
+    /// <param name="scale">The degenerate DPI scale factor under test.</param>
     [Theory]
     [InlineData(0d)]
     [InlineData(-1d)]
@@ -88,7 +98,7 @@ public class LassoPanelGeometryTests
     [InlineData(double.PositiveInfinity)]
     public void ToDip_DegenerateScale_FallsBackToOneToOne(double scale)
     {
-        var dip = LassoPanelGeometry.ToDip(300, 300, 600, 600, scale, MinSize);
+        var dip = LassoPanelGeometry.ToDip(new Rect(300, 300, 600, 600), UniformScale(scale), MinSize);
 
         Assert.Equal(new Rect(300, 300, 600, 600), dip);
     }
@@ -100,10 +110,69 @@ public class LassoPanelGeometryTests
     [Fact]
     public void ToDip_NegativeMonitorCoordinates_ScaleWithoutSignSpecialCasing()
     {
-        var dip = LassoPanelGeometry.ToDip(-1200, -240, 600, 600, dpiScale: 1.5d, minSize: MinSize);
+        var dip = LassoPanelGeometry.ToDip(new Rect(-1200, -240, 600, 600), UniformScale(1.5d), minSize: MinSize);
 
         Assert.Equal(-800d, dip.X);
         Assert.Equal(-160d, dip.Y);
+    }
+
+    // ── ToDip: multi-monitor, anchored (mixed-DPI) snapshots (release-hardening F4) ──────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> on an anchored (mixed-DPI, two-monitor)
+    /// snapshot converts a lasso drawn entirely on the 150% secondary monitor through THAT monitor's own
+    /// scale — a lassoed panel on a non-primary, non-reference-scale monitor comes out the right size.
+    /// </summary>
+    [Fact]
+    public void ToDip_LassoOnSecondaryMonitorOfAnchoredLayout_UsesThatMonitorsOwnScale()
+    {
+        var dip = LassoPanelGeometry.ToDip(new Rect(2400, 150, 300, 300), Mixed100Plus150Right(), minSize: MinSize);
+
+        // Secondary's DIP origin is anchored at its own left edge (1920, facing the primary); size divided
+        // by its own 1.5 scale, not the primary's 1.0 reference scale.
+        Assert.Equal(new Rect(1920 + ((2400 - 1920) / 1.5), 150 / 1.5, 200, 200), dip);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="LassoPanelGeometry.ToDip"/> on an anchored (mixed-DPI, two-monitor)
+    /// snapshot converts a lasso drawn on the 100% primary through the primary's own scale, unaffected by
+    /// the secondary's different scale.
+    /// </summary>
+    [Fact]
+    public void ToDip_LassoOnPrimaryMonitorOfAnchoredLayout_UsesThePrimarysOwnScale()
+    {
+        var dip = LassoPanelGeometry.ToDip(new Rect(100, 50, 300, 150), Mixed100Plus150Right(), minSize: MinSize);
+
+        Assert.Equal(new Rect(100, 50, 300, 150), dip);
+    }
+
+    /// <summary>
+    /// Verifies that a lasso drawn across the seam between two differently-scaled monitors converts
+    /// through whichever monitor it intersects MOST — the same max-intersection rule
+    /// <see cref="DesktopScaleModel.PxToDip(Rect)"/> itself documents.
+    /// </summary>
+    [Fact]
+    public void ToDip_LassoAcrossTheSeamOfAnchoredLayout_UsesTheMaxIntersectionMonitor()
+    {
+        // 120 px on the primary (1800..1920), 180 px on the 150% secondary (1920..2100) -> the secondary
+        // wins the intersection regardless of the (equal, 300 px tall) height on both sides.
+        var dip = LassoPanelGeometry.ToDip(new Rect(1800, 100, 300, 300), Mixed100Plus150Right(), minSize: MinSize);
+
+        Assert.Equal(new Rect(1920 + ((1800 - 1920) / 1.5), 100 / 1.5, 200, 200), dip);
+    }
+
+    /// <summary>
+    /// Verifies that the minimum-size floor still applies AFTER the anchored, per-monitor conversion, on
+    /// the secondary monitor of a mixed-DPI layout.
+    /// </summary>
+    [Fact]
+    public void ToDip_LassoOnSecondaryMonitorOfAnchoredLayout_AppliesMinimumSizeFloorAfterConversion()
+    {
+        // 150 physical px at 150% is 100 DIP -- below the 120 DIP floor.
+        var dip = LassoPanelGeometry.ToDip(new Rect(2400, 150, 150, 150), Mixed100Plus150Right(), minSize: MinSize);
+
+        Assert.Equal(MinSize, dip.Width);
+        Assert.Equal(MinSize, dip.Height);
     }
 
     // ── ApplyTo ───────────────────────────────────────────────────────────────────────────────────
@@ -173,5 +242,23 @@ public class LassoPanelGeometryTests
 
         Assert.Equal(new DrawingPoint(-101, -201), model.Position);
         Assert.Equal(new System.Drawing.Size(334, 445), model.Size);
+    }
+
+    /// <summary>Builds a uniform (single-scale) desktop-scale snapshot for the <c>ToDip</c> cases above.</summary>
+    private static DesktopScaleModel UniformScale(double scale)
+        => DesktopScaleModel.Create(DesktopLayerMode.Embedded, scale, scale, []);
+
+    /// <summary>
+    /// Builds an anchored, TopLevel, two-monitor snapshot (100% primary + 150% to the right) for the
+    /// multi-monitor <c>ToDip</c> cases above (same layout as <c>DesktopScaleModelTests</c>' own).
+    /// </summary>
+    private static DesktopScaleModel Mixed100Plus150Right()
+    {
+        MonitorScale[] monitors =
+        [
+            new(Display1, new System.Drawing.Rectangle(0, 0, 1920, 1080), new System.Drawing.Rectangle(0, 0, 1920, 1040), true, 1d),
+            new(Display2, new System.Drawing.Rectangle(1920, 0, 3840, 2160), new System.Drawing.Rectangle(1920, 0, 3840, 2100), false, 1.5d),
+        ];
+        return DesktopScaleModel.Create(DesktopLayerMode.TopLevel, 1d, 1d, monitors);
     }
 }

@@ -1,0 +1,877 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for the serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently only
+    used for scalar types, but should be extensible for use with
+    other data types not directly supported by the parser and
+    TypeConverter classes.
+
+    Note that binary serialization is discouraged for security reasons.
+    Instead, we recommend using the "type" attribute with the actual TypeConverter type name, and
+    storing the data as a string using the InvariantCulture, if applicable.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <!-- ==== BEGIN SHARED (owner: WP-0S; docs/PLANS/localization.md §3.2/§3.3. Prefixes: Common_, Enum_,
+       Plural_, Language_, Page_, Panel_NewTitle, Snapshot_, SystemIcon_, Startup_, Restore_. Exception:
+       Settings_General_Language_Header/_Description are also seeded here — they are part of the C-5
+       language-picker contract (§2.9) and must exist before WP-4a's Settings_ region (below) is ever
+       populated. WP-4a only *consumes* these two keys, it must not redefine them. ==== -->
+  <data name="Common_Cancel_Button" xml:space="preserve">
+    <value>Отмена</value>
+  </data>
+  <data name="Common_EditLayout" xml:space="preserve">
+    <value>Изменить расположение</value>
+  </data>
+  <data name="Common_IconLayout_Header" xml:space="preserve">
+    <value>Расположение значков</value>
+  </data>
+  <data name="Common_IconSize_Header" xml:space="preserve">
+    <value>Размер значков</value>
+  </data>
+  <data name="Common_LockLayout" xml:space="preserve">
+    <value>Закрепить расположение</value>
+  </data>
+  <data name="Common_LockedReason" xml:space="preserve">
+    <value>Недоступно, пока расположение закреплено.</value>
+  </data>
+  <data name="Common_Ok_Button" xml:space="preserve">
+    <value>ОК</value>
+  </data>
+  <data name="Common_Remove_Button" xml:space="preserve">
+    <value>Удалить</value>
+  </data>
+  <data name="Common_Rename" xml:space="preserve">
+    <value>Переименовать</value>
+  </data>
+  <data name="Common_SurfaceStyle_Header" xml:space="preserve">
+    <value>Стиль поверхности</value>
+  </data>
+  <data name="Common_ValuePx_Format" xml:space="preserve">
+    <value>{0} пкс</value>
+  </data>
+  <data name="Enum_IconLayoutPolicy_FixedGap" xml:space="preserve">
+    <value>Фиксированный интервал</value>
+  </data>
+  <data name="Enum_IconLayoutPolicy_LegacyStretch" xml:space="preserve">
+    <value>Адаптивное растяжение (устар.)</value>
+  </data>
+  <data name="Enum_NormalModeLayoutGestures_MoveAndResize" xml:space="preserve">
+    <value>Перемещение и изменение размера</value>
+  </data>
+  <data name="Enum_NormalModeLayoutGestures_MoveOnly" xml:space="preserve">
+    <value>Только перемещение</value>
+  </data>
+  <data name="Enum_NormalModeLayoutGestures_None" xml:space="preserve">
+    <value>Нет (только в режиме изменения расположения)</value>
+  </data>
+  <data name="Enum_PanelContentFilter_FoldersOnly" xml:space="preserve">
+    <value>Только папки</value>
+  </data>
+  <data name="Enum_PanelContentFilter_HideAll" xml:space="preserve">
+    <value>Скрыть содержимое</value>
+  </data>
+  <data name="Enum_PanelContentFilter_HideShortcuts" xml:space="preserve">
+    <value>Скрыть ярлыки</value>
+  </data>
+  <data name="Enum_PanelContentFilter_ShowAll" xml:space="preserve">
+    <value>Показывать всё</value>
+  </data>
+  <data name="Enum_PanelGeometryMode_GridAligned" xml:space="preserve">
+    <value>По сетке</value>
+  </data>
+  <data name="Enum_PanelGeometryMode_LegacyFreeform" xml:space="preserve">
+    <value>Произвольная (устар.)</value>
+  </data>
+  <data name="Enum_PanelSizePreset_ExtraLarge" xml:space="preserve">
+    <value>Очень большой</value>
+  </data>
+  <data name="Enum_PanelSizePreset_Large" xml:space="preserve">
+    <value>Большой</value>
+  </data>
+  <data name="Enum_PanelSizePreset_Medium" xml:space="preserve">
+    <value>Средний</value>
+  </data>
+  <data name="Enum_PanelSizePreset_Small" xml:space="preserve">
+    <value>Маленький</value>
+  </data>
+  <data name="Enum_PanelSizingMode_AutoContent" xml:space="preserve">
+    <value>Автоподбор по содержимому</value>
+  </data>
+  <data name="Enum_PanelSizingMode_Manual" xml:space="preserve">
+    <value>Вручную</value>
+  </data>
+  <data name="Enum_PanelSortMode_Manual" xml:space="preserve">
+    <value>Вручную</value>
+  </data>
+  <data name="Enum_PanelSortMode_Name" xml:space="preserve">
+    <value>По имени</value>
+  </data>
+  <data name="Enum_PanelSurfaceStyle_Ambient" xml:space="preserve">
+    <value>Акцентный</value>
+  </data>
+  <data name="Enum_PanelSurfaceStyle_Glass" xml:space="preserve">
+    <value>Стекло</value>
+  </data>
+  <data name="Enum_PanelSurfaceStyle_Solid" xml:space="preserve">
+    <value>Сплошной</value>
+  </data>
+  <data name="Enum_PanelViewMode_Grid" xml:space="preserve">
+    <value>Сетка</value>
+  </data>
+  <data name="Enum_PanelViewMode_List" xml:space="preserve">
+    <value>Список</value>
+  </data>
+  <data name="Enum_SystemIconSize_Large" xml:space="preserve">
+    <value>Крупные (64 пкс)</value>
+  </data>
+  <data name="Enum_SystemIconSize_Medium" xml:space="preserve">
+    <value>Средние (48 пкс)</value>
+  </data>
+  <data name="Enum_SystemIconSize_Small" xml:space="preserve">
+    <value>Маленькие (32 пкс)</value>
+  </data>
+  <data name="Language_FollowWindows_Format" xml:space="preserve">
+    <value>Как в Windows ({0})</value>
+  </data>
+  <data name="Language_Name_En" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="Language_Name_Ru" xml:space="preserve">
+    <value>Русский</value>
+  </data>
+  <data name="Page_Default_DisplayName" xml:space="preserve">
+    <value>Основная</value>
+  </data>
+  <data name="Panel_NewTitle" xml:space="preserve">
+    <value>Новая панель</value>
+  </data>
+  <data name="Plural_Items_Few" xml:space="preserve">
+    <value>{0} элемента</value>
+  </data>
+  <data name="Plural_Items_Many" xml:space="preserve">
+    <value>{0} элементов</value>
+  </data>
+  <data name="Plural_Items_One" xml:space="preserve">
+    <value>{0} элемент</value>
+  </data>
+  <data name="Plural_Items_Other" xml:space="preserve">
+    <value>{0} элементов</value>
+  </data>
+  <data name="Plural_Panels_Few" xml:space="preserve">
+    <value>{0} панели</value>
+  </data>
+  <data name="Plural_Panels_Many" xml:space="preserve">
+    <value>{0} панелей</value>
+  </data>
+  <data name="Plural_Panels_One" xml:space="preserve">
+    <value>{0} панель</value>
+  </data>
+  <data name="Plural_Panels_Other" xml:space="preserve">
+    <value>{0} панелей</value>
+  </data>
+  <data name="Restore_CandidateInvalid_Format" xml:space="preserve">
+    <value>Кандидат «{0}» не прошёл проверку. Подробности: {1}</value>
+  </data>
+  <data name="Restore_Failed_Format" xml:space="preserve">
+    <value>Восстановление из «{0}» не удалось. Подробности: {1}</value>
+  </data>
+  <data name="Restore_LockUnavailable_Message" xml:space="preserve">
+    <value>DesktopOrganizer не удалось восстановить состояние приложения: блокировку хранилища удерживает другой запущенный экземпляр. Закройте DesktopOrganizer и попробуйте снова.</value>
+  </data>
+  <data name="Restore_NoCandidate_Message" xml:space="preserve">
+    <value>Не найден файл резервной копии и файлы карантина — нет данных для восстановления.</value>
+  </data>
+  <data name="Restore_Restored_Format" xml:space="preserve">
+    <value>Восстановлено из «{0}». Предыдущий основной файл не существовал.</value>
+  </data>
+  <data name="Restore_RestoredQuarantined_Format" xml:space="preserve">
+    <value>Восстановлено из «{0}». Предыдущий основной файл перемещён в карантин как «{1}».</value>
+  </data>
+  <data name="Restore_Unknown_Format" xml:space="preserve">
+    <value>Неожиданный результат восстановления: {0}. Подробности: {1}</value>
+  </data>
+  <data name="Settings_General_Language_Description" xml:space="preserve">
+    <value>Меняет язык DesktopOrganizer сразу, без перезапуска.</value>
+  </data>
+  <data name="Settings_General_Language_Header" xml:space="preserve">
+    <value>Язык</value>
+  </data>
+  <data name="Snapshot_DefaultName_Format" xml:space="preserve">
+    <value>Расположение {0:dd.MM HH:mm}</value>
+  </data>
+  <data name="Startup_ActivationFailed_Message" xml:space="preserve">
+    <value>DesktopOrganizer уже запущен, но не отвечает. Закройте его через Диспетчер задач и попробуйте снова.</value>
+  </data>
+  <data name="Startup_Failed_Format" xml:space="preserve">
+    <value>DesktopOrganizer не удалось запустить: {0}</value>
+  </data>
+  <data name="Crash_Dialog_Title" xml:space="preserve">
+    <value>DesktopOrganizer — непредвиденная ошибка</value>
+  </data>
+  <data name="Crash_Dialog_Message" xml:space="preserve">
+    <value>В работе DesktopOrganizer произошла непредвиденная ошибка, и приложение пришлось закрыть. Значки рабочего стола восстановлены, отчёт о сбое сохранён. Открыть папку с журналами?</value>
+  </data>
+  <data name="Startup_OtherSession_Message" xml:space="preserve">
+    <value>DesktopOrganizer уже запущен в другом сеансе Windows. Переключитесь на этот сеанс, чтобы использовать приложение.</value>
+  </data>
+  <data name="SystemIcon_ControlPanel" xml:space="preserve">
+    <value>Панель управления</value>
+  </data>
+  <data name="SystemIcon_Network" xml:space="preserve">
+    <value>Сеть</value>
+  </data>
+  <data name="SystemIcon_RecycleBin" xml:space="preserve">
+    <value>Корзина</value>
+  </data>
+  <data name="SystemIcon_ThisPc" xml:space="preserve">
+    <value>Этот компьютер</value>
+  </data>
+  <data name="SystemIcon_UserFolder" xml:space="preserve">
+    <value>Пользователь</value>
+  </data>
+  <!-- ==== END SHARED ==== -->
+  <!-- ==== BEGIN WP-1 Tray (Tray_) ==== -->
+  <data name="Tray_Exit" xml:space="preserve">
+    <value>Выход</value>
+  </data>
+  <data name="Tray_LayoutLockedTooltip" xml:space="preserve">
+    <value>Расположение закреплено</value>
+  </data>
+  <data name="Tray_Settings" xml:space="preserve">
+    <value>Параметры</value>
+  </data>
+  <data name="Tray_ShowDesktopIcons" xml:space="preserve">
+    <value>Показывать значки рабочего стола</value>
+  </data>
+  <!-- ==== END WP-1 ==== -->
+  <!-- ==== BEGIN WP-2 Converters (Panel_ViewToggle_, Panel_SortToggle_, Panel_RollUp_, Settings_Panels_Subtitle_) ==== -->
+  <data name="Panel_RollUp_Collapse_Tooltip" xml:space="preserve">
+    <value>Свернуть панель</value>
+  </data>
+  <data name="Panel_RollUp_Expand_Tooltip" xml:space="preserve">
+    <value>Развернуть панель</value>
+  </data>
+  <data name="Panel_SortToggle_Manual_Tooltip" xml:space="preserve">
+    <value>Порядок вручную — нажмите, чтобы отсортировать по имени</value>
+  </data>
+  <data name="Panel_SortToggle_SortedByName_Tooltip" xml:space="preserve">
+    <value>Отсортировано по имени — нажмите, чтобы упорядочить вручную</value>
+  </data>
+  <data name="Panel_ViewToggle_SwitchToGrid_Tooltip" xml:space="preserve">
+    <value>Переключить на сетку</value>
+  </data>
+  <data name="Panel_ViewToggle_SwitchToList_Tooltip" xml:space="preserve">
+    <value>Переключить на список</value>
+  </data>
+  <data name="Settings_Panels_Subtitle_Format" xml:space="preserve">
+    <value>{0} · {1}</value>
+  </data>
+  <data name="Settings_Panels_Subtitle_Portal" xml:space="preserve">
+    <value>Портал папки</value>
+  </data>
+  <data name="Settings_Panels_Subtitle_View_Format" xml:space="preserve">
+    <value>{0}</value>
+  </data>
+  <!-- ==== END WP-2 ==== -->
+  <!-- ==== BEGIN WP-3 Panel surfaces (Panel_, Hint_) ==== -->
+  <data name="Hint_Move_Message" xml:space="preserve">
+    <value>Файл перемещён в панель — исходный файл удалён с рабочего стола.</value>
+  </data>
+  <data name="Hint_Rename_Failed" xml:space="preserve">
+    <value>Не удалось переименовать файл.</value>
+  </data>
+  <data name="Hint_Rename_InvalidName" xml:space="preserve">
+    <value>Недопустимое имя файла.</value>
+  </data>
+  <data name="Hint_Rename_NameTaken" xml:space="preserve">
+    <value>Файл или папка с таким именем уже существует.</value>
+  </data>
+  <data name="Hint_Rename_NotFound" xml:space="preserve">
+    <value>Файл не найден — возможно, он был удалён или перемещён.</value>
+  </data>
+  <data name="Panel_Confirm_ApplyIconLayout_Format" xml:space="preserve">
+    <value>Применить расположение значков «{0}» ко всем панелям на всех страницах ({1})? Это действие нельзя отменить автоматически.</value>
+  </data>
+  <data name="Panel_Confirm_ApplyIconLayout_Title" xml:space="preserve">
+    <value>Применение расположения значков ко всем панелям</value>
+  </data>
+  <data name="Panel_Confirm_ApplySizingMode_Format" xml:space="preserve">
+    <value>Применить режим размера «{0}» ко всем панелям на всех страницах ({1})? Это действие нельзя отменить автоматически.</value>
+  </data>
+  <data name="Panel_Confirm_ApplySizingMode_Title" xml:space="preserve">
+    <value>Применение режима размера ко всем панелям</value>
+  </data>
+  <data name="Panel_FileMenu_Open" xml:space="preserve">
+    <value>Открыть</value>
+  </data>
+  <data name="Panel_FileMenu_OpenContainingFolder" xml:space="preserve">
+    <value>Открыть папку с файлом</value>
+  </data>
+  <data name="Panel_FileMenu_Properties" xml:space="preserve">
+    <value>Свойства</value>
+  </data>
+  <data name="Panel_FileMenu_RemoveFromPanel" xml:space="preserve">
+    <value>Удалить из панели</value>
+  </data>
+  <data name="Panel_FileMenu_RemoveFromPanel_Tooltip" xml:space="preserve">
+    <value>Для файлов, перемещённых в панель перетаскиванием, элемент обычно возвращается на исходное место на диске. Для остальных он просто удаляется из панели.</value>
+  </data>
+  <data name="Panel_Header_More" xml:space="preserve">
+    <value>Ещё</value>
+  </data>
+  <data name="Panel_Menu_AlignToGrid" xml:space="preserve">
+    <value>Привязать к сетке рабочей области</value>
+  </data>
+  <data name="Panel_Menu_AlignToGrid_Tooltip" xml:space="preserve">
+    <value>Удерживайте Alt при перетаскивании для свободного перемещения</value>
+  </data>
+  <data name="Panel_Menu_ApplyToAllPanels" xml:space="preserve">
+    <value>Применить ко всем панелям…</value>
+  </data>
+  <data name="Panel_Menu_ArrangeIconsHeader" xml:space="preserve">
+    <value>Упорядочить значки</value>
+  </data>
+  <data name="Panel_Menu_AutoSizeToContent_Tooltip" xml:space="preserve">
+    <value>Автоматически подгоняет высоту панели под значки (только вид «Сетка» — недоступно в виде «Список»).</value>
+  </data>
+  <data name="Panel_Menu_ContentHeader" xml:space="preserve">
+    <value>Содержимое</value>
+  </data>
+  <data name="Panel_Menu_Customize" xml:space="preserve">
+    <value>Настроить панель…</value>
+  </data>
+  <data name="Panel_Menu_FitToContent" xml:space="preserve">
+    <value>Подогнать панель по содержимому</value>
+  </data>
+  <data name="Panel_Menu_FitToContent_Tooltip" xml:space="preserve">
+    <value>Изменяет высоту панели, чтобы вместить текущие значки (только вид «Сетка»).</value>
+  </data>
+  <data name="Panel_Menu_PanelSizing" xml:space="preserve">
+    <value>Размер панели</value>
+  </data>
+  <data name="Panel_Menu_PanelSizing_Tooltip" xml:space="preserve">
+    <value>Действия подбора по содержимому применяются только в виде «Сетка».</value>
+  </data>
+  <data name="Panel_Menu_RollUpDown" xml:space="preserve">
+    <value>Свернуть / развернуть</value>
+  </data>
+  <data name="Panel_Menu_Size" xml:space="preserve">
+    <value>Размер</value>
+  </data>
+  <data name="Panel_Menu_SizeSmall_Tooltip" xml:space="preserve">
+    <value>Компактный размер 20 × 20 единиц (152 × 152 DIP) — вмещает около 2 × 1 значков при 32 пкс.</value>
+  </data>
+  <data name="Panel_Menu_Size_Tooltip" xml:space="preserve">
+    <value>Изменяет размер панели на заданный. Отключает «Автоподбор по содержимому». Недоступно, пока панель свёрнута. Удерживайте Alt при перетаскивании края для изменения размера вне сетки; при отпускании панель привязывается к сетке рабочей области.</value>
+  </data>
+  <data name="Panel_SystemIcons_Title" xml:space="preserve">
+    <value>Панель системных значков</value>
+  </data>
+  <!-- ==== END WP-3 ==== -->
+  <!-- ==== BEGIN WP-4a Settings window (Settings_) ==== -->
+  <data name="Settings_About_Diagnostics_Message" xml:space="preserve">
+    <value>Диагностика: запустите с --diag для подробного журналирования. Откройте папку логов ниже, чтобы посмотреть файлы журнала.</value>
+  </data>
+  <data name="Settings_About_OpenFolder_Button" xml:space="preserve">
+    <value>Открыть папку</value>
+  </data>
+  <data name="Settings_About_StorageFolder_Header" xml:space="preserve">
+    <value>Папка хранения</value>
+  </data>
+  <data name="Settings_About_Version_Format" xml:space="preserve">
+    <value>Версия {0}</value>
+  </data>
+  <!-- ==== BEGIN G2 Update check + About links (Settings_About_Update_/Settings_About_Links_) ==== -->
+  <data name="Settings_About_Update_Available_Format" xml:space="preserve">
+    <value>Доступно обновление: {0}</value>
+  </data>
+  <data name="Settings_About_Update_CheckButton" xml:space="preserve">
+    <value>Проверить обновления</value>
+  </data>
+  <data name="Settings_About_Update_Checking" xml:space="preserve">
+    <value>Проверка обновлений…</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Format" xml:space="preserve">
+    <value>Не удалось проверить обновления: {0}</value>
+  </data>
+  <data name="Settings_About_Update_Failed_InvalidResponse" xml:space="preserve">
+    <value>неожиданный ответ от GitHub</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Network" xml:space="preserve">
+    <value>проблема с сетью</value>
+  </data>
+  <data name="Settings_About_Update_Failed_RateLimited" xml:space="preserve">
+    <value>достигнут лимит запросов GitHub</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Timeout" xml:space="preserve">
+    <value>истекло время ожидания</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Unexpected" xml:space="preserve">
+    <value>неизвестная ошибка</value>
+  </data>
+  <data name="Settings_About_Update_Header" xml:space="preserve">
+    <value>Обновления</value>
+  </data>
+  <data name="Settings_About_Update_NoReleases" xml:space="preserve">
+    <value>Пока не опубликовано ни одного релиза.</value>
+  </data>
+  <data name="Settings_About_Update_UpToDate" xml:space="preserve">
+    <value>У вас установлена последняя версия.</value>
+  </data>
+  <data name="Settings_About_Update_ViewRelease_Button" xml:space="preserve">
+    <value>Открыть релиз</value>
+  </data>
+  <data name="Settings_About_Links_Header" xml:space="preserve">
+    <value>Ссылки</value>
+  </data>
+  <data name="Settings_About_Links_OpenLogsFolder_Button" xml:space="preserve">
+    <value>Открыть папку логов</value>
+  </data>
+  <data name="Settings_About_Links_ProjectPage_Button" xml:space="preserve">
+    <value>Страница проекта</value>
+  </data>
+  <data name="Settings_About_Links_ReportProblem_Button" xml:space="preserve">
+    <value>Сообщить о проблеме</value>
+  </data>
+  <!-- ==== END G2 Update check + About links ==== -->
+  <data name="Settings_Backup_CreatedAt_Format" xml:space="preserve">
+    <value>{0:g}</value>
+  </data>
+  <data name="Settings_Backup_DateColumn_Header" xml:space="preserve">
+    <value>Дата</value>
+  </data>
+  <data name="Settings_Backup_Delete_Button" xml:space="preserve">
+    <value>Удалить</value>
+  </data>
+  <data name="Settings_Backup_Delete_Format" xml:space="preserve">
+    <value>Удалить «{0}»</value>
+  </data>
+  <data name="Settings_Backup_LayoutSnapshots_Description" xml:space="preserve">
+    <value>Сохраняет положение, размер и оформление каждой панели, чтобы позже восстановить именно это расположение.</value>
+  </data>
+  <data name="Settings_Backup_LayoutSnapshots_Header" xml:space="preserve">
+    <value>Снимки расположения</value>
+  </data>
+  <data name="Settings_Backup_NameColumn_Header" xml:space="preserve">
+    <value>Имя</value>
+  </data>
+  <data name="Settings_Backup_Restore_Button" xml:space="preserve">
+    <value>Восстановить</value>
+  </data>
+  <data name="Settings_Backup_Restore_Format" xml:space="preserve">
+    <value>Восстановить «{0}»</value>
+  </data>
+  <data name="Settings_Backup_SaveSnapshot_Button" xml:space="preserve">
+    <value>Сохранить снимок…</value>
+  </data>
+  <data name="Settings_General_Advanced_Header" xml:space="preserve">
+    <value>Дополнительно</value>
+  </data>
+  <data name="Settings_General_Autostart_Description" xml:space="preserve">
+    <value>Запускает DesktopOrganizer автоматически при входе в систему.</value>
+  </data>
+  <data name="Settings_General_Autostart_Header" xml:space="preserve">
+    <value>Запускать при старте Windows</value>
+  </data>
+  <data name="Settings_General_NativeResize_Description" xml:space="preserve">
+    <value>Изменяет размер панелей через системный цикл изменения размера вместо встроенных маркеров. Действует только на панели, созданные после перезапуска приложения.</value>
+  </data>
+  <data name="Settings_General_NativeResize_Header" xml:space="preserve">
+    <value>Системное изменение размера (экспериментально)</value>
+  </data>
+  <data name="Settings_General_ResetHints_Button" xml:space="preserve">
+    <value>Сбросить</value>
+  </data>
+  <data name="Settings_General_ResetHints_Description" xml:space="preserve">
+    <value>Показывает одноразовую подсказку о перемещении снова при следующем перетаскивании файла в панель.</value>
+  </data>
+  <data name="Settings_General_ResetHints_Header" xml:space="preserve">
+    <value>Сбросить одноразовые подсказки</value>
+  </data>
+  <data name="Settings_General_ResetHints_NoneMessage" xml:space="preserve">
+    <value>Нет подсказок для сброса.</value>
+  </data>
+  <data name="Settings_Layout_GridStep_Label" xml:space="preserve">
+    <value>Шаг сетки</value>
+  </data>
+  <data name="Settings_Layout_LockLayout_Description" xml:space="preserve">
+    <value>Запрещает перемещать и изменять размер панелей до снятия блокировки. Сворачивание/разворачивание, переименование и файловые операции не затрагиваются. Также доступно из значка в трее.</value>
+  </data>
+  <data name="Settings_Layout_MagnetDistance_Description" xml:space="preserve">
+    <value>Расстояние в пикселях, на котором перетаскиваемая панель притягивается к сетке. 0 отключает притяжение при перетаскивании; привязка при отпускании кнопки мыши всё равно применяется.</value>
+  </data>
+  <data name="Settings_Layout_MagnetDistance_Header" xml:space="preserve">
+    <value>Расстояние притяжения при перетаскивании</value>
+  </data>
+  <data name="Settings_Layout_MagnetDistance_RequiresSnap_Message" xml:space="preserve">
+    <value>Требует включённого параметра «Привязка позиции панели к сетке».</value>
+  </data>
+  <data name="Settings_Layout_NormalModeGestures_Description" xml:space="preserve">
+    <value>Какие жесты перемещения и изменения размера панели остаются доступны, когда режим изменения расположения выключен.</value>
+  </data>
+  <data name="Settings_Layout_NormalModeGestures_Header" xml:space="preserve">
+    <value>Перемещение и размер вне режима изменения расположения</value>
+  </data>
+  <data name="Settings_Layout_SnapResizeToIconGrid_Description" xml:space="preserve">
+    <value>Изменение размера панели привязывает её размеры к размеру ячейки сетки значков в реальном времени.</value>
+  </data>
+  <data name="Settings_Layout_SnapResizeToIconGrid_Header" xml:space="preserve">
+    <value>Привязка размера панели к сетке значков</value>
+  </data>
+  <data name="Settings_Layout_SnapToGrid_Description" xml:space="preserve">
+    <value>Округляет позицию перетаскиваемой панели до фиксированного шага. Отключение этого параметра не влияет на интервалы между значками внутри панели.</value>
+  </data>
+  <data name="Settings_Layout_SnapToGrid_Header" xml:space="preserve">
+    <value>Привязка позиции панели к сетке</value>
+  </data>
+  <data name="Settings_Nav_About" xml:space="preserve">
+    <value>О программе</value>
+  </data>
+  <data name="Settings_Nav_Backup" xml:space="preserve">
+    <value>Резервные копии</value>
+  </data>
+  <data name="Settings_Nav_General" xml:space="preserve">
+    <value>Общие</value>
+  </data>
+  <data name="Settings_Nav_LayoutSnapping" xml:space="preserve">
+    <value>Расположение и привязка</value>
+  </data>
+  <data name="Settings_Nav_NewPanelDefaults" xml:space="preserve">
+    <value>Параметры новых панелей</value>
+  </data>
+  <data name="Settings_Nav_Pages" xml:space="preserve">
+    <value>Страницы</value>
+  </data>
+  <data name="Settings_Nav_Panels" xml:space="preserve">
+    <value>Панели</value>
+  </data>
+  <data name="Settings_Nav_SystemIcons" xml:space="preserve">
+    <value>Системные значки</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_AccentColor_Label" xml:space="preserve">
+    <value>Цвет акцента</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_Description" xml:space="preserve">
+    <value>Задаёт оформление для каждой панели, созданной с этого момента. На уже существующие панели не влияет.</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_IconLayout_Description" xml:space="preserve">
+    <value>Используют ли новые панели фиксированный интервал между значками или растягивают ряд на всю ширину панели.</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_Opacity_Label" xml:space="preserve">
+    <value>Непрозрачность</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_PanelGeometry_Description" xml:space="preserve">
+    <value>Привязываются ли новые панели к сетке рабочей области (По сетке) или изменяют размер и перемещаются свободно (Произвольная).</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_PanelGeometry_Header" xml:space="preserve">
+    <value>Геометрия панели</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_SurfaceStyle_Description" xml:space="preserve">
+    <value>Стекло лучше смотрится на тёмных обоях; для светлых обоев более читаемы Сплошной или Акцентный стиль.</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_TakeFromSelected_Description" xml:space="preserve">
+    <value>Копирует панель, выбранную в разделе «Панели», во все параметры выше. Сначала выберите там панель.</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_TakeFromSelected_Header" xml:space="preserve">
+    <value>Взять из выбранной панели</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_Take_Button" xml:space="preserve">
+    <value>Взять</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_TextColor_Label" xml:space="preserve">
+    <value>Цвет текста</value>
+  </data>
+  <data name="Settings_Pages_AddPage_Button" xml:space="preserve">
+    <value>Добавить страницу</value>
+  </data>
+  <data name="Settings_Pages_CurrentBadge" xml:space="preserve">
+    <value>(текущая)</value>
+  </data>
+  <data name="Settings_Pages_MakeCurrent_Button" xml:space="preserve">
+    <value>Сделать текущей</value>
+  </data>
+  <data name="Settings_Pages_MakeCurrent_Format" xml:space="preserve">
+    <value>Сделать «{0}» текущей</value>
+  </data>
+  <data name="Settings_Pages_Remove_Format" xml:space="preserve">
+    <value>Удалить «{0}»</value>
+  </data>
+  <data name="Settings_Panels_AddPanel_Button" xml:space="preserve">
+    <value>Добавить панель</value>
+  </data>
+  <data name="Settings_Panels_AlignAll_Button" xml:space="preserve">
+    <value>Выровнять…</value>
+  </data>
+  <data name="Settings_Panels_AlignAll_Description" xml:space="preserve">
+    <value>Перемещает все панели текущей страницы на сетку рабочей области и приводит их размер к целым единицам сетки. Отменить одним действием нельзя.</value>
+  </data>
+  <data name="Settings_Panels_AlignAll_Header" xml:space="preserve">
+    <value>Выровнять все панели по сетке</value>
+  </data>
+  <data name="Settings_Panels_Customize_Button" xml:space="preserve">
+    <value>Настроить…</value>
+  </data>
+  <data name="Settings_Panels_EmptyState_Message" xml:space="preserve">
+    <value>На этой странице пока нет панелей. Нажмите «Добавить панель» или проведите правой кнопкой мыши по рабочему столу, чтобы нарисовать одну.</value>
+  </data>
+  <data name="Settings_Panels_MoveToPage_Button" xml:space="preserve">
+    <value>Переместить на страницу ▾</value>
+  </data>
+  <data name="Settings_Panels_OnThisPage_Header" xml:space="preserve">
+    <value>Панели на этой странице</value>
+  </data>
+  <data name="Settings_Panels_PageSelector_Description" xml:space="preserve">
+    <value>Панели ниже относятся к этой странице. Ctrl+PgUp/PgDn также переключает страницы.</value>
+  </data>
+  <data name="Settings_Panels_Page_Label" xml:space="preserve">
+    <value>Страница</value>
+  </data>
+  <data name="Settings_SystemIcons_AllVirtualDesktops_Description" xml:space="preserve">
+    <value>Оставляет панель видимой при переключении виртуальных рабочих столов Windows (Представление задач). Если параметр выключен, панель остаётся только на первом виртуальном рабочем столе.</value>
+  </data>
+  <data name="Settings_SystemIcons_AllVirtualDesktops_Header" xml:space="preserve">
+    <value>Показывать на всех виртуальных рабочих столах</value>
+  </data>
+  <data name="Settings_SystemIcons_EnablePanelFirst_Message" xml:space="preserve">
+    <value>Включите «Показывать панель системных значков», чтобы изменить это.</value>
+  </data>
+  <data name="Settings_SystemIcons_FeatureIneffective_Message" xml:space="preserve">
+    <value>Эта функция не работает на этой системе и была отключена.</value>
+  </data>
+  <data name="Settings_SystemIcons_ShowPanel_Description" xml:space="preserve">
+    <value>Отдельная панель рабочего стола для значков «Этот компьютер», «Корзина» и других системных значков.</value>
+  </data>
+  <data name="Settings_SystemIcons_ShowPanel_Header" xml:space="preserve">
+    <value>Показывать панель системных значков</value>
+  </data>
+  <data name="Settings_SystemIcons_VisibleIcons_Header" xml:space="preserve">
+    <value>Видимые значки</value>
+  </data>
+  <data name="Settings_Window_Title" xml:space="preserve">
+    <value>DesktopOrganizer — Параметры</value>
+  </data>
+  <!-- ==== END WP-4a ==== -->
+  <!-- ==== BEGIN WP-4b Customize & dialogs (Customize_, Dialog_) ==== -->
+  <data name="Customize_AccentColor_Header" xml:space="preserve">
+    <value>Цвет акцента (hex)</value>
+  </data>
+  <data name="Customize_Appearance_Header" xml:space="preserve">
+    <value>Внешний вид</value>
+  </data>
+  <data name="Customize_AutoSizeToContentGridOnly_Description" xml:space="preserve">
+    <value>Только для вида «Сетка» — недоступно в виде «Список».</value>
+  </data>
+  <data name="Customize_AutoSizeToContent_Description" xml:space="preserve">
+    <value>Автоматически подгоняет высоту панели под её значки.</value>
+  </data>
+  <data name="Customize_AutoSizeToContent_Header" xml:space="preserve">
+    <value>Автоподбор по содержимому</value>
+  </data>
+  <data name="Customize_Browse_Button" xml:space="preserve">
+    <value>Обзор…</value>
+  </data>
+  <data name="Customize_BrowseFolderSource_A11y" xml:space="preserve">
+    <value>Выбрать папку-источник для портала папки</value>
+  </data>
+  <data name="Customize_BrowseFolder_Title" xml:space="preserve">
+    <value>Выберите папку-источник для портала папки</value>
+  </data>
+  <data name="Customize_ClearFolder_A11y" xml:space="preserve">
+    <value>Очистить портал папки</value>
+  </data>
+  <data name="Customize_ClearFolder_Button" xml:space="preserve">
+    <value>Очистить</value>
+  </data>
+  <data name="Customize_ContentFilter_Header" xml:space="preserve">
+    <value>Фильтр содержимого</value>
+  </data>
+  <data name="Customize_Content_Header" xml:space="preserve">
+    <value>Содержимое</value>
+  </data>
+  <data name="Customize_FolderPortal_Description" xml:space="preserve">
+    <value>Отражает содержимое папки вместо вручную составленного списка элементов. Панели-порталы папок всегда сортируются по имени и игнорируют перетаскивание вручную.</value>
+  </data>
+  <data name="Customize_FolderPortal_Header" xml:space="preserve">
+    <value>Портал папки</value>
+  </data>
+  <data name="Customize_IconLayout_Description" xml:space="preserve">
+    <value>Фиксированный интервал распределяет значки равномерно; адаптивное растяжение заполняет ими всю панель (устар.).</value>
+  </data>
+  <data name="Customize_Layout_Header" xml:space="preserve">
+    <value>Расположение</value>
+  </data>
+  <data name="Customize_SortMode_FolderPortal_Description" xml:space="preserve">
+    <value>Панели-порталы папок всегда сортируются по имени.</value>
+  </data>
+  <data name="Customize_SortMode_Header" xml:space="preserve">
+    <value>Порядок сортировки</value>
+  </data>
+  <data name="Customize_SortMode_Manual_Description" xml:space="preserve">
+    <value>Вручную сохраняет порядок, который вы задали сами; По имени сортирует по алфавиту.</value>
+  </data>
+  <data name="Customize_SurfaceOpacity_Header" xml:space="preserve">
+    <value>Непрозрачность поверхности</value>
+  </data>
+  <data name="Customize_SurfaceStyle_GlassHint_Description" xml:space="preserve">
+    <value>Стекло лучше смотрится на тёмных обоях; для светлых обоев более читаемы Сплошной или Акцентный стиль.</value>
+  </data>
+  <data name="Customize_TextColor_Header" xml:space="preserve">
+    <value>Цвет текста (hex)</value>
+  </data>
+  <data name="Customize_Title_Header" xml:space="preserve">
+    <value>Название</value>
+  </data>
+  <data name="Customize_View_Header" xml:space="preserve">
+    <value>Вид</value>
+  </data>
+  <data name="Customize_WindowTitle_Format" xml:space="preserve">
+    <value>Настройка «{0}»</value>
+  </data>
+  <!-- ==== END WP-4b ==== -->
+  <!-- ==== BEGIN WP-5 ViewModels (Settings_Confirm_, Snapshot_, Page_Confirm_) ==== -->
+  <data name="Page_Confirm_Remove_ManagedFiles_Message" xml:space="preserve">
+    <value>Страница будет удалена навсегда вместе со всеми панелями на ней. Файлы, перемещённые в эти панели, будут перемещены в Корзину, откуда их можно восстановить. Продолжить?</value>
+  </data>
+  <data name="Page_Confirm_Remove_Message" xml:space="preserve">
+    <value>Страница и все панели на ней будут удалены. Продолжить?</value>
+  </data>
+  <data name="Page_Confirm_Remove_Title" xml:space="preserve">
+    <value>Удалить страницу</value>
+  </data>
+  <data name="Settings_Confirm_AlignAll_Message_Format" xml:space="preserve">
+    <value>Все панели на текущей странице ({0}) будут перемещены на сетку рабочей области и приведены к целым ячейкам сетки. Отменить это одним действием нельзя. Продолжить?</value>
+  </data>
+  <data name="Settings_Confirm_AlignAll_Title" xml:space="preserve">
+    <value>Выровнять все панели по сетке</value>
+  </data>
+  <data name="Settings_Confirm_RemovePanel_ManagedFiles_Message" xml:space="preserve">
+    <value>Панель будет удалена без возможности восстановления. Файлы, перемещённые в неё, будут перемещены в Корзину, откуда их можно восстановить. Продолжить?</value>
+  </data>
+  <data name="Settings_Confirm_RemovePanel_Message" xml:space="preserve">
+    <value>Панель будет удалена. Продолжить?</value>
+  </data>
+  <data name="Settings_Confirm_RemovePanel_Title" xml:space="preserve">
+    <value>Удалить панель</value>
+  </data>
+  <data name="Recycle_Failed_Title" xml:space="preserve">
+    <value>Не удалось переместить в Корзину</value>
+  </data>
+  <data name="Recycle_Failed_Message_Format" xml:space="preserve">
+    <value>Элементов, которые не удалось переместить в Корзину: {0}. Ничего не удалено безвозвратно: эти элементы и панели, в которых они находятся, сохранены. Элементы, которые попали в Корзину, убраны с панелей. Закройте программы, которые могут использовать оставшиеся элементы, и повторите попытку.</value>
+  </data>
+  <data name="Snapshot_Capture_Label" xml:space="preserve">
+    <value>Имя снимка:</value>
+  </data>
+  <data name="Snapshot_Capture_Title" xml:space="preserve">
+    <value>Сохранить снимок</value>
+  </data>
+  <data name="Snapshot_Delete_Message_Format" xml:space="preserve">
+    <value>Удалить снимок «{0}»? Это действие нельзя отменить.</value>
+  </data>
+  <data name="Snapshot_Delete_Title" xml:space="preserve">
+    <value>Удаление снимка</value>
+  </data>
+  <data name="Snapshot_Delete_UnnamedFallback" xml:space="preserve">
+    <value>этот снимок</value>
+  </data>
+  <data name="Snapshot_Restore_Message" xml:space="preserve">
+    <value>Текущее расположение будет заменено этим снимком. Продолжить?</value>
+  </data>
+  <data name="Snapshot_Restore_Title" xml:space="preserve">
+    <value>Восстановить расположение</value>
+  </data>
+  <!-- ==== END WP-5 ==== -->
+</root>

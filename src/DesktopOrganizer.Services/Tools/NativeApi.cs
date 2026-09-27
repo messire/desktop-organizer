@@ -1,10 +1,53 @@
 ﻿using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Tools;
 
 /// <inheritdoc />
 internal partial class NativeApi: INativeApi
 {
+    private const string ExplorerAdvancedKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+    private const string ExplorerPoliciesKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
+
+    /// <summary>
+    /// Per-HWND rate limit for the <c>GetWindowRectFailed</c> warning (release-hardening review L11):
+    /// <see cref="GetWindowRect"/> runs from hot window-procedure paths, and a dead HWND must not be able
+    /// to write one line per message.
+    /// </summary>
+    private readonly HandleLogRateLimiter _getWindowRectFailures;
+
+    /// <summary>
+    /// Rate limit for the <c>ListViewHitTestFailed</c> error, which can only be raised from inside the
+    /// <c>WH_MOUSE_LL</c> callback and therefore must neither flood the log nor be written on that thread.
+    /// </summary>
+    private readonly HandleLogRateLimiter _hitTestFailures;
+
+    private readonly IAppLog? _appLog;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="NativeApi"/> class. Logs through the ambient
+    /// <see cref="AppLog.Current"/> on the real clock.
+    /// </summary>
+    public NativeApi()
+        : this(null, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="NativeApi"/> class with an explicit log and clock
+    /// (tests).
+    /// </summary>
+    /// <param name="appLog">Log to write to; the ambient <see cref="AppLog.Current"/> when <see langword="null"/>.</param>
+    /// <param name="timeProvider">Clock for log rate limiting; <see cref="TimeProvider.System"/> when <see langword="null"/>.</param>
+    internal NativeApi(IAppLog? appLog, TimeProvider? timeProvider)
+    {
+        _appLog = appLog;
+        _getWindowRectFailures = new HandleLogRateLimiter(TimeSpan.FromMinutes(1), timeProvider);
+        _hitTestFailures = new HandleLogRateLimiter(TimeSpan.FromMinutes(1), timeProvider);
+    }
+
+    private IAppLog Log => _appLog ?? AppLog.Current;
+
     /// <inheritdoc />
     public IntPtr GetFileInfo(string filePath, uint fileAttributes, ref ShellFileInfo fileInfo, uint fileInfoSize, uint flags)
         => NativeMethods.ShGetFileInfo(filePath, fileAttributes, ref fileInfo, fileInfoSize, flags);
@@ -22,8 +65,22 @@ internal partial class NativeApi: INativeApi
         => NativeMethods.FindWindowExW(parent, childAfter, className, windowName);
 
     /// <inheritdoc />
-    public IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
-        => NativeMethods.SendMessageW(hwnd, msg, wParam, lParam);
+    public bool SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, uint timeoutMs, out IntPtr result)
+    {
+        result = IntPtr.Zero;
+        if (hwnd == IntPtr.Zero) return false;
+
+        // A zero return means timeout, hung target (SMTO_ABORTIFHUNG gives up at once) or failure alike.
+        var sent = NativeMethods.SendMessageTimeoutW(
+            hwnd,
+            unchecked((int)msg),
+            wParam,
+            lParam,
+            NativeMethods.SmtoNormal | NativeMethods.SmtoAbortIfHung,
+            timeoutMs,
+            out result);
+        return sent != IntPtr.Zero;
+    }
 
     /// <inheritdoc />
     public bool EnumWindows(EnumWindowsCallback callback, IntPtr lParam)
@@ -93,6 +150,11 @@ internal partial class NativeApi: INativeApi
     /// <inheritdoc />
     public bool IsWindowVisible(IntPtr hwnd)
         => NativeMethods.IsWindowVisible(hwnd);
+
+    /// <inheritdoc />
+    public bool IsExplorerDesktopIconsSettingOff()
+        => ReadCurrentUserDword(ExplorerAdvancedKeyPath, "HideIcons") == 1
+           || ReadCurrentUserDword(ExplorerPoliciesKeyPath, "NoDesktop") == 1;
 
     /// <inheritdoc />
     public IntPtr GetForegroundWindow()
@@ -357,33 +419,22 @@ internal partial class NativeApi: INativeApi
 
     /// <inheritdoc />
     public bool SendToRecycleBin(string[] paths, IntPtr ownerHwnd)
+        => RunShFileDelete(
+            paths,
+            ownerHwnd,
+            NativeMethods.FofAllowUndo | NativeMethods.FofNoConfirmation | NativeMethods.FofNoErrorUi | NativeMethods.FofSilent);
+
+    /// <inheritdoc />
+    public bool RecycleItems(string[] paths, IntPtr ownerHwnd)
     {
-        if (paths is null || paths.Length == 0)
-        {
-            return false;
-        }
+        // No FOF_SILENT on purpose: the progress dialog lets the user cancel a long operation,
+        // and FOF_WANTNUKEWARNING must be able to ask before anything is destroyed for good.
+        const ushort flags = NativeMethods.FofAllowUndo
+            | NativeMethods.FofNoConfirmation
+            | NativeMethods.FofNoErrorUi
+            | NativeMethods.FofWantNukeWarning;
 
-        try
-        {
-            // Double null-terminated, null-terminated list of paths.
-            var from = string.Join("\0", paths) + "\0\0";
-
-            var op = new NativeMethods.ShFileOpStruct
-            {
-                hwnd = ownerHwnd,
-                wFunc = NativeMethods.FoDelete,
-                pFrom = from,
-                pTo = null,
-                fFlags = NativeMethods.FofAllowUndo | NativeMethods.FofNoConfirmation | NativeMethods.FofNoErrorUi | NativeMethods.FofSilent,
-            };
-
-            var result = NativeMethods.SHFileOperation(ref op);
-            return result == 0 && !op.fAnyOperationsAborted;
-        }
-        catch
-        {
-            return false;
-        }
+        return RunShFileDelete(paths, ownerHwnd, flags);
     }
 
     // ── Low-level mouse hook (WH_MOUSE_LL), see ADR-003 / ADR-012 ───────────────────────────────
@@ -475,7 +526,20 @@ internal partial class NativeApi: INativeApi
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"ListView hit-test failed: {ex.Message}");
+            // This runs inside the WH_MOUSE_LL callback (M6): never format/write a log entry on this
+            // thread. A rate-limit check (one short lock) decides, and the write is handed to the pool.
+            if (_hitTestFailures.TryAdmit(listView, out var suppressed))
+            {
+                ThreadPool.UnsafeQueueUserWorkItem(
+                    static state => state.Log.Error(
+                        "NativeApi",
+                        "ListViewHitTestFailed",
+                        state.Ex,
+                        new KeyValuePair<string, object?>("suppressedSinceLast", state.Suppressed)),
+                    (Log, Ex: ex, Suppressed: suppressed),
+                    preferLocal: false);
+            }
+
             return false;
         }
         finally
@@ -502,7 +566,8 @@ internal partial class NativeApi: INativeApi
                     mi.DeviceName,
                     ToRectangle(mi.rcMonitor),
                     ToRectangle(mi.rcWork),
-                    (mi.dwFlags & NativeMethods.MonitorinfofPrimary) != 0));
+                    (mi.dwFlags & NativeMethods.MonitorinfofPrimary) != 0,
+                    GetEffectiveDpi(hMonitor)));
             }
 
             return true; // continue enumeration
@@ -515,7 +580,7 @@ internal partial class NativeApi: INativeApi
         catch (Exception ex)
         {
             // Defensive: never let a native failure bubble into the caller (often the UI thread).
-            Console.Error.WriteLine($"EnumDisplayMonitors failed: {ex.Message}");
+            AppLog.Current.Error("NativeApi", "EnumDisplayMonitorsFailed", ex);
         }
 
         return monitors;
@@ -530,7 +595,7 @@ internal partial class NativeApi: INativeApi
         try
         {
             var dpi = NativeMethods.GetDeviceCaps(hdc, NativeMethods.LogPixelsX);
-            return dpi > 0 ? dpi / 96.0 : 1.0;
+            return dpi > 0 ? DesktopScaleModel.ScaleFromDpi((uint)dpi) : 1.0;
         }
         finally
         {
@@ -595,6 +660,40 @@ internal partial class NativeApi: INativeApi
     public IntPtr DefaultWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam)
         => NativeMethods.DefWindowProcW(hwnd, msg, wParam, lParam);
 
+    // ── Explorer restart recovery (ADR-034) ─────────────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public int RegisterWindowMessage(string messageName)
+        => string.IsNullOrEmpty(messageName) ? 0 : (int)NativeMethods.RegisterWindowMessageW(messageName);
+
+    /// <inheritdoc />
+    public bool AllowWindowMessage(IntPtr hwnd, int msg)
+        => hwnd != IntPtr.Zero
+           && msg != 0
+           && NativeMethods.ChangeWindowMessageFilterEx(hwnd, (uint)msg, NativeMethods.MsgFltAllow, IntPtr.Zero);
+
+    /// <inheritdoc />
+    public bool IsWindow(IntPtr hwnd)
+        => hwnd != IntPtr.Zero && NativeMethods.IsWindowNative(hwnd);
+
+    /// <inheritdoc />
+    public IntPtr GetAncestorParent(IntPtr hwnd)
+        => hwnd == IntPtr.Zero ? IntPtr.Zero : NativeMethods.GetAncestor(hwnd, NativeMethods.GaParent);
+
+    /// <inheritdoc />
+    public IntPtr GetRootWindow(IntPtr hwnd)
+        => hwnd == IntPtr.Zero ? IntPtr.Zero : NativeMethods.GetAncestor(hwnd, NativeMethods.GaRoot);
+
+    /// <inheritdoc />
+    public bool SetTimer(IntPtr hwnd, IntPtr timerId, uint intervalMs)
+        => hwnd != IntPtr.Zero
+           && timerId != IntPtr.Zero
+           && NativeMethods.SetTimerNative(hwnd, timerId, intervalMs, IntPtr.Zero) != IntPtr.Zero;
+
+    /// <inheritdoc />
+    public bool KillTimer(IntPtr hwnd, IntPtr timerId)
+        => hwnd != IntPtr.Zero && timerId != IntPtr.Zero && NativeMethods.KillTimerNative(hwnd, timerId);
+
     // ── Native panel sizing primitives (ADR-022 / Phase 2) ──────────────────────────────────────
 
     /// <inheritdoc />
@@ -605,8 +704,18 @@ internal partial class NativeApi: INativeApi
 
         if (!NativeMethods.GetWindowRect(hwnd, out var native))
         {
-            // Defensive: a destroyed/invalid HWND must not throw into a window procedure.
-            Console.Error.WriteLine($"GetWindowRect failed: {Marshal.GetLastWin32Error()}");
+            // Defensive: a destroyed/invalid HWND must not throw into a window procedure. Read the
+            // error first — the rate limiter must not be able to clobber it.
+            var win32Error = Marshal.GetLastWin32Error();
+            if (_getWindowRectFailures.TryAdmit(hwnd, out var suppressed))
+            {
+                Log.Warn(
+                    "NativeApi",
+                    "GetWindowRectFailed",
+                    new KeyValuePair<string, object?>("win32Error", win32Error),
+                    new KeyValuePair<string, object?>("suppressedSinceLast", suppressed));
+            }
+
             return false;
         }
 
@@ -648,7 +757,7 @@ internal partial class NativeApi: INativeApi
             try
             {
                 var dpi = NativeMethods.GetDpiForWindow(hwnd);
-                if (dpi > 0) return dpi / 96.0;
+                if (dpi > 0) return DesktopScaleModel.ScaleFromDpi(dpi);
             }
             catch (EntryPointNotFoundException)
             {
@@ -665,6 +774,89 @@ internal partial class NativeApi: INativeApi
 
     private static System.Drawing.Rectangle ToRectangle(NativeMethods.RECT r)
         => System.Drawing.Rectangle.FromLTRB(r.left, r.top, r.right, r.bottom);
+
+    /// <summary>
+    /// Effective DPI of a monitor (<c>shcore!GetDpiForMonitor(MDT_EFFECTIVE_DPI)</c>), or 0 when it cannot
+    /// be read — the caller (<c>DesktopScaleProvider</c>) substitutes the system scale for 0. Runs inside
+    /// the <c>EnumDisplayMonitors</c> callback, so it must never throw.
+    /// </summary>
+    /// <param name="hMonitor">Monitor handle from the enumeration.</param>
+    /// <returns>The effective DPI (the X value; X and Y are always equal for this DPI type), or 0.</returns>
+    private static uint GetEffectiveDpi(IntPtr hMonitor)
+    {
+        try
+        {
+            var hr = NativeMethods.GetDpiForMonitor(hMonitor, NativeMethods.MdtEffectiveDpi, out var dpiX, out _);
+            return hr == 0 ? dpiX : 0;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Pre-8.1 shcore without the export: unknown, the provider falls back to the system scale.
+            return 0;
+        }
+        catch (DllNotFoundException)
+        {
+            // No shcore.dll at all: same fallback.
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Single <c>SHFileOperationW(FO_DELETE)</c> batch shared by <see cref="SendToRecycleBin"/> and
+    /// <see cref="RecycleItems"/>, which differ only in their <c>FOF_*</c> flags.
+    /// </summary>
+    /// <param name="paths">Full paths to delete; <see langword="null"/>/empty answers <see langword="false"/>.</param>
+    /// <param name="ownerHwnd">Owner window for any shell UI, or <see cref="IntPtr.Zero"/>.</param>
+    /// <param name="flags">The <c>FOF_*</c> flags of the operation.</param>
+    /// <returns>Whether the shell reported success with no aborted operations. Never throws.</returns>
+    private static bool RunShFileDelete(string[] paths, IntPtr ownerHwnd, ushort flags)
+    {
+        if (paths is null || paths.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            // Double null-terminated, null-terminated list of paths.
+            var from = string.Join("\0", paths) + "\0\0";
+
+            var op = new NativeMethods.ShFileOpStruct
+            {
+                hwnd = ownerHwnd,
+                wFunc = NativeMethods.FoDelete,
+                pFrom = from,
+                pTo = null,
+                fFlags = flags,
+            };
+
+            var result = NativeMethods.SHFileOperation(ref op);
+            return result == 0 && !op.fAnyOperationsAborted;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads a <c>REG_DWORD</c> under <c>HKEY_CURRENT_USER</c>.
+    /// </summary>
+    /// <param name="keyPath">Sub-key path below <c>HKCU</c>.</param>
+    /// <param name="valueName">Value name.</param>
+    /// <returns>The value, or <see langword="null"/> when absent, of another type, or unreadable. Never throws.</returns>
+    private static int? ReadCurrentUserDword(string keyPath, string valueName)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(keyPath, writable: false);
+            return key?.GetValue(valueName) is int value ? value : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private static partial class NativeMethods
     {
@@ -685,6 +877,7 @@ internal partial class NativeApi: INativeApi
         public const ushort FofNoConfirmation = 0x0010;
         public const ushort FofAllowUndo = 0x0040;
         public const ushort FofNoErrorUi = 0x0400;
+        public const ushort FofWantNukeWarning = 0x4000;
 
         // Context menu
         public const uint CmfNormal = 0x00000000;
@@ -693,6 +886,7 @@ internal partial class NativeApi: INativeApi
 
         // Low-level mouse hook + cross-process LVM_HITTEST
         public const int LvmHitTest = 0x1000 + 18;
+        public const uint SmtoNormal = 0x0000;
         public const uint SmtoBlock = 0x0001;
         public const uint SmtoAbortIfHung = 0x0002;
 
@@ -711,6 +905,14 @@ internal partial class NativeApi: INativeApi
 
         // Monitors / hidden broadcast window
         public const int MonitorinfofPrimary = 0x00000001;
+
+        // Explorer restart recovery (ADR-034)
+        public const uint MsgFltAllow = 1;
+        public const uint GaParent = 1;
+
+        // Per-monitor DPI (release-hardening F1)
+        public const uint GaRoot = 2;
+        public const int MdtEffectiveDpi = 0;
         public const int LogPixelsX = 88;
         public const int SmCxScreen = 0;
         public const int SmCyScreen = 1;
@@ -735,9 +937,6 @@ internal partial class NativeApi: INativeApi
 
         [LibraryImport("User32.dll", EntryPoint = "FindWindowExW", StringMarshalling = StringMarshalling.Utf16)]
         public static partial IntPtr FindWindowExW(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string? lpszWindow);
-
-        [LibraryImport("User32.dll", EntryPoint = "SendMessageW")]
-        public static partial IntPtr SendMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
         // EnumWindows needs a managed delegate callback — DllImport required
         [DllImport("User32.dll", EntryPoint = "EnumWindows")]
@@ -1167,6 +1366,11 @@ internal partial class NativeApi: INativeApi
         [LibraryImport("User32.dll", EntryPoint = "GetDpiForWindow")]
         public static partial uint GetDpiForWindow(IntPtr hWnd);
 
+        // Windows 8.1+ (shcore). Returns an HRESULT; resolved lazily, so a missing export surfaces as an
+        // EntryPointNotFoundException/DllNotFoundException at the call site (handled there → 0).
+        [LibraryImport("Shcore.dll", EntryPoint = "GetDpiForMonitor")]
+        public static partial int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
         [LibraryImport("User32.dll", EntryPoint = "GetDC")]
         public static partial IntPtr GetDC(IntPtr hWnd);
 
@@ -1205,6 +1409,28 @@ internal partial class NativeApi: INativeApi
 
         [LibraryImport("User32.dll", EntryPoint = "DefWindowProcW")]
         public static partial IntPtr DefWindowProcW(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        // ── Explorer restart recovery (ADR-034) ─────────────────────────────────────────────────
+        [LibraryImport("User32.dll", EntryPoint = "RegisterWindowMessageW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+        public static partial uint RegisterWindowMessageW(string lpString);
+
+        [LibraryImport("User32.dll", EntryPoint = "ChangeWindowMessageFilterEx", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool ChangeWindowMessageFilterEx(IntPtr hWnd, uint message, uint action, IntPtr pChangeFilterStruct);
+
+        [LibraryImport("User32.dll", EntryPoint = "IsWindow")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool IsWindowNative(IntPtr hWnd);
+
+        [LibraryImport("User32.dll", EntryPoint = "GetAncestor")]
+        public static partial IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
+        [LibraryImport("User32.dll", EntryPoint = "SetTimer", SetLastError = true)]
+        public static partial IntPtr SetTimerNative(IntPtr hWnd, IntPtr nIdEvent, uint uElapse, IntPtr lpTimerFunc);
+
+        [LibraryImport("User32.dll", EntryPoint = "KillTimer", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool KillTimerNative(IntPtr hWnd, IntPtr uIdEvent);
 
         /// <summary>
         /// <c>MONITORENUMPROC</c>. <paramref name="lprcMonitor"/> is kept as a raw pointer (the

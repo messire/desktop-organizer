@@ -3,10 +3,32 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <StackPanel>
-        <TextBlock Text="General" Style="{StaticResource Settings.PageHeader}"/>
+        <TextBlock Text="{loc:Loc Settings_Nav_General}" Style="{StaticResource Settings.PageHeader}"/>
+
+        <!-- Language (docs/PLANS/localization.md §2.9 contract C-5): LanguageOptions/SelectedLanguageOption
+             are provided by MainWindowViewModel (WP-5). Placed first per §4.5. -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock Text="{loc:Loc Settings_General_Language_Header}" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Text="{loc:Loc Settings_General_Language_Description}"
+                               Style="{StaticResource Settings.CardDescription}"/>
+                </StackPanel>
+                <ComboBox Grid.Column="1" MinWidth="140" VerticalAlignment="Center"
+                          AutomationProperties.Name="{loc:Loc Settings_General_Language_Header}"
+                          ItemsSource="{Binding LanguageOptions}"
+                          SelectedItem="{Binding SelectedLanguageOption, Mode=TwoWay}"
+                          DisplayMemberPath="DisplayName"/>
+            </Grid>
+        </Border>
 
         <Border Style="{StaticResource Settings.CardBorder}">
             <Grid>
@@ -15,18 +37,18 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="Start with Windows" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Text="Launches DesktopOrganizer automatically when you sign in."
+                    <TextBlock Text="{loc:Loc Settings_General_Autostart_Header}" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Text="{loc:Loc Settings_General_Autostart_Description}"
                                Style="{StaticResource Settings.CardDescription}"/>
                 </StackPanel>
                 <CheckBox Grid.Column="1" VerticalAlignment="Center"
                           Style="{StaticResource Settings.ToggleCheckBox}"
-                          AutomationProperties.Name="Start with Windows"
+                          AutomationProperties.Name="{loc:Loc Settings_General_Autostart_Header}"
                           IsChecked="{Binding AutostartEnabled, Mode=TwoWay}"/>
             </Grid>
         </Border>
 
-        <Expander Header="Advanced" IsExpanded="False" Margin="0,4,0,0">
+        <Expander Header="{loc:Loc Settings_General_Advanced_Header}" IsExpanded="False" Margin="0,4,0,0">
             <StackPanel Margin="0,10,0,0">
                 <Border Style="{StaticResource Settings.CardBorder}">
                     <Grid>
@@ -35,13 +57,13 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                            <TextBlock Text="Native resize (experimental)" Style="{StaticResource Settings.CardHeader}"/>
+                            <TextBlock Text="{loc:Loc Settings_General_NativeResize_Header}" Style="{StaticResource Settings.CardHeader}"/>
                             <TextBlock Style="{StaticResource Settings.CardDescription}"
-                                       Text="Resizes panels via the OS native sizing loop instead of the built-in resize handles. Applies only to panels created after the app restarts."/>
+                                       Text="{loc:Loc Settings_General_NativeResize_Description}"/>
                         </StackPanel>
                         <CheckBox Grid.Column="1" VerticalAlignment="Center"
                                   Style="{StaticResource Settings.ToggleCheckBox}"
-                                  AutomationProperties.Name="Native resize (experimental)"
+                                  AutomationProperties.Name="{loc:Loc Settings_General_NativeResize_Header}"
                                   IsChecked="{Binding NativePanelSizing, Mode=TwoWay}"/>
                     </Grid>
                 </Border>
@@ -53,10 +75,10 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                            <TextBlock Text="Reset one-time hints" Style="{StaticResource Settings.CardHeader}"/>
+                            <TextBlock Text="{loc:Loc Settings_General_ResetHints_Header}" Style="{StaticResource Settings.CardHeader}"/>
                             <TextBlock Style="{StaticResource Settings.CardDescription}"
-                                       Text="Shows the one-time Move-semantics hint again the next time a drag-drop moves a file into a panel."/>
-                            <TextBlock Text="There are no hints to reset." Margin="0,4,0,0">
+                                       Text="{loc:Loc Settings_General_ResetHints_Description}"/>
+                            <TextBlock Text="{loc:Loc Settings_General_ResetHints_NoneMessage}" Margin="0,4,0,0">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
                                         <Setter Property="Visibility" Value="Collapsed"/>
@@ -69,8 +91,8 @@
                                 </TextBlock.Style>
                             </TextBlock>
                         </StackPanel>
-                        <Button Grid.Column="1" Content="Reset" Padding="12,6" VerticalAlignment="Center"
-                                AutomationProperties.Name="Reset one-time hints"
+                        <Button Grid.Column="1" Content="{loc:Loc Settings_General_ResetHints_Button}" Padding="12,6" VerticalAlignment="Center"
+                                AutomationProperties.Name="{loc:Loc Settings_General_ResetHints_Header}"
                                 Command="{Binding ResetOneTimeHintsCommand}"/>
                     </Grid>
                 </Border>

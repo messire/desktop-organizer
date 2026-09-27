@@ -1,10 +1,14 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Windows;
+using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Models;
@@ -38,13 +42,26 @@ public class MainWindowViewModel : INotifyPropertyChanged
     private readonly IPanelItemStorageService _itemStorage;
     private readonly ILayoutEditModeService _layoutEditMode;
     private readonly IPanelCustomizeService _panelCustomizeService;
+    private readonly ILocalizationService _localization;
+    private readonly CultureInfo _systemUiCulture;
+    private readonly IAppLog? _appLog;
     private ChildWindowModel? _selectedPanel;
     private SettingsSection _selectedSection = SettingsSection.General;
+    private LanguageOption _selectedLanguageOption;
 
     /// <summary>
     /// ViewModel for the "Layout snapshots" section.
     /// </summary>
     public LayoutSnapshotsViewModel LayoutSnapshots { get; }
+
+    /// <summary>
+    /// ViewModel for the About section's "Updates"/"Links" cards (release-hardening-1.0.md §G2) — DI
+    /// singleton, injected and stored verbatim (unlike <see cref="GlobalDefaults"/>/<see cref="SystemIconsSettings"/>,
+    /// which this class constructs internally): <c>AboutSection.xaml</c> binds against it directly
+    /// (<c>{Binding About.X}</c>), the same convention <c>BackupSection.xaml</c> already uses for
+    /// <see cref="LayoutSnapshots"/>.
+    /// </summary>
+    public AboutViewModel About { get; }
 
     /// <summary>
     /// Global default settings for new panels and grid/snap behavior (REFACTORING_PLAN.md §5.3).
@@ -367,6 +384,46 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Opens <see cref="StorageFolderPath"/> in Windows Explorer — About section.</summary>
     public ICommand OpenStorageFolderCommand { get; }
 
+    // ── Language picker (docs/PLANS/localization.md §2.9 contract C-5) ─────────────────────────────
+
+    /// <summary>
+    /// The three language choices shown by the General section's Language <c>ComboBox</c>: "Follow
+    /// Windows" (<see cref="LanguageOption.Tag"/> <c>""</c>), <c>"en"</c>, <c>"ru"</c>, in that display
+    /// order. Each option's own <see cref="LanguageOption.DisplayName"/> is re-resolved in place on
+    /// <see cref="ILocalizationService.CultureChanged"/> — see this constructor.
+    /// </summary>
+    public IReadOnlyList<LanguageOption> LanguageOptions { get; }
+
+    /// <summary>
+    /// The currently selected language option. Setting it to an option with a different
+    /// <see cref="LanguageOption.Tag"/> writes <see cref="IAppSettings.Language"/>, saves it, and applies
+    /// it via <see cref="ILocalizationService.ApplyLanguage"/> immediately (D-3 hot switch); re-selecting
+    /// the option that is already current is a no-op (no save, no re-apply). Setting
+    /// <see langword="null"/> is also a no-op (fix cycle 1 NIT) rather than throwing —
+    /// <c>ComboBox.SelectedItem</c> bindings can pass <see langword="null"/> transiently (e.g. while the
+    /// items collection is being reset), and this setter is invoked directly by that binding.
+    /// </summary>
+    [AllowNull]
+    public LanguageOption SelectedLanguageOption
+    {
+        get => _selectedLanguageOption;
+        set
+        {
+            if (value is null) return;
+            if (ReferenceEquals(_selectedLanguageOption, value)) return;
+
+            var tagChanged = _selectedLanguageOption.Tag != value.Tag;
+            _selectedLanguageOption = value;
+            OnPropertyChanged(nameof(SelectedLanguageOption));
+
+            if (!tagChanged) return;
+
+            _appSettings.Language = value.Tag;
+            _appSettings.Save();
+            _localization.ApplyLanguage(value.Tag);
+        }
+    }
+
     /// <summary>The app's informational version string, for the About section.</summary>
     public string AppVersion { get; } = ResolveAppVersion();
 
@@ -414,6 +471,13 @@ public class MainWindowViewModel : INotifyPropertyChanged
     public bool SystemIconsVirtualDesktopFeatureIneffective => SystemIconsSettings.SystemIconsVirtualDesktopFeatureIneffective;
 
     /// <summary>
+    /// The log this instance writes failures to: the one explicitly supplied, falling back to the
+    /// process-wide ambient <see cref="AppLog.Current"/> for tests that construct this type directly
+    /// without a log.
+    /// </summary>
+    private IAppLog Log => _appLog ?? AppLog.Current;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="MainWindowViewModel"/> class.
     /// </summary>
     /// <param name="windowManager">Creates/removes/persists panel windows.</param>
@@ -426,6 +490,20 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <param name="itemStorage">Provides app-managed item storage used when removing panels.</param>
     /// <param name="layoutEditMode">The application-global Edit Layout mode service.</param>
     /// <param name="panelCustomizeService">Opens the "Customize panel…" dialog (WP-B).</param>
+    /// <param name="localization">
+    /// Backs <see cref="LanguageOptions"/>/<see cref="SelectedLanguageOption"/> (docs/PLANS/localization.md
+    /// §2.9 contract C-5) and localizes this ViewModel's own confirmation dialogs.
+    /// </param>
+    /// <param name="systemUiCulture">
+    /// The Windows UI culture the "Follow Windows" <see cref="LanguageOption"/> names (fix cycle 1
+    /// MINOR-2: production — <see cref="SystemCulture.OriginalUiCulture"/>, wired in
+    /// <c>Configuration/DiConfig.cs</c> — same snapshot <paramref name="localization"/>'s own
+    /// implementation resolves "follow Windows" against). Passed through to every
+    /// <see cref="LanguageOption"/> instead of each one reaching for that static culture itself, so
+    /// tests can exercise both the "en" and "ru" branches deterministically.
+    /// </param>
+    /// <param name="about">See <see cref="About"/>.</param>
+    /// <param name="appLog">See <see cref="Log"/>.</param>
     public MainWindowViewModel(
         IWindowManager windowManager,
         IAppSettings appSettings,
@@ -436,7 +514,11 @@ public class MainWindowViewModel : INotifyPropertyChanged
         IConfirmationService confirmation,
         IPanelItemStorageService itemStorage,
         ILayoutEditModeService layoutEditMode,
-        IPanelCustomizeService panelCustomizeService)
+        IPanelCustomizeService panelCustomizeService,
+        ILocalizationService localization,
+        CultureInfo systemUiCulture,
+        AboutViewModel about,
+        IAppLog? appLog = null)
     {
         _windowManager = windowManager;
         _appSettings = appSettings;
@@ -446,7 +528,24 @@ public class MainWindowViewModel : INotifyPropertyChanged
         _itemStorage = itemStorage;
         _layoutEditMode = layoutEditMode;
         _panelCustomizeService = panelCustomizeService;
+        _localization = localization;
+        _systemUiCulture = systemUiCulture ?? throw new ArgumentNullException(nameof(systemUiCulture));
+        _appLog = appLog;
         LayoutSnapshots = layoutSnapshots;
+        About = about ?? throw new ArgumentNullException(nameof(about));
+
+        // Language picker (§2.9 C-5): three fixed options, in display order — never rebuilt; each
+        // option's own DisplayName is re-resolved in place on CultureChanged below, so the ComboBox's
+        // bound SelectedItem instance never needs to change out from under a live selection.
+        LanguageOptions = [
+            new LanguageOption(SupportedLanguages.FollowSystem, _localization, _systemUiCulture),
+            new LanguageOption("en", _localization, _systemUiCulture),
+            new LanguageOption("ru", _localization, _systemUiCulture),
+        ];
+        _selectedLanguageOption = LanguageOptions.FirstOrDefault(o =>
+                string.Equals(o.Tag, _localization.LanguagePreference, StringComparison.OrdinalIgnoreCase))
+            ?? LanguageOptions[0];
+        _localization.CultureChanged += OnLocalizationCultureChanged;
 
         GlobalDefaults = new GlobalDefaultsViewModel(appSettings, windowManager);
         SystemIconsSettings = new SystemIconsSettingsViewModel(systemIconsPanelManager);
@@ -632,12 +731,10 @@ public class MainWindowViewModel : INotifyPropertyChanged
         if (IsLayoutLocked) return;
 
         var panelCount = Panels.Count(p => p.PageId == CurrentPage);
-        var panelWord = panelCount == 1 ? "panel" : "panels";
+        var panelText = _localization.FormatPlural("Plural_Panels", panelCount);
         if (!_confirmation.Confirm(
-                $"Every panel on the current page ({panelCount} {panelWord}) will be moved onto the " +
-                "workspace grid and resized to whole grid units. There is no single-step undo for this. " +
-                "Continue?",
-                "Align all panels to grid"))
+                _localization.Format("Settings_Confirm_AlignAll_Message_Format", panelText),
+                _localization.GetString("Settings_Confirm_AlignAll_Title")))
         {
             return;
         }
@@ -744,7 +841,11 @@ public class MainWindowViewModel : INotifyPropertyChanged
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            Console.Error.WriteLine($"Failed to open storage folder '{StorageFolderPath}': {ex.Message}");
+            Log.Error(
+                "MainWindowViewModel",
+                "OpenStorageFolderFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", StorageFolderPath));
         }
     }
 
@@ -762,6 +863,19 @@ public class MainWindowViewModel : INotifyPropertyChanged
             OnPropertyChanged(nameof(IsLayoutLocked));
     }
 
+    /// <summary>
+    /// Re-resolves every <see cref="LanguageOptions"/> entry's own <see cref="LanguageOption.DisplayName"/>
+    /// for the new current culture (docs/PLANS/localization.md §2.9 C-5) — including the "Follow Windows"
+    /// entry's parenthetical, which always names the language Windows itself resolves to. Never
+    /// unsubscribed: this ViewModel is a DI singleton, same rationale as the sub-ViewModel/
+    /// <see cref="ILayoutEditModeService"/> subscriptions above.
+    /// </summary>
+    private void OnLocalizationCultureChanged(object? sender, CultureChangedEventArgs e)
+    {
+        foreach (var option in LanguageOptions)
+            option.Refresh(_localization);
+    }
+
     private void RemovePanel()
     {
         if (_selectedPanel is null) return;
@@ -772,26 +886,35 @@ public class MainWindowViewModel : INotifyPropertyChanged
         // anything to lose. Without this, a panel removed before its first save still has
         // _selectedPanel.FilePaths pointing at the stale original path (never itself "managed"), so the
         // IsManaged check below is false and the neutral "nothing lost" dialog is shown — but
-        // RemoveChildWindow further down calls SyncToModel() again immediately before Release(), which
-        // DOES pick up the by-then-remapped managed path and deletes it past the Recycle Bin without the
-        // warning the user should have seen (ADR-010 Decision 2).
+        // RemoveChildWindow further down calls SyncToModel() again immediately before recycling, which
+        // DOES pick up the by-then-remapped managed path and sends it to the Recycle Bin without the
+        // warning the user should have seen (ADR-010 Decision 2, amended by ADR-035).
         _windowManager.SyncAllWindowsToModels();
 
         var hasManagedFiles = _selectedPanel.FilePaths.Any(_itemStorage.IsManaged);
+        var title = _localization.GetString("Settings_Confirm_RemovePanel_Title");
 
         var confirmed = hasManagedFiles
             ? _confirmation.Confirm(
-                "The panel will be permanently removed. Files moved into it will be deleted from disk " +
-                "without the ability to restore them via the Recycle Bin. Continue?",
-                "Remove Panel",
+                _localization.GetString("Settings_Confirm_RemovePanel_ManagedFiles_Message"),
+                title,
                 MessageBoxImage.Warning)
             : _confirmation.Confirm(
-                "The panel will be removed. Continue?",
-                "Remove Panel");
+                _localization.GetString("Settings_Confirm_RemovePanel_Message"),
+                title);
 
         if (!confirmed) return;
 
-        _windowManager.RemoveChildWindow(_selectedPanel.Id, releaseManagedItems: true);
+        // ADR-035: managed items go to the Recycle Bin; if any of them couldn't, the panel is kept
+        // (fail visibly — nothing is ever deleted past the Recycle Bin) and the user is told why.
+        var result = _windowManager.RemoveChildWindow(_selectedPanel.Id, releaseManagedItems: true);
+        if (result.IsBlocked)
+        {
+            _confirmation.Notify(
+                _localization.Format("Recycle_Failed_Message_Format", result.Remaining.Count),
+                _localization.GetString("Recycle_Failed_Title"),
+                MessageBoxImage.Warning);
+        }
     }
 
     private bool CanRemovePanel() => _selectedPanel is not null;

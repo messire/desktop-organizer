@@ -1,4 +1,3 @@
-using System.IO;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Interfaces;
 using Moq;
@@ -30,6 +29,8 @@ public class DesktopGestureServiceTests
     private static readonly IntPtr HookHandle = new(2000);
 
     private readonly Mock<INativeApi> _nativeApiMock = new();
+    private readonly Mock<IAppLog> _appLogMock = new();
+    private readonly ManualTimeProvider _time = new();
     private readonly DesktopGestureService _service;
 
     /// <summary>
@@ -38,7 +39,7 @@ public class DesktopGestureServiceTests
     public DesktopGestureServiceTests()
     {
         _nativeApiMock.Setup(api => api.GetModuleHandle(null)).Returns(ModuleHandle);
-        _service = new DesktopGestureService(_nativeApiMock.Object);
+        _service = new DesktopGestureService(_nativeApiMock.Object, _appLogMock.Object, _time);
     }
 
     // ── Start/Dispose lifecycle ─────────────────────────────────────────────────
@@ -91,30 +92,21 @@ public class DesktopGestureServiceTests
     /// to "gestures unavailable" rather than throwing, and the reason must still be observable.
     /// </summary>
     [Fact]
-    public void Start_WhenHookInstallFails_LogsToConsoleErrorAndDoesNotThrow()
+    public void Start_WhenHookInstallFails_LogsAndDoesNotThrow()
     {
         // Arrange
         _nativeApiMock
             .Setup(api => api.SetWindowsHookEx(WhMouseLl, It.IsAny<LowLevelMouseCallback>(), ModuleHandle, 0))
             .Returns(IntPtr.Zero);
 
-        using var consoleOutput = new StringWriter();
-        var originalError = Console.Error;
-        Console.SetError(consoleOutput);
+        // Act
+        var ex = Record.Exception(() => _service.Start());
 
-        try
-        {
-            // Act
-            var ex = Record.Exception(() => _service.Start());
-
-            // Assert
-            Assert.Null(ex);
-            Assert.Contains("Desktop gesture hook could not be installed", consoleOutput.ToString());
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        // Assert
+        Assert.Null(ex);
+        _appLogMock.Verify(
+            log => log.Warn("DesktopGestureService", "HookInstallFailed", It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Once);
     }
 
     /// <summary>
@@ -477,40 +469,72 @@ public class DesktopGestureServiceTests
     }
 
     /// <summary>
-    /// Verifies that an exception thrown while decoding the mouse message is logged to <see cref="Console.Error"/>
-    /// and swallowed by the hook procedure, which still forwards the message via <c>CallNextHookEx</c> so
-    /// system-wide input is never stalled by a bug in the gesture logic.
+    /// Verifies that an exception thrown while decoding the mouse message is swallowed by the hook procedure,
+    /// which still forwards the message via <c>CallNextHookEx</c> so system-wide input is never stalled by a
+    /// bug in the gesture logic — and that it is logged via <see cref="IAppLog"/> only AFTER the callback
+    /// returned (off the hook thread), never from inside it (release-hardening review M6).
     /// </summary>
     [Fact]
-    public void HookCallback_WhenProcessingThrows_LogsAndDoesNotSwallowOrPropagate()
+    public void HookCallback_WhenProcessingThrows_LogsLaterAndDoesNotSwallowOrPropagate()
     {
         // Arrange
         var proc = CaptureHookProc();
         var lParam = new IntPtr(1);
         var wParam = new IntPtr(WmRButtonDown);
         var next = new IntPtr(555);
+        var thrown = new InvalidOperationException("garbage lParam");
 
-        _nativeApiMock.Setup(api => api.ReadMouseHookPoint(lParam)).Throws(new InvalidOperationException("garbage lParam"));
+        _nativeApiMock.Setup(api => api.ReadMouseHookPoint(lParam)).Throws(thrown);
         _nativeApiMock.Setup(api => api.CallNextHookEx(HookHandle, 0, wParam, lParam)).Returns(next);
 
-        using var consoleOutput = new StringWriter();
-        var originalError = Console.Error;
-        Console.SetError(consoleOutput);
-
-        IntPtr result;
-        try
-        {
-            // Act
-            result = proc(0, wParam, lParam);
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+        // Act
+        var result = proc(0, wParam, lParam);
 
         // Assert — a bug in processing must never suppress the message nor stall system-wide input.
         Assert.Equal(next, result);
-        Assert.Contains("Desktop gesture hook failed: garbage lParam", consoleOutput.ToString());
+        VerifyHookFailureLogged(Times.Never()); // nothing written inside the callback
+
+        _time.Advance(TimeSpan.Zero); // the deferred flush (a thread-pool timer in production)
+
+        _appLogMock.Verify(
+            log => log.Error("DesktopGestureService", "HookCallbackFailed", thrown, It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// M6: a failure that repeats on every mouse event (N callbacks) produces ONE log entry per interval,
+    /// carrying the number of occurrences — not N entries, and none of them from inside the callback.
+    /// </summary>
+    [Fact]
+    public void HookCallback_RepeatedFailures_ProduceSingleRateLimitedLogEntry()
+    {
+        // Arrange
+        const int failures = 200;
+        var proc = CaptureHookProc();
+        var lParam = new IntPtr(1);
+        var wParam = new IntPtr(WmMouseMove);
+        _nativeApiMock.Setup(api => api.ReadMouseHookPoint(lParam)).Throws(new InvalidOperationException("boom"));
+
+        // Act
+        for (var i = 0; i < failures; i++) proc(0, wParam, lParam);
+        VerifyHookFailureLogged(Times.Never());
+        _time.Advance(TimeSpan.Zero);
+
+        // Assert
+        _appLogMock.Verify(
+            log => log.Error(
+                "DesktopGestureService",
+                "HookCallbackFailed",
+                It.IsAny<Exception?>(),
+                It.Is<KeyValuePair<string, object?>[]>(d => d.Any(kv => kv.Key == "occurrences" && (int)kv.Value! == failures))),
+            Times.Once);
+
+        // More failures inside the same minute stay batched until the minute is over.
+        for (var i = 0; i < failures; i++) proc(0, wParam, lParam);
+        _time.Advance(TimeSpan.FromSeconds(59));
+        VerifyHookFailureLogged(Times.Once());
+        _time.Advance(TimeSpan.FromSeconds(1));
+        VerifyHookFailureLogged(Times.Exactly(2));
     }
 
     /// <summary>
@@ -532,30 +556,51 @@ public class DesktopGestureServiceTests
         _nativeApiMock.Setup(api => api.GetWindowClassName(hwnd)).Returns("Progman");
         _nativeApiMock.Setup(api => api.CallNextHookEx(HookHandle, 0, wParam, lParam)).Returns(IntPtr.Zero);
 
-        _service.DesktopDoubleClicked += (_, _) => throw new InvalidOperationException("boom");
+        var thrown = new InvalidOperationException("boom");
+        _service.DesktopDoubleClicked += (_, _) => throw thrown;
 
-        using var consoleOutput = new StringWriter();
-        var originalError = Console.Error;
-        Console.SetError(consoleOutput);
+        // Act
+        proc(0, wParam, lParam); // arms the double click
+        var ex = Record.Exception(() => proc(0, wParam, lParam)); // raises it, subscriber throws
 
-        try
-        {
-            // Act
-            proc(0, wParam, lParam); // arms the double click
-            var ex = Record.Exception(() => proc(0, wParam, lParam)); // raises it, subscriber throws
+        // Assert — logged only after the callback returned, off the hook thread.
+        Assert.Null(ex);
+        _appLogMock.Verify(
+            log => log.Error("DesktopGestureService", "SubscriberFailed", It.IsAny<Exception?>(), It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Never);
+        _time.Advance(TimeSpan.Zero);
+        _appLogMock.Verify(
+            log => log.Error("DesktopGestureService", "SubscriberFailed", thrown, It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Once);
+    }
 
-            // Assert
-            Assert.Null(ex);
-        }
-        finally
-        {
-            Console.SetError(originalError);
-        }
+    /// <summary>
+    /// Dispose unhooks first and then writes a still-pending failure batch synchronously, so a failure
+    /// recorded just before shutdown is not lost.
+    /// </summary>
+    [Fact]
+    public void Dispose_FlushesPendingHookFailure()
+    {
+        // Arrange
+        var proc = CaptureHookProc();
+        var lParam = new IntPtr(1);
+        _nativeApiMock.Setup(api => api.ReadMouseHookPoint(lParam)).Throws(new InvalidOperationException("boom"));
+        proc(0, new IntPtr(WmMouseMove), lParam);
 
-        Assert.Contains("Desktop gesture subscriber failed: boom", consoleOutput.ToString());
+        // Act
+        _service.Dispose();
+
+        // Assert
+        VerifyHookFailureLogged(Times.Once());
+        _nativeApiMock.Verify(api => api.UnhookWindowsHookEx(HookHandle), Times.Once);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+    private void VerifyHookFailureLogged(Times times)
+        => _appLogMock.Verify(
+            log => log.Error("DesktopGestureService", "HookCallbackFailed", It.IsAny<Exception?>(), It.IsAny<KeyValuePair<string, object?>[]>()),
+            times);
+
     private LowLevelMouseCallback CaptureHookProc(IntPtr? hookHandleResult = null)
     {
         LowLevelMouseCallback? captured = null;

@@ -33,6 +33,7 @@ public sealed class PanelDragMoveBehavior
     private readonly ILayoutEditModeService _layoutEditMode;
     private readonly IMonitorService _monitorService;
     private readonly PanelGeometryWriter _geometryWriter;
+    private readonly IDesktopScaleProvider _desktopScale;
 
     // Snapshot of every OTHER live panel's screen rectangle, taken once per drag gesture (see
     // docs/PLANS/panel-anti-overlap.md §3.3) — safe to take only once because the mouse is captured
@@ -75,8 +76,20 @@ public sealed class PanelDragMoveBehavior
     private bool _isArmed;
     private bool _isDragging;
     private Point _dragStartScreenCursor;
-    private double _dragStartLeft;
-    private double _dragStartTop;
+
+    // release-hardening F (ADR-037): the panel's own top-left at gesture start, in PHYSICAL screen
+    // pixels (Window.PointToScreen(0,0)) — replaces the pre-F Window.Left/Top (DIP) snapshot.
+    // DragPositionCalculator anchors the whole gesture's raw position here; see its remarks for why the
+    // delta between _dragStartScreenCursor and the live cursor position needs no DPI conversion of its
+    // own (both are physical pixels) while the RESULT does (a monitor-crossing drag can change scale).
+    private Point _dragStartTopLeftPx;
+
+    // Updated every frame after the pipeline below resolves the panel's new position — the desktop-DIP
+    // equivalent of what used to be a bare Window.Left/Top re-read. Kept as a field (rather than always
+    // re-reading Window.Left/Top through the adapter) because, once PanelWindowCoordinates writes a
+    // position back onto the window, Window.Left/Top is in WINDOW space again, which only equals
+    // desktop-DIP on a uniform snapshot.
+    private Point _currentDesktopPosition;
 
     // Filled in OnTitleBarMouseLeftButtonDown immediately after a successful CaptureMouse(); cleared in
     // EndDrag. Lets AbortDrag() (D-4) end an in-flight gesture from outside the normal mouse event flow
@@ -143,8 +156,14 @@ public sealed class PanelDragMoveBehavior
     /// The panel's single geometry writer (docs/PLANS/workspace-grid-03-04-integration.md §1.5) — used by
     /// the <see cref="PanelGeometryMode.GridAligned"/> DROP path (and the F-6 monitor-id update) so the
     /// window and its model are written in one guarded act. The per-frame live-drag write deliberately
-    /// stays a direct <c>Window.Left</c>/<c>Top</c> assignment (plan P03-D8): it is transient, runs at
-    /// mouse-move frequency, and is committed to the model by the drop-time write below anyway.
+    /// stays a per-frame call into <see cref="Interaction.PanelWindowCoordinates"/> (plan P03-D8): it is
+    /// transient, runs at mouse-move frequency, and is committed to the model by the drop-time write below
+    /// anyway.
+    /// </param>
+    /// <param name="desktopScale">
+    /// The per-monitor DPI snapshot provider (release-hardening F, ADR-037) — every px↔desktop-DIP
+    /// conversion this behavior performs (<see cref="Interaction.DragPositionCalculator"/>,
+    /// <see cref="Interaction.PanelWindowCoordinates"/>) reads its current snapshot.
     /// </param>
     public PanelDragMoveBehavior(
         Window window,
@@ -159,7 +178,8 @@ public sealed class PanelDragMoveBehavior
         Func<bool> canMove,
         ILayoutEditModeService layoutEditMode,
         IMonitorService monitorService,
-        PanelGeometryWriter geometryWriter)
+        PanelGeometryWriter geometryWriter,
+        IDesktopScaleProvider desktopScale)
     {
         _window = window;
         _appSettings = appSettings;
@@ -174,6 +194,7 @@ public sealed class PanelDragMoveBehavior
         _layoutEditMode = layoutEditMode;
         _monitorService = monitorService;
         _geometryWriter = geometryWriter;
+        _desktopScale = desktopScale;
     }
 
     /// <summary>
@@ -241,8 +262,23 @@ public sealed class PanelDragMoveBehavior
         _captureElement = element;
         _isArmed = true;
         _dragStartScreenCursor = _window.PointToScreen(Mouse.GetPosition(_window));
-        _dragStartLeft = _window.Left;
-        _dragStartTop = _window.Top;
+
+        // release-hardening F (ADR-037, §5 #17), MV-1 fix (H2): the physical-pixel anchor
+        // DragPositionCalculator resolves every frame's raw position from. This used to be
+        // Window.PointToScreen(0,0) — TRUE screen pixels, anchored at the physical-screen origin
+        // (top-left of the primary monitor). But the position DragPositionCalculator resolves every
+        // frame is written back through PanelWindowCoordinates.WriteDesktopPosition, i.e. in
+        // DESKTOP-DIP space, whose origin (in Embedded mode, DesktopCoordinateSpace) is the WorkerW
+        // child's own origin — which is offset from the physical-screen origin by the virtual-screen
+        // origin whenever a monitor sits left of/above the primary. Anchoring the start point in a
+        // DIFFERENT space than the one every subsequent frame writes into made the panel jump by that
+        // offset on the very first move. Deriving the anchor from the same desktop-DIP read the rest
+        // of the gesture uses, then converting it to px through the very same scale, keeps this
+        // bit-identical to 0.6.1 on every uniform/Embedded snapshot (DipToPx/PxToDip round-trip
+        // through one scale factor) while fixing the offset on a mixed-DPI TopLevel desktop.
+        var scale = _desktopScale.Current;
+        _dragStartTopLeftPx = scale.DipToPx(PanelWindowCoordinates.ReadDesktopBounds(_window, scale).TopLeft);
+        _currentDesktopPosition = PanelWindowCoordinates.ReadDesktopBounds(_window, scale).TopLeft;
     }
 
     /// <summary>
@@ -264,16 +300,18 @@ public sealed class PanelDragMoveBehavior
     {
         if (!_isArmed || e.LeftButton != MouseButtonState.Pressed) return;
 
-        // PointToScreen returns physical device pixels, but Window.Left/Top — and
-        // SystemParameters.MinimumHorizontal/VerticalDragDistance below — are device-independent units
-        // (96 DPI baseline). At any DPI scale other than 100% (e.g. 125%/150%, common on laptops)
-        // applying/comparing a raw device-pixel delta against a DIU value would move the panel faster
-        // than the cursor, or trip the threshold too early/late. Convert the delta to DIU using this
-        // window's DPI scale up front and reuse it for both the threshold check and the movement below.
-        var dpi = VisualTreeHelper.GetDpi(_window);
+        // PointToScreen returns physical device pixels, but SystemParameters.MinimumHorizontal/
+        // VerticalDragDistance below are device-independent units (96 DPI baseline). At any DPI scale
+        // other than 100% (e.g. 125%/150%, common on laptops) comparing a raw device-pixel delta against
+        // a DIU value would trip the threshold too early/late. Convert the delta to DIU using this
+        // window's DPI scale, for the threshold check only — release-hardening F (ADR-037): reads through
+        // the adapter's GetWindowScale (the one allowed VisualTreeHelper.GetDpi use outside
+        // Interaction/PanelWindowCoordinates.cs itself), not a raw VisualTreeHelper.GetDpi call. The
+        // actual raw target position below is resolved separately, px-anchored (DragPositionCalculator).
+        var windowScale = PanelWindowCoordinates.GetWindowScale(_window, _desktopScale.Current);
         var currentScreenCursor = _window.PointToScreen(Mouse.GetPosition(_window));
-        var deltaX = (currentScreenCursor.X - _dragStartScreenCursor.X) / dpi.DpiScaleX;
-        var deltaY = (currentScreenCursor.Y - _dragStartScreenCursor.Y) / dpi.DpiScaleY;
+        var deltaX = (currentScreenCursor.X - _dragStartScreenCursor.X) / windowScale;
+        var deltaY = (currentScreenCursor.Y - _dragStartScreenCursor.Y) / windowScale;
 
         if (!_isDragging)
         {
@@ -331,15 +369,23 @@ public sealed class PanelDragMoveBehavior
             // saved to disk and PanelResizeController's own diagnostics convention — unified here rather
             // than left to differ per gesture type (finalization M-5 cleanup). This does not touch the
             // `current` Rect below, which intentionally still reads ActualWidth/ActualHeight for the
-            // real anti-overlap clamp — only the log-only diagnostics reads change.
+            // real anti-overlap clamp — only the log-only diagnostics reads change. Position is the
+            // last-resolved desktop-DIP position (release-hardening F, ADR-037) — see
+            // _currentDesktopPosition's own remarks.
             _diagnostics.DragStarted(
                 _getPanelId(),
                 _dragStartScreenCursor,
-                new Rect(_window.Left, _window.Top, _window.Width, _window.Height));
+                new Rect(_currentDesktopPosition, new Size(_window.Width, _window.Height)));
         }
 
-        var rawLeft = _dragStartLeft + deltaX;
-        var rawTop = _dragStartTop + deltaY;
+        // release-hardening F (ADR-037, §5 #17): px-anchored — the raw target position is resolved from
+        // the physical-pixel cursor delta through the current desktop-scale snapshot (per-monitor,
+        // anchored on a mixed-DPI TopLevel desktop), not from a DIP delta added to a DIP start position.
+        // Bit-identical to the pre-F `_dragStartLeft/Top + deltaX/Y` on any uniform snapshot.
+        var rawDesktop = DragPositionCalculator.ResolveDesktopTopLeft(
+            _dragStartTopLeftPx, _dragStartScreenCursor, currentScreenCursor, _desktopScale.Current);
+        var rawLeft = rawDesktop.X;
+        var rawTop = rawDesktop.Y;
 
         // P03-D4/D5/D6/D7: a GridAligned panel runs the whole ADR-028 pipeline (workspace-grid
         // quantisation -> ADR-026 guides -> gap-aware hard wall) in one pure call; the Alt modifier is
@@ -349,7 +395,7 @@ public sealed class PanelDragMoveBehavior
         // LegacyFreeform (без изменений)»).
         if (_gridState.IsGridAligned)
         {
-            var gridCurrent = new Rect(_window.Left, _window.Top, _window.ActualWidth, _window.ActualHeight);
+            var gridCurrent = new Rect(_currentDesktopPosition, new Size(_window.ActualWidth, _window.ActualHeight));
             var gridPosition = PanelDragPipeline.ResolveGridFrame(
                 gridCurrent,
                 new Point(rawLeft, rawTop),
@@ -359,10 +405,10 @@ public sealed class PanelDragMoveBehavior
                 isEditingLayout: _layoutEditMode.IsEditing,
                 freeMove: IsFreeMoveModifierDown);
 
-            _window.Left = gridPosition.X;
-            _window.Top = gridPosition.Y;
+            _currentDesktopPosition = gridPosition;
+            PanelWindowCoordinates.WriteDesktopPosition(_window, gridPosition, _desktopScale.Current);
 
-            _diagnostics.DragDelta(_getPanelId(), new Rect(_window.Left, _window.Top, _window.Width, _window.Height));
+            _diagnostics.DragDelta(_getPanelId(), new Rect(_currentDesktopPosition, new Size(_window.Width, _window.Height)));
             return;
         }
 
@@ -386,7 +432,7 @@ public sealed class PanelDragMoveBehavior
             // fall inside any snapshotted monitor bounds (e.g. transiently off every screen), workArea
             // stays Rect.Empty, which SnapGuideCalculator.Snap's contract treats as "disable the guard"
             // rather than "reject every guide".
-            var origin = new Point(_window.Left, _window.Top);
+            var origin = _currentDesktopPosition;
             var workArea = Rect.Empty;
             for (var i = 0; i < _dragMonitors.Count; i++)
             {
@@ -405,16 +451,16 @@ public sealed class PanelDragMoveBehavior
         // ClampAgainstObstacles ALWAYS runs last, on whatever snappedLeft/snappedTop the steps above
         // produced (grid-only in Normal mode, grid+guide in Edit Layout) — R-8's "hard wall": no upstream
         // magnet, including the guide step above, is ever allowed to push the panel into a neighbour.
-        var current = new Rect(_window.Left, _window.Top, _window.ActualWidth, _window.ActualHeight);
+        var current = new Rect(_currentDesktopPosition, new Size(_window.ActualWidth, _window.ActualHeight));
         var clamped = PanelCollision.ClampAgainstObstacles(current, snappedLeft, snappedTop, _dragObstacles);
 
-        _window.Left = clamped.X;
-        _window.Top = clamped.Y;
+        _currentDesktopPosition = clamped.TopLeft;
+        PanelWindowCoordinates.WriteDesktopPosition(_window, clamped.TopLeft, _desktopScale.Current);
 
         // Width/Height, not ActualWidth/ActualHeight — see the DragStarted comment above for why;
         // `clamped`/`current` above are the real (unmodified) clamp math and still use
         // ActualWidth/ActualHeight.
-        _diagnostics.DragDelta(_getPanelId(), new Rect(_window.Left, _window.Top, _window.Width, _window.Height));
+        _diagnostics.DragDelta(_getPanelId(), new Rect(_currentDesktopPosition, new Size(_window.Width, _window.Height)));
     }
 
     /// <summary>Ends the drag gesture (if any) on release of the title-bar mouse button.</summary>
@@ -485,14 +531,17 @@ public sealed class PanelDragMoveBehavior
         // the resize controllers' completed-handlers (see the remarks above), where no drag ran and the
         // field is still PanelGridState.Legacy — so it re-resolves on demand there rather than silently
         // falling back to the legacy magnet (plan §4.3 item 3).
+        var scale = _desktopScale.Current;
         var state = _gridState.IsGridAligned ? _gridState : ResolveGridState();
         if (state.IsGridAligned)
         {
             // Committed (explicit) size, not ActualWidth/Height: the resize controllers call this right
             // after committing Width/Height, one layout pass before Actual* catches up — see
-            // PanelDragPipeline.CommittedSize's remarks.
+            // PanelDragPipeline.CommittedSize's remarks. release-hardening F (ADR-037): the position is
+            // read fresh, through the adapter — this method also runs from a resize-completed handler,
+            // where no drag gesture ran this frame and _currentDesktopPosition may be stale/unset.
             var current = new Rect(
-                new Point(_window.Left, _window.Top),
+                PanelWindowCoordinates.ReadDesktopBounds(_window, scale).TopLeft,
                 PanelDragPipeline.CommittedSize(_window.Width, _window.Height, _window.ActualWidth, _window.ActualHeight));
 
             // C-1 fix-cycle 1: retarget `state` to whichever monitor the panel's RAW (pre-clamp) rect
@@ -520,17 +569,25 @@ public sealed class PanelDragMoveBehavior
         var width = _window.ActualWidth;
         var height = _window.ActualHeight;
 
-        var snappedLeft = GridSnap.SnapAxis(_window.Left, grid, threshold);
-        var beforeX = new Rect(_window.Left, _window.Top, width, height);
-        var afterX = new Rect(snappedLeft, _window.Top, width, height);
-        if (!PanelCollision.CreatesNewOverlap(beforeX, afterX, _dragObstacles))
-            _window.Left = snappedLeft;
+        // release-hardening F (ADR-037): read/write through the adapter — see the GridAligned branch's
+        // matching remark for why this cannot rely on _currentDesktopPosition here.
+        var position = PanelWindowCoordinates.ReadDesktopBounds(_window, scale).TopLeft;
+        var left = position.X;
+        var top = position.Y;
 
-        var snappedTop = GridSnap.SnapAxis(_window.Top, grid, threshold);
-        var beforeY = new Rect(_window.Left, _window.Top, width, height);
-        var afterY = new Rect(_window.Left, snappedTop, width, height);
+        var snappedLeft = GridSnap.SnapAxis(left, grid, threshold);
+        var beforeX = new Rect(left, top, width, height);
+        var afterX = new Rect(snappedLeft, top, width, height);
+        if (!PanelCollision.CreatesNewOverlap(beforeX, afterX, _dragObstacles))
+            left = snappedLeft;
+
+        var snappedTop = GridSnap.SnapAxis(top, grid, threshold);
+        var beforeY = new Rect(left, top, width, height);
+        var afterY = new Rect(left, snappedTop, width, height);
         if (!PanelCollision.CreatesNewOverlap(beforeY, afterY, _dragObstacles))
-            _window.Top = snappedTop;
+            top = snappedTop;
+
+        PanelWindowCoordinates.WriteDesktopPosition(_window, new Point(left, top), scale);
     }
 
     private void EndDrag(UIElement? element)
@@ -597,7 +654,8 @@ public sealed class PanelDragMoveBehavior
         // unchanged. Width/Height (not ActualWidth/ActualHeight) for the same reason as DragStarted/
         // DragDelta above. If SnapToGrid/SaveWindowsState throws, diagnostics simply never gets
         // recorded for this gesture — acceptable, diagnostics is best-effort by design.
-        _diagnostics.DragCompleted(_getPanelId(), new Rect(_window.Left, _window.Top, _window.Width, _window.Height));
+        var finalPosition = PanelWindowCoordinates.ReadDesktopBounds(_window, _desktopScale.Current).TopLeft;
+        _diagnostics.DragCompleted(_getPanelId(), new Rect(finalPosition, new Size(_window.Width, _window.Height)));
     }
 
     /// <summary>
@@ -643,7 +701,7 @@ public sealed class PanelDragMoveBehavior
         // WorkspaceGridPlacement.ExpandedBounds' remarks. The live rectangle is still what the collision
         // math below uses; only the resolver's view of "how big is this panel" is corrected here.
         var bounds = WorkspaceGridPlacement.ExpandedBounds(
-            new Point(_window.Left, _window.Top),
+            PanelWindowCoordinates.ReadDesktopBounds(_window, _desktopScale.Current).TopLeft,
             new Size(_window.ActualWidth, _window.ActualHeight),
             model);
 
@@ -661,7 +719,9 @@ public sealed class PanelDragMoveBehavior
         if (_getModel() is not { } model) return;
         if (_dragMonitors.Count == 0) return;
 
-        var final = new Rect(_window.Left, _window.Top, _window.ActualWidth, _window.ActualHeight);
+        var final = new Rect(
+            PanelWindowCoordinates.ReadDesktopBounds(_window, _desktopScale.Current).TopLeft,
+            new Size(_window.ActualWidth, _window.ActualHeight));
         var deviceId = PanelDragPipeline.ResolveDropMonitor(final, _dragMonitors, model.MonitorDeviceId);
         if (deviceId is null) return;
 

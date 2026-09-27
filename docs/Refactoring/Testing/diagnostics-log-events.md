@@ -16,7 +16,7 @@ gesture lifecycle, полный список событий и privacy-инва�
 
 ## Где лежит лог
 
-`%LOCALAPPDATA%\DesktopOrganizer\Logs\gestures-{yyyyMMdd-HHmmss}-{pid}.jsonl`.
+`%LOCALAPPDATA%\DesktopOrganizer\Logs\app-{yyyyMMdd-HHmmss}-{pid}.jsonl`.
 
 - Ротация: файл сессии переключается на `-1`/`-2` суффиксы при превышении 10 МБ; хранится не более
   10 файлов сессий (старые удаляются при старте).
@@ -311,7 +311,7 @@ helper, что и остальные события категорий `gesture`
 ## Использование при диагностике зависания
 
 Для каждого сценария из `resize-repro-matrix.md`: воспроизвести с `--diag`, найти в
-`%LOCALAPPDATA%\DesktopOrganizer\Logs\gestures-*.jsonl` последнюю запись для нужного `scope` —
+`%LOCALAPPDATA%\DesktopOrganizer\Logs\app-*.jsonl` последнюю запись для нужного `scope` —
 это последнее зафиксированное состояние gesture lifecycle непосредственно перед зависанием.
 Особое внимание — есть ли `CaptureLost` без последующего `ResizeCompleted` (сигнатура утечки capture,
 которую Фаза 1 должна устранить).

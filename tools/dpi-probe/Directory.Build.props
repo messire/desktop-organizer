@@ -1,0 +1,6 @@
+<Project>
+    <!-- Deliberately empty: stops MSBuild from walking up to the repository-root Directory.Build.props
+         (UseWPF, StyleCop, product Version/AssemblyVersion pinning, InternalsVisibleTo). This probe is a
+         standalone diagnostic tool (docs/PLANS/release-hardening-1.0.md, package F, sub-package F0) and is
+         intentionally NOT part of DesktopOrganizer.sln. -->
+</Project>

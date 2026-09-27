@@ -122,14 +122,13 @@ public partial class SystemIconsPanelWindow : Window
     {
         if (sender is FrameworkElement fe && fe.DataContext is SystemIconItemModel item)
         {
-            // Convert WPF logical coordinates to physical screen pixels for the native menu.
-            var source = PresentationSource.FromVisual(this);
-            var dpiX = source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
-            var dpiY = source?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
-
-            var logicalPos = e.GetPosition(this);
-            var screenX = (int)((Left + logicalPos.X) * dpiX);
-            var screenY = (int)((Top + logicalPos.Y) * dpiY);
+            // release-hardening F (ADR-037, plan §5 #22): PointToScreen already performs the correct
+            // logical-to-physical conversion for THIS window's current monitor — replaces the pre-F
+            // manual (Left + x) * dpiX derivation, which assumed Left/Top and the click position share
+            // one flat DPI scale (true only on a uniform desktop).
+            var screenPos = PointToScreen(e.GetPosition(this));
+            var screenX = (int)screenPos.X;
+            var screenY = (int)screenPos.Y;
 
             var hwnd = new WindowInteropHelper(this).Handle;
 

@@ -1,3 +1,4 @@
+using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 using Point = System.Drawing.Point;
 using Size = System.Drawing.Size;
@@ -30,8 +31,16 @@ namespace DesktopOrganizer.UI.Behaviors;
 /// (C# forbids a public member exposing a less accessible type). No code outside this assembly
 /// constructs or calls it.
 /// </para>
+/// <para>
+/// <b>release-hardening F (ADR-037).</b> <see cref="Apply"/>/<see cref="ApplyPosition"/>'s bounds are
+/// DESKTOP-DIP — the single space every model/persisted geometry lives in — not literally
+/// <see cref="Window.Left"/>/<see cref="Window.Top"/>'s own space, which can now differ from desktop-DIP
+/// on a mixed-DPI TopLevel desktop layer. <see cref="Interaction.PanelWindowCoordinates"/> performs that
+/// one conversion, right here, so every caller keeps passing desktop-DIP bounds exactly as it always did
+/// (identity on any uniform snapshot — see that type's own remarks).
+/// </para>
 /// </remarks>
-public sealed class PanelGeometryWriter(Window window, Func<ChildWindowModel?> getModel)
+public sealed class PanelGeometryWriter(Window window, Func<ChildWindowModel?> getModel, IDesktopScaleProvider scaleProvider)
 {
     private bool _applying;
 
@@ -105,21 +114,23 @@ public sealed class PanelGeometryWriter(Window window, Func<ChildWindowModel?> g
         _applying = true;
         try
         {
-            window.Left = boundsWindowSpace.X;
-            window.Top = boundsWindowSpace.Y;
+            var scale = scaleProvider.Current;
+
+            if (positionOnly)
+                PanelWindowCoordinates.WriteDesktopPosition(window, boundsWindowSpace.TopLeft, scale);
+            else
+                PanelWindowCoordinates.WriteDesktopBounds(window, boundsWindowSpace, scale);
 
             // m-1 fix-cycle 1 (docs/PLANS/workspace-grid-03-04-integration.md §2, code-review): Math.Round,
             // not a truncating (int) cast — see WindowManager.WriteModelGeometry's remarks for why a plain
             // cast (asymmetric toward zero) disagreed with LassoPanelGeometry's own Math.Round for negative
-            // DIP coordinates.
+            // DIP coordinates. Model geometry is desktop-DIP, so it is written from boundsWindowSpace
+            // (the parameter's real, desktop-DIP contents — see this type's remarks) directly, never from
+            // whatever PanelWindowCoordinates just translated onto the window.
             model.Position = new Point((int)Math.Round(boundsWindowSpace.X), (int)Math.Round(boundsWindowSpace.Y));
 
             if (!positionOnly)
-            {
-                window.Width = boundsWindowSpace.Width;
-                window.Height = boundsWindowSpace.Height;
                 model.Size = new Size((int)Math.Round(boundsWindowSpace.Width), (int)Math.Round(boundsWindowSpace.Height));
-            }
 
             if (span is { } s)
             {

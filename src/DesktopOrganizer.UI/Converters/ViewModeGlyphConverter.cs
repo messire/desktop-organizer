@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Windows.Data;
+using DesktopOrganizer.Localization;
 using DesktopOrganizer.UI.Models;
 
 namespace DesktopOrganizer.UI.Converters;
@@ -9,7 +10,10 @@ namespace DesktopOrganizer.UI.Converters;
 /// <see cref="Models.ChildWindowModel.ViewMode"/>) to the glyph or tooltip for the panel's
 /// view-mode toggle button. Use <c>ConverterParameter="glyph"</c> (default) for the button content,
 /// or <c>ConverterParameter="tooltip"</c> for the ToolTip text — same two-parameter pattern as
-/// <see cref="BoolToGlyphConverter"/>'s roll-up glyph/tooltip pair.
+/// <see cref="BoolToGlyphConverter"/>'s roll-up glyph/tooltip pair. The glyph itself is not
+/// localizable text (a Segoe MDL2 Assets code point); the tooltip comes from
+/// <c>Panel_ViewToggle_SwitchToList_Tooltip</c>/<c>Panel_ViewToggle_SwitchToGrid_Tooltip</c>
+/// (docs/PLANS/localization.md §4.3, WP-2).
 /// </summary>
 /// <remarks>
 /// Glyph convention (ui-polishing-1 §4.2): the button shows the <b>target</b> mode — what clicking it
@@ -36,9 +40,9 @@ public sealed class ViewModeGlyphConverter : IValueConverter
         // Currently Grid -> next click switches to List; currently List (or unset) -> next click
         // switches to Grid. The glyph/tooltip always describe that upcoming target mode.
         return isTooltip
-            ? isGrid
-                ? "Switch to list view"
-                : "Switch to grid view"
+            ? LocalizationResources.GetString(
+                isGrid ? "Panel_ViewToggle_SwitchToList_Tooltip" : "Panel_ViewToggle_SwitchToGrid_Tooltip",
+                culture)
             : isGrid
                 ? ListTargetGlyph
                 : GridTargetGlyph;

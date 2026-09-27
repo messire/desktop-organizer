@@ -3,7 +3,8 @@
                     xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
                     xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
                     xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
-                    xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming">
+                    xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
+                    xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization">
     <!--
         Ambient Accent Visual System — PanelChrome default style (D-8, docs/PLANS/phase-5-ambient-accent-ui.md
         §1 D-8, §5.3/§5.4/§5.6 of the phase spec). Controls/PanelChrome.cs's static constructor points
@@ -302,7 +303,7 @@
                                         <!-- §5.6 rolled-up state: "Accent | Title | optional item count | expand control" — visible only while IsRolledUp (trigger below). -->
                                         <TextBlock x:Name="PART_ItemCount"
                                                    Grid.Column="2"
-                                                   Text="{Binding ItemCount, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ItemCountToText}}"
+                                                   Text="{loc:LocBinding ItemCount, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ItemCountToText}}"
                                                    VerticalAlignment="Center"
                                                    Margin="0,0,6,0"
                                                    Style="{StaticResource Typography.Caption}"

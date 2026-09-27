@@ -1,4 +1,5 @@
 using System.Windows;
+using DesktopOrganizer.UI.Localization;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.State;
 using DesktopOrganizer.UI.Theming;
@@ -31,11 +32,17 @@ public static class PanelDefaults
     /// <param name="settings">The global application settings providing the defaults.</param>
     /// <param name="pageId">The page the new panel is created on.</param>
     /// <returns>The newly created, not-yet-registered panel model.</returns>
+    /// <remarks>
+    /// The title is read from <see cref="LocalizationSource.Current"/> (a static-helper call site DI
+    /// cannot reach, L-5) at CREATION time only (docs/PLANS/localization.md D-5) — it is data, not UI, so
+    /// it is never re-resolved on a later language switch, and a panel created while the app is Russian
+    /// keeps its Russian "Новая панель" title even after switching to English.
+    /// </remarks>
     public static ChildWindowModel CreateNew(IAppSettings settings, string pageId)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        var model = new ChildWindowModel { Title = "New Panel", PageId = pageId };
+        var model = new ChildWindowModel { Title = LocalizationSource.Current.GetString("Panel_NewTitle"), PageId = pageId };
         Apply(model, settings);
         return model;
     }

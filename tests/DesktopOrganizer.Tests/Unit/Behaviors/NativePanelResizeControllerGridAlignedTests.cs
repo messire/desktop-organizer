@@ -71,7 +71,7 @@ public class NativePanelResizeControllerGridAlignedTests
     [MemberData(nameof(EightEdgesAcrossDpiScales))]
     public void RealController_GridAligned_MatchesThePurePipeline_BitForBit(ResizeEdge edge, double totalDx, double totalDy, double scale)
     {
-        var harness = CreateHarness(gridAligned: true);
+        var harness = CreateHarness(gridAligned: true, desktopScale: scale);
         var state = harness.GridHost.State;
         var constraints = ResizeConstraintsFactory.BuildConstraints(harness.Model, snapEnabled: true, TitleBarHeight, state);
 
@@ -97,7 +97,7 @@ public class NativePanelResizeControllerGridAlignedTests
     [MemberData(nameof(EightEdgesAcrossDpiScales))]
     public void RealController_GridAligned_KeepsTheOppositeEdgeFixed(ResizeEdge edge, double totalDx, double totalDy, double scale)
     {
-        var harness = CreateHarness(gridAligned: true);
+        var harness = CreateHarness(gridAligned: true, desktopScale: scale);
 
         var resultDip = NativeSizingCoordinateMapper.ToDip(harness.RunGesture(edge, totalDx, totalDy, scale), scale);
 
@@ -293,7 +293,8 @@ public class NativePanelResizeControllerGridAlignedTests
         PanelViewMode viewMode = PanelViewMode.Grid,
         bool snapEnabled = true,
         int gridSize = 0,
-        Func<bool>? isFreeResizeModifierDown = null)
+        Func<bool>? isFreeResizeModifierDown = null,
+        double desktopScale = 1d)
     {
         var model = new ChildWindowModel
         {
@@ -307,7 +308,7 @@ public class NativePanelResizeControllerGridAlignedTests
             State = gridAligned ? FakePanelSizingGridHost.GridAligned() : PanelGridState.Legacy,
         };
 
-        return new ControllerHarness(StartBoundsDip, model, snapEnabled, host, gridSize, isFreeResizeModifierDown);
+        return new ControllerHarness(StartBoundsDip, model, snapEnabled, host, gridSize, isFreeResizeModifierDown, desktopScale);
     }
 
     /// <summary>
@@ -333,7 +334,8 @@ public class NativePanelResizeControllerGridAlignedTests
             bool snapEnabled,
             FakePanelSizingGridHost gridHost,
             int gridSize = 0,
-            Func<bool>? isFreeResizeModifierDown = null)
+            Func<bool>? isFreeResizeModifierDown = null,
+            double desktopScale = 1d)
         {
             Bounds = startBounds;
             Model = model;
@@ -357,6 +359,7 @@ public class NativePanelResizeControllerGridAlignedTests
                 Tracker,
                 Mock.Of<INativePanelSizingService>(),
                 isResizeEnabled: () => true,
+                desktopScale: FakeDesktopScale.Uniform(desktopScale).Object,
                 gridHost: gridHost,
                 isFreeResizeModifierDown: isFreeResizeModifierDown);
         }

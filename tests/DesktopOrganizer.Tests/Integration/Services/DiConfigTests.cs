@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Threading;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Configuration;
@@ -47,6 +48,21 @@ public class DiConfigTests
         Assert.NotNull(iconHandler);
         Assert.NotNull(iconFactory);
         Assert.NotNull(iconProvider);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="ILocalizationService"/> (docs/PLANS/localization.md §2.2/§4.0)
+    /// resolves without throwing and is registered as a singleton — the same instance backs both
+    /// <c>App.StartApp</c>'s <c>ApplyLanguage</c> call and every other consumer (tray, ViewModels).
+    /// </summary>
+    [Fact]
+    public void RegisterServices_ILocalizationService_ResolvesAsSingleton()
+    {
+        var first = _serviceProvider.GetRequiredService<ILocalizationService>();
+        var second = _serviceProvider.GetRequiredService<ILocalizationService>();
+
+        Assert.NotNull(first);
+        Assert.Same(first, second);
     }
 
     /// <summary>
@@ -152,6 +168,128 @@ public class DiConfigTests
         Assert.Same(NullDiagnosticsLog.Instance, log);
     }
 #endif
+
+    // ── IAppLog registration (ADR-033 part 1) ─────────────────────────────────
+    //
+    // IAppLog always writes regardless of DiagnosticsLevel — unlike IDiagnosticsLog above — but must
+    // still never eagerly materialize the underlying JsonLinesDiagnosticsLog sink merely by being
+    // resolved (ADR-023 R-12): only an actual Info/Warn/Error call may do that. Each test below points
+    // the internal diagnosticsLogDirectory overload at its own throwaway temp directory, same as the
+    // IDiagnosticsLog tests above.
+
+    /// <summary>
+    /// Build-configuration-agnostic: <see cref="IAppLog"/> resolves without throwing and as a singleton.
+    /// </summary>
+    [Fact]
+    public void RegisterServices_IAppLog_ResolvesAsSingleton()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        try
+        {
+            var services = new ServiceCollection();
+            services.RegisterServices(tempDir);
+            using var serviceProvider = services.BuildServiceProvider();
+
+            var first = serviceProvider.GetRequiredService<IAppLog>();
+            var second = serviceProvider.GetRequiredService<IAppLog>();
+
+            Assert.NotNull(first);
+            Assert.Same(first, second);
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+        }
+    }
+
+    /// <summary>
+    /// R-12: merely resolving <see cref="IAppLog"/> — without ever calling <see cref="IAppLog.Info"/>/
+    /// <see cref="IAppLog.Warn"/>/<see cref="IAppLog.Error"/> — must never create the log directory, let
+    /// alone a JSONL file in it. Only an actual write may materialize the underlying sink.
+    /// </summary>
+    [Fact]
+    public void RegisterServices_IAppLog_ResolvingAloneDoesNotCreateLogDirectory()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        try
+        {
+            var services = new ServiceCollection();
+            services.RegisterServices(tempDir);
+            using var serviceProvider = services.BuildServiceProvider();
+
+            var appLog = serviceProvider.GetRequiredService<IAppLog>();
+
+            Assert.NotNull(appLog);
+            Assert.False(Directory.Exists(tempDir), "Resolving IAppLog must not materialize the JSONL sink.");
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="IAppLog"/> writes to the shared sink even when <see cref="DiagnosticsSwitch"/> resolves
+    /// to <see cref="DiagnosticsLevel.Standard"/> (the Release-without-flags default) — this is exactly
+    /// what distinguishes it from <see cref="IDiagnosticsLog"/>. Skipped in a Debug build of this test
+    /// project (see the class remarks) — Debug always resolves Verbose, so it cannot exercise the
+    /// Standard-level path; the Release-only counterpart below covers that instead. Either way,
+    /// materializing the sink via an actual Info() call must produce a real JSONL session file, sharing
+    /// the very same directory as IDiagnosticsLog would use.
+    /// </summary>
+    [Fact]
+    public void RegisterServices_IAppLog_InfoCallMaterializesSinkAndWritesFile()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        try
+        {
+            var services = new ServiceCollection();
+            services.RegisterServices(tempDir);
+            using var serviceProvider = services.BuildServiceProvider();
+
+            var appLog = serviceProvider.GetRequiredService<IAppLog>();
+            appLog.Info("Test", "Probe");
+
+            Assert.True(
+                WaitForFileInDirectory(tempDir, TimeSpan.FromSeconds(5)),
+                "IAppLog.Info() must eventually materialize the JSONL sink and write a session file.");
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+        }
+    }
+
+    /// <summary>
+    /// In <see cref="DiagnosticsLevel.Standard"/>, <see cref="IDiagnosticsLog"/> still resolves to the
+    /// zero-cost <see cref="NullDiagnosticsLog"/> even after <see cref="IAppLog"/> has materialized the
+    /// shared sink (proving the two facades are independently gated, sharing only the underlying sink
+    /// instance when both happen to be active).
+    /// </summary>
+#if DEBUG
+    [Fact(Skip = "Debug builds always resolve DiagnosticsLevel.Verbose (see DiagnosticsSwitchTests remarks) — this path only exists in Release.")]
+#else
+    [Fact]
+#endif
+    public void RegisterServices_StandardLevel_IDiagnosticsLogStaysNull_EvenAfterIAppLogWrites()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        try
+        {
+            var services = new ServiceCollection();
+            services.RegisterServices(tempDir);
+            using var serviceProvider = services.BuildServiceProvider();
+
+            serviceProvider.GetRequiredService<IAppLog>().Info("Test", "Probe");
+            var diagnosticsLog = serviceProvider.GetRequiredService<IDiagnosticsLog>();
+
+            Assert.Same(NullDiagnosticsLog.Instance, diagnosticsLog);
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+        }
+    }
 
     // ── ISingleInstanceCoordinator disposal (C-2) ─────────────────────────────
     //
@@ -444,6 +582,52 @@ public class DiConfigTests
         }
     }
 
+    // ── Localization (docs/PLANS/localization.md §4.8, WP-6 item 5) ──────────
+    //
+    // ILocalizationService itself already resolves as a singleton per
+    // RegisterServices_ILocalizationService_ResolvesAsSingleton above (registered once in
+    // DesktopOrganizer.Services' DiConfig, which UiDiConfig.ConfigureServices builds on top of). The
+    // test below resolves every UI-layer consumer that takes ILocalizationService through its own
+    // constructor — the tray, the page/system-icons managers, and the settings window's VM — from that
+    // SAME provider, confirming none of them accidentally shadow the registration with a second one.
+
+    /// <summary>
+    /// Verifies that <see cref="ITrayIconManager"/>, <see cref="IPageManager"/>,
+    /// <see cref="ISystemIconsPanelManager"/>, and <see cref="MainWindowViewModel"/> — every UI-layer
+    /// consumer of <see cref="ILocalizationService"/> — resolve without throwing through the full UI
+    /// service collection, and that <see cref="ILocalizationService"/> itself is still the one singleton
+    /// instance backing all of them ("один экземпляр для трея и UI").
+    /// </summary>
+    [Fact]
+    public void UiConfigureServices_LocalizationConsumers_ResolveCorrectly()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        var storageRoot = NewTempStorageRoot();
+        try
+        {
+            var services = new ServiceCollection();
+            UiDiConfig.ConfigureServices(services, tempDir, storageRoot);
+            using var serviceProvider = services.BuildServiceProvider();
+
+            var localization = serviceProvider.GetRequiredService<ILocalizationService>();
+            var trayIconManager = serviceProvider.GetRequiredService<ITrayIconManager>();
+            var pageManager = serviceProvider.GetRequiredService<IPageManager>();
+            var systemIconsPanelManager = serviceProvider.GetRequiredService<ISystemIconsPanelManager>();
+            var mainWindowViewModel = serviceProvider.GetRequiredService<MainWindowViewModel>();
+
+            Assert.NotNull(trayIconManager);
+            Assert.NotNull(pageManager);
+            Assert.NotNull(systemIconsPanelManager);
+            Assert.NotNull(mainWindowViewModel);
+            Assert.Same(localization, serviceProvider.GetRequiredService<ILocalizationService>());
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+            SafeDeleteDirectory(storageRoot);
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
     private static string NewTempDiagnosticsDirectory() =>
         Path.Combine(Path.GetTempPath(), $"DOrgDiConfigDiag_{Guid.NewGuid():N}");
@@ -461,5 +645,25 @@ public class DiConfigTests
         {
             // Best-effort cleanup; a still-locked handle shouldn't mask the real assertion failure.
         }
+    }
+
+    /// <summary>
+    /// Polls until <paramref name="directory"/> exists and contains at least one file, or
+    /// <paramref name="timeout"/> elapses. <c>JsonLinesDiagnosticsLog</c>'s background writer thread
+    /// creates the directory/file asynchronously (see its own remarks), so a bare
+    /// <see cref="Directory.Exists(string)"/> check right after a single <c>Write</c> call would be racy.
+    /// </summary>
+    private static bool WaitForFileInDirectory(string directory, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (Directory.Exists(directory) && Directory.EnumerateFiles(directory).Any())
+                return true;
+
+            Thread.Sleep(50);
+        }
+
+        return Directory.Exists(directory) && Directory.EnumerateFiles(directory).Any();
     }
 }

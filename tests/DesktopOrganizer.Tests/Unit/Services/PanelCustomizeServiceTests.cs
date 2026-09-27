@@ -1,3 +1,4 @@
+using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -240,7 +241,8 @@ public class PanelCustomizeServiceTests
         public PanelCustomizeViewModel ViewModel { get; } = new(
             new Mock<IWindowManager>().Object,
             BuildAlwaysUnlockedLayoutEditMode(),
-            new Mock<IFolderPickerService>().Object);
+            new Mock<IFolderPickerService>().Object,
+            TestLocalization.English);
 
         public event EventHandler? Closed;
 

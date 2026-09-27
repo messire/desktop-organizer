@@ -88,6 +88,13 @@ internal class AppSettings : IAppSettings
     }
 
     /// <inheritdoc />
+    public string Language
+    {
+        get => Properties.Settings.Default.Language;
+        set => Properties.Settings.Default.Language = value;
+    }
+
+    /// <inheritdoc />
     public bool IsLayoutLocked
     {
         get => Properties.Settings.Default.IsLayoutLocked;

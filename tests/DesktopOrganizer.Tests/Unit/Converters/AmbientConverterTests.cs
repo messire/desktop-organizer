@@ -686,13 +686,16 @@ public class EditAwareAccentIndicatorWidthConverterTests
 
 /// <summary>
 /// Unit tests for <see cref="ItemCountToTextConverter"/>, covering singular/plural formatting and graceful
-/// handling of negative or non-integer counts.
+/// handling of negative or non-integer counts. Localized (docs/PLANS/localization.md §4.3, WP-2): every
+/// culture-sensitive assertion fixes an explicit culture (L-3/R-5) instead of relying on
+/// <see cref="CultureInfo.InvariantCulture"/>, which no longer distinguishes en/ru plural forms.
 /// </summary>
 [Trait(UnitTests, "UI")]
 public class ItemCountToTextConverterTests
 {
     private static readonly ItemCountToTextConverter Converter = new();
-    private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
+    private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en");
+    private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru");
 
     /// <summary>
     /// Verifies that a count of zero returns an empty string.
@@ -700,33 +703,54 @@ public class ItemCountToTextConverterTests
     [Fact]
     public void Convert_Zero_ReturnsEmptyString()
     {
-        var result = Converter.Convert(0, typeof(string), null, AnyCulture);
+        var result = Converter.Convert(0, typeof(string), null, English);
 
         Assert.Equal(string.Empty, result);
     }
 
     /// <summary>
-    /// Verifies that a count of one returns the singular "1 item" text.
+    /// Verifies that a count of one returns the singular "1 item" text in English.
     /// </summary>
     [Fact]
-    public void Convert_One_ReturnsSingularText()
+    public void Convert_One_English_ReturnsSingularText()
     {
-        var result = Converter.Convert(1, typeof(string), null, AnyCulture);
+        var result = Converter.Convert(1, typeof(string), null, English);
 
         Assert.Equal("1 item", result);
     }
 
     /// <summary>
-    /// Verifies that counts greater than one return the plural "N items" text.
+    /// Verifies that counts greater than one return the plural "N items" text in English.
     /// </summary>
     /// <param name="count">The item count to convert.</param>
     /// <param name="expected">The expected formatted text.</param>
     [Theory]
     [InlineData(2, "2 items")]
     [InlineData(42, "42 items")]
-    public void Convert_MultipleItems_ReturnsPluralText(int count, string expected)
+    public void Convert_MultipleItems_English_ReturnsPluralText(int count, string expected)
     {
-        var result = Converter.Convert(count, typeof(string), null, AnyCulture);
+        var result = Converter.Convert(count, typeof(string), null, English);
+
+        Assert.Equal(expected, result);
+    }
+
+    /// <summary>
+    /// Verifies the Russian CLDR One/Few/Many plural forms, including the <c>11</c>/<c>21</c>
+    /// exceptions (docs/PLANS/localization.md L-8).
+    /// </summary>
+    /// <param name="count">The item count to convert.</param>
+    /// <param name="expected">The expected formatted Russian text.</param>
+    [Theory]
+    [InlineData(1, "1 элемент")]
+    [InlineData(2, "2 элемента")]
+    [InlineData(5, "5 элементов")]
+    [InlineData(11, "11 элементов")]
+    [InlineData(21, "21 элемент")]
+    [InlineData(22, "22 элемента")]
+    [InlineData(25, "25 элементов")]
+    public void Convert_Russian_ReturnsExpectedPluralForm(int count, string expected)
+    {
+        var result = Converter.Convert(count, typeof(string), null, Russian);
 
         Assert.Equal(expected, result);
     }
@@ -737,7 +761,7 @@ public class ItemCountToTextConverterTests
     [Fact]
     public void Convert_NegativeCount_ReturnsEmptyString_DoesNotThrow()
     {
-        var result = Converter.Convert(-5, typeof(string), null, AnyCulture);
+        var result = Converter.Convert(-5, typeof(string), null, English);
 
         Assert.Equal(string.Empty, result);
     }
@@ -748,7 +772,7 @@ public class ItemCountToTextConverterTests
     [Fact]
     public void Convert_NonIntValue_ReturnsEmptyString_DoesNotThrow()
     {
-        var result = Converter.Convert("not-an-int", typeof(string), null, AnyCulture);
+        var result = Converter.Convert("not-an-int", typeof(string), null, English);
 
         Assert.Equal(string.Empty, result);
     }
@@ -759,7 +783,7 @@ public class ItemCountToTextConverterTests
     [Fact]
     public void Convert_NullValue_DoesNotThrow()
     {
-        var exception = Record.Exception(() => Converter.Convert(null, typeof(string), null, AnyCulture));
+        var exception = Record.Exception(() => Converter.Convert(null, typeof(string), null, English));
 
         Assert.Null(exception);
     }
@@ -771,7 +795,7 @@ public class ItemCountToTextConverterTests
     [Fact]
     public void ConvertBack_ReturnsDoNothing()
     {
-        var result = Converter.ConvertBack("1 item", typeof(int), null, AnyCulture);
+        var result = Converter.ConvertBack("1 item", typeof(int), null, English);
 
         Assert.Equal(System.Windows.Data.Binding.DoNothing, result);
     }

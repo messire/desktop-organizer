@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows.Input;
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
@@ -21,6 +22,7 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     private readonly IWindowManager _windowManager;
     private readonly ILayoutEditModeService _layoutEditMode;
     private readonly IFolderPickerService _folderPicker;
+    private readonly ILocalizationService _localization;
     private ChildWindowModel _target;
 
     /// <inheritdoc />
@@ -38,11 +40,26 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     /// Shows the folder-browser dialog for <see cref="BrowseFolderCommand"/> (FIX-B fix-cycle minor
     /// finding 5 — extracted so this ViewModel is testable without a real Explorer dialog).
     /// </param>
-    public PanelCustomizeViewModel(IWindowManager windowManager, ILayoutEditModeService layoutEditMode, IFolderPickerService folderPicker)
+    /// <param name="localization">
+    /// Backs <see cref="WindowTitle"/>/<see cref="SortModeDescription"/>/<see cref="IconLayoutDescription"/>/
+    /// <see cref="AutoSizeToContentDescription"/> (docs/PLANS/localization.md §2.9 "re-raise rule") — this
+    /// ViewModel is transient (a fresh one is built the first time the dialog opens, or after it was
+    /// closed — see <see cref="Services.IPanelCustomizeService"/>'s own remarks), not a singleton, and
+    /// subscribes to <see cref="ILocalizationService.CultureChanged"/> only for the lifetime of one such
+    /// instance: it unsubscribes in <see cref="Dispose"/>, called by
+    /// <c>Views.PanelCustomizeWindow.OnClosed</c>.
+    /// </param>
+    public PanelCustomizeViewModel(
+        IWindowManager windowManager,
+        ILayoutEditModeService layoutEditMode,
+        IFolderPickerService folderPicker,
+        ILocalizationService localization)
     {
         _windowManager = windowManager;
         _layoutEditMode = layoutEditMode;
         _folderPicker = folderPicker;
+        _localization = localization;
+        _localization.CultureChanged += OnCultureChanged;
 
         // Placeholder target until IPanelCustomizeService.Show/PanelCustomizeWindow.Retarget assigns
         // the real panel — mirrors ChildWindowViewModel's own "_model = new()" default, so Target/
@@ -94,7 +111,7 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     }
 
     /// <summary>The dialog's title-bar text.</summary>
-    public string WindowTitle => $"Customize “{_target.Title}”";
+    public string WindowTitle => _localization.Format("Customize_WindowTitle_Format", _target.Title);
 
     // ── Content ──────────────────────────────────────────────────────────────────────────────────
 
@@ -121,8 +138,8 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     /// for a panel that was never a portal).
     /// </summary>
     public string SortModeDescription => IsFolderPortal
-        ? "Folder Portal panels always sort by name."
-        : "Manual keeps the order you arrange; By name sorts alphabetically.";
+        ? _localization.GetString("Customize_SortMode_FolderPortal_Description")
+        : _localization.GetString("Customize_SortMode_Manual_Description");
 
     /// <summary>Opens a folder-browser dialog and assigns the chosen folder as the panel's portal source.</summary>
     public ICommand BrowseFolderCommand { get; }
@@ -156,8 +173,8 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     /// disabled reason must be a description, not only a tooltip).
     /// </summary>
     public string IconLayoutDescription => CanChangeLayout
-        ? "Fixed spacing keeps icons evenly gapped; Adaptive stretch spreads them to fill the panel (legacy)."
-        : "Unavailable while the layout is locked.";
+        ? _localization.GetString("Customize_IconLayout_Description")
+        : _localization.GetString("Common_LockedReason");
 
     /// <summary>
     /// Whether the panel's height follows its content (<see cref="PanelSizingMode.AutoContent"/>).
@@ -195,10 +212,10 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     /// (FIX-B fix-cycle MAJOR finding M-1).
     /// </summary>
     public string AutoSizeToContentDescription => !CanChangeLayout
-        ? "Unavailable while the layout is locked."
+        ? _localization.GetString("Common_LockedReason")
         : CanAutoSizeToContent
-            ? "Keeps the panel's height matched to its icons automatically."
-            : "Grid view only — unavailable in List view.";
+            ? _localization.GetString("Customize_AutoSizeToContent_Description")
+            : _localization.GetString("Customize_AutoSizeToContentGridOnly_Description");
 
     /// <summary>
     /// Whether the Layout section's controls can be changed right now — <see langword="true"/> unless
@@ -216,6 +233,7 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     /// </summary>
     public void Dispose()
     {
+        _localization.CultureChanged -= OnCultureChanged;
         _layoutEditMode.PropertyChanged -= OnLayoutEditModePropertyChanged;
         _target.PropertyChanged -= OnTargetPropertyChanged;
         Appearance.PropertyChanged -= OnAppearancePropertyChanged;
@@ -224,7 +242,7 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
 
     private void BrowseFolder()
     {
-        var path = _folderPicker.PickFolder("Select source folder for Folder Portal", _target.SourceFolderPath);
+        var path = _folderPicker.PickFolder(_localization.GetString("Customize_BrowseFolder_Title"), _target.SourceFolderPath);
         if (path is null) return;
 
         SetFolderPortalPath(path);
@@ -332,6 +350,20 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
         OnPropertyChanged(nameof(CanChangeLayout));
         OnPropertyChanged(nameof(IconLayoutDescription));
         OnPropertyChanged(nameof(CanToggleAutoSizeToContent));
+        OnPropertyChanged(nameof(AutoSizeToContentDescription));
+    }
+
+    /// <summary>
+    /// Re-raises every localized string property by its EXPLICIT name (docs/PLANS/localization.md §2.9
+    /// "re-raise rule" — never <see cref="string.Empty"/>, which would also re-raise <see cref="Target"/>
+    /// and every other unrelated property this dialog exposes) when the language hot-switches while this
+    /// dialog is open.
+    /// </summary>
+    private void OnCultureChanged(object? sender, CultureChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(WindowTitle));
+        OnPropertyChanged(nameof(SortModeDescription));
+        OnPropertyChanged(nameof(IconLayoutDescription));
         OnPropertyChanged(nameof(AutoSizeToContentDescription));
     }
 

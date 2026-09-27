@@ -1,5 +1,7 @@
+using System.Globalization;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Localization;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State;
@@ -12,7 +14,9 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 /// <summary>
 /// Unit tests for SystemIconsPanelManager.
 /// IApplicationStateService, IDesktopIntegrationService, IMonitorService and the window factory
-/// are all mocked — no WPF window is created.
+/// are all mocked — no WPF window is created. <see cref="ILocalizationService"/> is a real,
+/// English-pinned <see cref="LocalizationService"/> instance (docs/PLANS/localization.md R-5) — see
+/// the "Label localization" region below for the label-refresh-specific coverage.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class SystemIconsPanelManagerTests
@@ -27,6 +31,8 @@ public class SystemIconsPanelManagerTests
     private readonly Mock<IDesktopIntegrationService> _desktopMock = new();
     private readonly Mock<IMonitorService> _monitorMock = new();
     private readonly Mock<IVirtualDesktopService> _virtualDesktopMock = new();
+    private readonly Mock<IDesktopScaleProvider> _desktopScaleMock = FakeDesktopScale.Uniform();
+    private readonly LocalizationService _localizationService = new(CultureInfo.GetCultureInfo("en"));
 
     // Tracks whether the factory delegate was invoked.
     private bool _factoryInvoked;
@@ -247,6 +253,41 @@ public class SystemIconsPanelManagerTests
         sut.Apply();
 
         // Assert
+        Assert.True(_factoryInvoked);
+    }
+
+    // ── ReassertAfterShellRestart (ADR-034) ──────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.ReassertAfterShellRestart"/> is a complete no-op
+    /// when the sidebar is switched off — an Explorer restart must never create it.
+    /// </summary>
+    [Fact]
+    public void ReassertAfterShellRestart_WhenDisabled_DoesNothing()
+    {
+        var sut = BuildSut(initialState: null);
+        sut.Load();
+
+        sut.ReassertAfterShellRestart();
+
+        Assert.False(_factoryInvoked);
+        _desktopMock.Verify(d => d.ApplyDesktopWindowStyles(It.IsAny<IntPtr>()), Times.Never);
+        _desktopMock.Verify(d => d.SendToBackOfZOrder(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that an enabled sidebar without a live window is rebuilt through the regular open path
+    /// (window factory), and that a failure there never escapes to the recovery caller.
+    /// </summary>
+    [Fact]
+    public void ReassertAfterShellRestart_WhenEnabledWithoutWindow_ReopensPanel()
+    {
+        var sut = BuildSut(initialState: BuildState(isEnabled: true));
+        sut.Load();
+
+        var ex = Record.Exception(sut.ReassertAfterShellRestart);
+
+        Assert.Null(ex);
         Assert.True(_factoryInvoked);
     }
 
@@ -1366,6 +1407,65 @@ public class SystemIconsPanelManagerTests
     // Whether Save() ends up omitting a null anchorVirtualDesktopId key on disk is StateJson's
     // DefaultIgnoreCondition.WhenWritingNull concern — see SchemaContractTests.
 
+    // ── Label localization (docs/PLANS/localization.md §2.9) ────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Load"/> resolves every item's
+    /// <see cref="SystemIconItemModel.Label"/> from the current (English) culture's <c>SystemIcon_*</c>
+    /// RESX keys rather than leaving <see cref="SystemIconsPanelModel.BuildDefaultItems"/>'s own
+    /// <c>DefaultCaption</c> seed untouched.
+    /// </summary>
+    [Fact]
+    public void Load_ResolvesItemLabelsFromCurrentCulture()
+    {
+        var sut = BuildSut(initialState: null);
+
+        sut.Load();
+
+        Assert.Equal("This PC", sut.Model.Items.Single(i => i.Kind == SystemIconKind.ThisPc).Label);
+        Assert.Equal("Recycle Bin", sut.Model.Items.Single(i => i.Kind == SystemIconKind.RecycleBin).Label);
+    }
+
+    /// <summary>
+    /// Verifies that a live culture switch (<see cref="ILocalizationService.CultureChanged"/>)
+    /// re-resolves every item's label in place — never rebuilding <see cref="SystemIconsPanelModel.Items"/>
+    /// itself — matching the same instances the panel window's <c>IconsListBox</c> is bound to.
+    /// </summary>
+    [Fact]
+    public void CultureChanged_RefreshesItemLabelsInPlace()
+    {
+        var sut = BuildSut(initialState: null);
+        sut.Load();
+        var thisPcItem = sut.Model.Items.Single(i => i.Kind == SystemIconKind.ThisPc);
+
+        _localizationService.ApplyLanguage("ru");
+
+        Assert.Same(thisPcItem, sut.Model.Items.Single(i => i.Kind == SystemIconKind.ThisPc));
+        Assert.Equal("Этот компьютер", thisPcItem.Label);
+
+        _localizationService.ApplyLanguage("en"); // restore — this LocalizationService instance is shared across this test class's fields.
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.Dispose"/> unsubscribes from
+    /// <see cref="ILocalizationService.CultureChanged"/>, so a disposed manager's <see cref="SystemIconsPanelModel"/>
+    /// is never mutated by a later language switch (R-11).
+    /// </summary>
+    [Fact]
+    public void Dispose_UnsubscribesFromCultureChanged()
+    {
+        var sut = BuildSut(initialState: null);
+        sut.Load();
+        var thisPcItem = sut.Model.Items.Single(i => i.Kind == SystemIconKind.ThisPc);
+
+        sut.Dispose();
+        _localizationService.ApplyLanguage("ru");
+
+        Assert.Equal("This PC", thisPcItem.Label); // untouched — the manager no longer reacts.
+
+        _localizationService.ApplyLanguage("en"); // restore.
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -1477,6 +1577,8 @@ public class SystemIconsPanelManagerTests
             _desktopMock.Object,
             _monitorMock.Object,
             _virtualDesktopMock.Object,
+            _localizationService,
+            _desktopScaleMock.Object,
             FactoryDelegate);
     }
 }

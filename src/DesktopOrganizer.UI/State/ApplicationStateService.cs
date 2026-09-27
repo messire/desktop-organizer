@@ -4,6 +4,7 @@ using System.Windows;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
+using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State.Dto;
@@ -155,7 +156,7 @@ internal sealed class ApplicationStateService : IApplicationStateService
         {
             // Mirrors PersistNow's never-throws contract — a failure to quarantine must not take down
             // whatever caller (e.g. WindowManager.LoadWindowsState) is reporting the partial load.
-            Console.Error.WriteLine($"Failed to quarantine partially-loaded application state: {ex.Message}");
+            AppLog.Current.Error("ApplicationStateService", "QuarantinePartialLoadFailed", ex);
         }
     }
 
@@ -282,7 +283,7 @@ internal sealed class ApplicationStateService : IApplicationStateService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Failed to save application state: {ex.Message}");
+            AppLog.Current.Error("ApplicationStateService", "SaveFailed", ex);
         }
     }
 

@@ -230,6 +230,63 @@ public class DiagnosticsSwitchTests
         Assert.Throws<ArgumentNullException>(() => DiagnosticsSwitch.IsEnabled([], null!));
     }
 
+    // ── Resolve (ADR-033 part 1: DiagnosticsLevel) ──────────────────────────
+
+    /// <summary>
+    /// <see cref="DiagnosticsSwitch.Resolve"/> matches the current build's compile-time default
+    /// (<see cref="CurrentBuildIsDebug"/>) when neither the command-line flag nor the environment
+    /// variable is present — <see cref="DiagnosticsLevel.Verbose"/> in a Debug build (this test project's
+    /// own configuration), <see cref="DiagnosticsLevel.Standard"/> in Release.
+    /// </summary>
+    [Fact]
+    public void Resolve_NoFlagsPresent_MatchesCurrentBuildConfiguration()
+    {
+        var expected = CurrentBuildIsDebug ? DiagnosticsLevel.Verbose : DiagnosticsLevel.Standard;
+
+        var result = DiagnosticsSwitch.Resolve([], NoEnvironmentVariables);
+
+        Assert.Equal(expected, result);
+    }
+
+    /// <summary><see cref="DiagnosticsSwitch.Resolve"/> resolves to <see cref="DiagnosticsLevel.Verbose"/>
+    /// when the command-line flag is present, regardless of build configuration.</summary>
+    [Fact]
+    public void Resolve_CommandLineFlagPresent_ReturnsVerbose()
+    {
+        var result = DiagnosticsSwitch.Resolve([DiagnosticsSwitch.CommandLineFlag], NoEnvironmentVariables);
+
+        Assert.Equal(DiagnosticsLevel.Verbose, result);
+    }
+
+    /// <summary><see cref="DiagnosticsSwitch.Resolve"/> resolves to <see cref="DiagnosticsLevel.Verbose"/>
+    /// when the environment variable is set to <c>"1"</c>, regardless of build configuration.</summary>
+    [Fact]
+    public void Resolve_EnvironmentVariableEquals1_ReturnsVerbose()
+    {
+        var result = DiagnosticsSwitch.Resolve([], EnvironmentReturning("1"));
+
+        Assert.Equal(DiagnosticsLevel.Verbose, result);
+    }
+
+    /// <summary>
+    /// <see cref="DiagnosticsSwitch.IsEnabled"/> stays consistent with <see cref="DiagnosticsSwitch.Resolve"/>:
+    /// it is exactly the "resolves to Verbose" boolean view existing callers (gesture-diagnostics
+    /// registration) keep using.
+    /// </summary>
+    /// <param name="commandLineFlagPresent">Whether <see cref="DiagnosticsSwitch.CommandLineFlag"/> is included in the args passed to both methods.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void IsEnabled_AlwaysMatchesResolveEqualsVerbose(bool commandLineFlagPresent)
+    {
+        string[] args = commandLineFlagPresent ? [DiagnosticsSwitch.CommandLineFlag] : [];
+
+        var level = DiagnosticsSwitch.Resolve(args, NoEnvironmentVariables);
+        var isEnabled = DiagnosticsSwitch.IsEnabled(args, NoEnvironmentVariables);
+
+        Assert.Equal(level == DiagnosticsLevel.Verbose, isEnabled);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
     private static Func<string, string?> EnvironmentReturning(string value) =>
         name => name == DiagnosticsSwitch.EnvironmentVariableName ? value : null;

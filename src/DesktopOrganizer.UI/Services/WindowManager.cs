@@ -1,7 +1,10 @@
 using System.IO;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
+using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.State;
+using DesktopOrganizer.UI.ViewModels;
 using DesktopOrganizer.UI.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Point = System.Drawing.Point;
@@ -18,6 +21,8 @@ public class WindowManager : IWindowManager
     private readonly IPanelItemStorageService _itemStorage;
     private readonly IApplicationStateService _applicationStateService;
     private readonly IAppSettings _appSettings;
+    private readonly IDesktopScaleProvider _desktopScale;
+    private readonly IAppLog? _appLog;
     private readonly Dictionary<Guid, (ChildWindow Window, ChildWindowModel Model)> _childWindows = [];
 
     // Lazily resolved to break the circular dependency WindowManager ↔ PageManagerService.
@@ -41,20 +46,37 @@ public class WindowManager : IWindowManager
     /// restore-time/settings-change grid-size normalization (<see cref="NormalizeLegacyFreeformToGridSize"/>/
     /// <see cref="NormalizeGridAlignedToGridSize"/>/<see cref="NormalizePanelsToGrid"/>).
     /// </param>
+    /// <param name="desktopScale">
+    /// The per-monitor DPI snapshot provider (release-hardening F, ADR-037) — <see cref="CollectOtherPanelBounds"/>
+    /// reads live panel geometry through it, and <see cref="RecoverDesktopLayer"/> refreshes it once every
+    /// surviving panel has been re-embedded/rebuilt.
+    /// </param>
+    /// <param name="appLog">See <see cref="Log"/>.</param>
     public WindowManager(
         IServiceProvider serviceProvider,
         IMonitorService monitorService,
         IPanelItemStorageService itemStorage,
         IApplicationStateService applicationStateService,
-        IAppSettings appSettings)
+        IAppSettings appSettings,
+        IDesktopScaleProvider desktopScale,
+        IAppLog? appLog = null)
     {
         _serviceProvider = serviceProvider;
         _monitorService = monitorService;
         _itemStorage = itemStorage;
         _applicationStateService = applicationStateService;
         _appSettings = appSettings;
+        _desktopScale = desktopScale;
+        _appLog = appLog;
         _monitorService.MonitorsChanged += OnMonitorsChanged;
     }
+
+    /// <summary>
+    /// The log this instance writes failures to: the one explicitly supplied, falling back to the
+    /// process-wide ambient <see cref="AppLog.Current"/> for tests that construct this type directly
+    /// without a log.
+    /// </summary>
+    private IAppLog Log => _appLog ?? AppLog.Current;
 
     private IPageManager PageManager => _pageManager ??= _serviceProvider.GetRequiredService<IPageManager>();
 
@@ -87,26 +109,69 @@ public class WindowManager : IWindowManager
     {
         ArgumentNullException.ThrowIfNull(model);
 
-        // Assign the current page if the model does not already have a non-default page.
-        if (string.IsNullOrWhiteSpace(model.PageId))
-            model.PageId = "default";
-
-        ResolveMonitorPlacement(model);
-
-        var window = _serviceProvider.GetRequiredService<ChildWindow>();
-        window.Initialize(model);
-
-        _childWindows[model.Id] = (window, model);
-
-        // Only show the panel when its page is the active page.
-        var isOnActivePage = model.PageId == PageManager.CurrentPage;
-        if (model.IsVisible && isOnActivePage)
-        {
-            window.Show();
-        }
-
+        var window = CreateChildWindowCore(model);
         OnChildWindowAdded?.Invoke(this, model);
         return window;
+    }
+
+    /// <inheritdoc />
+    public DesktopLayerRecoveryResult RecoverDesktopLayer()
+    {
+        int embedded = 0, topLevel = 0, recreated = 0, skipped = 0, failed = 0;
+
+        // Snapshot: rebuilding a panel overwrites its dictionary entry mid-loop.
+        foreach (var (id, entry) in _childWindows.ToList())
+        {
+            try
+            {
+                var window = entry.Window;
+                var outcome = window.RecoverAfterShellRestart();
+
+                if (outcome == PanelShellRecoveryOutcome.Destroyed)
+                {
+                    window = RebuildDestroyedPanel(entry);
+                    recreated++;
+
+                    // The rebuilt window embedded itself on Show() (OnSourceInitialized); asking again
+                    // reports where it actually ended up, and is a no-op when it already is embedded.
+                    outcome = window.RecoverAfterShellRestart();
+                }
+
+                switch (outcome)
+                {
+                    case PanelShellRecoveryOutcome.Embedded:
+                        embedded++;
+                        break;
+                    case PanelShellRecoveryOutcome.TopLevel:
+                        topLevel++;
+                        break;
+                    case PanelShellRecoveryOutcome.NotCreated:
+                        skipped++;
+                        break;
+                    default:
+                        failed++;
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                failed++;
+
+                // Opaque id only — never the panel title (privacy invariant).
+                Log.Error(
+                    "WindowManager",
+                    "ShellRecoveryPanelFailed",
+                    ex,
+                    new KeyValuePair<string, object?>("panelId", id));
+            }
+        }
+
+        // release-hardening F (ADR-037, plan §3.2 triggers): re-embedding/rebuilding every surviving panel
+        // above can change the desktop layer mode (e.g. Explorer restarted into a WorkerW-less shell) or
+        // the root window's DPI — refresh the snapshot once, after all of them, rather than per-panel.
+        _desktopScale.Refresh();
+
+        return new DesktopLayerRecoveryResult(embedded, topLevel, recreated, skipped, failed);
     }
 
     /// <inheritdoc />
@@ -133,6 +198,8 @@ public class WindowManager : IWindowManager
     {
         ArgumentNullException.ThrowIfNull(buffer);
         buffer.Clear();
+
+        var scale = _desktopScale.Current;
 
         foreach (var (id, entry) in _childWindows)
         {
@@ -161,7 +228,11 @@ public class WindowManager : IWindowManager
                 continue;
             if (width <= 0 || height <= 0) continue; // not yet measured / degenerate
 
-            buffer.Add(new Rect(window.Left, window.Top, width, height));
+            // release-hardening F (ADR-037): obstacles must be desktop-DIP (the space every other caller
+            // of this buffer — WorkspaceGridPlacement/PanelCollision/SnapGuideCalculator — already reasons
+            // in), converted through the adapter rather than a bare Window.Left/Top read. Identity on any
+            // uniform snapshot.
+            buffer.Add(PanelWindowCoordinates.ToDesktopBounds(window, new Rect(window.Left, window.Top, width, height), scale));
         }
     }
 
@@ -257,8 +328,9 @@ public class WindowManager : IWindowManager
     /// <list type="bullet">
     /// <item><c>MainWindowViewModel.RemovePanel</c> — the user explicitly deletes a single panel via
     /// the UI. Permanent → <c>releaseManagedItems: true</c>.</item>
-    /// <item><c>PageManagerService.RemovePage</c> — the user explicitly deletes an entire page, which
-    /// permanently destroys every panel on it. Permanent → <c>releaseManagedItems: true</c>.</item>
+    /// <item><c>PageManagerService.RemovePage</c> — the user explicitly deletes an entire page. It
+    /// recycles the managed items of all the page's panels in one batch itself (ADR-035), then removes
+    /// the panels with <c>releaseManagedItems: false</c> (their items are already in the Recycle Bin).</item>
     /// <item><c>LayoutSnapshotService.Restore</c> — removes every current panel only so it can
     /// immediately recreate the panel set from a snapshot's JSON, which references the very same
     /// managed paths. NOT a permanent deletion → <c>releaseManagedItems: false</c> (the default),
@@ -268,7 +340,7 @@ public class WindowManager : IWindowManager
     /// This overload always persists synchronously (<c>deferSave: false</c>) — see
     /// <see cref="RemoveChildWindow(Guid, bool, bool)"/> for the bulk-removal-loop variant.
     /// </remarks>
-    public void RemoveChildWindow(Guid windowId, bool releaseManagedItems)
+    public PanelRemovalResult RemoveChildWindow(Guid windowId, bool releaseManagedItems)
         => RemoveChildWindow(windowId, releaseManagedItems, deferSave: false);
 
     /// <inheritdoc />
@@ -281,18 +353,31 @@ public class WindowManager : IWindowManager
     /// after the loop to flush it synchronously. Every other caller must keep the default/explicit
     /// <see langword="false"/> so its single removal is never left to a debounce window that might not
     /// elapse before the process exits.
+    /// <para>
+    /// ADR-035 (fail visibly): with <paramref name="releaseManagedItems"/> the managed items go to the
+    /// Recycle Bin in one batch. If any of them is still on disk afterwards, the panel is <b>kept</b>:
+    /// only the items that did reach the Recycle Bin are taken out of it (a debounced save follows,
+    /// like any ordinary item removal), and <see cref="PanelRemovalResult.Blocked"/> is returned.
+    /// </para>
     /// </remarks>
-    public void RemoveChildWindow(Guid windowId, bool releaseManagedItems, bool deferSave)
+    public PanelRemovalResult RemoveChildWindow(Guid windowId, bool releaseManagedItems, bool deferSave)
     {
-        if (!_childWindows.TryGetValue(windowId, out var entry)) return;
+        if (!_childWindows.TryGetValue(windowId, out var entry)) return PanelRemovalResult.Removed;
+
+        // Sync the model with any pending UI-side changes before inspecting FilePaths, then move any
+        // app-managed copies to the Recycle Bin so they don't linger orphaned in PanelItems storage —
+        // but only when this is a genuine permanent deletion (see remarks above).
+        entry.Window.SyncToModel();
+        var outcome = ReleaseManagedItemsIfRequested(entry.Model, _itemStorage, releaseManagedItems);
+
+        if (!outcome.IsComplete)
+        {
+            RemoveItemsFromPanel(entry.Window, outcome.Recycled);
+            SaveWindowsState();
+            return PanelRemovalResult.Blocked(outcome.Remaining);
+        }
 
         OnChildWindowRemoved?.Invoke(this, entry.Model);
-
-        // Sync the model with any pending UI-side changes before inspecting FilePaths, then release
-        // any app-managed copies so they don't linger orphaned in PanelItems storage — but only when
-        // this is a genuine permanent deletion (see remarks above).
-        entry.Window.SyncToModel();
-        ReleaseManagedItemsIfRequested(entry.Model, _itemStorage, releaseManagedItems);
 
         entry.Window.Close();
         _childWindows.Remove(windowId);
@@ -304,6 +389,20 @@ public class WindowManager : IWindowManager
             SaveWindowsState();
         else
             SaveWindowsStateNow();
+
+        return PanelRemovalResult.Removed;
+    }
+
+    /// <inheritdoc />
+    public void RemoveItemsFromPanels(IReadOnlyCollection<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        if (paths.Count == 0) return;
+
+        foreach (var entry in _childWindows.Values)
+            RemoveItemsFromPanel(entry.Window, paths);
+
+        SaveWindowsState();
     }
 
     /// <inheritdoc />
@@ -342,7 +441,11 @@ public class WindowManager : IWindowManager
         var skipped = CreateEachIsolated(states, state => CreateChildWindow(state));
         if (skipped > 0)
         {
-            Console.Error.WriteLine($"Skipped {skipped} corrupt saved panel(s) out of {states.Count} while loading window state.");
+            Log.Warn(
+                "WindowManager",
+                "CorruptSavedPanelsSkipped",
+                new KeyValuePair<string, object?>("skipped", skipped),
+                new KeyValuePair<string, object?>("total", states.Count));
 
             // ADR-024 finalization C-1: a skipped panel means whatever gets persisted next reflects
             // fewer panels than the document ApplicationStateService.Load() actually returned. Without
@@ -393,14 +496,15 @@ public class WindowManager : IWindowManager
             if (!NormalizeLegacyFreeformToGridSize(model, monitor, gridSize)) continue;
 
             anyChanged = true;
-            window.Left = model.Position.X;
-            window.Top = model.Position.Y;
 
-            if (!model.IsRolledUp)
-            {
-                window.Width = model.Size.Width;
-                window.Height = model.Size.Height;
-            }
+            // release-hardening F (ADR-037): through the panel's own geometry writer/adapter, not a bare
+            // Window.Left/Top/Width/Height assignment — ApplyWorkspaceGridGeometry already applies
+            // position-only while the panel is rolled up (see its remarks), matching this method's own
+            // pre-F "skip Width/Height while rolled up" shape exactly.
+            window.ApplyWorkspaceGridGeometry(
+                new Rect(model.Position.X, model.Position.Y, model.Size.Width, model.Size.Height),
+                span: null,
+                monitorDeviceId: null);
         }
 
         if (anyChanged) SaveWindowsStateNow();
@@ -425,27 +529,24 @@ public class WindowManager : IWindowManager
     }
 
     /// <summary>
-    /// Releases every app-managed item copy referenced by <paramref name="model"/>'s
-    /// <see cref="ChildWindowModel.FilePaths"/>. Folder Portal panels have no persisted
-    /// <see cref="ChildWindowModel.FilePaths"/> pointing into managed storage, so
-    /// <see cref="IPanelItemStorageService.IsManaged"/> naturally makes this a no-op for them.
+    /// Moves every app-managed item copy referenced by <paramref name="model"/>'s
+    /// <see cref="ChildWindowModel.FilePaths"/> to the Recycle Bin in a single batch (ADR-035). Folder
+    /// Portal panels have no persisted <see cref="ChildWindowModel.FilePaths"/> pointing into managed
+    /// storage, so <see cref="IPanelItemStorageService.IsManaged"/> naturally makes this a no-op for them
+    /// (the storage service is not even called when there's nothing managed).
     /// </summary>
     /// <remarks>
     /// Internal (rather than <see langword="private"/>) solely so <c>DesktopOrganizer.Tests</c> can
     /// unit test this pure model+storage logic directly, without needing a real WPF <c>ChildWindow</c>
     /// (which <see cref="RemoveChildWindow(Guid, bool)"/> otherwise requires via DI).
     /// </remarks>
-    /// <param name="model">The panel model whose <see cref="ChildWindowModel.FilePaths"/> are released.</param>
-    /// <param name="storage">Releases the app-managed item copies.</param>
-    internal static void ReleaseManagedItems(ChildWindowModel model, IPanelItemStorageService storage)
+    /// <param name="model">The panel model whose managed <see cref="ChildWindowModel.FilePaths"/> are recycled.</param>
+    /// <param name="storage">Recycles the app-managed item copies.</param>
+    /// <returns>What was recycled and what is still on disk; an empty outcome when nothing was managed.</returns>
+    internal static RecycleOutcome ReleaseManagedItems(ChildWindowModel model, IPanelItemStorageService storage)
     {
-        foreach (var path in model.FilePaths)
-        {
-            if (storage.IsManaged(path))
-            {
-                storage.Release(path);
-            }
-        }
+        var managed = model.FilePaths.Where(storage.IsManaged).ToList();
+        return managed.Count == 0 ? default : storage.ReleaseToRecycleBin(managed);
     }
 
     /// <summary>
@@ -455,16 +556,12 @@ public class WindowManager : IWindowManager
     /// solely so <c>DesktopOrganizer.Tests</c> can directly assert that the flag controls the release
     /// call, without needing a real WPF <c>ChildWindow</c>.
     /// </summary>
-    /// <param name="model">The panel model whose managed items may be released.</param>
-    /// <param name="storage">Releases the app-managed item copies.</param>
+    /// <param name="model">The panel model whose managed items may be recycled.</param>
+    /// <param name="storage">Recycles the app-managed item copies.</param>
     /// <param name="releaseManagedItems">Whether the caller actually wants the release to happen.</param>
-    internal static void ReleaseManagedItemsIfRequested(ChildWindowModel model, IPanelItemStorageService storage, bool releaseManagedItems)
-    {
-        if (releaseManagedItems)
-        {
-            ReleaseManagedItems(model, storage);
-        }
-    }
+    /// <returns>The recycle outcome; an empty (complete) outcome when <paramref name="releaseManagedItems"/> is <see langword="false"/>.</returns>
+    internal static RecycleOutcome ReleaseManagedItemsIfRequested(ChildWindowModel model, IPanelItemStorageService storage, bool releaseManagedItems)
+        => releaseManagedItems ? ReleaseManagedItems(model, storage) : default;
 
     /// <summary>
     /// Cross-panel-aware counterpart to <c>ChildWindowViewModel.LoadFromModel</c>'s own per-panel
@@ -596,7 +693,14 @@ public class WindowManager : IWindowManager
             catch (Exception ex)
             {
                 skipped++;
-                Console.Error.WriteLine($"Skipped a corrupt saved panel ('{state.Title}', id {state.Id}): {ex.Message}");
+
+                // state.Title is deliberately never logged (privacy invariant) — only the panel's
+                // opaque id.
+                AppLog.Current.Error(
+                    "WindowManager",
+                    "CorruptSavedPanelSkipped",
+                    ex,
+                    new KeyValuePair<string, object?>("panelId", state.Id));
             }
         }
 
@@ -628,7 +732,13 @@ public class WindowManager : IWindowManager
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Failed to sync panel '{entry.Model.Title}' ({entry.Model.Id}): {ex.Message}");
+                // entry.Model.Title is deliberately never logged (privacy invariant) — only the
+                // panel's opaque id.
+                AppLog.Current.Error(
+                    "WindowManager",
+                    "PanelSyncFailed",
+                    ex,
+                    new KeyValuePair<string, object?>("panelId", entry.Model.Id));
             }
         }
     }
@@ -700,6 +810,12 @@ public class WindowManager : IWindowManager
     internal static void ClampIntoMonitor(ChildWindowModel model, MonitorInfo monitor)
     {
         var area = monitor.WorkArea;
+
+        // H1: a monitor the desktop-scale snapshot doesn't know about surfaces as Rect.Empty (X/Y =
+        // +Infinity, ADR-037 MonitorService.GetMonitors). Clamping against that would round to
+        // int.MinValue below and PERSIST it into model.Position — leave the panel untouched instead.
+        if (area.IsEmpty || !IsFiniteRect(area)) return;
+
         var width = Math.Max(0, model.Size.Width);
         var height = Math.Max(0, model.Size.Height);
 
@@ -833,6 +949,14 @@ public class WindowManager : IWindowManager
     }
 
     /// <summary>
+    /// True when every edge of <paramref name="rect"/> is a finite number — guards <see cref="ClampIntoMonitor"/>
+    /// against a work area whose bounds are <see cref="double.PositiveInfinity"/>/<see cref="double.NegativeInfinity"/>
+    /// (as produced by <c>Rect.Empty</c>) without relying on <c>Rect.IsEmpty</c> alone.
+    /// </summary>
+    private static bool IsFiniteRect(Rect rect)
+        => double.IsFinite(rect.Left) && double.IsFinite(rect.Top) && double.IsFinite(rect.Right) && double.IsFinite(rect.Bottom);
+
+    /// <summary>
     /// The same width/height floor <c>ResizeConstraintsFactory.BuildConstraints</c> computes for a
     /// <see cref="PanelGeometryMode.LegacyFreeform"/> panel's live resize gesture: <c>MinWidth</c> is
     /// icon-grid-derived only in <see cref="PanelViewMode.Grid"/>, <c>MinHeight</c> is always the flat
@@ -869,6 +993,23 @@ public class WindowManager : IWindowManager
     }
 
     /// <summary>
+    /// Takes <paramref name="paths"/> out of one live panel: out of its ViewModel (so the items vanish
+    /// from the UI) and then out of its model via <see cref="ChildWindow.SyncToModel"/>. Folder Portal
+    /// panels are left alone — they mirror a live folder and never hold managed items.
+    /// </summary>
+    private static void RemoveItemsFromPanel(ChildWindow window, IReadOnlyCollection<string> paths)
+    {
+        if (paths.Count == 0) return;
+
+        if (window.DataContext is ChildWindowViewModel { IsPortal: false } viewModel)
+        {
+            foreach (var path in paths) viewModel.RemoveFileByPath(path);
+        }
+
+        window.SyncToModel();
+    }
+
+    /// <summary>
     /// Every live panel's rectangle — <see cref="CollectOtherPanelBounds"/> with no panel excluded
     /// (a not-yet-created panel has no id in <see cref="_childWindows"/> to exclude).
     /// </summary>
@@ -877,6 +1018,77 @@ public class WindowManager : IWindowManager
         var bounds = new List<Rect>();
         CollectOtherPanelBounds(excludingId: null, bounds);
         return bounds;
+    }
+
+    /// <summary>
+    /// Builds, registers and (when on the active page) shows a panel window for <paramref name="model"/>
+    /// — everything <see cref="CreateChildWindow"/> does except raising <see cref="OnChildWindowAdded"/>,
+    /// which a shell-restart rebuild (<see cref="RebuildDestroyedPanel"/>) must not raise: the panel is
+    /// not new, only its native window is.
+    /// </summary>
+    private ChildWindow CreateChildWindowCore(ChildWindowModel model)
+    {
+        // Assign the current page if the model does not already have a non-default page.
+        if (string.IsNullOrWhiteSpace(model.PageId))
+            model.PageId = "default";
+
+        ResolveMonitorPlacement(model);
+
+        var window = _serviceProvider.GetRequiredService<ChildWindow>();
+        window.Initialize(model);
+
+        // ADR-034: lets shell-restart recovery tell "this panel's HWND died with Explorer" from "it
+        // was never created" — must be attached before Show() so SourceInitialized is observed.
+        window.AttachShellRecoveryTracking();
+
+        _childWindows[model.Id] = (window, model);
+
+        // Only show the panel when its page is the active page.
+        var isOnActivePage = model.PageId == PageManager.CurrentPage;
+        if (model.IsVisible && isOnActivePage)
+        {
+            window.Show();
+        }
+
+        return window;
+    }
+
+    /// <summary>
+    /// Rebuilds a panel whose native window was destroyed by the shell (ADR-034 — a <c>WorkerW</c>
+    /// child dies together with its dead Explorer parent). The model is the single source of truth, so
+    /// the panel comes back exactly as it was: same model instance, same position/size/page/roll-up.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately NOT <see cref="RemoveChildWindow(Guid, bool, bool)"/>: that path treats the panel as
+    /// deleted (raises <see cref="OnChildWindowRemoved"/>, may recycle managed items, writes state). A
+    /// window destroyed from outside is not a user deletion, so none of that may happen here.
+    /// </para>
+    /// <para>
+    /// The dictionary entry is never removed first: <see cref="CreateChildWindowCore"/> overwrites it
+    /// only once the new window exists, so if the rebuild throws the model stays registered — it keeps
+    /// being persisted and the next recovery attempt tries again — instead of silently dropping the
+    /// panel from the next save ("all my panels are gone").
+    /// </para>
+    /// </remarks>
+    private ChildWindow RebuildDestroyedPanel((ChildWindow Window, ChildWindowModel Model) entry)
+    {
+        try
+        {
+            // Releases what WPF's own close path would have (model/VM subscriptions, VM disposal) and
+            // syncs the live file list into the model first. Idempotent across attempts.
+            entry.Window.TearDownAfterExternalDestroy();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(
+                "WindowManager",
+                "ShellRecoveryTearDownFailed",
+                ex,
+                new KeyValuePair<string, object?>("panelId", entry.Model.Id));
+        }
+
+        return CreateChildWindowCore(entry.Model);
     }
 
     // MainWindow is a singleton in DI — always returns the same instance
@@ -967,6 +1179,7 @@ public class WindowManager : IWindowManager
         // for a GridAligned panel, unconditionally re-writing Width/Height through
         // ApplyWorkspaceGridGeometry) every single time.
         var anyChanged = false;
+        var scale = _desktopScale.Current;
 
         foreach (var (window, model) in _childWindows.Values)
         {
@@ -993,8 +1206,9 @@ public class WindowManager : IWindowManager
                 // M-3: skip the write (and the resulting model-dirty/save) entirely when the panel is
                 // already, within a sub-pixel-rounding tolerance, exactly where ApplyWorkspaceGridGeometry
                 // would put it — the overwhelmingly common case for a WM_SETTINGCHANGE that changed
-                // nothing about this panel's monitor.
-                var current = new Rect(window.Left, window.Top, window.Width, window.Height);
+                // nothing about this panel's monitor. release-hardening F (ADR-037): read through the
+                // adapter — desktop-DIP, the same space `bounds` is already in.
+                var current = PanelWindowCoordinates.ToDesktopBounds(window, new Rect(window.Left, window.Top, window.Width, window.Height), scale);
                 if (GridAlignedBoundsUnchanged(current, bounds, model.IsRolledUp)) continue;
 
                 // Through the panel's own single geometry writer, so Window.Left/Top/Width/Height and the
@@ -1008,7 +1222,6 @@ public class WindowManager : IWindowManager
             // Re-clamp against the (possibly resized) current work area. ClampIntoMonitor early-outs
             // when the panel is already fully inside, so this is a cheap no-op in the common case.
             var before = model.Position;
-            var beforeSize = model.Size;
             ClampIntoMonitor(model, monitor);
             if (model.Position != before) anyChanged = true;
 
@@ -1022,14 +1235,14 @@ public class WindowManager : IWindowManager
             if (NormalizeLegacyFreeformToGridSize(model, monitor, _appSettings.GridSize))
                 anyChanged = true;
 
-            window.Left = model.Position.X;
-            window.Top = model.Position.Y;
-
-            if (!model.IsRolledUp && model.Size != beforeSize)
-            {
-                window.Width = model.Size.Width;
-                window.Height = model.Size.Height;
-            }
+            // release-hardening F (ADR-037): through the geometry writer/adapter — matches
+            // NormalizePanelsToGrid's identical fix; ApplyWorkspaceGridGeometry already skips the
+            // Width/Height write while rolled up, same as this method's own pre-F guard, and re-writing
+            // an unchanged size is idempotent.
+            window.ApplyWorkspaceGridGeometry(
+                new Rect(model.Position.X, model.Position.Y, model.Size.Width, model.Size.Height),
+                span: null,
+                monitorDeviceId: null);
         }
 
         if (anyChanged) SaveWindowsState();

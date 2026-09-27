@@ -301,6 +301,7 @@ public class WindowManagerGridSizeNormalizationTests
             monitorServiceMock.Object,
             itemStorageMock.Object,
             stateMock.Object,
-            appSettingsMock.Object);
+            appSettingsMock.Object,
+            FakeDesktopScale.Uniform().Object);
     }
 }

@@ -436,6 +436,24 @@ load/save/drag/resize/page-switch/snapshot behavior is unchanged from the user's
 
 ---
 
+## Amendment 2026-09-27 (ADR-032): аддитивный скаляр `Language`
+
+*(Раздел на русском, как и предыдущий amendment; остальной документ ADR-024 — на языке оригинала.)*
+
+[ADR-032](ADR-032-ui-localization.md) вводит `IAppSettings.Language` (`""`/`"en"`/`"ru"`, дефолт `""`) —
+единственное расширение контура `user.config`, сделанное с явного разрешения пользователя
+(`docs/prompts/localization.md` D-1) поверх заморозки, которую CLAUDE.md формализовало из контекста этого
+ADR (`ApplicationSettingsBase` сохранён именно для «оставшихся простых скалярных настроек», см. раздел
+Context выше). `Language` пополняет прецедентный список аддитивных `IAppSettings`-скаляров, введённых
+после этого ADR без изменения `schemaVersion`/JSON-схемы: `DefaultSurfaceStyle`, `IsLayoutLocked`,
+`NormalModeLayoutGestures`, `DefaultPanelGeometryMode`, `DefaultIconLayoutPolicy`. Diff контура persistence
+ограничен четырьмя файлами (`Properties/Settings.settings`, `Properties/Settings.Designer.cs`,
+`Services/IAppSettings.cs`, `Services/AppSettings.cs`) — JSON-документ (`schemaVersion`, миграции, DTO)
+не тронут; инварианты D-1..D-13 не затронуты. Это не открывает общее разрешение на будущие скаляры —
+каждый новый скаляр продолжает требовать отдельного явного «да» пользователя в самой задаче.
+
+---
+
 ## Amendment 2026-09-25: раздельные корни хранилища для Debug и Release
 
 **Контекст.** До этой поправки все сборки писали в один корень `%LOCALAPPDATA%\DesktopOrganizer`:

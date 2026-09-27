@@ -1,8 +1,13 @@
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Windows;
+using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
+using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.UI.Configuration;
+using DesktopOrganizer.UI.Lifecycle;
 using DesktopOrganizer.UI.State;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -21,30 +26,23 @@ public static class Program
 {
     private const string AppTitle = "DesktopOrganizer";
 
-    // Two user-facing strings, deliberately not localized (ADR-023 phase-3 plan §8 — localization is a
-    // separate cross-cutting task).
-    private const string OtherSessionMessage =
-        "DesktopOrganizer is already running in another Windows session. Switch to that session to use it.";
-
-    private const string ActivationFailedMessage =
-        "DesktopOrganizer is already running but is not responding. Close it via Task Manager and try again.";
-
-    // English, deliberately not localized (same rationale as the two messages above, ADR-023 phase-3
-    // plan §8). Covers M-4: a startup failure before any window/log exists still needs to tell the user
-    // something rather than the process silently vanishing.
-    private const string StartupFailedMessage = "DesktopOrganizer failed to start: {0}";
-
     // ADR-024 §7 rollback scenario C: a manual recovery switch, handled entirely before the single-
     // instance handshake / normal ApplicationStateService.Load() path — see RunRestoreStateBackup.
-    // Deliberately not localized, same rationale as the three strings above.
+    // Not a localizable string — a command-line flag, always ASCII/English.
     private const string RestoreStateBackupFlag = "--restore-state-backup";
 
+    // English, printed to Console.Error only (never shown in a message box) so scripts/developers
+    // reading the terminal always see the same text regardless of UI language (docs/PLANS/
+    // localization.md §2.8/§0.2 — diagnostics and console output stay English). The message box shown
+    // for the same failure uses the localized "Restore_LockUnavailable_Message" RESX key instead — see
+    // RunRestoreStateBackup.
     private const string RestoreLockUnavailableMessage =
         "DesktopOrganizer could not restore application state: another running instance holds the storage lock. Close DesktopOrganizer and try again.";
 
     // ADR-024 D-8: printed once, to Console.Error only (no message box — a normal launch must not
     // gain a new modal dialog over a degraded-but-working session, see D-8's own rationale), when the
-    // normal startup path's storage-lock acquire fails.
+    // normal startup path's storage-lock acquire fails. Not localized — same rationale as
+    // RestoreLockUnavailableMessage's console line above.
     private const string StorageLockUnavailableMessage =
         "DesktopOrganizer: could not acquire the application-state storage lock — running with saving disabled for this session.";
 
@@ -65,7 +63,11 @@ public static class Program
     /// <see cref="System.Threading.WaitHandleCannotBeOpenedException"/>); <c>2</c> —
     /// <c>--restore-state-backup</c> was requested but did not restore anything (no candidate found, the
     /// candidate failed validation, the storage lock could not be acquired, or the write itself failed —
-    /// see <see cref="RunRestoreStateBackup"/>).
+    /// see <see cref="RunRestoreStateBackup"/>); <c>5</c> — a fatal unhandled exception was caught by
+    /// <see cref="DesktopOrganizer.UI.Lifecycle.CrashCoordinator"/> on the UI thread and the crash
+    /// sequence ran to completion (ADR-033 part 2, <see cref="DesktopOrganizer.UI.Lifecycle.ExitCodes.Crashed"/>);
+    /// a fatal exception on a genuine background thread instead ends the process via the CLR's own
+    /// unmanaged-exception termination, with no code this method controls.
     /// </summary>
     /// <param name="args">
     /// Command-line arguments. Unused by protocol <c>DO/1</c> itself (ADR-023 D-5) — the one flag this
@@ -75,14 +77,53 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        // M-4: everything below — DI container construction, resolving ISingleInstanceCoordinator (whose
-        // factory constructs a real named Mutex and reads WindowsIdentity.GetCurrent()/
-        // Process.GetCurrentProcess()), and the handshake itself — runs before any WPF Application or
-        // diagnostics log exists. Unlike the WPF SDK's own auto-generated Main, nothing upstream of this
-        // method catches an exception thrown here; without this guard the process would simply vanish
-        // with no message and a CLR-default exit code.
+        // ADR-033 part 2 (crash safety, release-hardening plan §2): installed as early as possible —
+        // before the single-instance handshake, before the DI container, before any WPF Application
+        // exists. CrashRouting.Handler is still null at this point (App's constructor sets it); every
+        // one of these three delegates tolerates that (see CrashRouting's own remarks) and simply drops
+        // a crash that manages to happen in the narrow window before App is constructed, the same way
+        // the outer try/catch below already covers that window with its own message box.
+        //
+        // TaskScheduler.UnobservedTaskException is deliberately NOT routed through CrashCoordinator —
+        // it is by design non-fatal (.NET's own default behavior: the process survives regardless of
+        // this handler), so this only records it and marks it observed.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex)
+                CrashRouting.Handler?.Invoke(ex, CrashOrigin.Background);
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            AppLog.Current.Error("Program", "UnobservedTaskException", e.Exception);
+            e.SetObserved();
+        };
+
+        // M-4: everything below — the WinForms exception bridge, DI container construction, resolving
+        // ISingleInstanceCoordinator (whose factory constructs a real named Mutex and reads
+        // WindowsIdentity.GetCurrent()/Process.GetCurrentProcess()), and the handshake itself — runs
+        // before any WPF Application or diagnostics log exists. Unlike the WPF SDK's own auto-generated
+        // Main, nothing upstream of this method catches an exception thrown here; without this guard the
+        // process would simply vanish with no message and a CLR-default exit code.
         try
         {
+            // Inside the guard (release-hardening review L7): Install touches WinForms' global
+            // Application state, and a throw from it must still end in the startup-failed message box
+            // below rather than an unhandled exception with no message at all.
+            WinFormsExceptionBridge.Install(ex => CrashRouting.Handler?.Invoke(ex, CrashOrigin.WinForms));
+
+            // docs/PLANS/localization.md §2.5 step 1 (finding 5): touch SystemCulture before anything
+            // below ever assigns CultureInfo.CurrentUICulture, so its static field-initializer snapshot
+            // is the real, unmodified Windows UI culture — what "follow Windows" (SupportedLanguages.
+            // FollowSystem) resolves against later, including after a manual language switch back to
+            // "as in Windows" in a later session.
+            _ = SystemCulture.OriginalUiCulture;
+
+            var preference = TryReadLanguagePreference();
+            var culture = SupportedLanguages.Resolve(preference, SystemCulture.OriginalUiCulture);
+            CultureInfo.DefaultThreadCurrentUICulture = culture;
+            CultureInfo.CurrentUICulture = culture;
+
             // Handled entirely on its own, before the single-instance handshake and before
             // ApplicationStateService.Load() ever run (ADR-024 §7 scenario C) — this is a one-shot
             // recovery tool, not a normal application launch. No WPF Application is ever constructed on
@@ -94,12 +135,33 @@ public static class Program
         }
         catch (Exception ex)
         {
+            // M-4: if the exception happened before the culture bootstrap above ran to completion,
+            // CultureInfo.CurrentUICulture is still whatever Windows started the process with — an
+            // accepted degradation (docs/PLANS/localization.md §2.5 step 4).
             MessageBox.Show(
-                string.Format(StartupFailedMessage, ex.Message),
+                LocalizationResources.Format("Startup_Failed_Format", CultureInfo.CurrentUICulture, ex.Message),
                 AppTitle,
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Reads <see cref="Properties.Settings.Default"/>'s <c>Language</c> user setting (docs/PLANS/
+    /// localization.md §2.3/§2.5 step 2), tolerating a corrupt/missing <c>user.config</c>: any exception
+    /// reading it — most notably <see cref="System.Configuration.ConfigurationErrorsException"/> —
+    /// degrades to <see cref="SupportedLanguages.FollowSystem"/> rather than ever failing startup.
+    /// </summary>
+    private static string TryReadLanguagePreference()
+    {
+        try
+        {
+            return Properties.Settings.Default.Language;
+        }
+        catch (Exception)
+        {
+            return SupportedLanguages.FollowSystem;
         }
     }
 
@@ -109,7 +171,9 @@ public static class Program
     /// before touching any file — running this concurrently with a live, writing DesktopOrganizer
     /// instance would be exactly the two-writer hazard the lock exists to prevent — then delegates the
     /// actual recovery to <see cref="IStateRestoreCommand"/>. Both success and failure are reported to
-    /// the console (this is meant to be run from a terminal) and via a message box (in case it wasn't).
+    /// the console (this is meant to be run from a terminal, always in English — see
+    /// <see cref="LocalizeRestoreResult"/>'s remarks) and via a message box, localized to
+    /// <see cref="CultureInfo.CurrentUICulture"/> (in case it wasn't run from a terminal).
     /// </summary>
     private static int RunRestoreStateBackup()
     {
@@ -118,27 +182,77 @@ public static class Program
 
         using var provider = services.BuildServiceProvider();
 
+        AppLog.Initialize(provider.GetRequiredService<IAppLog>());
+
         var storageLock = provider.GetRequiredService<IStorageLock>();
         if (!storageLock.TryAcquire())
         {
-            Console.Error.WriteLine(RestoreLockUnavailableMessage);
-            MessageBox.Show(RestoreLockUnavailableMessage, AppTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+            Console.Error.WriteLine(RestoreLockUnavailableMessage); // cli-output
+            AppLog.Current.Warn("Program", "RestoreStateBackupLockUnavailable");
+            MessageBox.Show(
+                LocalizationResources.GetString("Restore_LockUnavailable_Message", CultureInfo.CurrentUICulture),
+                AppTitle,
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
             return 2;
         }
 
         var restoreCommand = provider.GetRequiredService<IStateRestoreCommand>();
         var result = restoreCommand.Restore();
+        var localizedMessage = LocalizeRestoreResult(result, CultureInfo.CurrentUICulture);
 
         if (result.Outcome == StateRestoreOutcome.Restored)
         {
             Console.WriteLine(result.Message);
-            MessageBox.Show(result.Message, AppTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+            AppLog.Current.Info("Program", "RestoreStateBackupRestored", new KeyValuePair<string, object?>("message", result.Message));
+            MessageBox.Show(localizedMessage, AppTitle, MessageBoxButton.OK, MessageBoxImage.Information);
             return 0;
         }
 
-        Console.Error.WriteLine(result.Message);
-        MessageBox.Show(result.Message, AppTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+        Console.Error.WriteLine(result.Message); // cli-output
+        AppLog.Current.Warn(
+            "Program",
+            "RestoreStateBackupNotRestored",
+            new KeyValuePair<string, object?>("outcome", result.Outcome.ToString()),
+            new KeyValuePair<string, object?>("message", result.Message));
+        MessageBox.Show(localizedMessage, AppTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
         return 2;
+    }
+
+    /// <summary>
+    /// Maps a <see cref="StateRestoreResult"/> to the localized text shown in
+    /// <see cref="RunRestoreStateBackup"/>'s message box (docs/PLANS/localization.md §2.8). The
+    /// <see cref="StateRestoreResult.Message"/> string itself is never localized and is always printed
+    /// to the console verbatim, in English — it is meant for scripts/developers reading the terminal,
+    /// not the end user (CLAUDE.md: diagnostics stay English); this method only supplies the
+    /// user-facing message box wording, folding that same English text in as a "Details" suffix for the
+    /// outcomes that carry one.
+    /// </summary>
+    /// <param name="result">The outcome of a single <see cref="IStateRestoreCommand.Restore"/> call.</param>
+    /// <param name="culture">The culture to localize the message box text into.</param>
+    private static string LocalizeRestoreResult(StateRestoreResult result, CultureInfo culture)
+    {
+        var candidateFileName = result.CandidatePath is null ? null : Path.GetFileName(result.CandidatePath);
+
+        return result.Outcome switch
+        {
+            StateRestoreOutcome.Restored when result.QuarantinedPrimaryPath is not null =>
+                LocalizationResources.Format(
+                    "Restore_RestoredQuarantined_Format",
+                    culture,
+                    candidateFileName,
+                    Path.GetFileName(result.QuarantinedPrimaryPath)),
+            StateRestoreOutcome.Restored =>
+                LocalizationResources.Format("Restore_Restored_Format", culture, candidateFileName),
+            StateRestoreOutcome.NoCandidateFound =>
+                LocalizationResources.GetString("Restore_NoCandidate_Message", culture),
+            StateRestoreOutcome.CandidateInvalid =>
+                LocalizationResources.Format("Restore_CandidateInvalid_Format", culture, candidateFileName, result.Message),
+            StateRestoreOutcome.Failed =>
+                LocalizationResources.Format("Restore_Failed_Format", culture, candidateFileName, result.Message),
+            _ =>
+                LocalizationResources.Format("Restore_Unknown_Format", culture, result.Outcome, result.Message),
+        };
     }
 
     private static int RunSingleInstanceHandshakeAndApp(string[] args)
@@ -149,6 +263,8 @@ public static class Program
         // Side-effect-free: every registration here is a singleton descriptor, none are eagerly
         // resolved by BuildServiceProvider() itself (ADR-023 §2.4).
         using var provider = services.BuildServiceProvider();
+
+        AppLog.Initialize(provider.GetRequiredService<IAppLog>());
 
         var coordinator = provider.GetRequiredService<ISingleInstanceCoordinator>();
 
@@ -166,11 +282,19 @@ public static class Program
                 return 0;
 
             case SingleInstanceStartupAction.ExitOtherSession:
-                MessageBox.Show(OtherSessionMessage, AppTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(
+                    LocalizationResources.GetString("Startup_OtherSession_Message", CultureInfo.CurrentUICulture),
+                    AppTitle,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
                 return 4;
 
             case SingleInstanceStartupAction.ExitActivationFailed:
-                MessageBox.Show(ActivationFailedMessage, AppTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(
+                    LocalizationResources.GetString("Startup_ActivationFailed_Message", CultureInfo.CurrentUICulture),
+                    AppTitle,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
                 return 3;
         }
 
@@ -206,11 +330,15 @@ public static class Program
             // no-op) rather than aborting startup — killing the process over a stuck lock file would
             // be worse than running without persistence. Logged exactly once, here; every later
             // Save() call re-checks IsWritable silently, without logging again.
-            Console.Error.WriteLine(StorageLockUnavailableMessage);
+            Console.Error.WriteLine(StorageLockUnavailableMessage); // cli-output
             provider.GetRequiredService<IDiagnosticsLog>().Write(
                 "state",
                 "StateStoreLockUnavailable",
                 null,
+                new KeyValuePair<string, object?>("attempts", StorageLockDefaultMaxAttempts));
+            AppLog.Current.Warn(
+                "Program",
+                "StorageLockUnavailable",
                 new KeyValuePair<string, object?>("attempts", StorageLockDefaultMaxAttempts));
         }
 

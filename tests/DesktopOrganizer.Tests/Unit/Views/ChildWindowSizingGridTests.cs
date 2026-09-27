@@ -448,7 +448,9 @@ public class ChildWindowSizingGridTests
                 layoutEditMode.Object,
                 monitors.Object,
                 Mock.Of<IConfirmationService>(),
-                Mock.Of<IPanelCustomizeService>());
+                Mock.Of<IPanelCustomizeService>(),
+                Mock.Of<IPanelItemDragOutSession>(),
+                FakeDesktopScale.Uniform().Object);
 
             var harness = new Harness(app, originalResources, ownsApplication, window);
             harnessBox[0] = harness;

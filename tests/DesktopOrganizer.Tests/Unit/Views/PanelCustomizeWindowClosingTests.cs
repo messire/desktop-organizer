@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -165,9 +166,10 @@ public class PanelCustomizeWindowClosingTests
             var viewModel = new PanelCustomizeViewModel(
                 Mock.Of<IWindowManager>(),
                 Mock.Of<ILayoutEditModeService>(),
-                Mock.Of<IFolderPickerService>());
+                Mock.Of<IFolderPickerService>(),
+                TestLocalization.English);
 
-            var window = new PanelCustomizeWindow(viewModel, Mock.Of<IMonitorService>());
+            var window = new PanelCustomizeWindow(viewModel, Mock.Of<IMonitorService>(), FakeDesktopScale.Uniform().Object);
 
             return new PanelCustomizeWindowHarness(app, originalResources, ownsApplication, window, viewModel);
         }

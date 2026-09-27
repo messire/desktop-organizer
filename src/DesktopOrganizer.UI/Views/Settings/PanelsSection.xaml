@@ -4,13 +4,14 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+             xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <UserControl.Resources>
         <conv:PanelSubtitleConverter x:Key="PanelSubtitle"/>
     </UserControl.Resources>
     <StackPanel>
-        <TextBlock Text="Panels" Style="{StaticResource Settings.PageHeader}"/>
+        <TextBlock Text="{loc:Loc Settings_Nav_Panels}" Style="{StaticResource Settings.PageHeader}"/>
 
         <!-- Page selector — replaces the old top page-tab strip; selecting a page switches the active
              application page (MainWindowViewModel.SelectedPage -> SwitchPageCommand). -->
@@ -21,28 +22,36 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="Page" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Text="{loc:Loc Settings_Panels_Page_Label}" Style="{StaticResource Settings.CardHeader}"/>
                     <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="The panels below belong to this page. Ctrl+PgUp/PgDn also switches pages."/>
+                               Text="{loc:Loc Settings_Panels_PageSelector_Description}"/>
                 </StackPanel>
+                <!-- Page IDs are DATA, never re-translated (D-5/L-10) — only "default" resolves to a
+                     localized display name via PageDisplayNameConverter. -->
                 <ComboBox Grid.Column="1" MinWidth="140" VerticalAlignment="Center"
-                          AutomationProperties.Name="Page"
+                          AutomationProperties.Name="{loc:Loc Settings_Panels_Page_Label}"
                           ItemsSource="{Binding Pages}"
-                          SelectedItem="{Binding SelectedPage, Mode=TwoWay}"/>
+                          SelectedItem="{Binding SelectedPage, Mode=TwoWay}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{loc:LocBinding Converter={StaticResource PageDisplayName}}"/>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
             </Grid>
         </Border>
 
         <!-- Panel list for the current page. -->
         <Border Style="{StaticResource Settings.CardBorder}">
             <StackPanel>
-                <TextBlock Text="Panels on this page" Style="{StaticResource Settings.CardHeader}"/>
+                <TextBlock Text="{loc:Loc Settings_Panels_OnThisPage_Header}" Style="{StaticResource Settings.CardHeader}"/>
 
                 <Border BorderBrush="{StaticResource Brush.Settings.CardBorder}" BorderThickness="1"
                         CornerRadius="{StaticResource Radius.Control}" Height="180" Margin="0,8,0,0">
                     <Grid>
                         <ListBox ItemsSource="{Binding PanelsOnCurrentPage}"
                                  SelectedItem="{Binding SelectedPanel}"
-                                 AutomationProperties.Name="Panels on this page"
+                                 AutomationProperties.Name="{loc:Loc Settings_Panels_OnThisPage_Header}"
                                  BorderThickness="0">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
@@ -54,6 +63,7 @@
                                                     <Binding Path="ViewMode"/>
                                                     <Binding Path="SourceFolderPath"/>
                                                     <Binding Path="FilePaths.Count"/>
+                                                    <loc:CultureBinding/>
                                                 </MultiBinding>
                                             </TextBlock.Text>
                                         </TextBlock>
@@ -64,7 +74,7 @@
 
                         <!-- Empty state (docs/prompts/settings-window-redesign.md UX finding): shown only
                              while PanelsOnCurrentPage has no panels — mirrors the lasso-gesture hint. -->
-                        <TextBlock Text="No panels on this page yet. Click Add panel, or drag on the desktop with the right mouse button to draw one."
+                        <TextBlock Text="{loc:Loc Settings_Panels_EmptyState_Message}"
                                    TextWrapping="Wrap" TextAlignment="Center"
                                    VerticalAlignment="Center" HorizontalAlignment="Center"
                                    Margin="20" MaxWidth="280">
@@ -83,22 +93,22 @@
                 </Border>
 
                 <WrapPanel Orientation="Horizontal" Margin="0,10,0,0">
-                    <Button Content="Add panel" Padding="12,6" Margin="0,0,8,8"
+                    <Button Content="{loc:Loc Settings_Panels_AddPanel_Button}" Padding="12,6" Margin="0,0,8,8"
                             Command="{Binding AddPanelCommand}"/>
-                    <Button Content="Customize…" Padding="12,6" Margin="0,0,8,8"
+                    <Button Content="{loc:Loc Settings_Panels_Customize_Button}" Padding="12,6" Margin="0,0,8,8"
                             Command="{Binding CustomizePanelCommand}"/>
                     <!-- Opened on left-click via the code-behind Click handler (a pure view mechanic —
                          ContextMenu otherwise only opens on right-click). Each item's Command/
                          CommandParameter route through PlacementTarget.DataContext, the same pattern
                          ChildWindow.xaml's own header context menus already use, since a ContextMenu
                          is a separate visual-tree root and does not inherit DataContext. -->
-                    <Button Content="Move to page ▾" Padding="12,6" Margin="0,0,8,8"
+                    <Button Content="{loc:Loc Settings_Panels_MoveToPage_Button}" Padding="12,6" Margin="0,0,8,8"
                             Click="MoveToPageButton_Click">
                         <Button.ContextMenu>
                             <ContextMenu ItemsSource="{Binding Pages}" Placement="Bottom">
                                 <ContextMenu.ItemContainerStyle>
                                     <Style TargetType="MenuItem">
-                                        <Setter Property="Header" Value="{Binding}"/>
+                                        <Setter Property="Header" Value="{loc:LocBinding Converter={StaticResource PageDisplayName}}"/>
                                         <Setter Property="Command"
                                                 Value="{Binding PlacementTarget.DataContext.MovePanelToPageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                         <Setter Property="CommandParameter" Value="{Binding}"/>
@@ -107,7 +117,7 @@
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
-                    <Button Content="Remove" Padding="12,6" Margin="0,0,8,8"
+                    <Button Content="{loc:Loc Common_Remove_Button}" Padding="12,6" Margin="0,0,8,8"
                             Command="{Binding RemovePanelCommand}"/>
                 </WrapPanel>
             </StackPanel>
@@ -122,10 +132,10 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="Align all panels to grid" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Text="{loc:Loc Settings_Panels_AlignAll_Header}" Style="{StaticResource Settings.CardHeader}"/>
                     <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="Moves every panel on the current page onto the workspace grid and resizes it to whole grid units. There's no single-step undo."/>
-                    <TextBlock Text="Unavailable while the layout is locked." Margin="0,4,0,0">
+                               Text="{loc:Loc Settings_Panels_AlignAll_Description}"/>
+                    <TextBlock Text="{loc:Loc Common_LockedReason}" Margin="0,4,0,0">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
                                 <Setter Property="Visibility" Value="Collapsed"/>
@@ -138,7 +148,7 @@
                         </TextBlock.Style>
                     </TextBlock>
                 </StackPanel>
-                <Button Grid.Column="1" Content="Align…" Padding="12,6" VerticalAlignment="Center"
+                <Button Grid.Column="1" Content="{loc:Loc Settings_Panels_AlignAll_Button}" Padding="12,6" VerticalAlignment="Center"
                         Command="{Binding AlignAllPanelsCommand}"/>
             </Grid>
         </Border>

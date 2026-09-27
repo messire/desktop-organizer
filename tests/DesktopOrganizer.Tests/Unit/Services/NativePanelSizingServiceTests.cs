@@ -565,6 +565,62 @@ public class NativePanelSizingServiceTests
     }
 
     /// <summary>
+    /// Verifies that <c>WM_DPICHANGED</c>'s wParam-hiword DPI is converted through
+    /// <see cref="DesktopScaleModel.ScaleFromDpi"/> (release-hardening F2 #7) rather than a private
+    /// <c>dpi / 96.0</c> literal, for a representative set of DPI values including non-"nice" percentages.
+    /// </summary>
+    /// <param name="dpi">The DPI value carried in wParam's high word.</param>
+    /// <param name="expectedScale">The scale <see cref="DesktopScaleModel.ScaleFromDpi"/> produces for it.</param>
+    [Theory]
+    [InlineData(96, 1.0)]
+    [InlineData(120, 1.25)]
+    [InlineData(144, 1.5)]
+    [InlineData(192, 2.0)]
+    public void WmDpiChanged_ScalesWParamHiwordDpi_ThroughDesktopScaleModelScaleFromDpi(int dpi, double expectedScale)
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        var suggestedRect = new NativeRectPx(50, 60, 400, 500);
+        var lParam = new IntPtr(0x4000);
+        _nativeApiMock.Setup(api => api.ReadRect(lParam)).Returns(suggestedRect);
+        var wParam = new IntPtr((dpi << 16) | dpi);
+        var handled = false;
+
+        // Act
+        _hook!(Hwnd, WmDpiChanged, wParam, lParam, ref handled);
+
+        // Assert
+        Assert.Equal(expectedScale, DesktopScaleModel.ScaleFromDpi((uint)dpi));
+        _clientMock.Verify(c => c.DpiChanged(expectedScale, suggestedRect), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that a zero DPI in wParam's high word (never expected from real
+    /// <c>WM_DPICHANGED</c>, but defensive) falls back to <see cref="INativeApi.GetDpiScaleForWindow"/>
+    /// instead of <see cref="DesktopScaleModel.ScaleFromDpi"/>'s own <c>1.0</c> fallback — unchanged
+    /// behavior across the F2 migration.
+    /// </summary>
+    [Fact]
+    public void WmDpiChanged_ZeroDpiInWParam_FallsBackToGetDpiScaleForWindow()
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        var suggestedRect = new NativeRectPx(50, 60, 400, 500);
+        var lParam = new IntPtr(0x4000);
+        _nativeApiMock.Setup(api => api.ReadRect(lParam)).Returns(suggestedRect);
+        _nativeApiMock.Setup(api => api.GetDpiScaleForWindow(Hwnd)).Returns(1.75);
+        var handled = false;
+
+        // Act
+        _hook!(Hwnd, WmDpiChanged, IntPtr.Zero, lParam, ref handled);
+
+        // Assert
+        _clientMock.Verify(c => c.DpiChanged(1.75, suggestedRect), Times.Once);
+    }
+
+    /// <summary>
     /// Verifies that <c>WM_DPICHANGED_AFTERPARENT</c>, which carries no RECT payload, asks the native API
     /// directly for both the current DPI scale and the window rectangle instead of reading the message.
     /// </summary>

@@ -87,7 +87,7 @@ public class AppStorageRootTests
     {
         // Constructing the service touches no files (the manifest is read lazily), so the real
         // default constructor is safe to exercise here.
-        var service = new PanelItemStorageService();
+        var service = new PanelItemStorageService(Moq.Mock.Of<DesktopOrganizer.Services.Interfaces.INativeApi>());
 
         Assert.Equal(Path.Combine(AppStorageRoot.Default, "PanelItems"), service.StorageRoot);
     }

@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -20,6 +22,10 @@ public class PanelCustomizeViewModelTests
     private readonly Mock<IWindowManager> _windowManagerMock = new();
     private readonly Mock<ILayoutEditModeService> _layoutEditModeMock = new();
     private readonly Mock<IFolderPickerService> _folderPickerMock = new();
+
+    // docs/PLANS/localization.md R-5: a real LocalizationService fixed to English, independent of the
+    // test-runner machine's own culture — every pre-existing assertion below expects English text.
+    private readonly ILocalizationService _localization = TestLocalization.English;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PanelCustomizeViewModelTests"/> class, unlocking the
@@ -649,6 +655,53 @@ public class PanelCustomizeViewModelTests
         Assert.False(raised);
     }
 
+    // ── Localization: hot culture switch (docs/PLANS/localization.md §2.9) ──────────────────────
+
+    /// <summary>
+    /// Verifies that switching the language while the dialog is open re-raises
+    /// <see cref="PanelCustomizeViewModel.WindowTitle"/> and every localized description property, with
+    /// their Russian text (docs/PLANS/localization.md §2.9 "re-raise rule").
+    /// </summary>
+    [Fact]
+    public void CultureChanged_RaisesWindowTitleAndDescriptions()
+    {
+        var sut = BuildSut();
+        sut.Target = new ChildWindowModel { Title = "Downloads" };
+
+        var raised = new List<string>();
+        sut.PropertyChanged += (_, e) => raised.Add(e.PropertyName!);
+
+        _localization.ApplyLanguage("ru");
+
+        Assert.Equal("Настройка «Downloads»", sut.WindowTitle);
+        Assert.Equal("Вручную сохраняет порядок, который вы задали сами; По имени сортирует по алфавиту.", sut.SortModeDescription);
+        Assert.Contains(nameof(PanelCustomizeViewModel.WindowTitle), raised);
+        Assert.Contains(nameof(PanelCustomizeViewModel.SortModeDescription), raised);
+        Assert.Contains(nameof(PanelCustomizeViewModel.IconLayoutDescription), raised);
+        Assert.Contains(nameof(PanelCustomizeViewModel.AutoSizeToContentDescription), raised);
+    }
+
+    /// <summary>
+    /// Verifies that after <see cref="PanelCustomizeViewModel.Dispose"/>, a subsequent language switch no
+    /// longer raises notifications on this dialog (the <see cref="ILocalizationService.CultureChanged"/>
+    /// subscription was torn down).
+    /// </summary>
+    [Fact]
+    public void Dispose_UnsubscribesFromCultureChanged()
+    {
+        var sut = BuildSut();
+        sut.Target = new ChildWindowModel { Title = "Downloads" };
+
+        sut.Dispose();
+
+        var raised = false;
+        sut.PropertyChanged += (_, _) => raised = true;
+
+        _localization.ApplyLanguage("ru");
+
+        Assert.False(raised);
+    }
+
     private PanelCustomizeViewModel BuildSut() =>
-        new(_windowManagerMock.Object, _layoutEditModeMock.Object, _folderPickerMock.Object);
+        new(_windowManagerMock.Object, _layoutEditModeMock.Object, _folderPickerMock.Object, _localization);
 }

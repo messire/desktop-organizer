@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading;
 using DesktopOrganizer.Services.Abstractions.Storage;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Storage;
 
@@ -164,7 +165,7 @@ internal sealed class AtomicJsonFileWriter
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"AtomicJsonFileWriter: failed to enumerate orphaned temp files: {ex.GetType().Name}");
+            AppLog.Current.Error("AtomicJsonFileWriter", "OrphanedTempFilesEnumerateFailed", ex);
             return;
         }
 
@@ -176,7 +177,7 @@ internal sealed class AtomicJsonFileWriter
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"AtomicJsonFileWriter: failed to delete orphaned temp file: {ex.GetType().Name}");
+                AppLog.Current.Error("AtomicJsonFileWriter", "OrphanedTempFileDeleteFailed", ex);
             }
         }
     }
@@ -198,7 +199,7 @@ internal sealed class AtomicJsonFileWriter
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"AtomicJsonFileWriter: failed to enumerate quarantine files: {ex.GetType().Name}");
+            AppLog.Current.Error("AtomicJsonFileWriter", "QuarantineFilesEnumerateFailed", ex);
             return;
         }
 
@@ -216,7 +217,7 @@ internal sealed class AtomicJsonFileWriter
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"AtomicJsonFileWriter: failed to delete old quarantine file: {ex.GetType().Name}");
+                AppLog.Current.Error("AtomicJsonFileWriter", "QuarantineFileDeleteFailed", ex);
             }
         }
     }
@@ -229,7 +230,7 @@ internal sealed class AtomicJsonFileWriter
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"AtomicJsonFileWriter: failed to clean up temp file after a failed write: {ex.GetType().Name}");
+            AppLog.Current.Error("AtomicJsonFileWriter", "TempFileCleanupAfterFailedWriteFailed", ex);
         }
     }
 

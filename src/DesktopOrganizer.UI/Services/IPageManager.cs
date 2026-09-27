@@ -38,8 +38,10 @@ public interface IPageManager
     /// <returns>
     /// <see langword="true"/> if the page (and its panels) were actually removed; <see langword="false"/>
     /// if nothing changed — <paramref name="pageId"/> is <c>"default"</c> or unknown, or the user
-    /// declined the implementation's own irreversible-deletion confirmation gate (see
-    /// <c>PageManagerService.RemovePage</c>'s remarks, ADR-010 Decision 2 / ADR-009 Amendment 2).
+    /// declined the implementation's own deletion confirmation gate (see
+    /// <c>PageManagerService.RemovePage</c>'s remarks, ADR-010 Decision 2 / ADR-009 Amendment 2), or
+    /// some of the page's app-managed items could not be moved to the Recycle Bin — the page and its
+    /// panels are then kept and the user has already been told why (ADR-035).
     /// CRITICAL-1 fix (P08 fix cycle 2, 2026-09-22): callers that mirror this outcome onto their own
     /// state (e.g. <c>MainWindowViewModel.RemovePage</c>'s <c>Pages</c> collection) must consult this
     /// return value instead of assuming the removal always happened.

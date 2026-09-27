@@ -4,6 +4,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 using DesktopOrganizer.Core;
+using DesktopOrganizer.UI.Localization;
 using DesktopOrganizer.UI.ViewModels;
 
 using static DesktopOrganizer.UI.Views.VisualTreeWalker;
@@ -77,12 +78,13 @@ public sealed class HintPopupController
     /// <param name="outcome">The failure reason, used to select the message shown in the hint popup.</param>
     public void ShowRenameError(RenameOutcome outcome)
     {
+        var loc = LocalizationSource.Current;
         _renameErrorText.Text = outcome switch
         {
-            RenameOutcome.InvalidName => "Invalid file name.",
-            RenameOutcome.NameTaken => "A file or folder with that name already exists.",
-            RenameOutcome.NotFound => "File not found — it may have been deleted or moved.",
-            _ => "Failed to rename the file.",
+            RenameOutcome.InvalidName => loc.GetString("Hint_Rename_InvalidName"),
+            RenameOutcome.NameTaken => loc.GetString("Hint_Rename_NameTaken"),
+            RenameOutcome.NotFound => loc.GetString("Hint_Rename_NotFound"),
+            _ => loc.GetString("Hint_Rename_Failed"),
         };
 
         _renameErrorTimer?.Stop();

@@ -951,7 +951,9 @@ public class ChildWindowContentSizingTests
                 layoutEditModeMock.Object,
                 monitorServiceMock.Object,
                 confirmationMock.Object,
-                Mock.Of<IPanelCustomizeService>());
+                Mock.Of<IPanelCustomizeService>(),
+                Mock.Of<IPanelItemDragOutSession>(),
+                FakeDesktopScale.Uniform().Object);
 
             return new ChildWindowContentSizingHarness(app, originalResources, ownsApplication, window, viewModel, windowManagerMock, confirmationMock, layoutEditModeMock, monitorServiceMock, diagnosticsMock);
         }

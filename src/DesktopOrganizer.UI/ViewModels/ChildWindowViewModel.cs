@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using DesktopOrganizer.Core;
+using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Diagnostics;
 using DesktopOrganizer.UI.Models;
@@ -400,7 +401,15 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// <param name="paths">Raw file-system paths from the drop (<c>DataFormats.FileDrop</c>).</param>
     public void AddDroppedFiles(string[] paths)
     {
-        var sources = paths.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
+        // ADR-036 (release-hardening-1.0.md §E): a raw path that's already inside app-managed storage
+        // (e.g. dragged directly out of PanelItems via Explorer, rather than through the in-app
+        // drag-out session — see AddTransferredItem for the legitimate cross-panel path) is rejected
+        // outright, never MoveIn'd again — doing so would re-adopt it under a brand-new GUID directory
+        // and orphan whichever manifest entry (and panel) already owns it, producing a duplicate
+        // reference to the same managed copy.
+        var sources = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path) && !_itemStorage.IsManaged(path))
+            .ToArray();
         var resolved = new string[sources.Length];
         var anyMoved = false;
 
@@ -420,6 +429,58 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         AddFiles(resolved);
 
         MaybeRaiseMoveHint(anyMoved);
+    }
+
+    /// <summary>
+    /// Adds a single item this panel just received as an in-app drag-out transfer from a DIFFERENT
+    /// panel (ADR-036, release-hardening-1.0.md §E — see <c>IPanelItemDragOutSession</c>). Deliberately
+    /// does <b>not</b> go through <see cref="IPanelItemStorageService.MoveIn"/>/<c>MoveInDirectory</c>
+    /// like <see cref="AddDroppedFiles"/> does — <paramref name="path"/> is either already inside the
+    /// shared app-managed storage folder (the source panel's own managed copy — moving it again would
+    /// orphan the manifest entry the source panel's <see cref="RemoveTransferredItem"/> is about to
+    /// stop referencing) or a plain referenced-in-place path (never managed to begin with, same as any
+    /// other reference). Either way, this panel simply starts referencing the exact same path.
+    /// </summary>
+    /// <param name="path">The transferred item's path (managed or referenced-in-place).</param>
+    public void AddTransferredItem(string path)
+    {
+        // Defense in depth: ChildWindow.OnDrop already refuses a drop entirely for a Folder Portal
+        // before this is ever reached.
+        if (IsPortal) return;
+
+        AddFiles([path]);
+    }
+
+    /// <summary>
+    /// Removes <paramref name="item"/> from this panel because a DIFFERENT panel just accepted it as an
+    /// in-app drag-out transfer (ADR-036 §E). Unlike <c>RemoveFileItem</c>, this never calls
+    /// <see cref="IPanelItemStorageService.Restore"/>/<see cref="IPanelItemStorageService.ReleaseToRecycleBin"/>:
+    /// the underlying managed copy (if any) is shared storage that now belongs to the target panel's own
+    /// reference — this panel only ever stops pointing at it.
+    /// </summary>
+    /// <param name="item">The item that was just transferred away.</param>
+    public void RemoveTransferredItem(FileItem item)
+    {
+        RemoveFile(item);
+        FilesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Removes <paramref name="item"/> from this panel after an external drag-out (Explorer/the desktop,
+    /// ADR-036 §E) was independently confirmed to have actually moved the file away from its original
+    /// path (see <c>MovedOutVerifier</c>'s 0/500/2000&#160;ms existence-recheck — never trusts the raw
+    /// OLE drop effect). Tells the storage service to forget the (now-gone) path via
+    /// <see cref="IPanelItemStorageService.ForgetMovedOut"/> — a manifest/GUID-directory-only cleanup
+    /// that never deletes a file itself, mirroring how <c>RemoveFileItem</c> degrades to the Recycle Bin
+    /// for the in-app "Remove from panel" gesture, except here the file is already gone by the caller's
+    /// own hand (the shell's move), not this application's.
+    /// </summary>
+    /// <param name="item">The item confirmed to have moved out of its original location.</param>
+    public void RemoveMovedOutItem(FileItem item)
+    {
+        _itemStorage.ForgetMovedOut(item.Path);
+        RemoveFile(item);
+        FilesChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -559,7 +620,11 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Failed to read folder '{folder}': {ex.Message}");
+            AppLog.Current.Error(
+                "ChildWindowViewModel",
+                "ReadFolderFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", folder));
             return [];
         }
     }
@@ -578,11 +643,17 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     {
         if (item is null) return;
 
-        RemoveFile(item);
-
         var outcome = _itemStorage.Restore(item.Path);
         if (outcome == RestoreOutcome.OriginalPathUnknown)
-            _itemStorage.Release(item.Path); // legacy managed copy with no manifest entry — old behavior
+        {
+            // Legacy managed copy with no manifest entry — there is nowhere to restore it to, so it goes
+            // to the Recycle Bin (ADR-035; never a permanent delete). If the Recycle Bin refuses it, the
+            // item stays in the panel: removing it from the UI would orphan the only copy in storage.
+            var recycle = _itemStorage.ReleaseToRecycleBin([item.Path]);
+            if (!recycle.IsComplete) return;
+        }
+
+        RemoveFile(item);
 
         // NotManaged: Restore already no-op'd. Failed: logged inside the service; item stays removed from UI
         // even though the managed copy is orphaned in storage — acceptable, documented in the plan (risk table).
@@ -1001,7 +1072,11 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Failed to read folder '{model.SourceFolderPath}': {ex.Message}");
+            AppLog.Current.Error(
+                "ChildWindowViewModel",
+                "ReadFolderFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", model.SourceFolderPath));
             return [];
         }
     }

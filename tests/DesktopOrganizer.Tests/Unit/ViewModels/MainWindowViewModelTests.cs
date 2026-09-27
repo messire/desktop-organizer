@@ -1,7 +1,10 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Globalization;
 using System.Windows;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Localization;
+using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -13,8 +16,8 @@ namespace DesktopOrganizer.Tests.Unit.ViewModels;
 /// Unit tests for <see cref="MainWindowViewModel.RemovePanelCommand"/> (<c>RemovePanel</c>).
 /// Covers the confirmation gate added in front of the irreversible
 /// <see cref="IWindowManager.RemoveChildWindow(Guid, bool)"/> call (fences-ux-parity-reviewer finding
-/// #2): panel deletion moves app-managed item copies past the Recycle Bin (<c>File.Delete</c> /
-/// <c>Directory.Delete</c>), so it must never happen without an explicit user confirmation.
+/// #2): panel deletion moves app-managed item copies to the Recycle Bin (ADR-035), so it must never
+/// happen without an explicit user confirmation — and a blocked removal must be reported to the user.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class MainWindowViewModelTests
@@ -30,6 +33,14 @@ public class MainWindowViewModelTests
     private readonly Mock<IPanelItemStorageService> _itemStorageMock = new();
     private readonly Mock<ILayoutEditModeService> _layoutEditModeMock = new();
     private readonly Mock<IPanelCustomizeService> _panelCustomizeServiceMock = new();
+    private readonly Mock<IUpdateCheckService> _updateCheckServiceMock = new();
+    private readonly Mock<IExternalLinkLauncher> _linkLauncherMock = new();
+
+    // A real LocalizationService (English) rather than a mock: several tests below assert actual
+    // confirmation-dialog text (e.g. "moved to the Recycle Bin", plural panel counts) — the same pattern the
+    // localization work packages use throughout (docs/PLANS/localization.md R-5: tests fix culture
+    // explicitly rather than relying on the machine's own culture).
+    private readonly ILocalizationService _localization = TestLocalization.English;
 
     // ── CRITICAL-1 regression: AddPanelCommand must not seed a new panel with the legacy, near-invisible
     // #1E1E1E default accent — see AccentPalette.ResolveDefaultAccent. ────────────────────────────────
@@ -254,6 +265,42 @@ public class MainWindowViewModelTests
         _windowManagerMock.Verify(
             w => w.RemoveChildWindow(panel.Id, true),
             Times.Once);
+        _confirmationMock.Verify(
+            c => c.Notify(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// ADR-035 fail-visibly: when <see cref="IWindowManager.RemoveChildWindow(Guid, bool)"/> reports the
+    /// removal as <see cref="PanelRemovalResult.Blocked"/> (some managed items could not be moved to the
+    /// Recycle Bin, so the panel was kept), the user is told — once, with a warning and the number of
+    /// items that stayed.
+    /// </summary>
+    [Fact]
+    public void RemovePanel_RemovalBlocked_NotifiesUserWithRemainingCount()
+    {
+        // Arrange
+        var sut = BuildSut();
+        var panel = new ChildWindowModel { FilePaths = ["C:\\managed\\a.txt", "C:\\managed\\b.txt"] };
+        sut.SelectedPanel = panel;
+        _itemStorageMock.Setup(s => s.IsManaged(It.IsAny<string>())).Returns(true);
+        _confirmationMock
+            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
+            .Returns(true);
+        _windowManagerMock
+            .Setup(w => w.RemoveChildWindow(panel.Id, true))
+            .Returns(PanelRemovalResult.Blocked(["C:\\managed\\a.txt", "C:\\managed\\b.txt"]));
+
+        // Act
+        sut.RemovePanelCommand.Execute(null);
+
+        // Assert
+        _confirmationMock.Verify(
+            c => c.Notify(
+                It.Is<string>(m => m.StartsWith("2 ", StringComparison.Ordinal) && m.Contains("Recycle Bin")),
+                _localization.GetString("Recycle_Failed_Title"),
+                MessageBoxImage.Warning),
+            Times.Once);
     }
 
     /// <summary>
@@ -323,7 +370,7 @@ public class MainWindowViewModelTests
         // Assert
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => m.Contains("deleted from disk")),
+                It.Is<string>(m => m.Contains("moved to the Recycle Bin")),
                 It.IsAny<string>(),
                 MessageBoxImage.Warning),
             Times.Once);
@@ -352,7 +399,7 @@ public class MainWindowViewModelTests
         // Assert — neutral overload (default Question icon), not the Warning one.
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => !m.Contains("deleted from disk")),
+                It.Is<string>(m => !m.Contains("moved to the Recycle Bin")),
                 It.IsAny<string>(),
                 MessageBoxImage.Question),
             Times.Once);
@@ -375,8 +422,8 @@ public class MainWindowViewModelTests
         // ChildWindowViewModel has already remapped it to the managed copy in memory (ADR-009
         // Amendment). SyncAllWindowsToModels() must run — and its effect must already be visible —
         // before hasManagedFiles is computed, or this dialog would wrongly show the neutral
-        // "nothing lost" text right before RemoveChildWindow's own SyncToModel()+Release() silently
-        // deletes the by-then-managed file past the Recycle Bin.
+        // "nothing lost" text right before RemoveChildWindow's own SyncToModel()+recycle silently
+        // sends the by-then-managed file to the Recycle Bin.
         var sut = BuildSut();
         var panel = new ChildWindowModel { FilePaths = ["C:\\stale\\original.lnk"] };
         sut.SelectedPanel = panel;
@@ -397,7 +444,7 @@ public class MainWindowViewModelTests
         // Assert
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => m.Contains("deleted from disk")),
+                It.Is<string>(m => m.Contains("moved to the Recycle Bin")),
                 It.IsAny<string>(),
                 MessageBoxImage.Warning),
             Times.Once);
@@ -1317,8 +1364,144 @@ public class MainWindowViewModelTests
         Assert.Equal(["place", "create"], order);
     }
 
+    // ── Language picker (docs/PLANS/localization.md §2.9 contract C-5) ─────────────────────────────
+
+    /// <summary>
+    /// Verifies that setting <see cref="MainWindowViewModel.SelectedLanguageOption"/> to an option with a
+    /// different <see cref="LanguageOption.Tag"/> writes and saves <see cref="IAppSettings.Language"/>
+    /// and applies the new language via <see cref="ILocalizationService.ApplyLanguage"/>.
+    /// </summary>
+    [Fact]
+    public void SelectedLanguageOption_Set_WritesSettingsSavesAndApplies()
+    {
+        var sut = BuildSut();
+        var ruOption = sut.LanguageOptions.First(o => o.Tag == "ru");
+
+        sut.SelectedLanguageOption = ruOption;
+
+        _appSettingsMock.VerifySet(a => a.Language = "ru", Times.Once);
+        _appSettingsMock.Verify(a => a.Save(), Times.Once);
+        Assert.Equal(CultureInfo.GetCultureInfo("ru"), _localization.CurrentCulture);
+        Assert.Same(ruOption, sut.SelectedLanguageOption);
+    }
+
+    /// <summary>
+    /// Verifies that re-selecting the already-current <see cref="LanguageOption"/> is a no-op: no
+    /// <see cref="IAppSettings.Save"/>, no re-apply.
+    /// </summary>
+    [Fact]
+    public void SelectedLanguageOption_SameTag_NoSave()
+    {
+        var sut = BuildSut();
+        var current = sut.SelectedLanguageOption;
+
+        sut.SelectedLanguageOption = current;
+
+        _appSettingsMock.Verify(a => a.Save(), Times.Never);
+    }
+
+    /// <summary>
+    /// Fix cycle 1 NIT: setting <see cref="MainWindowViewModel.SelectedLanguageOption"/> to
+    /// <see langword="null"/> — which <c>ComboBox.SelectedItem</c> bindings can do transiently — is a
+    /// no-op rather than throwing <see cref="ArgumentNullException"/> out of the binding engine.
+    /// </summary>
+    [Fact]
+    public void SelectedLanguageOption_SetNull_NoOp()
+    {
+        var sut = BuildSut();
+        var current = sut.SelectedLanguageOption;
+
+        sut.SelectedLanguageOption = null;
+
+        Assert.Same(current, sut.SelectedLanguageOption);
+        _appSettingsMock.Verify(a => a.Save(), Times.Never);
+    }
+
+    /// <summary>
+    /// Fix cycle 1 NIT: the constructor's initial <see cref="MainWindowViewModel.SelectedLanguageOption"/>
+    /// match against <see cref="ILocalizationService.LanguagePreference"/> is case-insensitive — a
+    /// defense-in-depth companion to <c>LocalizationService</c>'s own casing normalization (which already
+    /// makes this scenario unreachable through the REAL service; this test exercises the match directly
+    /// via a mock returning an unnormalized <c>"RU"</c>, so a future <see cref="ILocalizationService"/>
+    /// implementation that skipped normalization still gets the correct initial selection here).
+    /// </summary>
+    [Fact]
+    public void SelectedLanguageOption_InitialSelection_MatchesLanguagePreferenceCaseInsensitively()
+    {
+        var localizationMock = new Mock<ILocalizationService>();
+        localizationMock.SetupGet(l => l.LanguagePreference).Returns("RU");
+
+        var sut = BuildSut(localization: localizationMock.Object);
+
+        Assert.Equal("ru", sut.SelectedLanguageOption.Tag);
+    }
+
+    /// <summary>
+    /// Fix cycle 1 MINOR-2: verifies that the "Follow Windows" <see cref="LanguageOption"/>'s
+    /// <see cref="LanguageOption.DisplayName"/> names, in its own self-name, whichever language
+    /// <paramref name="systemCultureTag"/> resolves to — driven by the explicit
+    /// <see cref="CultureInfo"/> <see cref="BuildSut"/> passes to <c>MainWindowViewModel</c>'s
+    /// constructor, not by <see cref="DesktopOrganizer.Localization.SystemCulture.OriginalUiCulture"/>
+    /// (the actual test-runner machine's own OS language). This is what makes both the "ru" and "en"
+    /// branches deterministically verifiable on any machine — the previous version of this test only
+    /// ever exercised whichever branch happened to match the author's own machine.
+    /// </summary>
+    /// <param name="systemCultureTag">The <see cref="CultureInfo"/> tag <see cref="BuildSut"/> wires up as the "system" UI culture.</param>
+    /// <param name="expectedNativeName">The expected embedded native language name for <paramref name="systemCultureTag"/>.</param>
+    [Theory]
+    [InlineData("en", "English")]
+    [InlineData("ru", "Русский")]
+    public void LanguageOptions_FollowWindowsDisplayName_NamesTheGivenSystemUiCultureNatively(
+        string systemCultureTag, string expectedNativeName)
+    {
+        var sut = BuildSut(CultureInfo.GetCultureInfo(systemCultureTag));
+        var followWindows = sut.LanguageOptions.First(o => o.Tag == string.Empty);
+
+        var expected = _localization.Format("Language_FollowWindows_Format", expectedNativeName);
+
+        Assert.Equal(expected, followWindows.DisplayName);
+    }
+
+    /// <summary>
+    /// Verifies that the align-all confirmation message uses the Russian plural form when the UI
+    /// language is Russian (docs/PLANS/localization.md L-8).
+    /// </summary>
+    [Fact]
+    public void AlignAllConfirm_UsesRussianPlural()
+    {
+        _localization.ApplyLanguage("ru");
+        _pageManagerMock.SetupGet(p => p.CurrentPage).Returns("page-1");
+        string? capturedMessage = null;
+        _confirmationMock
+            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
+            .Callback<string, string, MessageBoxImage>((message, _, _) => capturedMessage = message)
+            .Returns(true);
+        var sut = BuildSut();
+        sut.Panels.Add(new ChildWindowModel { PageId = "page-1" });
+        sut.Panels.Add(new ChildWindowModel { PageId = "page-1" });
+
+        sut.AlignAllPanelsCommand.Execute(null);
+
+        Assert.NotNull(capturedMessage);
+        Assert.Contains("2 панели", capturedMessage); // ru "Few" category for n=2.
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
-    private MainWindowViewModel BuildSut()
+
+    /// <param name="systemUiCulture">
+    /// The <c>systemUiCulture</c> wired into <c>MainWindowViewModel</c>'s constructor (fix cycle 1
+    /// MINOR-2) — defaults to English so every existing call site keeps its prior behavior unchanged;
+    /// <see cref="LanguageOptions_FollowWindowsDisplayName_NamesTheGivenSystemUiCultureNatively"/> passes
+    /// an explicit culture to exercise the "ru" branch deterministically.
+    /// </param>
+    /// <param name="localization">
+    /// The <c>localization</c> wired into <c>MainWindowViewModel</c>'s own constructor — defaults to the
+    /// shared real <see cref="_localization"/> field every other test relies on; <see cref="SelectedLanguageOption_InitialSelection_MatchesLanguagePreferenceCaseInsensitively"/>
+    /// substitutes a mock to exercise a preference whose casing a real <see cref="LocalizationService"/>
+    /// would already have normalized away (fix cycle 1 NIT). <see cref="LayoutSnapshotsViewModel"/> always
+    /// gets the real <see cref="_localization"/>, regardless — it is unrelated to what that test verifies.
+    /// </param>
+    private MainWindowViewModel BuildSut(CultureInfo? systemUiCulture = null, ILocalizationService? localization = null)
     {
         _pageManagerMock.Setup(p => p.Pages).Returns([]);
         _layoutSnapshotServiceMock.Setup(s => s.Snapshots).Returns([]);
@@ -1332,7 +1515,16 @@ public class MainWindowViewModelTests
         // (D-10 contract) — this call site is a mechanical wiring fixup only, same category as
         // DiConfig.cs's one-line IInputDialogService registration; no MainWindowViewModel behavior here
         // changed.
-        var layoutSnapshots = new LayoutSnapshotsViewModel(_layoutSnapshotServiceMock.Object, _confirmationMock.Object, _inputDialogServiceMock.Object);
+        var layoutSnapshots = new LayoutSnapshotsViewModel(
+            _layoutSnapshotServiceMock.Object,
+            _confirmationMock.Object,
+            _inputDialogServiceMock.Object,
+            _localization);
+
+        // Package G2 wiring fixup only (release-hardening-1.0.md §G2): MainWindowViewModel's constructor
+        // gained an AboutViewModel parameter, same category as WP-C's own IInputDialogService fixup above
+        // — no MainWindowViewModel behavior under test here changed.
+        var about = new AboutViewModel(_updateCheckServiceMock.Object, _linkLauncherMock.Object, localization ?? _localization);
 
         return new MainWindowViewModel(
             _windowManagerMock.Object,
@@ -1344,6 +1536,9 @@ public class MainWindowViewModelTests
             _confirmationMock.Object,
             _itemStorageMock.Object,
             _layoutEditModeMock.Object,
-            _panelCustomizeServiceMock.Object);
+            _panelCustomizeServiceMock.Object,
+            localization ?? _localization,
+            systemUiCulture ?? CultureInfo.GetCultureInfo("en"),
+            about);
     }
 }

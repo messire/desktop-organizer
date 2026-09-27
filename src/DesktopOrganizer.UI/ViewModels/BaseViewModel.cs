@@ -48,11 +48,6 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     public ObservableCollection<FileItem> FileItems => _fileItems;
 
     /// <summary>
-    /// Text displaying the current number of visible files.
-    /// </summary>
-    public string FileCountText => $"File Count: {FileItems.Count}";
-
-    /// <summary>
     /// The file item currently selected by the user.
     /// </summary>
     public FileItem? SelectedFile
@@ -326,12 +321,11 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     protected virtual void OnSourceChanged() => ReplaceFileItems(_allItems);
 
     /// <summary>
-    /// Replaces <see cref="FileItems"/> with <paramref name="items"/> in a single batch, raising
-    /// exactly one <see cref="System.Collections.Specialized.NotifyCollectionChangedEventArgs"/>
-    /// (<c>Reset</c>) and one <see cref="FileCountText"/> change notification, regardless of how many
-    /// elements are added or removed. Subclasses that override <see cref="OnSourceChanged"/> to apply
-    /// a filter (e.g. content-filter projections) should call this instead of mutating
-    /// <see cref="FileItems"/> by hand with <c>Clear()</c> + <c>Add()</c>.
+    /// Replaces <see cref="FileItems"/> with <paramref name="items"/> in a single batch, raising exactly
+    /// one <see cref="System.Collections.Specialized.NotifyCollectionChangedEventArgs"/> (<c>Reset</c>),
+    /// regardless of how many elements are added or removed. Subclasses that override
+    /// <see cref="OnSourceChanged"/> to apply a filter (e.g. content-filter projections) should call this
+    /// instead of mutating <see cref="FileItems"/> by hand with <c>Clear()</c> + <c>Add()</c>.
     /// </summary>
     /// <remarks>
     /// A <c>Reset</c> notification makes a bound <see cref="System.Windows.Controls.ListBox"/> forget
@@ -350,17 +344,16 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
 
         // Early exit (ADR-014 Decision 8): if the new projection is reference-for-reference identical
         // to what `_fileItems` already holds, skip the rebuild entirely — no `ReplaceAll` (so no
-        // `Reset`), no `FileCountText` notification, nothing to restore the selection from (it was
-        // never disturbed). This is what keeps the `Name -> Manual` drag-triggered switch (see
-        // `ChildWindowViewModel.ReorderItem`) from visibly "jumping": `SortAllItems` materializes
-        // `_allItems` into the same order the view was already showing, so the very next
-        // `ApplyFilterAndSort` produces a projection identical to the current one and lands here.
+        // `Reset`), nothing to restore the selection from (it was never disturbed). This is what keeps
+        // the `Name -> Manual` drag-triggered switch (see `ChildWindowViewModel.ReorderItem`) from
+        // visibly "jumping": `SortAllItems` materializes `_allItems` into the same order the view was
+        // already showing, so the very next `ApplyFilterAndSort` produces a projection identical to the
+        // current one and lands here.
         if (SequenceEqualByReference(_fileItems, materialized)) return;
 
         var selectedPath = _selectedFile?.Path;
 
         _fileItems.ReplaceAll(materialized);
-        OnPropertyChanged(nameof(FileCountText));
 
         if (selectedPath is not null)
         {

@@ -17,4 +17,13 @@ public interface IConfirmationService
     /// Windows convention.
     /// </param>
     bool Confirm(string message, string title = "", MessageBoxImage icon = MessageBoxImage.Question);
+
+    /// <summary>
+    /// Displays an informational/warning message with a single OK button (no decision to make) — e.g.
+    /// "some items could not be moved to the Recycle Bin, the panel was kept" (ADR-035).
+    /// </summary>
+    /// <param name="message">The body text of the dialog.</param>
+    /// <param name="title">The caption of the dialog window.</param>
+    /// <param name="icon">The icon shown in the dialog.</param>
+    void Notify(string message, string title, MessageBoxImage icon);
 }

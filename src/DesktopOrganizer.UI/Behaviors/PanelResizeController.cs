@@ -47,6 +47,7 @@ public sealed class PanelResizeController : IPanelResizeController
     private readonly double _titleBarHeight;
     private readonly IGestureDiagnostics _diagnostics;
     private readonly ResizeGestureSession _session;
+    private readonly IDesktopScaleProvider _desktopScale;
 
     // P04 (docs/PLANS/workspace-grid-03-04-integration.md §3.3/§3.4): the ADR-028 workspace-grid seam,
     // derived from the panel window itself (Views.ChildWindow implements it in its Sizing partial) so
@@ -93,6 +94,11 @@ public sealed class PanelResizeController : IPanelResizeController
     /// <see cref="ResizeGestureSession"/>, which claims <see cref="PanelInteractionState.Resizing"/> for
     /// the duration of each gesture.
     /// </param>
+    /// <param name="desktopScale">
+    /// The per-monitor DPI snapshot provider (release-hardening F, ADR-037) — every
+    /// <see cref="Window.Left"/>/<see cref="Window.Top"/> read/write in this class goes through
+    /// <see cref="Interaction.PanelWindowCoordinates"/> against its current snapshot.
+    /// </param>
     /// <param name="isFreeResizeModifierDown">
     /// P04 fix-cycle 1: test seam for the <c>Alt</c> free-resize modifier, forwarded verbatim to
     /// <see cref="ResizeGestureSession"/>. <see langword="null"/> (production, and every pre-existing
@@ -109,6 +115,7 @@ public sealed class PanelResizeController : IPanelResizeController
         double titleBarHeight,
         IGestureDiagnostics diagnostics,
         PanelInteractionTracker tracker,
+        IDesktopScaleProvider desktopScale,
         Func<bool>? isFreeResizeModifierDown = null)
     {
         _window = window;
@@ -121,6 +128,7 @@ public sealed class PanelResizeController : IPanelResizeController
         _titleBarHeight = titleBarHeight;
         _diagnostics = diagnostics;
         _session = new ResizeGestureSession(tracker, isFreeResizeModifierDown);
+        _desktopScale = desktopScale;
         _gridHost = window as IPanelSizingGridHost;
     }
 
@@ -161,7 +169,7 @@ public sealed class PanelResizeController : IPanelResizeController
         }
 
         var model = _getModel();
-        var startBounds = new Rect(_window.Left, _window.Top, _window.Width, _window.Height);
+        var startBounds = PanelWindowCoordinates.ReadDesktopBounds(_window, _desktopScale.Current);
 
         // P04: ONE resolution per gesture (§1.3's "снимок один раз на жест" contract) — feeds both the
         // constraint floors (§3.3) and the per-frame quantisation inside the session (§3.4).
@@ -240,7 +248,8 @@ public sealed class PanelResizeController : IPanelResizeController
         // exception now ends the gesture instead of escaping into the WPF input pipeline.
         try
         {
-            var current = new Rect(_window.Left, _window.Top, _window.Width, _window.Height);
+            var scale = _desktopScale.Current;
+            var current = PanelWindowCoordinates.ReadDesktopBounds(_window, scale);
 
             if (!_session.TryUpdate(edge, new Vector(e.HorizontalChange, e.VerticalChange), current, out applied))
             {
@@ -252,10 +261,7 @@ public sealed class PanelResizeController : IPanelResizeController
                 return;
             }
 
-            _window.Left = applied.Left;
-            _window.Top = applied.Top;
-            _window.Width = applied.Width;
-            _window.Height = applied.Height;
+            PanelWindowCoordinates.WriteDesktopBounds(_window, applied, scale);
         }
         catch (Exception ex)
         {
@@ -409,7 +415,7 @@ public sealed class PanelResizeController : IPanelResizeController
         // and future caller of SnapWidthToGrid inherits it (and so P04 needs no edit in the
         // ChildWindow.xaml.cs region P03 is concurrently changing — §4.2). LegacyFreeform keeps the
         // existing behaviour, F-2 remaining that mode's documented limitation.
-        if (PanelSizingGridSupport.IsGridAligned(_gridHost, new Rect(_window.Left, _window.Top, _window.Width, _window.Height))) return;
+        if (PanelSizingGridSupport.IsGridAligned(_gridHost, PanelWindowCoordinates.ReadDesktopBounds(_window, _desktopScale.Current))) return;
 
         var cell = GridMetrics.CellSize(model.IconSize);
         var chrome = GridMetrics.ContentHorizontalChrome(model.IconLayoutPolicy, SystemParameters.VerticalScrollBarWidth);
@@ -476,9 +482,11 @@ public sealed class PanelResizeController : IPanelResizeController
             // GridAligned panel; in the old order that clamp saw an oversized rectangle and "fixed" it by
             // TRANSLATING the panel, moving the very edge the resize had anchored. For a LegacyFreeform
             // panel PersistSpans is a no-op, so the legacy order (snap, then save) is unchanged.
+            var scale = _desktopScale.Current;
+
             PanelSizingGridSupport.PersistSpans(
                 _gridHost,
-                new Rect(_window.Left, _window.Top, _window.Width, _window.Height),
+                PanelWindowCoordinates.ReadDesktopBounds(_window, scale),
                 outcome.Edge,
                 _commitObstacles);
 
@@ -489,7 +497,7 @@ public sealed class PanelResizeController : IPanelResizeController
             // see ResizeGestureSession.TryUpdate). Runs AFTER PersistSpans, same ordering rationale as
             // that call relative to _snapToGrid() below: whichever step can still move Width/Height must
             // run before the position-only drop-time snap.
-            var beforeSizeGridNormalize = new Rect(_window.Left, _window.Top, _window.Width, _window.Height);
+            var beforeSizeGridNormalize = PanelWindowCoordinates.ReadDesktopBounds(_window, scale);
             var sizeGridNormalized = PanelSizingGridSupport.NormalizeCommittedSize(
                 _gridHost,
                 _getModel(),
@@ -500,12 +508,7 @@ public sealed class PanelResizeController : IPanelResizeController
                 outcome.Edge);
 
             if (sizeGridNormalized != beforeSizeGridNormalize)
-            {
-                _window.Left = sizeGridNormalized.Left;
-                _window.Top = sizeGridNormalized.Top;
-                _window.Width = sizeGridNormalized.Width;
-                _window.Height = sizeGridNormalized.Height;
-            }
+                PanelWindowCoordinates.WriteDesktopBounds(_window, sizeGridNormalized, scale);
 
             _snapToGrid();
 
@@ -529,7 +532,7 @@ public sealed class PanelResizeController : IPanelResizeController
             _getModel()?.Id,
             outcome.Edge.ToString(),
             reason == ResizeEndReason.Canceled,
-            new Rect(_window.Left, _window.Top, _window.Width, _window.Height),
+            PanelWindowCoordinates.ReadDesktopBounds(_window, _desktopScale.Current),
             outcome.Reason.ToString(),
             exceptionType);
     }

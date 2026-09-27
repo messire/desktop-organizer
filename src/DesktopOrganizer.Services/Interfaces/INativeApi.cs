@@ -76,13 +76,22 @@ internal interface INativeApi
     IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string? windowName);
 
     /// <summary>
-    /// Sends a message to a window (<c>SendMessage</c>).
+    /// Sends a message to a window and waits for it with an upper bound (<c>SendMessageTimeoutW</c> with
+    /// <c>SMTO_NORMAL | SMTO_ABORTIFHUNG</c>). There deliberately is no plain, unbounded
+    /// <c>SendMessage</c> on this façade: every cross-process send from the UI thread must be able to
+    /// give up on a hung target (release-hardening review M9).
     /// </summary>
-    /// <param name="hwnd">Handle of the destination window.</param>
+    /// <param name="hwnd">Handle of the destination window. <see cref="IntPtr.Zero"/> answers <see langword="false"/>.</param>
     /// <param name="msg">The message to send.</param>
     /// <param name="wParam">The first message-specific parameter (<c>wParam</c>).</param>
     /// <param name="lParam">The second message-specific parameter (<c>lParam</c>).</param>
-    IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+    /// <param name="timeoutMs">Maximum time to wait, in milliseconds.</param>
+    /// <param name="result">Receives the message result when delivered; <see cref="IntPtr.Zero"/> otherwise.</param>
+    /// <returns>
+    /// <see langword="true"/> when the target processed the message; <see langword="false"/> on timeout,
+    /// when the target is hung (abandoned immediately), or on any other failure. Never throws.
+    /// </returns>
+    bool SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam, uint timeoutMs, out IntPtr result);
 
     /// <summary>
     /// Enumerates all top-level windows, invoking <paramref name="callback"/> for each (<c>EnumWindows</c>).
@@ -188,6 +197,22 @@ internal interface INativeApi
     bool IsWindowVisible(IntPtr hwnd);
 
     /// <summary>
+    /// Returns whether the user (or policy) turned desktop icons off in Explorer itself: the
+    /// "View &gt; Show desktop icons" setting (<c>HKCU\…\Explorer\Advanced\HideIcons = 1</c>) or the
+    /// "Hide and disable all items on the desktop" policy (<c>HKCU\…\Policies\Explorer\NoDesktop = 1</c>).
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when either is on. <see langword="false"/> when both are off, absent, or
+    /// unreadable. Never throws.
+    /// </returns>
+    /// <remarks>
+    /// That state belongs to the user, not to this application: startup self-heal must never "repair"
+    /// it (release-hardening review L5). A registry read, not P/Invoke, but kept behind this façade so
+    /// the decision logic stays unit-testable.
+    /// </remarks>
+    bool IsExplorerDesktopIconsSettingOff();
+
+    /// <summary>
     /// Returns the handle of the window the user is currently working with,
     /// or <see cref="IntPtr.Zero"/> if there is none.
     /// </summary>
@@ -268,6 +293,28 @@ internal interface INativeApi
     /// </param>
     bool SendToRecycleBin(string[] paths, IntPtr ownerHwnd);
 
+    /// <summary>
+    /// Moves the given paths to the Recycle Bin in a single <c>SHFileOperationW</c> batch
+    /// (<c>FO_DELETE</c> with <c>FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_WANTNUKEWARNING</c>,
+    /// ADR-035). Unlike <see cref="SendToRecycleBin"/> (fully silent, used by the System Icons panel),
+    /// this variant is for app-managed panel items that must NEVER be destroyed permanently: with
+    /// <c>FOF_WANTNUKEWARNING</c> the shell asks the user before deleting an item that can't go to the
+    /// Recycle Bin (too large, drive without a Recycle Bin) instead of silently nuking it, and the
+    /// progress dialog is kept (no <c>FOF_SILENT</c>) so a long operation can be cancelled.
+    /// </summary>
+    /// <remarks>
+    /// Must be called on the UI (STA) thread — the shell may show UI. The return value only reflects
+    /// what the shell reported; callers must decide what was actually recycled by checking which
+    /// paths still exist afterwards (the operation can partially succeed). Never throws.
+    /// </remarks>
+    /// <param name="paths">Full paths of the files/folders to recycle. Must exist; must not be <c>\\?\</c> long paths.</param>
+    /// <param name="ownerHwnd">Owner window for any shell UI, or <see cref="IntPtr.Zero"/>.</param>
+    /// <returns>
+    /// <see langword="true"/> if the shell reported success with no aborted operations; otherwise
+    /// <see langword="false"/> (error, user declined the permanent-delete warning, or cancelled).
+    /// </returns>
+    bool RecycleItems(string[] paths, IntPtr ownerHwnd);
+
     // ── Low-level mouse hook (WH_MOUSE_LL), see ADR-003 / ADR-012 ────────────────────────────────
 
     /// <summary>
@@ -340,13 +387,16 @@ internal interface INativeApi
     // ── Monitors & hidden broadcast window ──────────────────────────────────────────────────────
 
     /// <summary>
-    /// Enumerates the attached display monitors. Rectangles are physical pixels.
+    /// Enumerates the attached display monitors. Rectangles are physical pixels (the process is
+    /// PerMonitorV2, so they are never DPI-virtualized). Each entry also carries the monitor's effective
+    /// DPI (<c>GetDpiForMonitor(MDT_EFFECTIVE_DPI)</c>), or 0 when that is unavailable.
     /// Returns an empty list on failure.
     /// </summary>
     IReadOnlyList<NativeMonitorInfo> GetMonitorInfos();
 
     /// <summary>
-    /// System (primary monitor) DPI scale — 1.0 at 96 DPI. Returns 1.0 on failure.
+    /// System (primary monitor) DPI scale — 1.0 at 96 DPI (<see cref="DesktopScaleModel.ScaleFromDpi"/>).
+    /// Returns 1.0 on failure.
     /// </summary>
     double GetSystemDpiScale();
 
@@ -383,6 +433,70 @@ internal interface INativeApi
     /// <param name="lParam">The second message-specific parameter (<c>lParam</c>).</param>
     IntPtr DefaultWindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
 
+    // ── Explorer restart recovery (ADR-034) ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Registers (or looks up) a system-wide unique window message (<c>RegisterWindowMessage</c>), e.g.
+    /// the shell's <c>"TaskbarCreated"</c> broadcast.
+    /// </summary>
+    /// <param name="messageName">The message name.</param>
+    /// <returns>The message id (in the <c>0xC000</c>–<c>0xFFFF</c> range), or 0 on failure. Never throws.</returns>
+    int RegisterWindowMessage(string messageName);
+
+    /// <summary>
+    /// Lets <paramref name="msg"/> through the UIPI message filter of <paramref name="hwnd"/>
+    /// (<c>ChangeWindowMessageFilterEx(MSGFLT_ALLOW)</c>). Needed for <c>TaskbarCreated</c> to reach an
+    /// elevated process from a non-elevated Explorer.
+    /// </summary>
+    /// <param name="hwnd">A window owned by the calling thread.</param>
+    /// <param name="msg">The message to allow.</param>
+    /// <returns><see langword="true"/> on success. Best effort — never throws.</returns>
+    bool AllowWindowMessage(IntPtr hwnd, int msg);
+
+    /// <summary>
+    /// Returns whether <paramref name="hwnd"/> names an existing window (<c>IsWindow</c>).
+    /// <see cref="IntPtr.Zero"/> answers <see langword="false"/>. Never throws.
+    /// </summary>
+    /// <param name="hwnd">Window handle to test.</param>
+    bool IsWindow(IntPtr hwnd);
+
+    /// <summary>
+    /// Returns the real parent of <paramref name="hwnd"/> (<c>GetAncestor(GA_PARENT)</c>) — unlike
+    /// <see cref="GetParent"/>, never the owner of a <c>WS_POPUP</c> window (WPF panels are popups with
+    /// a hidden owner, so <c>GetParent</c> would report that owner, not <c>WorkerW</c>). For a top-level
+    /// window this is the desktop window; <see cref="IntPtr.Zero"/> on failure. Never throws.
+    /// </summary>
+    /// <param name="hwnd">Window whose parent is requested.</param>
+    IntPtr GetAncestorParent(IntPtr hwnd);
+
+    /// <summary>
+    /// Returns the root window of <paramref name="hwnd"/> (<c>GetAncestor(GA_ROOT)</c>) — the top-level
+    /// window at the end of its parent chain, never an owner. For a top-level window (a panel on the
+    /// Windows 11 24H2+ layout) that is <paramref name="hwnd"/> itself; for a panel embedded into
+    /// <c>WorkerW</c> it is the shell's top-level window whose DPI every embedded panel shares
+    /// (release-hardening F, <see cref="DesktopLayerMode"/>). <see cref="IntPtr.Zero"/> on failure. Never throws.
+    /// </summary>
+    /// <param name="hwnd">Window whose root is requested.</param>
+    IntPtr GetRootWindow(IntPtr hwnd);
+
+    /// <summary>
+    /// Starts (or restarts) a <c>WM_TIMER</c> timer on <paramref name="hwnd"/> (<c>SetTimer</c> without a
+    /// <c>TIMERPROC</c>) — the tick arrives through that window's own window procedure, on its thread.
+    /// </summary>
+    /// <param name="hwnd">A window owned by the calling thread.</param>
+    /// <param name="timerId">Non-zero timer id, delivered as the <c>WM_TIMER</c> <c>wParam</c>.</param>
+    /// <param name="intervalMs">Interval in milliseconds.</param>
+    /// <returns><see langword="true"/> on success. Never throws.</returns>
+    bool SetTimer(IntPtr hwnd, IntPtr timerId, uint intervalMs);
+
+    /// <summary>
+    /// Stops a timer started with <see cref="SetTimer"/> (<c>KillTimer</c>). Never throws.
+    /// </summary>
+    /// <param name="hwnd">The window the timer was started on.</param>
+    /// <param name="timerId">The timer id passed to <see cref="SetTimer"/>.</param>
+    /// <returns><see langword="true"/> when a timer was stopped.</returns>
+    bool KillTimer(IntPtr hwnd, IntPtr timerId);
+
     // ── Native panel sizing primitives (ADR-022 / Phase 2) ──────────────────────────────────────
 
     /// <summary>
@@ -394,6 +508,10 @@ internal interface INativeApi
     /// <param name="hwnd">Window to measure.</param>
     /// <param name="rect">Receives the screen rectangle in physical pixels, or default on failure.</param>
     /// <returns><see langword="true"/> when the call succeeded.</returns>
+    /// <remarks>
+    /// Called from hot window-procedure paths: a failure is logged at most once per handle per minute
+    /// (with the number of suppressed repeats), so a dead HWND cannot flood the log. Never throws.
+    /// </remarks>
     bool GetWindowRect(IntPtr hwnd, out NativeRectPx rect);
 
     /// <summary>
@@ -413,7 +531,7 @@ internal interface INativeApi
     void WriteRect(IntPtr lParam, NativeRectPx rect);
 
     /// <summary>
-    /// Per-window DPI scale (<c>GetDpiForWindow</c> / 96.0), falling back to
+    /// Per-window DPI scale (<c>GetDpiForWindow</c> through <see cref="DesktopScaleModel.ScaleFromDpi"/>), falling back to
     /// <see cref="GetSystemDpiScale"/> when the window DPI is unavailable (invalid handle, or a
     /// pre-1607 Windows where the export does not exist).
     /// </summary>
@@ -431,11 +549,20 @@ internal readonly record struct RecycleBinNativeState(long ItemCount, long Total
 /// A display monitor as reported by <c>GetMonitorInfo</c>. Rectangles are physical pixels;
 /// conversion to WPF device-independent units is the caller's job.
 /// </summary>
+/// <param name="DeviceName">Stable device name (e.g. <c>\\.\DISPLAY1</c>).</param>
+/// <param name="Bounds">Full monitor rectangle, physical pixels.</param>
+/// <param name="WorkArea">Work area, physical pixels.</param>
+/// <param name="IsPrimary">Whether this is the primary monitor.</param>
+/// <param name="EffectiveDpi">
+/// Effective DPI of the monitor (<c>GetDpiForMonitor(MDT_EFFECTIVE_DPI)</c>); 0 when unknown (API missing,
+/// call failed, or a caller that does not supply it) — consumers then substitute the system scale.
+/// </param>
 internal readonly record struct NativeMonitorInfo(
     string DeviceName,
     System.Drawing.Rectangle Bounds,
     System.Drawing.Rectangle WorkArea,
-    bool IsPrimary);
+    bool IsPrimary,
+    uint EffectiveDpi = 0);
 
 /// <summary>
 /// Handle pair of a hidden broadcast window plus the class atom that has to be unregistered with it.

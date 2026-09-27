@@ -56,7 +56,8 @@ line flag or `DESKTOPORGANIZER_DIAG=1` environment variable (`DiagnosticsSwitch.
 `DesktopOrganizer.Services/Diagnostics/`). When disabled, `IsEnabled` is checked by callers *before*
 building a payload array — a zero-cost seam, not just a cheap no-op sink.
 
-Output: JSON Lines at `%LOCALAPPDATA%\DesktopOrganizer\Logs\gestures-{yyyyMMdd-HHmmss}-{pid}.jsonl`,
+Output: JSON Lines at `%LOCALAPPDATA%\DesktopOrganizer\Logs\app-{yyyyMMdd-HHmmss}-{pid}.jsonl` (renamed
+from the original `gestures-` prefix — see the L12 addendum below),
 UTF-8 without BOM, one JSON object per line (`timestamp`, `seq`, `category`, `name`, `scope`,
 `payload`). Rotates to `-1`/`-2` suffixes past 10MB per session file; retains at most 10 session files,
 pruning older ones at startup. Full schema and per-event payload contract:
@@ -177,6 +178,21 @@ instead). Documented explicitly, not silently missed — see
 only the `extension` value's derivation got stricter. Full schema/testing detail:
 `docs/Refactoring/Testing/diagnostics-log-events.md`'s `icon` category privacy note. Tests:
 `tests/DesktopOrganizer.Tests/Unit/Diagnostics/IconDiagnosticsTests.cs` (new file).
+
+## Addendum (2026-09-27): L12 — file prefix renamed `gestures-` → `app-`
+
+**Problem (cosmetic, found by the 1.0 release-hardening code review).** The sink's file prefix was still
+literally `gestures-` (`gestures-{yyyyMMdd-HHmmss}-{pid}.jsonl`), left over from when this log only ever
+carried gesture lifecycle events. Since then it has carried every app diagnostics event (icon
+resolution, monitor changes, shutdown steps, crash-adjacent instrumentation, …) — the name no longer
+described its contents, and a tester asked to "find the `app-*.jsonl` file" would find nothing.
+
+**Fix.** `DiagnosticsLogFileNaming.Prefix` and `JsonLinesDiagnosticsLog.FilePattern` both changed from
+`"gestures-"`/`"gestures-*.jsonl"` to `"app-"`/`"app-*.jsonl"`. Purely a file-name convention — no schema,
+category, event name, or payload field changed, and no migration of already-written files is needed
+(this log is a rolling, retention-pruned diagnostics artifact, never a source of truth read back by the
+app itself — see the non-blocking producer/backpressure contract above). Tests updated:
+`DiagnosticsLogFileNamingTests`, `JsonLinesDiagnosticsLogTests`.
 
 ## Related
 

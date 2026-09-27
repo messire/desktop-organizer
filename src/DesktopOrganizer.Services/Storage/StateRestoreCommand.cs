@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text.Json.Nodes;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Storage;
 
@@ -246,7 +247,7 @@ internal sealed class StateRestoreCommand : IStateRestoreCommand
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"StateRestoreCommand: failed to quarantine the previous primary for history: {ex.GetType().Name}");
+            AppLog.Current.Error("StateRestoreCommand", "QuarantinePreviousPrimaryFailed", ex);
             return null;
         }
     }

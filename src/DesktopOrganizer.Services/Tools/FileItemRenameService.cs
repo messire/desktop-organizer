@@ -1,6 +1,7 @@
 using System.IO;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Tools;
 
@@ -8,6 +9,7 @@ namespace DesktopOrganizer.Services.Tools;
 internal sealed class FileItemRenameService : IFileItemRenameService
 {
     private readonly IPanelItemStorageService _itemStorage;
+    private readonly IAppLog? _appLog;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FileItemRenameService"/> class.
@@ -16,10 +18,19 @@ internal sealed class FileItemRenameService : IFileItemRenameService
     /// Owns the app-managed storage folder; consulted to decide whether a rename must go through
     /// <see cref="IPanelItemStorageService.RenameManaged"/> instead of a plain file-system move.
     /// </param>
-    public FileItemRenameService(IPanelItemStorageService itemStorage)
+    /// <param name="appLog">See <see cref="Log"/>.</param>
+    public FileItemRenameService(IPanelItemStorageService itemStorage, IAppLog? appLog = null)
     {
         _itemStorage = itemStorage;
+        _appLog = appLog;
     }
+
+    /// <summary>
+    /// The log this instance writes failures to: the one explicitly supplied, falling back to the
+    /// process-wide ambient <see cref="AppLog.Current"/> for tests that construct this type directly
+    /// without a log.
+    /// </summary>
+    private IAppLog Log => _appLog ?? AppLog.Current;
 
     /// <inheritdoc />
     public RenameResult Rename(string path, string newName)
@@ -72,8 +83,10 @@ internal sealed class FileItemRenameService : IFileItemRenameService
             // disk full, a race where the file vanished between the existence check and the move,
             // …) is reported as Failed instead. The file/folder is left as-is: either the move above
             // never ran, or it threw before completing (File.Move/Directory.Move don't leave a
-            // partially-renamed item behind on failure).
-            Console.Error.WriteLine($"FileItemRenameService.Rename failed for '{path}' -> '{newName}': {ex.Message}");
+            // partially-renamed item behind on failure). newName is deliberately not logged: unlike
+            // path (a full path, scrubbed to <path:.ext> by LogScrubber), it's a bare file/folder name
+            // with no path prefix to scrub, so logging it verbatim would leak it into the log file.
+            Log.Error("FileItemRenameService", "RenameFailed", ex, new KeyValuePair<string, object?>("path", path));
             return new RenameResult(RenameOutcome.Failed, null);
         }
     }

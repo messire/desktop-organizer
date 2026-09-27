@@ -1,4 +1,5 @@
 using System.Windows;
+using DesktopOrganizer.UI.Interaction;
 
 namespace DesktopOrganizer.UI.Models;
 
@@ -6,10 +7,21 @@ namespace DesktopOrganizer.UI.Models;
 /// The single point of translation between the screen-DIP coordinate space every
 /// <see cref="DesktopOrganizer.Services.Abstractions.IMonitorService"/> query
 /// (<see cref="DesktopOrganizer.Services.Abstractions.MonitorInfo.Bounds"/>/<see cref="DesktopOrganizer.Services.Abstractions.MonitorInfo.WorkArea"/>)
-/// is always expressed in, and the space <see cref="System.Windows.Window.Left"/>/<see cref="System.Windows.Window.Top"/>
-/// live in for a panel window re-parented into <c>WorkerW</c>
-/// (<c>DesktopIntegrationService.EmbedInDesktop</c>).
+/// is always expressed in, and the "window space" every model/persisted panel geometry lives in for a
+/// panel window re-parented into <c>WorkerW</c> (<c>DesktopIntegrationService.EmbedInDesktop</c>).
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>release-hardening F redefinition (ADR-037).</b> Since F3, "window space" here means
+/// <b>desktop-DIP</b> — the single px↔DIP space <c>DesktopScaleModel</c>/<c>IDesktopScaleProvider</c>
+/// define (docs/PLANS/release-hardening-1.0-F-dpi.md §2), not literally <c>Window.Left</c>/<c>Top</c>'s
+/// own space (which, on a mixed-DPI TopLevel desktop layer, this window's <see cref="PanelWindowCoordinates"/>
+/// adapter may now translate into something else). This type's own translation — screen-DIP ↔
+/// desktop-DIP, <see cref="Offset"/> — is unaffected and stays orthogonal to that px↔DIP boundary: every
+/// consumer listed below already passed its result straight into <c>PanelGeometryWriter</c>/the geometry
+/// adapter, which is where the desktop-DIP↔window-Left/Top translation now happens.
+/// </para>
+/// </remarks>
 /// <remarks>
 /// <para>
 /// <b>Open question this type isolates (ADR-028 «Открытые вопросы», Вопрос 2;

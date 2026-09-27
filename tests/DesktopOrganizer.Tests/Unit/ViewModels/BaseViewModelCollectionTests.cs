@@ -176,7 +176,7 @@ public class BaseViewModelCollectionTests
         Assert.Equal(2, vm.AllItems.Count);
     }
 
-    // ── D2: batch notification — exactly one CollectionChanged / FileCountText per rebuild ─────────
+    // ── D2: batch notification — exactly one CollectionChanged per rebuild ─────────────────────────
 
     /// <summary>
     /// Verifies that a full <see cref="BaseViewModel.FileItems"/> rebuild raises exactly one
@@ -195,28 +195,6 @@ public class BaseViewModelCollectionTests
 
         var raised = Assert.Single(events);
         Assert.Equal(NotifyCollectionChangedAction.Reset, raised.Action);
-    }
-
-    /// <summary>
-    /// Verifies that a full <see cref="BaseViewModel.FileItems"/> rebuild raises
-    /// <see cref="INotifyPropertyChanged.PropertyChanged"/> for <see cref="BaseViewModel.FileCountText"/>
-    /// exactly once.
-    /// </summary>
-    [Fact]
-    public void OnSourceChanged_FullRebuild_RaisesFileCountTextExactlyOnce()
-    {
-        var vm = BuildVm();
-        vm.AddFiles([PathA]);
-
-        var raisedCount = 0;
-        vm.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(BaseViewModel.FileCountText)) raisedCount++;
-        };
-
-        vm.AddFiles([PathB, PathC]);
-
-        Assert.Equal(1, raisedCount);
     }
 
     /// <summary>
@@ -260,8 +238,7 @@ public class BaseViewModelCollectionTests
 
     /// <summary>
     /// Verifies that calling <c>AddFiles</c> with paths that are all already tracked is a no-op re-sync
-    /// that raises neither <see cref="INotifyCollectionChanged.CollectionChanged"/> nor
-    /// <see cref="BaseViewModel.FileCountText"/> notifications.
+    /// that raises no <see cref="INotifyCollectionChanged.CollectionChanged"/> notification.
     /// </summary>
     [Fact]
     public void AddFiles_AllPathsAlreadyTracked_DoesNotRaiseCollectionChanged()
@@ -271,16 +248,10 @@ public class BaseViewModelCollectionTests
 
         var events = new List<NotifyCollectionChangedEventArgs>();
         ((INotifyCollectionChanged)vm.FileItems).CollectionChanged += (_, e) => events.Add(e);
-        var raisedCount = 0;
-        vm.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(BaseViewModel.FileCountText)) raisedCount++;
-        };
 
         vm.AddFiles([PathA, PathB]); // both already present — a no-op re-sync
 
         Assert.Empty(events);
-        Assert.Equal(0, raisedCount);
     }
 
     /// <summary>
@@ -661,24 +632,20 @@ public class BaseViewModelCollectionTests
 
     /// <summary>
     /// Verifies that re-projecting <see cref="BaseViewModel.FileItems"/> against an unchanged source and
-    /// filter raises neither <see cref="INotifyCollectionChanged.CollectionChanged"/> nor
-    /// <see cref="BaseViewModel.FileCountText"/> notifications.
+    /// filter raises no <see cref="INotifyCollectionChanged.CollectionChanged"/> notification.
     /// </summary>
     [Fact]
-    public void ReplaceFileItems_IdenticalProjection_RaisesNoCollectionChangedOrFileCountText()
+    public void ReplaceFileItems_IdenticalProjection_RaisesNoCollectionChanged()
     {
         var vm = new FilterableViewModel(BuildIconProviderMock().Object);
         vm.AddFiles([PathA, PathB]); // first rebuild already happened here
 
         var events = new List<NotifyCollectionChangedEventArgs>();
         ((INotifyCollectionChanged)vm.FileItems).CollectionChanged += (_, e) => events.Add(e);
-        var raisedProperties = new List<string?>();
-        vm.PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName);
 
         vm.Reproject(); // same AllItems, same Filter -> reference-identical projection to what's shown
 
         Assert.Empty(events);
-        Assert.DoesNotContain(nameof(BaseViewModel.FileCountText), raisedProperties);
     }
 
     /// <summary>

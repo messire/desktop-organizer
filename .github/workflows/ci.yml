@@ -1,0 +1,154 @@
+name: CI
+
+# ADR-038 (G1). Windows-only: the app targets net8.0-windows/WPF and its tests reference real Win32
+# P/Invoke (INativeApi) — there is no meaningful Linux/macOS runner for this repo.
+on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch: { }
+
+# Cancel a superseded run on the same ref (e.g. a fast-follow push to the same PR) instead of letting
+# both finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# M5/L8 (release-hardening review): least-privilege default (GITHUB_TOKEN read-only) for every job in
+# this workflow; only the release job below needs (and declares) `contents: write` to attach the built
+# Setup.exe to a GitHub Release.
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore DesktopOrganizer.sln
+
+      # CLAUDE.md: "0 errors и 0 warnings" is the definition of a green build — TreatWarningsAsErrors
+      # turns any regression (a new CSxxxx/CAxxxx/SAxxxx warning) into a build failure here, instead of
+      # silently merging.
+      - name: Build (Release, 0 warnings gate)
+        run: dotnet build DesktopOrganizer.sln -c Release --no-restore -p:TreatWarningsAsErrors=true
+
+      # "Category!=RequiresDesktop" is a forward-looking filter (ADR-038 G1): no test currently carries
+      # that trait, so today this runs the full suite unchanged. It exists so a future test that
+      # genuinely needs a live interactive desktop/explorer.exe session (which a CI runner may not
+      # reliably provide) can opt out via [Trait("Category", "RequiresDesktop")] without touching this
+      # workflow again.
+      - name: Test
+        run: >
+          dotnet test DesktopOrganizer.sln -c Release --no-build
+          --filter "Category!=RequiresDesktop"
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          retention-days: 14
+
+  installer:
+    name: Build & publish installer
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write # to attach the built Setup.exe to the GitHub Release for this tag
+    env:
+      # Populated from repo/organization secrets; all three are optional (installer/README.md
+      # "Подпись кода"). Unset/empty -> installer\build.ps1 prints its own "unsigned build" notice and
+      # produces an unsigned Setup.exe, exactly like a local run with no signing env vars — CI never
+      # fails just because signing secrets are absent.
+      DESKTOPORGANIZER_SIGN_PFX_BASE64: ${{ secrets.DESKTOPORGANIZER_SIGN_PFX_BASE64 }}
+      DESKTOPORGANIZER_SIGN_PASSWORD: ${{ secrets.DESKTOPORGANIZER_SIGN_PASSWORD }}
+      DESKTOPORGANIZER_SIGN_TIMESTAMP: ${{ secrets.DESKTOPORGANIZER_SIGN_TIMESTAMP }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # M5/L8 (release-hardening review): pin the installed tool version instead of always taking
+      # choco's current "latest" — an upstream release regressing/being yanked must not silently change
+      # what this workflow builds with.
+      - name: Install Inno Setup
+        run: choco install innosetup --version=6.7.1 --no-progress -y
+
+      # M5/L8 (release-hardening review): build.ps1's ISCC "dosign" command line always signs by
+      # certificate-store thumbprint, never by /f <pfx> /p <password> — that command line is echoed into
+      # ISCC's own compile log, so a plaintext password there would be a real leak. Import the secret
+      # .pfx into the CURRENT USER's personal store here, up front, and hand build.ps1 only the resulting
+      # thumbprint (never the .pfx file path or the password) via DESKTOPORGANIZER_SIGN_CERT. The
+      # decoded .pfx file itself is deleted again immediately below, in the same step, the moment the
+      # import is done — the certificate store entry (not the file) is what's cleaned up afterwards.
+      - name: Import signing certificate (optional)
+        if: env.DESKTOPORGANIZER_SIGN_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "desktoporganizer-sign.pfx"
+          try {
+            $bytes = [Convert]::FromBase64String($env:DESKTOPORGANIZER_SIGN_PFX_BASE64)
+            [IO.File]::WriteAllBytes($certPath, $bytes)
+
+            $importArgs = @{ FilePath = $certPath; CertStoreLocation = "Cert:\CurrentUser\My" }
+            if ($env:DESKTOPORGANIZER_SIGN_PASSWORD) {
+              $importArgs["Password"] = ConvertTo-SecureString -String $env:DESKTOPORGANIZER_SIGN_PASSWORD -AsPlainText -Force
+            }
+
+            $imported = Import-PfxCertificate @importArgs
+            "DESKTOPORGANIZER_SIGN_CERT=$($imported.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          finally {
+            if (Test-Path $certPath) { Remove-Item -Force $certPath }
+          }
+
+      - name: Build installer (publish + ISCC, signs iff DESKTOPORGANIZER_SIGN_CERT is set)
+        shell: pwsh
+        run: .\installer\build.ps1
+
+      - name: Remove imported signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "desktoporganizer-sign.pfx"
+          if (Test-Path $certPath) { Remove-Item -Force $certPath }
+
+          if ($env:DESKTOPORGANIZER_SIGN_CERT -and (Test-Path "Cert:\CurrentUser\My\$($env:DESKTOPORGANIZER_SIGN_CERT)")) {
+            Remove-Item -Path "Cert:\CurrentUser\My\$($env:DESKTOPORGANIZER_SIGN_CERT)" -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Upload Setup.exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DesktopOrganizer-Setup
+          path: installer/Output/*.exe
+          retention-days: 90
+
+      # M5/L8 (release-hardening review): pinned to the v2.6.2 release commit rather than the floating
+      # `v2` tag — a third-party action's tag can be moved to point at different, unreviewed code.
+      - name: Attach Setup.exe to the GitHub Release for this tag
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: installer/Output/*.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true

@@ -218,6 +218,79 @@ public class NativeApiTests
     }
 
     /// <summary>
+    /// L11: a dead HWND queried from a hot window-procedure path logs ONE warning per minute (with the number
+    /// of suppressed repeats), not one per call.
+    /// </summary>
+    [Fact]
+    public void GetWindowRect_DeadHandleQueriedRepeatedly_LogsOncePerMinute()
+    {
+        // Arrange — a real handle that is guaranteed dead: create a window, then destroy it.
+        var log = new Moq.Mock<IAppLog>();
+        var time = new ManualTimeProvider();
+        var sut = new NativeApi(log.Object, time);
+        var window = CreateHiddenWindow(out var keepAlive);
+        Assert.True(window.IsValid, $"Window creation failed, Win32 error {window.LastError}.");
+        _nativeApi.DestroyMessageWindow(window);
+        GC.KeepAlive(keepAlive);
+
+        // Act
+        for (var i = 0; i < 100; i++) Assert.False(sut.GetWindowRect(window.Handle, out _));
+
+        // Assert
+        VerifyRectWarnings(log, Moq.Times.Once());
+
+        time.Advance(TimeSpan.FromMinutes(1));
+        Assert.False(sut.GetWindowRect(window.Handle, out _));
+        VerifyRectWarnings(log, Moq.Times.Exactly(2));
+        log.Verify(
+            l => l.Warn(
+                "NativeApi",
+                "GetWindowRectFailed",
+                Moq.It.Is<KeyValuePair<string, object?>[]>(d => d.Any(kv => kv.Key == "suppressedSinceLast" && (int)kv.Value! == 99))),
+            Moq.Times.Once);
+    }
+
+    /// <summary>
+    /// L1: both recycle-bin entry points share one implementation; an empty batch is rejected up front
+    /// without ever reaching the shell.
+    /// </summary>
+    [Fact]
+    public void RecycleEntryPoints_WithEmptyOrNullPaths_ReturnFalse()
+    {
+        Assert.False(_nativeApi.RecycleItems([], IntPtr.Zero));
+        Assert.False(_nativeApi.RecycleItems(null!, IntPtr.Zero));
+        Assert.False(_nativeApi.SendToRecycleBin([], IntPtr.Zero));
+        Assert.False(_nativeApi.SendToRecycleBin(null!, IntPtr.Zero));
+    }
+
+    /// <summary>M9: the bounded send rejects a null window without calling into USER32.</summary>
+    [Fact]
+    public void SendMessageTimeout_WithZeroHandle_ReturnsFalse()
+    {
+        Assert.False(_nativeApi.SendMessageTimeout(IntPtr.Zero, 0, IntPtr.Zero, IntPtr.Zero, 10, out var result));
+        Assert.Equal(IntPtr.Zero, result);
+    }
+
+    /// <summary>M9: a live, responsive window answers the bounded send (WM_NULL to our own hidden window).</summary>
+    [Fact]
+    public void SendMessageTimeout_ToLiveWindow_ReturnsTrue()
+    {
+        var window = CreateHiddenWindow(out var keepAlive);
+
+        try
+        {
+            Assert.True(window.IsValid, $"Window creation failed, Win32 error {window.LastError}.");
+
+            Assert.True(_nativeApi.SendMessageTimeout(window.Handle, 0x0000 /* WM_NULL */, IntPtr.Zero, IntPtr.Zero, 1000, out _));
+        }
+        finally
+        {
+            _nativeApi.DestroyMessageWindow(window);
+            GC.KeepAlive(keepAlive);
+        }
+    }
+
+    /// <summary>
     /// An unusable handle falls back to the system DPI scale instead of returning 0 or throwing.
     /// </summary>
     [Fact]
@@ -259,6 +332,10 @@ public class NativeApiTests
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+    private static void VerifyRectWarnings(Moq.Mock<IAppLog> log, Moq.Times times)
+        => log.Verify(
+            l => l.Warn("NativeApi", "GetWindowRectFailed", Moq.It.IsAny<KeyValuePair<string, object?>[]>()),
+            times);
 
     /// <summary>
     /// Creates a hidden top-level window with a unique class name. The window procedure must stay

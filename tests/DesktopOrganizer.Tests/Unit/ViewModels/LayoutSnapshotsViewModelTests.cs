@@ -1,6 +1,7 @@
 using System.Windows;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
 using Moq;
@@ -169,6 +170,53 @@ public class LayoutSnapshotsViewModelTests
         _serviceMock.Verify(s => s.Restore(It.IsAny<string>()), Times.Never);
     }
 
-    private LayoutSnapshotsViewModel BuildSut()
-        => new(_serviceMock.Object, _confirmationMock.Object, _inputDialogMock.Object);
+    // ── Snapshot_DefaultName_Format (docs/PLANS/localization.md D-5): resolved at creation time in the
+    // current UI language ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that the auto-generated default snapshot name uses the English
+    /// <c>Snapshot_DefaultName_Format</c> ("Layout dd.MM HH:mm") when the UI language is English.
+    /// </summary>
+    [Fact]
+    public void CaptureSnapshot_DefaultName_English()
+    {
+        string? promptedDefault = null;
+        _inputDialogMock
+            .Setup(d => d.PromptText(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string, string>((_, _, defaultValue) => promptedDefault = defaultValue)
+            .Returns((string?)null);
+        var sut = BuildSut(TestLocalization.English);
+
+        sut.CaptureSnapshotCommand.Execute(null);
+
+        Assert.NotNull(promptedDefault);
+        Assert.Matches(@"^Layout \d{2}\.\d{2} \d{2}:\d{2}$", promptedDefault!);
+    }
+
+    /// <summary>
+    /// Verifies that the auto-generated default snapshot name uses the Russian
+    /// <c>Snapshot_DefaultName_Format</c> ("Расположение dd.MM HH:mm") when the UI language is Russian.
+    /// </summary>
+    [Fact]
+    public void CaptureSnapshot_DefaultName_Russian()
+    {
+        string? promptedDefault = null;
+        _inputDialogMock
+            .Setup(d => d.PromptText(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string, string>((_, _, defaultValue) => promptedDefault = defaultValue)
+            .Returns((string?)null);
+        var sut = BuildSut(TestLocalization.Russian);
+
+        sut.CaptureSnapshotCommand.Execute(null);
+
+        Assert.NotNull(promptedDefault);
+        Assert.Matches(@"^Расположение \d{2}\.\d{2} \d{2}:\d{2}$", promptedDefault!);
+    }
+
+    private LayoutSnapshotsViewModel BuildSut(ILocalizationService? localization = null)
+        => new(
+            _serviceMock.Object,
+            _confirmationMock.Object,
+            _inputDialogMock.Object,
+            localization ?? TestLocalization.English);
 }

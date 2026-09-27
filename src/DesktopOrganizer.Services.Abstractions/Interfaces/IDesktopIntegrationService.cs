@@ -21,12 +21,54 @@ public interface IDesktopIntegrationService
     /// and removes it from the taskbar and Alt+Tab.
     /// </summary>
     /// <param name="hwnd">Handle of the window to embed.</param>
+    /// <returns>
+    /// Where the window ended up — see <see cref="DesktopEmbedResult"/>. Callers that only need the
+    /// side effect (panel creation) may ignore it; shell-restart recovery (ADR-034) uses it to tell a
+    /// not-yet-ready <c>WorkerW</c> (retry) from the Windows 11 24H2+ top-level layout (stop retrying).
+    /// </returns>
     /// <remarks>
+    /// <para>
     /// Equivalent to <see cref="ApplyDesktopWindowStyles"/> followed by re-parenting into
     /// <c>WorkerW</c>. The styles are applied unconditionally, even when the <c>WorkerW</c> lookup
     /// fails, so the taskbar/Alt+Tab guarantee does not depend on the shell trick succeeding.
+    /// </para>
+    /// <para>
+    /// Idempotent: when the window's parent already is the current <c>WorkerW</c>, <c>SetParent</c> is
+    /// skipped (<see cref="DesktopEmbedResult.AlreadyEmbedded"/>), so recovery can call this repeatedly
+    /// on every surviving panel without re-parenting churn.
+    /// </para>
     /// </remarks>
-    void EmbedInDesktop(IntPtr hwnd);
+    DesktopEmbedResult EmbedInDesktop(IntPtr hwnd);
+
+    /// <summary>
+    /// Returns whether <paramref name="hwnd"/> still names a live window (<c>IsWindow</c>).
+    /// </summary>
+    /// <param name="hwnd">Handle to test. <see cref="IntPtr.Zero"/> answers <see langword="false"/>.</param>
+    /// <returns><see langword="true"/> when the window exists. Never throws.</returns>
+    /// <remarks>
+    /// Used by shell-restart recovery (ADR-034) to tell a panel whose HWND survived the restart (re-embed
+    /// it) from one that was destroyed together with its dead <c>WorkerW</c> parent (rebuild it from its
+    /// model). A handle value can in theory be recycled by the system for an unrelated window; callers
+    /// combine this with their own bookkeeping rather than trusting it alone.
+    /// </remarks>
+    bool IsWindowAlive(IntPtr hwnd);
+
+    /// <summary>
+    /// Runs the same <c>WorkerW</c> lookup <see cref="EmbedInDesktop"/> uses, without touching any window
+    /// of ours (no styles, no <c>SetParent</c>), and returns what it found.
+    /// </summary>
+    /// <returns>
+    /// The top-level <c>WorkerW</c> panels would be embedded into (classic layout: Windows 10, Windows 11 up
+    /// to 23H2), or <see cref="IntPtr.Zero"/> when there is none (Windows 11 24H2+, or Explorer not ready).
+    /// Never throws.
+    /// </returns>
+    /// <remarks>
+    /// Used by <see cref="IDesktopScaleProvider"/> to <i>predict</i> the <see cref="DesktopLayerMode"/> (and the
+    /// DPI of the layer) before any panel exists; once a panel was embedded, its real root window wins.
+    /// Like <see cref="EmbedInDesktop"/> it sends <c>0x052C</c> to <c>Progman</c> and enumerates top-level
+    /// windows, so it is not meant for hot paths.
+    /// </remarks>
+    IntPtr FindDesktopLayerHost();
 
     /// <summary>
     /// Applies the desktop-window extended styles (<c>WS_EX_TOOLWINDOW</c> | <c>WS_EX_NOACTIVATE</c>)

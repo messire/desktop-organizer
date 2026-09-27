@@ -27,6 +27,8 @@ public class RollUpTests
     private const string ChevronUpGlyph = "\uE70E";
 
     private static readonly CultureInfo Invariant = CultureInfo.InvariantCulture;
+    private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en");
+    private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru");
 
     // ------------------------------------------------------------------
     // BoolToGlyphConverter — glyph mode
@@ -77,17 +79,21 @@ public class RollUpTests
     // ------------------------------------------------------------------
     // BoolToGlyphConverter — tooltip mode
     // ------------------------------------------------------------------
+    // Localized (docs/PLANS/localization.md §4.3, WP-2): the tooltip text now comes from
+    // Panel_RollUp_Expand_Tooltip/Panel_RollUp_Collapse_Tooltip, so these assertions fix an explicit
+    // culture (L-3/R-5) rather than relying on CultureInfo.InvariantCulture, which the glyph-mode tests
+    // above still use since the glyph itself is culture-invariant.
 
     /// <summary>
     /// Verifies that converting <see langword="true"/> with the "tooltip" parameter returns the
-    /// "Expand panel" tooltip text.
+    /// "Expand panel" tooltip text in English.
     /// </summary>
     [Fact]
-    public void Convert_TrueWithTooltipParameter_ReturnsExpand()
+    public void Convert_TrueWithTooltipParameter_English_ReturnsExpand()
     {
         var converter = CreateConverter();
 
-        var result = converter.Convert(true, typeof(string), "tooltip", Invariant);
+        var result = converter.Convert(true, typeof(string), "tooltip", English);
 
         // Pin updated (docs/PLANS/workspace-grid-07-visual.md fix-cycle 1, NIT): "Expand" -> "Expand
         // panel" for screen-reader clarity out of context — see BoolToGlyphConverter's own remarks.
@@ -96,16 +102,44 @@ public class RollUpTests
 
     /// <summary>
     /// Verifies that converting <see langword="false"/> with the "tooltip" parameter returns the
-    /// "Collapse panel" tooltip text.
+    /// "Collapse panel" tooltip text in English.
     /// </summary>
     [Fact]
-    public void Convert_FalseWithTooltipParameter_ReturnsCollapse()
+    public void Convert_FalseWithTooltipParameter_English_ReturnsCollapse()
     {
         var converter = CreateConverter();
 
-        var result = converter.Convert(false, typeof(string), "tooltip", Invariant);
+        var result = converter.Convert(false, typeof(string), "tooltip", English);
 
         Assert.Equal("Collapse panel", result);
+    }
+
+    /// <summary>
+    /// Verifies that converting <see langword="true"/> with the "tooltip" parameter returns the
+    /// Russian "Развернуть панель" tooltip text.
+    /// </summary>
+    [Fact]
+    public void Convert_TrueWithTooltipParameter_Russian_ReturnsExpand()
+    {
+        var converter = CreateConverter();
+
+        var result = converter.Convert(true, typeof(string), "tooltip", Russian);
+
+        Assert.Equal("Развернуть панель", result);
+    }
+
+    /// <summary>
+    /// Verifies that converting <see langword="false"/> with the "tooltip" parameter returns the
+    /// Russian "Свернуть панель" tooltip text.
+    /// </summary>
+    [Fact]
+    public void Convert_FalseWithTooltipParameter_Russian_ReturnsCollapse()
+    {
+        var converter = CreateConverter();
+
+        var result = converter.Convert(false, typeof(string), "tooltip", Russian);
+
+        Assert.Equal("Свернуть панель", result);
     }
 
     // ------------------------------------------------------------------

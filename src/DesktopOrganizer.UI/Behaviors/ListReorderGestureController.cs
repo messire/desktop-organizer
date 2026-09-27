@@ -37,6 +37,9 @@ public sealed class ListReorderGestureController<TItem>
     private readonly Action? _hideInsertionIndicator;
     private readonly Func<DragEventArgs, int>? _computeInsertionIndex;
     private readonly Action<TItem, int>? _performReorder;
+    private readonly Func<TItem, DataObject?>? _createDataObject;
+    private readonly Action<TItem>? _onDragCompleted;
+    private readonly Func<bool>? _isForeignPanelDrag;
 
     private Point _startPoint;
     private TItem? _candidate;
@@ -62,6 +65,35 @@ public sealed class ListReorderGestureController<TItem>
     /// <param name="hideInsertionIndicator">Optional: hides the insertion indicator. Required to use <see cref="OnDragOver"/>/<see cref="OnDragLeave"/>/<see cref="OnDrop"/>.</param>
     /// <param name="computeInsertionIndex">Optional: computes the drop insertion index. Required to use <see cref="OnDrop"/>.</param>
     /// <param name="performReorder">Optional: applies the reorder to the owning collection. Required to use <see cref="OnDrop"/>.</param>
+    /// <param name="createDataObject">
+    /// Optional (ADR-036, package E — panel-item drag-out): builds the full <see cref="DataObject"/> for
+    /// a candidate once the drag threshold is exceeded, replacing the default
+    /// <c>new DataObject(dataFormat, createPayload(candidate))</c>. Used by <c>ChildWindow</c> to also
+    /// attach <see cref="DataFormats.FileDrop"/> and the shell's preferred-drop-effect format, so the
+    /// SAME gesture that reorders within a panel also works as a drag-out to another panel or
+    /// Explorer/the desktop. Returning <see langword="null"/> aborts the drag entirely, before
+    /// <see cref="DragDrop.DoDragDrop"/> is ever called (e.g. a read-only source with nothing to drag
+    /// out) — <paramref name="onDragCompleted"/> is not invoked in that case, since no drag started.
+    /// </param>
+    /// <param name="onDragCompleted">
+    /// Optional (ADR-036, package E): invoked once per gesture, right before
+    /// <paramref name="onGestureEnded"/>, in the same <c>finally</c> block — i.e. exactly when a drag
+    /// that actually started (<see cref="DragDrop.DoDragDrop"/> was called) has fully finished,
+    /// regardless of the resulting effect (a caller that needs the outcome reads it from its own
+    /// session/state object instead — see <c>ChildWindow.OnPanelDragCompleted</c> and
+    /// <c>IPanelItemDragOutSession</c> — since the OLE drop effect itself is not trustworthy, e.g.
+    /// Explorer's own optimized move often reports <see cref="DragDropEffects.None"/>).
+    /// </param>
+    /// <param name="isForeignPanelDrag">
+    /// Optional (ADR-036, package E): checked, with no arguments (purely ambient/session state), right
+    /// after the <paramref name="dataFormat"/> presence check in <see cref="OnDragOver"/>/<see cref="OnDrop"/> —
+    /// when it returns <see langword="true"/>, the event is left COMPLETELY untouched (mirroring the
+    /// foreign-format early return, risk R1) even though <paramref name="dataFormat"/> IS present, so a
+    /// drag that originated on a DIFFERENT panel (which still carries this SAME private reorder format,
+    /// since the format name is shared by every panel) is not mistakenly treated as a same-panel reorder
+    /// attempt — instead it keeps bubbling up to the owning <c>Window</c>'s own
+    /// <see cref="DataFormats.FileDrop"/>-based drop handling (cross-panel transfer / external drop).
+    /// </param>
     public ListReorderGestureController(
         UIElement dragSource,
         string dataFormat,
@@ -72,7 +104,10 @@ public sealed class ListReorderGestureController<TItem>
         Action<DragEventArgs>? showInsertionIndicator = null,
         Action? hideInsertionIndicator = null,
         Func<DragEventArgs, int>? computeInsertionIndex = null,
-        Action<TItem, int>? performReorder = null)
+        Action<TItem, int>? performReorder = null,
+        Func<TItem, DataObject?>? createDataObject = null,
+        Action<TItem>? onDragCompleted = null,
+        Func<bool>? isForeignPanelDrag = null)
     {
         _dragSource = dragSource;
         _dataFormat = dataFormat;
@@ -84,6 +119,9 @@ public sealed class ListReorderGestureController<TItem>
         _hideInsertionIndicator = hideInsertionIndicator;
         _computeInsertionIndex = computeInsertionIndex;
         _performReorder = performReorder;
+        _createDataObject = createDataObject;
+        _onDragCompleted = onDragCompleted;
+        _isForeignPanelDrag = isForeignPanelDrag;
     }
 
     /// <summary>True while an OLE drag-reorder gesture (<see cref="DragDrop.DoDragDrop"/>) is in flight.</summary>
@@ -134,14 +172,25 @@ public sealed class ListReorderGestureController<TItem>
             Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance)
             return;
 
+        var candidate = _candidate;
+        var data = ResolveDragData(candidate, _createDataObject, _createPayload, _dataFormat);
+        if (data is null)
+        {
+            // ADR-036: createDataObject refused to build a payload (e.g. a read-only source with
+            // nothing to drag out) — abort before DoDragDrop ever runs, so no gesture-ended/drag-
+            // completed callback fires for a drag that never actually started.
+            _candidate = null;
+            return;
+        }
+
         _isReordering = true;
         try
         {
-            var data = new DataObject(_dataFormat, _createPayload(_candidate));
             DragDrop.DoDragDrop(_dragSource, data, DragDropEffects.Move);
         }
         finally
         {
+            _onDragCompleted?.Invoke(candidate);
             _isReordering = false;
             _candidate = null;
             _onGestureEnded();
@@ -166,6 +215,7 @@ public sealed class ListReorderGestureController<TItem>
             throw new InvalidOperationException($"{nameof(OnDragOver)} requires resolveDropTarget/showInsertionIndicator/hideInsertionIndicator to be supplied.");
 
         if (!e.Data.GetDataPresent(_dataFormat)) return; // foreign format — leave e untouched (risk R1).
+        if (_isForeignPanelDrag?.Invoke() == true) return; // another panel's own drag-out — leave e untouched (see isForeignPanelDrag remarks).
 
         if (_resolveDropTarget(e) is null)
         {
@@ -199,6 +249,7 @@ public sealed class ListReorderGestureController<TItem>
             throw new InvalidOperationException($"{nameof(OnDrop)} requires resolveDropTarget/hideInsertionIndicator/computeInsertionIndex/performReorder to be supplied.");
 
         if (!e.Data.GetDataPresent(_dataFormat)) return; // foreign format — leave e untouched (risk R1).
+        if (_isForeignPanelDrag?.Invoke() == true) return; // another panel's own drag-out — leave e untouched (see isForeignPanelDrag remarks).
 
         if (_resolveDropTarget(e) is not { } item)
         {
@@ -213,4 +264,36 @@ public sealed class ListReorderGestureController<TItem>
         _hideInsertionIndicator();
         e.Handled = true;
     }
+
+    /// <summary>
+    /// Resolves the <see cref="DataObject"/> for a drag gesture that just crossed the system drag
+    /// threshold (<see cref="OnPreviewMouseMove"/>). Extracted as an internal static helper (M1 fix
+    /// package, release-hardening 1.0 review) purely so its "return null to abort" contract is directly
+    /// unit-testable without needing a live <see cref="DragDrop.DoDragDrop"/> gesture.
+    /// </summary>
+    /// <remarks>
+    /// M2 (release-hardening 1.0 review): a prior version wrote this as
+    /// <c>createDataObject?.Invoke(candidate) ?? new DataObject(...)</c> — which made the "return
+    /// <see langword="null"/> to abort" contract documented on the constructor's <c>createDataObject</c>
+    /// parameter dead code. <c>??</c> replaces a null RESULT of a non-null delegate with the default
+    /// <see cref="DataObject"/> just as readily as it replaces a null DELEGATE, so <c>createDataObject</c>
+    /// returning <see langword="null"/> (e.g. a read-only source with nothing to drag out) silently fell
+    /// through to dragging the default payload anyway instead of aborting. Branching explicitly on
+    /// whether the delegate itself was supplied preserves that contract: only "no <c>createDataObject</c>
+    /// was ever passed in" falls back to the default <see cref="DataObject"/>; a supplied
+    /// <c>createDataObject</c> that returns <see langword="null"/> is honored as an abort.
+    /// </remarks>
+    /// <param name="candidate">The drag candidate resolved at press time.</param>
+    /// <param name="createDataObject">The optional <c>createDataObject</c> delegate (see the constructor's remarks).</param>
+    /// <param name="createPayload">The <c>createPayload</c> delegate, used only when <paramref name="createDataObject"/> is <see langword="null"/>.</param>
+    /// <param name="dataFormat">The reorder <see cref="DataObject"/> format, used only when <paramref name="createDataObject"/> is <see langword="null"/>.</param>
+    /// <returns>The resolved <see cref="DataObject"/>, or <see langword="null"/> to abort the gesture before <see cref="DragDrop.DoDragDrop"/> is ever called.</returns>
+    internal static DataObject? ResolveDragData(
+        TItem candidate,
+        Func<TItem, DataObject?>? createDataObject,
+        Func<TItem, object> createPayload,
+        string dataFormat)
+        => createDataObject is not null
+            ? createDataObject(candidate)
+            : new DataObject(dataFormat, createPayload(candidate));
 }

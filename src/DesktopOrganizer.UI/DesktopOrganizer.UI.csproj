@@ -9,6 +9,9 @@
              R-1) — so the WPF SDK's own auto-generated Main() (which always does `new App();
              app.Run();`, wired up via the ApplicationDefinition build action below) cannot be used. -->
         <StartupObject>DesktopOrganizer.UI.Program</StartupObject>
+        <!-- release-hardening F1 / ADR-037: PerMonitorV2 DPI awareness (fallback PerMonitor, then
+             system-aware) is declared ONLY in this manifest. Rollback = remove this line and the file. -->
+        <ApplicationManifest>app.manifest</ApplicationManifest>
     </PropertyGroup>
 
     <ItemGroup>
@@ -48,12 +51,16 @@
 
     <ItemGroup>
         <ProjectReference Include="..\DesktopOrganizer.Core\DesktopOrganizer.Core.csproj"/>
+        <ProjectReference Include="..\DesktopOrganizer.Localization\DesktopOrganizer.Localization.csproj"/>
         <ProjectReference Include="..\DesktopOrganizer.Services\DesktopOrganizer.Services.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions"/>
+        <!-- ADR-033 part 2 (crash safety) — see Directory.Packages.props for why this standalone
+             package is needed for Microsoft.Win32.SystemEvents.SessionEnding. -->
+        <PackageReference Include="Microsoft.Win32.SystemEvents"/>
     </ItemGroup>
 
 </Project>

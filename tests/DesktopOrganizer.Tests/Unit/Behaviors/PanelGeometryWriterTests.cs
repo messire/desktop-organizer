@@ -26,7 +26,7 @@ public class PanelGeometryWriterTests
         StaTestRunner.Run(() =>
         {
             var window = new Window();
-            var writer = new PanelGeometryWriter(window, () => null);
+            var writer = new PanelGeometryWriter(window, () => null, FakeDesktopScale.Uniform().Object);
 
             writer.Apply(new Rect(10, 20, 30, 40), span: null, monitorDeviceId: null);
 
@@ -45,7 +45,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window();
             var model = new ChildWindowModel();
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.Apply(new Rect(10, 20, 300, 400), span: null, monitorDeviceId: null);
 
@@ -73,7 +73,7 @@ public class PanelGeometryWriterTests
             // conversion (F-7) for the exact same class of coordinate.
             var window = new Window();
             var model = new ChildWindowModel();
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.Apply(new Rect(-0.6, -1366.6, 300, 400), span: null, monitorDeviceId: null);
 
@@ -89,7 +89,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window();
             var model = new ChildWindowModel();
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.ApplyPosition(new Point(-0.6, -101.5), span: null, monitorDeviceId: null);
 
@@ -107,7 +107,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window();
             var model = new ChildWindowModel();
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.Apply(new Rect(0, 0, 152, 152), span: new GridSpan(20, 20), monitorDeviceId: null);
 
@@ -124,7 +124,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window();
             var model = new ChildWindowModel { WidthSpanUnits = 12, HeightSpanUnits = 12 };
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.Apply(new Rect(0, 0, 100, 100), span: null, monitorDeviceId: null);
 
@@ -141,7 +141,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window();
             var model = new ChildWindowModel();
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.Apply(new Rect(0, 0, 100, 100), span: null, monitorDeviceId: @"\\.\DISPLAY2");
 
@@ -157,7 +157,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window();
             var model = new ChildWindowModel { MonitorDeviceId = @"\\.\DISPLAY1" };
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.Apply(new Rect(0, 0, 100, 100), span: null, monitorDeviceId: null);
 
@@ -173,7 +173,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window();
             var model = new ChildWindowModel();
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             Assert.False(writer.IsApplying);
 
@@ -204,7 +204,7 @@ public class PanelGeometryWriterTests
                 Position = new System.Drawing.Point(1, 2),
                 Size = new System.Drawing.Size(3, 4),
             };
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
             ApplyingField.SetValue(writer, true);
 
             writer.Apply(new Rect(999, 999, 999, 999), span: new GridSpan(50, 50), monitorDeviceId: @"\\.\DISPLAY9");
@@ -229,7 +229,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window { Width = 300, Height = 400 };
             var model = new ChildWindowModel { Size = new System.Drawing.Size(300, 400) };
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.ApplyPosition(new Point(17, 23), span: null, monitorDeviceId: null);
 
@@ -254,7 +254,7 @@ public class PanelGeometryWriterTests
             // deliberately still holds the expanded height for restore -- a move must not overwrite it.
             var window = new Window { Width = 300, Height = 32 };
             var model = new ChildWindowModel { IsRolledUp = true, Size = new System.Drawing.Size(300, 400) };
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.ApplyPosition(new Point(50, 60), span: null, monitorDeviceId: null);
 
@@ -271,7 +271,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window();
             var model = new ChildWindowModel();
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
 
             writer.ApplyPosition(new Point(0, 0), new GridSpan(31, 32), @"\.\DISPLAY2");
 
@@ -288,7 +288,7 @@ public class PanelGeometryWriterTests
         StaTestRunner.Run(() =>
         {
             var window = new Window();
-            var writer = new PanelGeometryWriter(window, () => null);
+            var writer = new PanelGeometryWriter(window, () => null, FakeDesktopScale.Uniform().Object);
 
             writer.ApplyPosition(new Point(10, 20), span: null, monitorDeviceId: null);
 
@@ -305,7 +305,7 @@ public class PanelGeometryWriterTests
         {
             var window = new Window();
             var model = new ChildWindowModel();
-            var writer = new PanelGeometryWriter(window, () => model);
+            var writer = new PanelGeometryWriter(window, () => model, FakeDesktopScale.Uniform().Object);
             var observed = new List<bool>();
             window.LocationChanged += (_, _) => observed.Add(writer.IsApplying);
 

@@ -40,9 +40,14 @@ public enum SettingsSection
 /// re-deriving the label/glyph from the enum value at render time.
 /// </summary>
 /// <param name="Section">The section this entry navigates to.</param>
-/// <param name="Title">The sidebar label, English only (D-8).</param>
-/// <param name="Glyph">A single Segoe MDL2 Assets glyph shown left of <paramref name="Title"/>.</param>
-public sealed record SettingsSectionInfo(SettingsSection Section, string Title, string Glyph);
+/// <param name="TitleKey">
+/// The RESX key (<c>Settings_Nav_*</c>, docs/PLANS/localization.md §2.6/§4.5) for the sidebar label —
+/// resolved hot-switch-aware via <c>{loc:LocBinding TitleKey, Converter={StaticResource LocKey}}</c>
+/// in <c>Resources/Styles/Settings.xaml</c>'s <c>Settings.SidebarItemTemplate</c>. Supersedes ADR-031
+/// D-8 ("English only") — localization is now in scope (ADR-032).
+/// </param>
+/// <param name="Glyph">A single Segoe MDL2 Assets glyph shown left of the resolved <paramref name="TitleKey"/>.</param>
+public sealed record SettingsSectionInfo(SettingsSection Section, string TitleKey, string Glyph);
 
 /// <summary>
 /// The fixed sidebar catalog (docs/prompts/settings-window-redesign.md inventory table), split into
@@ -54,15 +59,15 @@ public static class SettingsSectionCatalog
     /// <summary>The seven sections shown in the sidebar's main scrolling list, in display order.</summary>
     public static IReadOnlyList<SettingsSectionInfo> Primary { get; } =
     [
-        new(SettingsSection.General, "General", ""),
-        new(SettingsSection.LayoutSnapping, "Layout & snapping", ""),
-        new(SettingsSection.Panels, "Panels", ""),
-        new(SettingsSection.NewPanelDefaults, "New panel defaults", ""),
-        new(SettingsSection.Pages, "Pages", ""),
-        new(SettingsSection.SystemIcons, "System icons", ""),
-        new(SettingsSection.Backup, "Backup", ""),
+        new(SettingsSection.General, "Settings_Nav_General", ""),
+        new(SettingsSection.LayoutSnapping, "Settings_Nav_LayoutSnapping", ""),
+        new(SettingsSection.Panels, "Settings_Nav_Panels", ""),
+        new(SettingsSection.NewPanelDefaults, "Settings_Nav_NewPanelDefaults", ""),
+        new(SettingsSection.Pages, "Settings_Nav_Pages", ""),
+        new(SettingsSection.SystemIcons, "Settings_Nav_SystemIcons", ""),
+        new(SettingsSection.Backup, "Settings_Nav_Backup", ""),
     ];
 
     /// <summary>The single entry pinned to the bottom of the sidebar.</summary>
-    public static SettingsSectionInfo About { get; } = new(SettingsSection.About, "About", "");
+    public static SettingsSectionInfo About { get; } = new(SettingsSection.About, "Settings_Nav_About", "");
 }

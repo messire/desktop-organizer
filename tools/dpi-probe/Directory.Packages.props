@@ -1,0 +1,6 @@
+<Project>
+    <!-- Isolates the probe from the repository's Central Package Management; the probe has no packages. -->
+    <PropertyGroup>
+        <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    </PropertyGroup>
+</Project>

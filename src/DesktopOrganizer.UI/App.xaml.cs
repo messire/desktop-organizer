@@ -1,6 +1,13 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
+using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.UI.Diagnostics;
 using DesktopOrganizer.UI.Lifecycle;
+using DesktopOrganizer.UI.Localization;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State;
@@ -43,6 +50,14 @@ public partial class App : Application
     private IDiagnosticsLog? _diagnosticsLog;
     private IApplicationStateService? _applicationState;
     private IPageManager? _pageManager;
+    private ILocalizationService? _localization;
+    private IDesktopScaleProvider? _desktopScale;
+    private ShutdownSequence? _shutdownSequence;
+    private CrashCoordinator? _crashCoordinator;
+    private ShellRecoveryCoordinator? _shellRecovery;
+
+    /// <summary>The same <c>Logs</c> folder <see cref="JsonLinesDiagnosticsLog"/> writes its JSONL sessions to (see <c>DiConfig.DefaultDiagnosticsLogDirectory</c>).</summary>
+    private static string CrashLogDirectory => Path.Combine(AppStorageRoot.Default, "Logs");
 
     private ITrayIconManager TrayIconManager
         => (_trayIconManager ??= _serviceProvider.GetService<ITrayIconManager>())!;
@@ -77,20 +92,92 @@ public partial class App : Application
     private IDiagnosticsLog DiagnosticsLog
         => (_diagnosticsLog ??= _serviceProvider.GetService<IDiagnosticsLog>())!;
 
-    private static string GetAppVersion()
-        => System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+    private ILocalizationService Localization
+        => (_localization ??= _serviceProvider.GetService<ILocalizationService>())!;
+
+    /// <summary>The per-monitor DPI snapshot provider (release-hardening F, ADR-037).</summary>
+    private IDesktopScaleProvider DesktopScale
+        => (_desktopScale ??= _serviceProvider.GetService<IDesktopScaleProvider>())!;
 
     /// <summary>
-    /// Approximates the primary monitor's DPI scale (1.0 at 96 DPI) for diagnostics only — deliberately
-    /// not the more precise per-monitor <c>INativeApi.GetSystemDpiScale()</c> used internally by
-    /// <see cref="DesktopOrganizer.Services.Abstractions.IMonitorService"/>, which isn't reachable from
-    /// this project (<c>INativeApi</c> is internal to DesktopOrganizer.Services).
+    /// The application's one idempotent shutdown sequence (ADR-033 part 2) — see <see cref="ShutdownSequence"/>'s
+    /// own remarks. Built lazily, on first access, from properties that are themselves already lazily
+    /// resolved from DI — by the time anything can actually reach this (<see cref="OnExit"/>, a
+    /// <c>SessionEnding</c> handler, or a crash on the UI thread), <see cref="StartApp"/> has long since
+    /// resolved every one of them for its own ordinary use, so this never triggers a first-time DI
+    /// resolve mid-shutdown/mid-crash.
     /// </summary>
-    private static double GetPrimaryDpiScale()
-    {
-        using var g = System.Drawing.Graphics.FromHwnd(IntPtr.Zero);
-        return g.DpiX / 96.0;
-    }
+    /// <remarks>
+    /// H3 (release-hardening 1.0 review): <c>DiagnosticsLog.Flush</c> is the verbose gesture/lifecycle
+    /// tracer — a <c>NullDiagnosticsLog</c> no-op in every Release build (off by default) — so it flushing
+    /// is not enough to guarantee the ALWAYS-ON app log's own buffered events (every Info/Warn/Error this
+    /// session wrote through <see cref="AppLog.Current"/>) reach their sink before
+    /// <c>_serviceProvider.Dispose()</c> tears down whatever that sink depends on — <see cref="AppLog.Current"/>'s
+    /// own <c>Flush</c> is added right alongside it for exactly that reason.
+    /// </remarks>
+    private ShutdownSequence ShutdownSequenceInstance => _shutdownSequence ??= new ShutdownSequence(
+        _coordinator.EnterShutdown,
+        RestoreDesktopIcons,
+        ApplicationState.SaveNow,
+        GestureDiagnostics.SessionExiting,
+        _coordinator.CompleteShutdown,
+        DiagnosticsLog.Flush,
+        AppLog.Current.Flush, // H3: also flush the always-on app log — see this property's own remarks.
+        _serviceProvider.Dispose);
+
+    /// <summary>
+    /// The application's one fatal-crash sequence (ADR-033 part 2). Built lazily so every dependency is
+    /// captured once, the first time a crash actually happens — <see cref="DesktopIcons"/> in particular
+    /// is forced to resolve here rather than staying unresolved until this point, which is exactly the
+    /// "no DI resolve during the crash itself" invariant <see cref="CrashCoordinator"/>'s own remarks
+    /// describe; this property is also touched eagerly from the constructor (see <see cref="CrashRouting"/>)
+    /// so the very first background-thread crash handler installed by <c>Program.Main</c> already has
+    /// somewhere to route to.
+    /// </summary>
+    /// <remarks>
+    /// Two H3 fixes (release-hardening 1.0 review), both below: the <c>flushAppLog</c> argument is
+    /// <see cref="AppLog.Current"/>'s own <c>Flush</c> — not <c>IDiagnosticsLog.Flush</c>, the verbose
+    /// gesture/lifecycle tracer that is a <c>NullDiagnosticsLog</c> no-op in every Release build (off by
+    /// default) — so the crash record <see cref="CrashCoordinator.HandleFatal"/> just wrote via
+    /// <c>_appLog.Error</c> cannot be lost if the process dies immediately after that step. The
+    /// <c>saveStateForUiThreadCrash</c> argument goes through <see cref="RunShutdownSequence"/> (not a
+    /// bare <c>ShutdownSequenceInstance.Run()</c>) so a pending Explorer-restart recovery (ADR-034) is
+    /// stopped and <c>_shellRecovery</c> disposed BEFORE that step's <c>ApplicationState.SaveNow</c>/
+    /// <c>_serviceProvider.Dispose</c> run — see <see cref="RunShutdownSequence"/>'s own remarks for the
+    /// hazard this closes (a recovery rebuilding panels while, or after, the container that owns them is
+    /// being torn down).
+    /// </remarks>
+    private CrashCoordinator CrashCoordinatorInstance => _crashCoordinator ??= new CrashCoordinator(
+        DesktopIcons,
+        (exception, origin) => new CrashReportWriter(CrashLogDirectory).Write(exception, origin),
+        AppLog.Current,
+        AppLog.Current.Flush, // H3: flush the always-on app log, not IDiagnosticsLog — see this property's own remarks.
+        RunShutdownSequence, // H3: via RunShutdownSequence, not a bare ShutdownSequenceInstance.Run() — see this property's own remarks.
+        ShowCrashDialog,
+        OpenLogsFolder,
+        code =>
+        {
+            // Only an origin running on THIS (UI) thread can safely drive an orderly WPF shutdown —
+            // CrashCoordinator's own remarks on CrashOrigin.Background explain why a genuine
+            // background-thread crash must not attempt this at all (the CLR is already terminating the
+            // process by the time AppDomain.UnhandledException's handler returns).
+            if (Dispatcher.CheckAccess())
+                Shutdown(code);
+        });
+
+    private static string GetAppVersion() => AppVersionInfo.Display;
+
+    /// <summary>
+    /// The system/reference DPI scale (1.0 at 96 DPI) for diagnostics only (release-hardening F §5 #12,
+    /// ADR-037) — read from <see cref="DesktopScale"/>'s current snapshot instead of the pre-F
+    /// <c>System.Drawing.Graphics.FromHwnd(IntPtr.Zero)</c> GDI probe, so this diagnostics call no longer
+    /// needs a fourth, independent DPI source next to <see cref="IDesktopScaleProvider"/>. Deliberately
+    /// the single scalar <see cref="IGestureDiagnostics.SessionStarted"/> already accepts — the richer
+    /// per-monitor/mode/layer-scale picture <see cref="DesktopScale"/>'s <see cref="DesktopScaleModel"/>
+    /// snapshot now carries is available to a future diagnostics schema change, not added here (that
+    /// contract is out of this package's scope).
+    /// </summary>
+    private double GetPrimaryDpiScale() => DesktopScale.Current.ReferenceScale;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="App"/> class. Only ever called from
@@ -117,6 +204,26 @@ public partial class App : Application
         _serviceProvider = serviceProvider;
         _coordinator = coordinator;
         _role = role;
+
+        // ADR-033 part 2 (crash safety) — installed here, in the constructor, rather than lazily on
+        // first use: DispatcherUnhandledException must be wired before Run() ever pumps a single
+        // message, and CrashRouting.Handler must point somewhere real before Program.Main's own
+        // AppDomain/WinForms handlers (installed even earlier, before this constructor runs) can ever
+        // actually fire for real.
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        CrashRouting.Handler = CrashCoordinatorInstance.HandleFatal;
+
+        // Q2 (plan §2 default): both routed through the very same idempotent ShutdownSequenceInstance
+        // OnExit itself uses — whichever of SessionEnding/OnExit reaches it first does the real work,
+        // the other is a no-op. Application.SessionEnding is the primary signal (WPF's own top-level
+        // window already participates in WM_QUERYENDSESSION/WM_ENDSESSION); Microsoft.Win32.SystemEvents
+        // .SessionEnding is the "insurance" fallback the plan calls for, raised independently of any WPF
+        // window and marshalled onto the UI thread (it can arrive on a different thread) via
+        // UiDispatch — a dropped signal here just means OnExit's own, ordinary path still runs at real
+        // process exit.
+        SessionEnding += (_, _) => RunShutdownSequence();
+        Microsoft.Win32.SystemEvents.SessionEnding += (_, _) =>
+            UiDispatch.TryBeginInvoke(Dispatcher, RunShutdownSequence);
     }
 
     /// <inheritdoc />
@@ -131,45 +238,101 @@ public partial class App : Application
             return;
         }
 
-        // First real action of shutdown (ADR-023 D-9): flip the activation server to answering
-        // SHUTTING_DOWN before any teardown below runs, so a Secondary racing to activate us right now
-        // gets a deterministic "retry" signal (ADR-023 D-5/D-6/R-6) instead of a connection that just
-        // times out mid-shutdown.
-        _coordinator.EnterShutdown();
-
-        RestoreDesktopIcons();
-
-        // Structural (app exit): must write synchronously, before disposing the DI container, or the
-        // last action the user took right before closing (which SaveWindowsState may have only just
-        // scheduled, debounced) would be silently lost. A single ApplicationStateService.SaveNow() call
-        // now covers the whole document (panels, pages, layout snapshots AND the system icons panel —
-        // ADR-024 D-11/D-12: it pulls every section's current live state itself), replacing the two
-        // separate SystemIconsPanel.Save() + WindowManager.SaveWindowsStateNow() calls this used to be.
-        ApplicationState.SaveNow();
-
-        // Record the session end before the DI container (and the IDiagnosticsLog it owns) is disposed
-        // — otherwise the very last events recorded during shutdown could be lost.
-        GestureDiagnostics.SessionExiting();
-
-        // Stops the activation server and releases the guard mutex (ADR-023 D-9), then — since this
-        // process was Primary — writes the SingleInstanceShutdownSequence diagnostics event. Must run
-        // here, explicitly, before _serviceProvider.Dispose() below: IDiagnosticsLog is resolved from
-        // the still-live container, which is exactly what makes this safe. Calling it from inside
-        // ISingleInstanceCoordinator's own Dispose() (invoked automatically as part of the container's
-        // disposal chain, by which point the container is already marked disposed) would throw
-        // ObjectDisposedException on every ordinary exit (C-2) — Dispose() is a no-op with respect to
-        // diagnostics precisely because this call already did the work.
-        _coordinator.CompleteShutdown();
-
-        // Flush any buffered diagnostics events — including the shutdown-sequence event just written
-        // above — before the DI container is disposed.
-        DiagnosticsLog.Flush();
-
-        // Disposes every registered IDisposable singleton, including ISingleInstanceCoordinator, whose
-        // own Dispose() at this point only needs to release its two OS mutex handles (CompleteShutdown
-        // above already did the rest).
-        _serviceProvider.Dispose();
+        // ADR-033 part 2 (plan §2 Q2): the exact same idempotent sequence a SessionEnding handler (see
+        // the constructor) or a fatal UI-thread crash's own "save state" step (CrashCoordinator) may
+        // already have run — see ShutdownSequenceInstance's own remarks for why this is always safe to
+        // call again here regardless of which of those already fired.
+        RunShutdownSequence();
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// Shows the crash dialog (<c>Crash_Dialog_Title</c>/<c>Crash_Dialog_Message</c>, ADR-033 part 2 plan
+    /// §2 step 4) and reports whether the user asked to open the logs folder.
+    /// </summary>
+    /// <param name="crashReportPath">Unused by the dialog text itself (plan: no path shown to the user) — accepted only to match <see cref="CrashCoordinator"/>'s delegate shape.</param>
+    private static bool ShowCrashDialog(string crashReportPath)
+    {
+        _ = crashReportPath;
+
+        var result = MessageBox.Show(
+            LocalizationResources.GetString("Crash_Dialog_Message", CultureInfo.CurrentUICulture),
+            LocalizationResources.GetString("Crash_Dialog_Title", CultureInfo.CurrentUICulture),
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Error);
+
+        return result == MessageBoxResult.Yes;
+    }
+
+    /// <summary>
+    /// Opens the crash log's containing folder (falling back to the whole <c>Logs</c> folder if
+    /// <paramref name="crashReportPath"/> is blank — e.g. the report itself failed to write) in Explorer.
+    /// </summary>
+    /// <param name="crashReportPath">The crash report's full path, or <see cref="string.Empty"/>.</param>
+    private static void OpenLogsFolder(string crashReportPath)
+    {
+        var directory = string.IsNullOrEmpty(crashReportPath)
+            ? CrashLogDirectory
+            : Path.GetDirectoryName(crashReportPath) is { Length: > 0 } parent ? parent : CrashLogDirectory;
+
+        Process.Start(new ProcessStartInfo(directory) { UseShellExecute = true });
+    }
+
+    /// <summary>
+    /// WPF's own UI-thread crash entry point (ADR-033 part 2). Marks the exception handled — WPF's
+    /// default of tearing down the process with no report at all is exactly what this replaces — then
+    /// routes it through the same <see cref="CrashCoordinator"/> a background-thread/WinForms crash uses.
+    /// </summary>
+    private void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+        CrashCoordinatorInstance.HandleFatal(e.Exception, CrashOrigin.Dispatcher);
+    }
+
+    /// <summary>
+    /// Stops Explorer-restart recovery (ADR-034) — a pending recovery attempt must never rebuild
+    /// panels while, or after, the shutdown sequence saves state and disposes the container — then runs
+    /// the idempotent <see cref="ShutdownSequence"/>. Both steps are idempotent, so every entry point
+    /// (<see cref="OnExit"/>, both <c>SessionEnding</c> handlers) can call this unconditionally.
+    /// </summary>
+    private void RunShutdownSequence()
+    {
+        try
+        {
+            _shellRecovery?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Current.Error("App", "ShellRecoveryDisposeFailed", ex);
+        }
+
+        ShutdownSequenceInstance.Run();
+    }
+
+    /// <summary>
+    /// Wires Explorer-restart recovery (ADR-034). Runs last in <see cref="StartApp"/>: panels, sidebar
+    /// and tray must all exist before a recovery could touch them. Failure only disables automatic
+    /// recovery (the pre-ADR-034 behaviour) — it never blocks startup.
+    /// </summary>
+    private void InitShellRecovery()
+    {
+        try
+        {
+            _shellRecovery = new ShellRecoveryCoordinator(
+                _serviceProvider.GetRequiredService<IExplorerRestartMonitor>(),
+                WindowManager,
+                _serviceProvider.GetRequiredService<IVirtualDesktopService>(),
+                SystemIconsPanel,
+                DesktopIcons,
+                TrayIconManager,
+                _serviceProvider.GetService<IAppLog>() ?? AppLog.Current,
+                DesktopScale);
+            _shellRecovery.Start();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Current.Error("App", "ShellRecoveryInitFailed", ex);
+        }
     }
 
     /// <summary>
@@ -186,7 +349,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Failed to restore desktop icons on exit: {ex.Message}");
+            AppLog.Current.Error("App", "RestoreDesktopIconsOnExitFailed", ex);
         }
     }
 
@@ -264,9 +427,31 @@ public partial class App : Application
 
     private void StartApp(object? sender, StartupEventArgs e)
     {
-        // Must run before anything else in StartApp: InitTrayIcon()/LoadPanels() below are the first
-        // things that can construct a Window (ChildWindow/MainWindow/SystemIconsPanelWindow), and every
-        // one of those XAML files resolves StaticResource keys this builds.
+        // Localization bootstrap (docs/PLANS/localization.md §2.5 steps a-c) — must run before
+        // EVERYTHING else in StartApp, including LoadResourceDictionaries() below: it is the first
+        // thing that can construct a Window (ChildWindow/MainWindow/SystemIconsPanelWindow all resolve
+        // {loc:Loc}/{loc:LocBinding} bindings against LocalizationSource.Current), and
+        // FrameworkElement.LanguageProperty's default metadata override (CultureSync.Attach) is only
+        // honoured if it runs before the first FrameworkElement is ever constructed.
+        //
+        // a. Resolve IAppSettings.Language (the persisted preference — a single additive user.config
+        //    scalar, D-1) against the ILocalizationService singleton DiConfig already registered with
+        //    SystemCulture.OriginalUiCulture (captured by Program.Main, before any override).
+        Localization.ApplyLanguage(AppSettings.Language);
+
+        // b. Publish this exact instance as the one sanctioned static access point (L-5) for every
+        //    markup extension/converter/static helper XAML and CLR code construct outside of DI. Called
+        //    exactly once — see LocalizationSource.Initialize's own remarks for why calling it twice
+        //    with a different instance would be a bug, not a no-op.
+        LocalizationSource.Initialize(Localization);
+
+        // c. Override FrameworkElement.LanguageProperty's default metadata and start keeping every
+        //    open Window's Language / the UI thread's own culture in sync with future language switches.
+        CultureSync.Attach(Localization, this);
+
+        // Must run before anything else that can construct a Window: InitTrayIcon()/LoadPanels() below
+        // are the first things that can construct one (ChildWindow/MainWindow/SystemIconsPanelWindow),
+        // and every one of those XAML files resolves StaticResource keys this builds.
         LoadResourceDictionaries();
 
         // D-12 (docs/PLANS/phase-6-edit-layout-ux.md §1): published as an application resource, not a
@@ -275,6 +460,12 @@ public partial class App : Application
         // still bind to it via {StaticResource LayoutEditMode}. Must be set before InitTrayIcon()/
         // LoadPanels() below construct any Window whose XAML might reference it.
         Resources["LayoutEditMode"] = _serviceProvider.GetRequiredService<ILayoutEditModeService>();
+
+        // ADR-033 part 2 (crash safety, plan §2 startup self-heal): must run before InitTrayIcon() below
+        // reads DesktopIcons.AreIconsVisible to set the tray checkmark's initial state, so a previous
+        // process that died with icons hidden (crash that never reached RestoreDesktopIcons, taskkill,
+        // power loss) never leaves this session starting with a stale-hidden desktop.
+        StartupIconsSelfHeal.Apply(DesktopIcons);
 
         InitTrayIcon();
         MonitorService.Start(); // begin listening for display changes before panels load
@@ -285,10 +476,8 @@ public partial class App : Application
         //
         // Guarded by DiagnosticsLog.IsEnabled here (not just inside GestureDiagnostics.SessionStarted)
         // so the arguments themselves are never eagerly computed when diagnostics is off — the default
-        // for Release builds without --diag/DESKTOPORGANIZER_DIAG=1 (finalization MINOR-4).
-        // GetPrimaryDpiScale() in particular calls System.Drawing.Graphics.FromHwnd(IntPtr.Zero)
-        // unconditionally, with no try/catch of its own; skipping it entirely when diagnostics is
-        // disabled means a failure there can never interrupt StartApp before InitDesktopGestures().
+        // for Release builds without --diag/DESKTOPORGANIZER_DIAG=1 (finalization MINOR-4). Also skips
+        // MonitorService.GetMonitors() (a native monitor enumeration) when diagnostics is disabled.
         if (DiagnosticsLog.IsEnabled)
         {
             GestureDiagnostics.SessionStarted(
@@ -315,6 +504,10 @@ public partial class App : Application
         // an empty/default section from a consumer that hasn't loaded yet and persists it over real
         // on-disk data.
         ApplicationState.MarkConsumersReady();
+
+        // ADR-034: after the write barrier above, so a recovery that has to rebuild a panel can never
+        // run while a consumer is still unloaded.
+        InitShellRecovery();
 
         // Wired last, deliberately after every other startup step above: subscribing is the "attach
         // sink" moment that immediately replays anything ActivationRequestRelay buffered since
@@ -476,12 +669,14 @@ public partial class App : Application
         var model = NewPanelWithDefaults();
 
         // F-7 (P03-L1, ADR-028 «Lasso-создание панели: px vs DIP»): DesktopLassoEventArgs is in PHYSICAL
-        // SCREEN PIXELS by contract, while ChildWindowModel.Position/Size are DIP — writing one into the
-        // other made every lassoed panel oversized and displaced at any scale other than 100%. The
-        // conversion uses IMonitorService's own system-DPI coefficient (the same one GetMonitors()
-        // divides by), so no fourth DPI source is introduced; the minimum panel size is applied after it.
+        // SCREEN PIXELS by contract, while ChildWindowModel.Position/Size are desktop-DIP — writing one
+        // into the other made every lassoed panel oversized and displaced at any scale other than 100%.
+        // release-hardening F (ADR-037): the conversion now goes through IDesktopScaleProvider's current
+        // snapshot — the monitor the lasso rectangle intersects most (tie → primary) — rather than a
+        // single system-wide coefficient, so a lasso drawn on a secondary monitor at a different scale
+        // (mixed-DPI TopLevel mode) converts correctly; the minimum panel size is applied after it.
         var dipBounds = LassoPanelGeometry.ToDip(
-            args.X, args.Y, args.Width, args.Height, MonitorService.GetSystemDpiScale(), MinPanelSize);
+            new Rect(args.X, args.Y, args.Width, args.Height), DesktopScale.Current, MinPanelSize);
 
         var monitors = new List<(string DeviceName, System.Windows.Rect Bounds, System.Windows.Rect WorkArea)>();
         foreach (var monitor in MonitorService.GetMonitors())

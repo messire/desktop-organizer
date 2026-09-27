@@ -55,16 +55,22 @@ public interface IWindowManager
     void RemoveChildWindow(Guid windowId);
 
     /// <summary>
-    /// Removes a child window, optionally releasing any app-managed item copies it referenced.
+    /// Removes a child window, optionally moving any app-managed item copies it referenced to the
+    /// Recycle Bin (ADR-035).
     /// </summary>
     /// <param name="windowId">The ID of the window to remove.</param>
     /// <param name="releaseManagedItems">
     /// <see langword="true"/> if the panel is being permanently deleted by the user (or its owning
-    /// page is being permanently deleted) and its app-managed item copies should be released;
-    /// <see langword="false"/> if the panel is only being torn down to be immediately recreated
-    /// (e.g. layout snapshot restore) and its managed item copies must be preserved.
+    /// page is being permanently deleted) and its app-managed item copies should be moved to the
+    /// Recycle Bin; <see langword="false"/> if the panel is only being torn down to be immediately
+    /// recreated (e.g. layout snapshot restore) and its managed item copies must be preserved.
     /// </param>
-    void RemoveChildWindow(Guid windowId, bool releaseManagedItems);
+    /// <returns>
+    /// <see cref="PanelRemovalResult.Removed"/>, or <see cref="PanelRemovalResult.Blocked"/> when some
+    /// managed items could not be recycled — the panel is then kept (only the items that did reach the
+    /// Recycle Bin are taken out of it) and the caller is expected to tell the user.
+    /// </returns>
+    PanelRemovalResult RemoveChildWindow(Guid windowId, bool releaseManagedItems);
 
     /// <summary>
     /// Removes a child window, optionally releasing any app-managed item copies it referenced, and
@@ -80,7 +86,20 @@ public interface IWindowManager
     /// <see cref="SaveWindowsStateNow"/> call once every removal is done, or the change can be lost to
     /// a debounce window that never elapses.
     /// </param>
-    void RemoveChildWindow(Guid windowId, bool releaseManagedItems, bool deferSave);
+    /// <returns>
+    /// <see cref="PanelRemovalResult.Removed"/>, or <see cref="PanelRemovalResult.Blocked"/> when the panel
+    /// was kept because some managed items could not be recycled (details as for the two-argument overload).
+    /// </returns>
+    PanelRemovalResult RemoveChildWindow(Guid windowId, bool releaseManagedItems, bool deferSave);
+
+    /// <summary>
+    /// Takes <paramref name="paths"/> out of every live panel that lists them (ViewModel and model) and
+    /// requests a debounced save. Used after a partially successful Recycle Bin operation (ADR-035) —
+    /// e.g. a blocked page deletion — so items that already are in the Recycle Bin don't linger as
+    /// broken entries in the panels that are being kept.
+    /// </summary>
+    /// <param name="paths">Item paths to remove (case-insensitive).</param>
+    void RemoveItemsFromPanels(IReadOnlyCollection<string> paths);
 
     /// <summary>
     /// Gets all child windows.
@@ -228,4 +247,23 @@ public interface IWindowManager
     /// <param name="panel">The panel to move.</param>
     /// <param name="pageId">The destination page identifier.</param>
     void MovePanelToPage(Models.ChildWindowModel panel, string pageId);
+
+    /// <summary>
+    /// One attempt at putting every panel back on the desktop after Explorer was restarted (ADR-034).
+    /// A panel whose window survived is re-embedded into the current <c>WorkerW</c> (or, when there
+    /// is none, re-styled and pushed back to the bottom of the Z-order as a top-level window); a panel
+    /// whose window was destroyed together with the dead shell is rebuilt from its
+    /// <see cref="Models.ChildWindowModel"/>, the single source of truth.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Idempotent — the caller retries it within a bounded window while Explorer is still starting.
+    /// Rebuilding a panel neither raises <see cref="OnChildWindowRemoved"/>/<see cref="OnChildWindowAdded"/>
+    /// (the model, and therefore every view of it, is unchanged), nor releases managed items, nor
+    /// writes state: recovery must never change what is on disk.
+    /// </para>
+    /// <para>Each panel is isolated in its own <c>try</c>/<c>catch</c>; never throws. UI thread only.</para>
+    /// </remarks>
+    /// <returns>Counts of what happened to the panels during this attempt.</returns>
+    DesktopLayerRecoveryResult RecoverDesktopLayer();
 }

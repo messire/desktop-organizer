@@ -23,7 +23,7 @@
 - Store-файлы: `%LOCALAPPDATA%\DesktopOrganizer\State\application-state.json`(`.bak`, `.tmp-*`,
   `.corrupt-*.json`), `%LOCALAPPDATA%\DesktopOrganizer\.storage-lock`.
 - Legacy: `%LOCALAPPDATA%\DesktopOrganizer_Url_*\<AssemblyVersion>\user.config`.
-- Диагностика (при `--diag`/Debug-сборке): `%LOCALAPPDATA%\DesktopOrganizer\Logs\gestures-*.jsonl`,
+- Диагностика (при `--diag`/Debug-сборке): `%LOCALAPPDATA%\DesktopOrganizer\Logs\app-*.jsonl`,
   категория `state` — см. `Testing/diagnostics-log-events.md`.
 
 ## Матрица

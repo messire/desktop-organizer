@@ -298,6 +298,12 @@
   <data name="Startup_Failed_Format" xml:space="preserve">
     <value>DesktopOrganizer failed to start: {0}</value>
   </data>
+  <data name="Crash_Dialog_Title" xml:space="preserve">
+    <value>DesktopOrganizer — Unexpected Error</value>
+  </data>
+  <data name="Crash_Dialog_Message" xml:space="preserve">
+    <value>DesktopOrganizer ran into an unexpected problem and had to close. Your desktop icons have been restored and a crash report was saved. Open the log folder?</value>
+  </data>
   <data name="Startup_OtherSession_Message" xml:space="preserve">
     <value>DesktopOrganizer is already running in another Windows session. Switch to that session to use it.</value>
   </data>
@@ -457,7 +463,7 @@
   <!-- ==== END WP-3 ==== -->
   <!-- ==== BEGIN WP-4a Settings window (Settings_) ==== -->
   <data name="Settings_About_Diagnostics_Message" xml:space="preserve">
-    <value>Diagnostics: run with --diag</value>
+    <value>Diagnostics: run with --diag for verbose logging. Open the logs folder below to view log files.</value>
   </data>
   <data name="Settings_About_OpenFolder_Button" xml:space="preserve">
     <value>Open folder</value>
@@ -468,6 +474,59 @@
   <data name="Settings_About_Version_Format" xml:space="preserve">
     <value>Version {0}</value>
   </data>
+  <!-- ==== BEGIN G2 Update check + About links (Settings_About_Update_/Settings_About_Links_) ==== -->
+  <data name="Settings_About_Update_Available_Format" xml:space="preserve">
+    <value>Update available: {0}</value>
+  </data>
+  <data name="Settings_About_Update_CheckButton" xml:space="preserve">
+    <value>Check for updates</value>
+  </data>
+  <data name="Settings_About_Update_Checking" xml:space="preserve">
+    <value>Checking for updates…</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Format" xml:space="preserve">
+    <value>Couldn't check for updates: {0}</value>
+  </data>
+  <data name="Settings_About_Update_Failed_InvalidResponse" xml:space="preserve">
+    <value>unexpected response from GitHub</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Network" xml:space="preserve">
+    <value>network problem</value>
+  </data>
+  <data name="Settings_About_Update_Failed_RateLimited" xml:space="preserve">
+    <value>GitHub rate limit reached</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Timeout" xml:space="preserve">
+    <value>the request timed out</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Unexpected" xml:space="preserve">
+    <value>unknown error</value>
+  </data>
+  <data name="Settings_About_Update_Header" xml:space="preserve">
+    <value>Updates</value>
+  </data>
+  <data name="Settings_About_Update_NoReleases" xml:space="preserve">
+    <value>No releases have been published yet.</value>
+  </data>
+  <data name="Settings_About_Update_UpToDate" xml:space="preserve">
+    <value>You're up to date.</value>
+  </data>
+  <data name="Settings_About_Update_ViewRelease_Button" xml:space="preserve">
+    <value>View release</value>
+  </data>
+  <data name="Settings_About_Links_Header" xml:space="preserve">
+    <value>Links</value>
+  </data>
+  <data name="Settings_About_Links_OpenLogsFolder_Button" xml:space="preserve">
+    <value>Open logs folder</value>
+  </data>
+  <data name="Settings_About_Links_ProjectPage_Button" xml:space="preserve">
+    <value>Project page</value>
+  </data>
+  <data name="Settings_About_Links_ReportProblem_Button" xml:space="preserve">
+    <value>Report a problem</value>
+  </data>
+  <!-- ==== END G2 Update check + About links ==== -->
   <data name="Settings_Backup_CreatedAt_Format" xml:space="preserve">
     <value>{0:g}</value>
   </data>
@@ -764,7 +823,7 @@
   <!-- ==== END WP-4b ==== -->
   <!-- ==== BEGIN WP-5 ViewModels (Settings_Confirm_, Snapshot_, Page_Confirm_) ==== -->
   <data name="Page_Confirm_Remove_ManagedFiles_Message" xml:space="preserve">
-    <value>The page will be permanently removed, along with every panel on it. Files moved into those panels will be deleted from disk without the ability to restore them via the Recycle Bin. Continue?</value>
+    <value>The page will be permanently removed, along with every panel on it. Files moved into those panels will be moved to the Recycle Bin, where you can restore them. Continue?</value>
   </data>
   <data name="Page_Confirm_Remove_Message" xml:space="preserve">
     <value>The page and every panel on it will be removed. Continue?</value>
@@ -779,13 +838,19 @@
     <value>Align all panels to grid</value>
   </data>
   <data name="Settings_Confirm_RemovePanel_ManagedFiles_Message" xml:space="preserve">
-    <value>The panel will be permanently removed. Files moved into it will be deleted from disk without the ability to restore them via the Recycle Bin. Continue?</value>
+    <value>The panel will be permanently removed. Files moved into it will be moved to the Recycle Bin, where you can restore them. Continue?</value>
   </data>
   <data name="Settings_Confirm_RemovePanel_Message" xml:space="preserve">
     <value>The panel will be removed. Continue?</value>
   </data>
   <data name="Settings_Confirm_RemovePanel_Title" xml:space="preserve">
     <value>Remove Panel</value>
+  </data>
+  <data name="Recycle_Failed_Title" xml:space="preserve">
+    <value>Could Not Move to Recycle Bin</value>
+  </data>
+  <data name="Recycle_Failed_Message_Format" xml:space="preserve">
+    <value>{0} item(s) could not be moved to the Recycle Bin, so nothing was removed permanently: these items and the panels holding them were kept. Items that did reach the Recycle Bin were taken out of their panels. Close any programs that may be using the remaining items and try again.</value>
   </data>
   <data name="Snapshot_Capture_Label" xml:space="preserve">
     <value>Snapshot name:</value>

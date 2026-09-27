@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Tools;
 
@@ -49,7 +50,7 @@ internal class FileLauncher(INativeApi nativeApi) : IFileLauncher
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"FileLauncher error: {ex.Message}");
+            AppLog.Current.Error("FileLauncher", "ActionFailed", ex);
         }
     }
 }

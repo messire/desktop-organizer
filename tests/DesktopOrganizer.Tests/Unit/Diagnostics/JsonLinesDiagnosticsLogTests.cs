@@ -309,20 +309,20 @@ public class JsonLinesDiagnosticsLogTests
     {
         var dir = NewTempDirectory();
         Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir, "gestures-20200101-000000-1.jsonl"), string.Empty);
-        File.WriteAllText(Path.Combine(dir, "gestures-20200102-000000-1.jsonl"), string.Empty);
-        File.WriteAllText(Path.Combine(dir, "gestures-20200103-000000-1.jsonl"), string.Empty);
+        File.WriteAllText(Path.Combine(dir, "app-20200101-000000-1.jsonl"), string.Empty);
+        File.WriteAllText(Path.Combine(dir, "app-20200102-000000-1.jsonl"), string.Empty);
+        File.WriteAllText(Path.Combine(dir, "app-20200103-000000-1.jsonl"), string.Empty);
 
         try
         {
             using var sut = new JsonLinesDiagnosticsLog(dir, maxFiles: 2);
             sut.Flush(); // forces the writer thread past EnsureDirectoryAndRetention, which runs before it
 
-            var remaining = Directory.GetFiles(dir, "gestures-*.jsonl").Select(Path.GetFileName).ToList();
+            var remaining = Directory.GetFiles(dir, "app-*.jsonl").Select(Path.GetFileName).ToList();
 
-            Assert.DoesNotContain("gestures-20200101-000000-1.jsonl", remaining);
-            Assert.Contains("gestures-20200102-000000-1.jsonl", remaining);
-            Assert.Contains("gestures-20200103-000000-1.jsonl", remaining);
+            Assert.DoesNotContain("app-20200101-000000-1.jsonl", remaining);
+            Assert.Contains("app-20200102-000000-1.jsonl", remaining);
+            Assert.Contains("app-20200103-000000-1.jsonl", remaining);
         }
         finally
         {
@@ -477,7 +477,7 @@ public class JsonLinesDiagnosticsLogTests
             // Flush with nothing written yet: forces the writer thread past startup (so the base
             // session file exists) without tripping rotation (currentBytes is still 0).
             sut.Flush();
-            var sessionFile = Assert.Single(Directory.GetFiles(dir, "gestures-*.jsonl"));
+            var sessionFile = Assert.Single(Directory.GetFiles(dir, "app-*.jsonl"));
             var baseNoExt = Path.GetFileNameWithoutExtension(sessionFile);
             var backup1 = Path.Combine(dir, $"{baseNoExt}-1.jsonl");
             var backup2 = Path.Combine(dir, $"{baseNoExt}-2.jsonl");
@@ -503,7 +503,7 @@ public class JsonLinesDiagnosticsLogTests
 
             // Exactly three files on disk: the (fresh, empty) base session file plus the two backups —
             // Event1's content is gone for good, matching RotationBackupCount == 2.
-            var allFiles = Directory.GetFiles(dir, "gestures-*.jsonl");
+            var allFiles = Directory.GetFiles(dir, "app-*.jsonl");
             Assert.Equal(3, allFiles.Length);
             Assert.Contains(sessionFile, allFiles);
         }
@@ -538,7 +538,7 @@ public class JsonLinesDiagnosticsLogTests
             try
             {
                 sut.Flush(); // past startup, before any rotation
-                var sessionFile = Assert.Single(Directory.GetFiles(dir, "gestures-*.jsonl"));
+                var sessionFile = Assert.Single(Directory.GetFiles(dir, "app-*.jsonl"));
 
                 sut.Write("gesture", "Event1", null);
                 var flushException = Record.Exception(() => sut.Flush());
@@ -742,13 +742,13 @@ public class JsonLinesDiagnosticsLogTests
     /// </summary>
     private static List<JsonElement> ReadSessionFileLines(string directory)
     {
-        var file = Assert.Single(Directory.GetFiles(directory, "gestures-*.jsonl"));
+        var file = Assert.Single(Directory.GetFiles(directory, "app-*.jsonl"));
         return ReadJsonLines(file);
     }
 
     /// <summary>
     /// Same retry/sharing semantics as <see cref="ReadSessionFileLines"/>, but for an explicit file
-    /// path — used once rotation is involved and more than one <c>gestures-*.jsonl</c> file can exist
+    /// path — used once rotation is involved and more than one <c>app-*.jsonl</c> file can exist
     /// in the directory at once.
     /// </summary>
     private static List<JsonElement> ReadJsonLines(string file)

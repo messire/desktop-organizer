@@ -1,6 +1,8 @@
 using System.IO;
 using System.Text.Json;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
+using DesktopOrganizer.Services.Interfaces;
 
 namespace DesktopOrganizer.Services.Tools;
 
@@ -25,6 +27,8 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     private readonly string _storageRoot;
     private readonly string _manifestPath;
     private readonly object _manifestLock = new();
+    private readonly INativeApi _nativeApi;
+    private readonly IAppLog? _appLog;
 
     // Authoritative in-memory copy of the manifest, lazily loaded from disk on first access and
     // kept in sync via write-through on every mutation (see the "Manifest" region below). This
@@ -46,25 +50,42 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     internal string StorageRoot => _storageRoot;
 
     /// <summary>
+    /// The log this instance writes failures to: the one explicitly supplied (DI resolves
+    /// <see cref="IAppLog"/> automatically since it's registered — see
+    /// <see cref="DesktopOrganizer.Services.Configuration.DiConfig"/>), falling back to the process-wide
+    /// ambient <see cref="AppLog.Current"/> for tests that construct this type directly without a log.
+    /// </summary>
+    private IAppLog Log => _appLog ?? AppLog.Current;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="PanelItemStorageService"/> class, using the
     /// real per-user app-data folder as storage root (<see cref="Storage.AppStorageRoot.Default"/> —
     /// Debug and Release builds resolve to different folders, see <see cref="Storage.AppStorageRoot"/>).
     /// </summary>
-    public PanelItemStorageService()
-        : this(Path.Combine(Storage.AppStorageRoot.Default, "PanelItems"))
+    /// <param name="nativeApi">Shell access used by <see cref="ReleaseToRecycleBin"/> (Recycle Bin, ADR-035).</param>
+    /// <param name="appLog">See <see cref="Log"/>.</param>
+    public PanelItemStorageService(INativeApi nativeApi, IAppLog? appLog = null)
+        : this(Path.Combine(Storage.AppStorageRoot.Default, "PanelItems"), nativeApi, appLog)
     {
     }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PanelItemStorageService"/> class with an
     /// explicit storage root. Internal — used by tests to point at a disposable temp folder
-    /// instead of the real per-user app-data location.
+    /// instead of the real per-user app-data location (and a mocked <see cref="INativeApi"/> instead
+    /// of the real Recycle Bin).
     /// </summary>
     /// <param name="storageRoot">The folder moved-in files are stored under.</param>
-    internal PanelItemStorageService(string storageRoot)
+    /// <param name="nativeApi">Shell access used by <see cref="ReleaseToRecycleBin"/>.</param>
+    /// <param name="appLog">See <see cref="Log"/>.</param>
+    internal PanelItemStorageService(string storageRoot, INativeApi nativeApi, IAppLog? appLog = null)
     {
+        ArgumentNullException.ThrowIfNull(nativeApi);
+
         _storageRoot = storageRoot;
         _manifestPath = Path.Combine(_storageRoot, ManifestFileName);
+        _nativeApi = nativeApi;
+        _appLog = appLog;
     }
 
     /// <inheritdoc />
@@ -77,25 +98,101 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     public RestoreOutcome Restore(string storedPath) => Restore(storedPath, forceCrossVolume: false);
 
     /// <inheritdoc />
-    public void Release(string storedPath)
+    /// <remarks>
+    /// ADR-035: this method never deletes item content itself — the only destructive step is the
+    /// single <see cref="INativeApi.RecycleItems"/> batch. What actually went to the Recycle Bin is
+    /// decided afterwards by checking which paths still exist, so a partially-completed shell
+    /// operation (locked file, user declined the "delete permanently?" prompt, path too long for
+    /// <c>SHFileOperation</c>) is reported item by item. The only things removed directly are the
+    /// manifest entries and the empty per-item GUID wrapper directories of recycled items.
+    /// </remarks>
+    public RecycleOutcome ReleaseToRecycleBin(IReadOnlyList<string> storedPaths)
     {
-        if (!IsManaged(storedPath)) return;
+        ArgumentNullException.ThrowIfNull(storedPaths);
 
-        try
+        // (caller's path, normalized full path) for every distinct managed path.
+        var managed = new List<(string Original, string Full)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in storedPaths)
         {
-            var fullStored = Path.GetFullPath(storedPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (!IsManaged(path)) continue;
 
-            if (Directory.Exists(fullStored)) Directory.Delete(fullStored, recursive: true);
-            else if (File.Exists(fullStored)) File.Delete(fullStored);
+            string full;
+            try
+            {
+                full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch (Exception)
+            {
+                continue; // IsManaged already rejects malformed paths; belt-and-suspenders.
+            }
 
-            RemoveManifestEntry(fullStored);
-            TryCleanupEmptyItemDirectory(fullStored);
+            // M8 (release-hardening review): IsManaged(path) alone accepts the storage root itself and
+            // any of its descendants (by design — other callers, e.g. IsManaged(_storageRoot), rely on
+            // that). Recycling must never be handed the root or a bare per-item GUID wrapper directory
+            // directly — only an actual item strictly below one.
+            if (!IsStrictlyManagedItem(full)) continue;
+
+            if (seen.Add(full)) managed.Add((path, full));
         }
-        catch (Exception ex)
+
+        if (managed.Count == 0) return RecycleOutcome.Create([], [], cancelled: false);
+
+        // Only paths that exist go to the shell: SHFileOperation fails the whole batch on a missing
+        // source. A path that is already gone has nothing left to lose and is reported as recycled.
+        var toRecycle = managed.Where(m => PathExists(m.Full)).Select(m => m.Full).ToArray();
+
+        var shellReportedSuccess = true;
+        if (toRecycle.Length > 0)
         {
-            Console.Error.WriteLine($"PanelItemStorageService.Release failed for '{storedPath}': {ex.Message}");
+            try
+            {
+                shellReportedSuccess = _nativeApi.RecycleItems(toRecycle, IntPtr.Zero);
+            }
+            catch (Exception ex)
+            {
+                // INativeApi.RecycleItems is documented never to throw; a test double or future
+                // implementation that does must still not take the UI thread down.
+                shellReportedSuccess = false;
+                Log.Error(
+                    "PanelItemStorageService",
+                    "RecycleItemsThrew",
+                    ex,
+                    new KeyValuePair<string, object?>("count", toRecycle.Length));
+            }
         }
+
+        var recycled = new List<string>();
+        var remaining = new List<string>();
+        var recycledFull = new List<string>();
+        foreach (var (original, full) in managed)
+        {
+            if (PathExists(full))
+            {
+                remaining.Add(original);
+            }
+            else
+            {
+                recycled.Add(original);
+                recycledFull.Add(full);
+            }
+        }
+
+        RemoveManifestEntries(recycledFull);
+        foreach (var full in recycledFull) TryCleanupEmptyItemDirectory(full);
+
+        if (remaining.Count > 0 || !shellReportedSuccess)
+        {
+            Log.Warn(
+                "PanelItemStorageService",
+                "RecycleIncomplete",
+                new KeyValuePair<string, object?>("requested", managed.Count),
+                new KeyValuePair<string, object?>("recycled", recycled.Count),
+                new KeyValuePair<string, object?>("remaining", remaining.Count),
+                new KeyValuePair<string, object?>("shellReportedSuccess", shellReportedSuccess));
+        }
+
+        return RecycleOutcome.Create(recycled, remaining, cancelled: !shellReportedSuccess);
     }
 
     /// <inheritdoc />
@@ -212,7 +309,10 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             // failure) this aborts before any file-system mutation happens.
             if (!TryRenameManifestEntry(fullStored, newPath, actualNewName, out var hadOldEntry))
             {
-                Console.Error.WriteLine($"PanelItemStorageService.RenameManaged: manifest write failed, aborting rename of '{storedPath}'");
+                Log.Warn(
+                    "PanelItemStorageService",
+                    "RenameManagedManifestWriteFailed",
+                    new KeyValuePair<string, object?>("path", storedPath));
                 return new RenameResult(RenameOutcome.Failed, null);
             }
 
@@ -233,7 +333,12 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 // entry is harmless (Restore is only ever invoked with a managed path that actually
                 // exists on disk, so it can never be looked up — see TryRenameManifestEntry remarks).
                 if (hadOldEntry) RemoveManifestEntry(newPath);
-                Console.Error.WriteLine($"PanelItemStorageService.RenameManaged: move failed for '{storedPath}' -> '{newPath}': {ex.Message}");
+                Log.Error(
+                    "PanelItemStorageService",
+                    "RenameManagedMoveFailed",
+                    ex,
+                    new KeyValuePair<string, object?>("path", storedPath),
+                    new KeyValuePair<string, object?>("newPath", newPath));
                 return new RenameResult(RenameOutcome.Failed, null);
             }
 
@@ -245,7 +350,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"PanelItemStorageService.RenameManaged failed for '{storedPath}': {ex.Message}");
+            Log.Error(
+                "PanelItemStorageService",
+                "RenameManagedFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", storedPath));
             return new RenameResult(RenameOutcome.Failed, null);
         }
     }
@@ -306,6 +415,35 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         return candidates ?? (IReadOnlyList<string>)[];
     }
 
+    /// <inheritdoc />
+    public void ForgetMovedOut(string path)
+    {
+        if (!IsManaged(path)) return;
+
+        string full;
+        try
+        {
+            full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception)
+        {
+            return; // malformed path — IsManaged already rejects most of these; belt-and-suspenders.
+        }
+
+        // M8 (release-hardening review): see the identical guard in ReleaseToRecycleBin — never forget
+        // the storage root or a bare per-item GUID wrapper directory itself, only an actual item
+        // strictly below one.
+        if (!IsStrictlyManagedItem(full)) return;
+
+        // The only gate this method trusts: if the path is still there, "moved out" hasn't actually
+        // happened (a copy, a cancelled drag, a same-panel drop) — never touch the manifest for an item
+        // that's still really there.
+        if (PathExists(full)) return;
+
+        RemoveManifestEntry(full);
+        TryCleanupEmptyItemDirectory(full);
+    }
+
     /// <summary>
     /// Same as <see cref="MoveIn(string)"/>, but with an internal-only escape hatch for tests: when
     /// <paramref name="forceCrossVolume"/> is <see langword="true"/>, the same-volume fast path is
@@ -345,7 +483,10 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             if (!WriteManifestEntry(destPath, fullSource))
             {
                 RemoveManifestEntry(destPath);
-                Console.Error.WriteLine($"PanelItemStorageService.MoveIn: manifest write failed, aborting move of '{sourcePath}'");
+                Log.Warn(
+                    "PanelItemStorageService",
+                    "MoveInManifestWriteFailed",
+                    new KeyValuePair<string, object?>("path", sourcePath));
                 return null;
             }
 
@@ -382,7 +523,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 TryCleanupEmptyItemDirectory(destPath);
             }
 
-            Console.Error.WriteLine($"PanelItemStorageService.MoveIn failed for '{sourcePath}': {ex.Message}");
+            Log.Error(
+                "PanelItemStorageService",
+                "MoveInFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", sourcePath));
             return null;
         }
     }
@@ -418,7 +563,10 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 if (!WriteManifestEntry(destRoot, fullSource))
                 {
                     RemoveManifestEntry(destRoot);
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory: manifest write failed, aborting move of '{sourcePath}'");
+                    Log.Warn(
+                        "PanelItemStorageService",
+                        "MoveInDirectoryManifestWriteFailed",
+                        new KeyValuePair<string, object?>("path", sourcePath));
                     return null;
                 }
 
@@ -438,7 +586,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to enumerate '{sourcePath}': {ex.Message}");
+                    Log.Error(
+                        "PanelItemStorageService",
+                        "MoveInDirectoryEnumerateFailed",
+                        ex,
+                        new KeyValuePair<string, object?>("path", sourcePath));
                     return null;
                 }
 
@@ -456,7 +608,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 catch (Exception ex)
                 {
                     // A file vanished/became inaccessible mid-scan — bail out rather than move a partial view.
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to size '{sourcePath}': {ex.Message}");
+                    Log.Error(
+                        "PanelItemStorageService",
+                        "MoveInDirectorySizeFailed",
+                        ex,
+                        new KeyValuePair<string, object?>("path", sourcePath));
                     return null;
                 }
 
@@ -466,7 +622,10 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 if (!WriteManifestEntry(destRoot, fullSource))
                 {
                     RemoveManifestEntry(destRoot);
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory: manifest write failed, aborting move of '{sourcePath}'");
+                    Log.Warn(
+                        "PanelItemStorageService",
+                        "MoveInDirectoryManifestWriteFailed",
+                        new KeyValuePair<string, object?>("path", sourcePath));
                     return null;
                 }
 
@@ -483,7 +642,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                         // same discipline as MoveIn/Restore, see TryCopyFileVerified remarks.
                         if (!TryCopyFileVerified(file, destFile))
                         {
-                            Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory verified copy failed for '{file}' while copying '{sourcePath}'");
+                            Log.Warn(
+                                "PanelItemStorageService",
+                                "MoveInDirectoryVerifiedCopyFailed",
+                                new KeyValuePair<string, object?>("file", file),
+                                new KeyValuePair<string, object?>("path", sourcePath));
                             TryDeletePartialDirectory(destRoot);
                             RemoveManifestEntry(destRoot);
                             TryCleanupEmptyItemDirectory(destRoot);
@@ -493,7 +656,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed to copy '{sourcePath}': {ex.Message}");
+                    Log.Error(
+                        "PanelItemStorageService",
+                        "MoveInDirectoryCopyFailed",
+                        ex,
+                        new KeyValuePair<string, object?>("path", sourcePath));
                     TryDeletePartialDirectory(destRoot);
                     RemoveManifestEntry(destRoot);
                     TryCleanupEmptyItemDirectory(destRoot);
@@ -515,7 +682,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 TryCleanupEmptyItemDirectory(destRoot);
             }
 
-            Console.Error.WriteLine($"PanelItemStorageService.MoveInDirectory failed for '{sourcePath}': {ex.Message}");
+            Log.Error(
+                "PanelItemStorageService",
+                "MoveInDirectoryFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", sourcePath));
             return null;
         }
     }
@@ -618,7 +789,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"PanelItemStorageService.Restore failed for '{storedPath}': {ex.Message}");
+            Log.Error(
+                "PanelItemStorageService",
+                "RestoreFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", storedPath));
             return RestoreOutcome.Failed;
         }
     }
@@ -742,7 +917,12 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"PanelItemStorageService: verified copy failed '{sourcePath}' -> '{destPath}': {ex.Message}");
+            AppLog.Current.Error(
+                "PanelItemStorageService",
+                "VerifiedCopyFailed",
+                ex,
+                new KeyValuePair<string, object?>("source", sourcePath),
+                new KeyValuePair<string, object?>("dest", destPath));
             return false;
         }
     }
@@ -799,7 +979,12 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"PanelItemStorageService: verified directory copy failed '{sourceRoot}' -> '{destRoot}': {ex.Message}");
+            AppLog.Current.Error(
+                "PanelItemStorageService",
+                "VerifiedDirectoryCopyFailed",
+                ex,
+                new KeyValuePair<string, object?>("source", sourceRoot),
+                new KeyValuePair<string, object?>("dest", destRoot));
             return false;
         }
     }
@@ -812,7 +997,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"PanelItemStorageService: failed to clean up partial copy '{destPath}': {ex.Message}");
+            AppLog.Current.Error(
+                "PanelItemStorageService",
+                "PartialCopyCleanupFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", destPath));
         }
     }
 
@@ -824,7 +1013,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"PanelItemStorageService: failed to clean up partial copy '{destRoot}': {ex.Message}");
+            AppLog.Current.Error(
+                "PanelItemStorageService",
+                "PartialCopyCleanupFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", destRoot));
         }
     }
 
@@ -832,12 +1025,47 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     private static Dictionary<string, string> CreateEmptyManifest() =>
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// <see langword="true"/> if a file or directory exists at <paramref name="fullPath"/>. Used by
+    /// <see cref="ReleaseToRecycleBin"/> to decide per item what the shell actually recycled.
+    /// </summary>
+    private static bool PathExists(string fullPath) => File.Exists(fullPath) || Directory.Exists(fullPath);
+
+    /// <summary>
+    /// M8 (release-hardening review): true when <paramref name="fullPath"/> — already normalized the
+    /// same way <see cref="IsManaged"/> normalizes its input — is a single managed item: either strictly
+    /// BELOW a per-item GUID directory (<c>{storageRoot}{guid}{name}</c>) or a legacy flat-layout FILE
+    /// directly under <see cref="_storageRoot"/> (pre-ADR-013 installs still hold those and must stay
+    /// deletable). <see cref="IsManaged"/> itself deliberately accepts the storage root
+    /// and any of its descendants (other callers rely on that, e.g. <c>IsManaged(_storageRoot)</c> is
+    /// <see langword="true"/>), but <see cref="ReleaseToRecycleBin"/>/<see cref="ForgetMovedOut"/> must
+    /// reject the root itself and a bare <c>{guid}</c> wrapper directory — recycling/forgetting either
+    /// would destroy the storage layout's own structure instead of a single managed item.
+    /// </summary>
+    private bool IsStrictlyManagedItem(string fullPath)
+    {
+        var root = Path.GetFullPath(_storageRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase)) return false;
+
+        var rootWithSep = root + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase)) return false;
+
+        var relative = fullPath[rootWithSep.Length..];
+        var sepIndex = relative.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+        if (sepIndex > 0) return true;
+        if (sepIndex == 0) return false;
+
+        // Depth 1: a legacy flat-layout item is a file (or already gone); a bare "{guid}" wrapper is a
+        // directory and must never be recycled as if it were an item.
+        return !Directory.Exists(fullPath);
+    }
+
     // ── Per-item GUID directory cleanup ─────────────────────────────────────
 
     /// <summary>
     /// Deletes the per-item GUID directory a moved-in file/folder lived under (see
     /// <see cref="BuildDestinationPath"/>/<see cref="BuildDestinationDirectoryPath"/>) once it's
-    /// orphaned by a successful <see cref="Restore(string)"/>/<see cref="Release"/> — <b>only</b> if
+    /// orphaned by a successful <see cref="Restore(string)"/>/<see cref="ReleaseToRecycleBin"/> — <b>only</b> if
     /// that directory is a direct child of <see cref="_storageRoot"/> and is now empty. Never deletes
     /// <see cref="_storageRoot"/> itself, and never deletes a non-empty directory. A legacy flat-layout
     /// item (pre-GUID-directory) has no per-item directory to clean up — its parent already IS the
@@ -875,7 +1103,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"PanelItemStorageService: failed to clean up item directory for '{fullStoredPath}': {ex.Message}");
+            Log.Error(
+                "PanelItemStorageService",
+                "ItemDirectoryCleanupFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", fullStoredPath));
         }
     }
 
@@ -954,6 +1186,25 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             var (manifest, trusted) = EnsureManifestCacheUnlocked();
             if (!trusted) return;
             if (manifest.Remove(managedPath)) WriteManifestUnlocked(manifest);
+        }
+    }
+
+    /// <summary>
+    /// Batch counterpart of <see cref="RemoveManifestEntry"/>: removes every given key and writes the
+    /// manifest to disk at most once (a multi-item recycle would otherwise rewrite it per item).
+    /// </summary>
+    private void RemoveManifestEntries(IReadOnlyCollection<string> managedPaths)
+    {
+        if (managedPaths.Count == 0) return;
+
+        lock (_manifestLock)
+        {
+            var (manifest, trusted) = EnsureManifestCacheUnlocked();
+            if (!trusted) return;
+
+            var changed = false;
+            foreach (var path in managedPaths) changed |= manifest.Remove(path);
+            if (changed) WriteManifestUnlocked(manifest);
         }
     }
 
@@ -1081,7 +1332,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"PanelItemStorageService: failed to read manifest '{_manifestPath}': {ex.Message}");
+            Log.Error(
+                "PanelItemStorageService",
+                "ManifestReadFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", _manifestPath));
             return (CreateEmptyManifest(), false);
         }
     }
@@ -1110,7 +1365,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"PanelItemStorageService: failed to write manifest '{_manifestPath}': {ex.Message}");
+            Log.Error(
+                "PanelItemStorageService",
+                "ManifestWriteFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", _manifestPath));
             return false;
         }
     }

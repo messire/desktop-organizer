@@ -74,12 +74,15 @@ public static class DiConfig
             sp.GetRequiredService<ILayoutEditModeService>(),
             sp.GetRequiredService<IPanelCustomizeService>(),
             sp.GetRequiredService<ILocalizationService>(),
-            SystemCulture.OriginalUiCulture));
+            SystemCulture.OriginalUiCulture,
+            sp.GetRequiredService<AboutViewModel>()));
         services.AddTransient<ChildWindowViewModel>();       // Per-panel VM — has file state
         services.AddSingleton<LayoutSnapshotsViewModel>();  // Snapshots section VM
+        services.AddSingleton<AboutViewModel>();            // About section VM (release-hardening-1.0.md §G2)
 
         services.AddSingleton<IConfirmationService, ConfirmationService>();
         services.AddSingleton<IInputDialogService, InputDialogService>();
+        services.AddSingleton<IExternalLinkLauncher, ExternalLinkLauncher>();
 
         // "Customize panel…" dialog (docs/prompts/settings-window-redesign.md D-3, WP-B): the VM/window
         // are transient (a fresh one is built the first time the dialog opens, or after it was closed),
@@ -110,6 +113,10 @@ public static class DiConfig
         services.AddSingleton<IWindowManager, WindowManager>();
         services.AddSingleton<IPanelSelectionCoordinator, PanelSelectionCoordinator>();
 
+        // ADR-036 (release-hardening-1.0.md §E): process-wide, UI-thread-only coordination for a
+        // panel-item drag-out gesture — direct analogue of IPanelSelectionCoordinator above.
+        services.AddSingleton<IPanelItemDragOutSession, PanelItemDragOutSession>();
+
         // Global (process-wide, not per-panel) Edit Layout mode state, direct analogue of
         // IPanelSelectionCoordinator above (docs/PLANS/phase-6-edit-layout-ux.md §1 D-1).
         services.AddSingleton<ILayoutEditModeService, LayoutEditModeService>();
@@ -126,6 +133,7 @@ public static class DiConfig
                 sp.GetRequiredService<IMonitorService>(),
                 sp.GetRequiredService<IVirtualDesktopService>(),
                 sp.GetRequiredService<ILocalizationService>(),
+                sp.GetRequiredService<IDesktopScaleProvider>(),
                 () => sp.GetRequiredService<SystemIconsPanelWindow>()));
         services.AddTransient<SystemIconsPanelViewModel>(sp =>
             new SystemIconsPanelViewModel(

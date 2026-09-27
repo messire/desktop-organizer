@@ -41,4 +41,16 @@ public interface ISystemIconsPanelManager
     /// on the UI thread.
     /// </remarks>
     void ApplyVirtualDesktopSetting();
+
+    /// <summary>
+    /// Re-asserts the sidebar after Explorer was restarted (ADR-034): desktop-window styles, the
+    /// bottom-of-Z-order slot, and the virtual-desktop placement (the "show on all virtual desktops"
+    /// poll or the anchor desktop). Recreates the window when it is gone, or when the new shell no
+    /// longer tracks it for virtual desktops. A no-op when the sidebar is switched off.
+    /// </summary>
+    /// <remarks>
+    /// Call after <c>IVirtualDesktopService.Reset()</c>, so the placement step talks to the new
+    /// Explorer instance. Must be called on the UI thread; never throws.
+    /// </remarks>
+    void ReassertAfterShellRestart();
 }

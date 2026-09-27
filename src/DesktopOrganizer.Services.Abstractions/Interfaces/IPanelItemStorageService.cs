@@ -12,7 +12,7 @@ public enum RestoreOutcome
     /// <c>storedPath</c> (see <see cref="IPanelItemStorageService.Restore"/>) is inside managed
     /// storage, but no original-path manifest entry exists for it (e.g. a legacy item imported before Move
     /// semantics existed). The managed copy is left untouched — callers should degrade to
-    /// <see cref="IPanelItemStorageService.Release"/> for legacy behavior.
+    /// <see cref="IPanelItemStorageService.ReleaseToRecycleBin"/> for legacy behavior.
     /// </summary>
     OriginalPathUnknown,
 
@@ -25,6 +25,63 @@ public enum RestoreOutcome
     /// managed storage instead of returning to its original location.
     /// </summary>
     Failed,
+}
+
+/// <summary>
+/// Result of <see cref="IPanelItemStorageService.ReleaseToRecycleBin"/> (ADR-035). Which items were
+/// actually recycled is decided by checking, after the shell call, which paths still exist on disk —
+/// so this is accurate even when the shell operation only partially succeeded.
+/// </summary>
+/// <remarks>
+/// <c>default(RecycleOutcome)</c> is a valid empty outcome (both lists empty, not cancelled), so a
+/// loose test double returning the default value can never cause a <see cref="NullReferenceException"/>.
+/// </remarks>
+public readonly record struct RecycleOutcome
+{
+    private readonly IReadOnlyList<string>? _recycled;
+    private readonly IReadOnlyList<string>? _remaining;
+
+    private RecycleOutcome(IReadOnlyList<string> recycled, IReadOnlyList<string> remaining, bool cancelled)
+    {
+        _recycled = recycled;
+        _remaining = remaining;
+        Cancelled = cancelled;
+    }
+
+    /// <summary>
+    /// Gets the managed paths (as passed in by the caller) that no longer exist on disk — moved to the
+    /// Recycle Bin (or already gone before the call). Their manifest entries have been removed.
+    /// </summary>
+    public IReadOnlyList<string> Recycled => _recycled ?? [];
+
+    /// <summary>
+    /// Gets the managed paths (as passed in by the caller) that still exist on disk after the shell
+    /// call — nothing was deleted for them and their manifest entries are intact. Non-empty means the
+    /// caller must keep whatever references them (fail visibly, ADR-035).
+    /// </summary>
+    public IReadOnlyList<string> Remaining => _remaining ?? [];
+
+    /// <summary>
+    /// Gets a value indicating whether the shell reported the batch as not fully completed (the user
+    /// declined the permanent-delete warning or cancelled the progress dialog, or the shell failed).
+    /// Informational only — <see cref="Remaining"/> is the authoritative per-item result.
+    /// </summary>
+    public bool Cancelled { get; }
+
+    /// <summary>Gets a value indicating whether every requested managed item is gone (<see cref="Remaining"/> is empty).</summary>
+    public bool IsComplete => Remaining.Count == 0;
+
+    /// <summary>Creates an outcome.</summary>
+    /// <param name="recycled">See <see cref="Recycled"/>.</param>
+    /// <param name="remaining">See <see cref="Remaining"/>.</param>
+    /// <param name="cancelled">See <see cref="Cancelled"/>.</param>
+    /// <returns>The outcome.</returns>
+    public static RecycleOutcome Create(IReadOnlyList<string> recycled, IReadOnlyList<string> remaining, bool cancelled)
+    {
+        ArgumentNullException.ThrowIfNull(recycled);
+        ArgumentNullException.ThrowIfNull(remaining);
+        return new RecycleOutcome(recycled, remaining, cancelled);
+    }
 }
 
 /// <summary>
@@ -81,13 +138,19 @@ public interface IPanelItemStorageService
     RestoreOutcome Restore(string storedPath);
 
     /// <summary>
-    /// Deletes a previously moved-in file or folder (<see cref="MoveIn"/>/<see cref="MoveInDirectory"/>)
-    /// from managed storage, along with its manifest entry (if any). No-op (never throws) if
-    /// <paramref name="storedPath"/> isn't actually inside the managed storage folder — this guards
-    /// against ever deleting something the app doesn't own.
+    /// Moves previously moved-in files/folders (<see cref="MoveIn"/>/<see cref="MoveInDirectory"/>)
+    /// to the Windows Recycle Bin in a single shell batch (ADR-035, amends ADR-010) — the only way this
+    /// service ever gets rid of a managed item's content. Paths that aren't inside managed storage are
+    /// ignored entirely (never touched, never reported). There is <b>no</b> fallback to a permanent
+    /// delete: an item the shell couldn't recycle stays on disk, its manifest entry stays intact, and
+    /// it is reported in <see cref="RecycleOutcome.Remaining"/>. Manifest entries are removed (and the
+    /// now-empty per-item GUID directory cleaned up) only for items reported in
+    /// <see cref="RecycleOutcome.Recycled"/>. Never throws. Must be called on the UI (STA) thread —
+    /// the shell may show its own dialog (e.g. "this item is too big for the Recycle Bin").
     /// </summary>
-    /// <param name="storedPath">A path previously returned by <see cref="MoveIn"/> or <see cref="MoveInDirectory"/>.</param>
-    void Release(string storedPath);
+    /// <param name="storedPaths">Paths previously returned by <see cref="MoveIn"/>/<see cref="MoveInDirectory"/> (unmanaged entries are ignored).</param>
+    /// <returns>Which of the managed paths are gone and which are still on disk.</returns>
+    RecycleOutcome ReleaseToRecycleBin(IReadOnlyList<string> storedPaths);
 
     /// <summary>
     /// True if <paramref name="path"/> is inside the app-managed storage folder, i.e. it was
@@ -146,7 +209,7 @@ public interface IPanelItemStorageService
     /// <param name="managedPath">
     /// The managed path currently on disk for <paramref name="originalPath"/>, or <see langword="null"/>
     /// if no manifest entry maps to it, or the recorded managed path no longer exists on disk (e.g. the
-    /// item was since restored or released — see <see cref="Restore"/>/<see cref="Release"/>).
+    /// item was since restored or recycled — see <see cref="Restore"/>/<see cref="ReleaseToRecycleBin"/>).
     /// </param>
     /// <returns><see langword="true"/> if a live managed copy was found; otherwise <see langword="false"/>.</returns>
     /// <remarks>
@@ -182,4 +245,19 @@ public interface IPanelItemStorageService
     /// recorded managed path for it has since vanished from disk.
     /// </returns>
     IReadOnlyList<string> FindManagedCandidates(string originalPath);
+
+    /// <summary>
+    /// Manifest-only cleanup for a managed item that was moved out of the panel by an external drag
+    /// (Explorer/the desktop — ADR-036, release-hardening-1.0.md §E), AFTER the caller has independently
+    /// confirmed the path is actually gone (a UI-layer existence-recheck at increasing delays after the
+    /// drag completed, since the OLE drop effect an OS-level drag-and-drop call returns is not
+    /// trustworthy — Explorer's own optimized move frequently reports "no effect" even on success).
+    /// Never deletes a file or folder itself — this method's own job is exactly the reverse of that: it
+    /// removes the bookkeeping for a path that is <b>already</b> gone. A no-op if <paramref name="path"/>
+    /// is not managed, or if it still exists on disk (the caller's own external-move confirmation is the
+    /// only gate this method trusts — a still-existing path is always left completely untouched,
+    /// manifest included).
+    /// </summary>
+    /// <param name="path">A path previously returned by <see cref="MoveIn"/>/<see cref="MoveInDirectory"/>, confirmed by the caller to no longer exist.</param>
+    void ForgetMovedOut(string path);
 }

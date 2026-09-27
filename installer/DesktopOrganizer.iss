@@ -9,6 +9,10 @@
 
 #define MyAppName "DesktopOrganizer"
 #define MyAppPublisher "khagen"
+; Public support/publisher link (ADR-038, G1). Both [Setup] directives below point at the same
+; project home — there is no separate support page yet, so AppSupportURL simply reuses AppPublisherURL
+; rather than repeating the literal a second time.
+#define MyAppURL "https://github.com/messire"
 #define MyAppExeName "DesktopOrganizer.UI.exe"
 #define MyAppExePath SourcePath + "publish\win-x64\" + MyAppExeName
 ; Version comes straight from the published exe's file-version resource instead
@@ -59,7 +63,8 @@ AppId={{{#MyAppId}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-AppSupportURL=https://github.com/
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -88,6 +93,17 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; as a second line of defense in case some other handle (not the main .exe) is what's actually locking a
 ; file.
 CloseApplicationsFilter=*.exe,*.dll
+; Optional code-signing hook (ADR-038, G1). Off by default — a plain `ISCC installer\DesktopOrganizer.iss`
+; (or build.ps1 with no signing env vars set) compiles exactly as before, unsigned. build.ps1 turns this
+; on by passing `/DSignEnabled "/Sdosign=<signtool command line>"` to ISCC, but *only* when it already
+; found DESKTOPORGANIZER_SIGN_CERT set and successfully signed the published exe/dlls — see that script's
+; own remarks. `/Sdosign=...` defines the named sign tool "dosign" for this compile; SignTool= below just
+; tells Inno Setup to run it (once) on the finished Setup.exe, substituting $f for its path — the same
+; signtool invocation build.ps1 already used for the individual published files.
+#ifdef SignEnabled
+SignTool=dosign
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"

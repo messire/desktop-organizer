@@ -3,6 +3,7 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.State;
 using DesktopOrganizer.UI.Views;
@@ -83,6 +84,7 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     private readonly IMonitorService _monitorService;
     private readonly IVirtualDesktopService _virtualDesktopService;
     private readonly ILocalizationService _localization;
+    private readonly IDesktopScaleProvider _desktopScale;
     private readonly Func<SystemIconsPanelWindow> _windowFactory;
 
     private SystemIconsPanelWindow? _window;
@@ -104,6 +106,11 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     /// Resolves <see cref="SystemIconsPanelModel.Items"/>'s display labels (docs/PLANS/localization.md
     /// §2.9) and drives their hot re-translation on every language switch.
     /// </param>
+    /// <param name="desktopScale">
+    /// The per-monitor DPI snapshot provider (release-hardening F, ADR-037) — <see cref="PositionWindow"/>
+    /// positions the sidebar from its current snapshot's raw physical-pixel primary work area, per
+    /// <see cref="Interaction.TopLevelPlacement"/>'s own reasoning for top-level windows.
+    /// </param>
     /// <param name="windowFactory">
     /// Creates a NEW <see cref="SystemIconsPanelWindow"/> on every (re)open — must not cache; the
     /// previous instance is closed first.
@@ -114,6 +121,7 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
         IMonitorService monitorService,
         IVirtualDesktopService virtualDesktopService,
         ILocalizationService localization,
+        IDesktopScaleProvider desktopScale,
         Func<SystemIconsPanelWindow> windowFactory)
     {
         _applicationStateService = applicationStateService;
@@ -121,6 +129,7 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
         _monitorService = monitorService;
         _virtualDesktopService = virtualDesktopService;
         _localization = localization;
+        _desktopScale = desktopScale;
         _windowFactory = windowFactory;
 
         _monitorService.MonitorsChanged += OnMonitorsChanged;
@@ -238,6 +247,57 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
         if (hwnd != IntPtr.Zero)
         {
             ApplyVirtualDesktopPlacementOnce(hwnd);
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// The sidebar is a plain top-level window of this process (ADR-019), so its HWND survives an
+    /// Explorer restart; what does not survive is everything the shell remembered about it. In
+    /// particular the new Explorer instance may not track it for virtual desktops any more: a window
+    /// that already carries <c>WS_EX_TOOLWINDOW</c>/<c>WS_EX_NOACTIVATE</c> when the shell first sees it
+    /// is never registered (ADR-019 §R0.5, <c>GetWindowDesktopId</c> → <c>GUID_NULL</c>). In that case
+    /// — and when the window is gone altogether — the only reliable fix is the same close/reopen
+    /// <see cref="Apply"/> performs (show first, style after). Otherwise the window is kept and only
+    /// re-asserted in place, avoiding a needless flicker.
+    /// </para>
+    /// <para>
+    /// Nothing here writes state beyond what the placement step already does on every
+    /// <see cref="Apply"/> (a changed anchor desktop id is saved, exactly as on panel open).
+    /// </para>
+    /// </remarks>
+    public void ReassertAfterShellRestart()
+    {
+        if (!Model.IsEnabled) return;
+
+        try
+        {
+            var hwnd = _window is null ? IntPtr.Zero : new WindowInteropHelper(_window).Handle;
+
+            if (hwnd == IntPtr.Zero
+                || !_desktopIntegration.IsWindowAlive(hwnd)
+                || (_virtualDesktopService.IsSupported && _virtualDesktopService.TryGetWindowDesktopId(hwnd) is null))
+            {
+                Apply();
+                return;
+            }
+
+            // An explicit recovery is a legitimate retry point for a feature previously found
+            // inapplicable — the old verdict was reached against the dead shell.
+            ResetVirtualDesktopCircuitBreaker();
+
+            _desktopIntegration.ApplyDesktopWindowStyles(hwnd);
+            SendPanelToBackOnce(hwnd);
+            ApplyVirtualDesktopPlacementOnce(hwnd);
+
+            UpdateVirtualDesktopTimer();
+            UpdateZOrderTimer();
+        }
+        catch
+        {
+            // Degrade silently — same policy as every other sidebar path; the Z-order timer keeps
+            // running and the next explicit toggle re-applies everything.
         }
     }
 
@@ -729,10 +789,37 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     private void OnCultureChanged(object? sender, CultureChangedEventArgs e) => Model.RefreshLabels(ResolveIconLabel);
 
     // Window placement / monitor changes
+
+    /// <summary>
+    /// Positions the sidebar to fill the primary monitor's work area vertically (Left/Top/Height —
+    /// Width is set once in XAML and never changes here).
+    /// </summary>
+    /// <remarks>
+    /// release-hardening F (ADR-037, plan §5 #21): reads the primary monitor's raw PHYSICAL-pixel work
+    /// area straight from <see cref="IDesktopScaleProvider"/>'s current snapshot and divides by its own
+    /// effective scale (<see cref="DesktopScaleModel.GetTopLevelScale"/>) — the top-level-window rule
+    /// (plan §2 "always <c>px / s_M</c>") — rather than <see cref="IMonitorService"/>'s DIP rectangle,
+    /// which is not yet per-monitor-correct on a mixed-DPI desktop (that rewiring is F2's). Falls back to
+    /// <see cref="IMonitorService.GetPrimaryMonitor"/>'s DIP work area (the pre-F behavior, identity on a
+    /// uniform snapshot) when the snapshot has no monitors yet.
+    /// </remarks>
     private void PositionWindow(Window window)
     {
-        var primary = _monitorService.GetPrimaryMonitor();
-        var workArea = primary.WorkArea;
+        var scale = _desktopScale.Current;
+        var primaryScale = scale.Monitors.FirstOrDefault(m => m.IsPrimary) ?? scale.Monitors.FirstOrDefault();
+
+        Rect workArea;
+        if (primaryScale is null)
+        {
+            workArea = _monitorService.GetPrimaryMonitor().WorkArea;
+        }
+        else
+        {
+            workArea = TopLevelPlacement.ToDip(
+                new Rect(primaryScale.WorkAreaPx.Left, primaryScale.WorkAreaPx.Top, primaryScale.WorkAreaPx.Width, primaryScale.WorkAreaPx.Height),
+                primaryScale.DeviceName,
+                scale);
+        }
 
         window.Left = workArea.Left;
         window.Top = workArea.Top;

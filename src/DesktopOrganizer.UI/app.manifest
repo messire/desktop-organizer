@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DesktopOrganizer.UI application manifest (release-hardening F1, ADR-037).
+
+  DPI awareness: PerMonitorV2 (Windows 10 1703+), falling back to PerMonitor v1 (dpiAwareness is read
+  from Windows 10 1607 on; the list is tried left to right), and `true/pm` for older loaders that only
+  read dpiAware (per-monitor on Windows 8.1, system-aware before that). Declared here and nowhere else:
+  no SetProcessDpiAwareness*/SetHighDpiMode calls in code.
+
+  Why: a system-aware process whose panels are re-parented into Explorer's PerMonitorV2 WorkerW gets
+  those HWNDs silently forced to PMv2 (F0 experiment E5) while WPF keeps treating them as system-aware.
+  Declaring PerMonitorV2 removes that mismatch; px<->DIP geometry then goes through DesktopScaleModel.
+
+  Scope is deliberately minimal (no comctl v6, no longPathAware). Rollback = delete this file and the
+  <ApplicationManifest> line in DesktopOrganizer.UI.csproj; nothing is persisted.
+-->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="DesktopOrganizer.UI.app"/>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 / 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>

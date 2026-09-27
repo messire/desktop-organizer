@@ -1,3 +1,5 @@
+using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 using Microsoft.Win32;
 
 namespace DesktopOrganizer.UI.Services;
@@ -39,6 +41,14 @@ internal class AutostartService : IAutostartService
     internal const string ValueName = InstallerValueName;
 #endif
 
+    private readonly IAppLog? _appLog;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AutostartService"/> class.
+    /// </summary>
+    /// <param name="appLog">See <see cref="Log"/>.</param>
+    public AutostartService(IAppLog? appLog = null) => _appLog = appLog;
+
     /// <inheritdoc />
     public bool IsEnabled
     {
@@ -51,7 +61,7 @@ internal class AutostartService : IAutostartService
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Autostart read failed: {ex.Message}");
+                Log.Error("AutostartService", "ReadFailed", ex);
                 return false;
             }
         }
@@ -77,8 +87,15 @@ internal class AutostartService : IAutostartService
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Autostart write failed: {ex.Message}");
+                Log.Error("AutostartService", "WriteFailed", ex);
             }
         }
     }
+
+    /// <summary>
+    /// The log this instance writes failures to: the one explicitly supplied, falling back to the
+    /// process-wide ambient <see cref="AppLog.Current"/> for tests that construct this type directly
+    /// without a log.
+    /// </summary>
+    private IAppLog Log => _appLog ?? AppLog.Current;
 }

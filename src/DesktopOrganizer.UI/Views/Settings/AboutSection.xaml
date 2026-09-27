@@ -35,6 +35,44 @@
             </Grid>
         </Border>
 
+        <!-- Manual "check for updates" (release-hardening-1.0.md §G2): no automatic check at startup and
+             no persisted "last checked" state — a click here is the only network call this app ever makes. -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                    <TextBlock Text="{loc:Loc Settings_About_Update_Header}" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Text="{Binding About.StatusText}" Style="{StaticResource Settings.CardDescription}" TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="{loc:Loc Settings_About_Update_ViewRelease_Button}" Padding="12,6" Margin="0,0,8,0"
+                            Visibility="{Binding About.HasReleaseLink, Converter={StaticResource BooleanToVisibility}}"
+                            Command="{Binding About.OpenReleaseCommand}"/>
+                    <Button Content="{loc:Loc Settings_About_Update_CheckButton}" Padding="12,6"
+                            IsEnabled="{Binding About.IsChecking, Converter={StaticResource NotBoolean}}"
+                            Command="{Binding About.CheckForUpdatesCommand}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Fixed external links (release-hardening-1.0.md §G2) — every one opened via IExternalLinkLauncher (ShellExecute), never a direct process launch. -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <StackPanel>
+                <TextBlock Text="{loc:Loc Settings_About_Links_Header}" Style="{StaticResource Settings.CardHeader}"/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button Content="{loc:Loc Settings_About_Links_ProjectPage_Button}" Padding="12,6" Margin="0,0,8,0"
+                            Command="{Binding About.OpenProjectPageCommand}"/>
+                    <Button Content="{loc:Loc Settings_About_Links_ReportProblem_Button}" Padding="12,6" Margin="0,0,8,0"
+                            Command="{Binding About.ReportProblemCommand}"/>
+                    <Button Content="{loc:Loc Settings_About_Links_OpenLogsFolder_Button}" Padding="12,6"
+                            Command="{Binding About.OpenLogsFolderCommand}"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
         <TextBlock Text="{loc:Loc Settings_About_Diagnostics_Message}" Style="{StaticResource Settings.CardDescription}" Margin="0,4,0,0"/>
     </StackPanel>
 </UserControl>

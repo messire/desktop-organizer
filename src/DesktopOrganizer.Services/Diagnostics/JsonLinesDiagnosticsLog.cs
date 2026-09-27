@@ -37,7 +37,10 @@ namespace DesktopOrganizer.Services.Diagnostics;
 /// </remarks>
 public sealed class JsonLinesDiagnosticsLog : IDiagnosticsLog
 {
-    private const string FilePattern = "gestures-*.jsonl";
+    // L12 (release-hardening review, cosmetic): renamed from "gestures-*.jsonl" — see
+    // DiagnosticsLogFileNaming's own remark; this sink carries every app diagnostics event, not just
+    // gestures.
+    private const string FilePattern = "app-*.jsonl";
     private const int RotationBackupCount = 2;
     private const int FlushBatchSize = 64;
 

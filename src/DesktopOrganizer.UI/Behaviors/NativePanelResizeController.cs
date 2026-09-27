@@ -87,6 +87,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
     private readonly ResizeGestureSession _session;
     private readonly INativePanelSizingService _nativeSizingService;
     private readonly Func<bool> _isResizeEnabled;
+    private readonly IDesktopScaleProvider _desktopScale;
 
     // P04 (docs/PLANS/workspace-grid-03-04-integration.md §3.3/§3.4) — see PanelResizeController's
     // identically-named field: the ADR-028 workspace-grid seam, supplied by the panel window itself
@@ -107,8 +108,10 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
     private IDisposable? _attachToken;
 
     // Per-gesture state, valid only while _session.IsActive (mirrors ResizeGestureSession's own "valid
-    // only while IsActive" fields — reset at the top of every successful SizeMoveEntered).
-    private double _dpiScale = 1d;
+    // only while IsActive" fields — reset at the top of every successful SizeMoveEntered). Pre-F this
+    // also held the gesture's per-window dpiScale (WM_SIZING's own callback parameter); release-hardening
+    // F (ADR-037) replaced that flat scale with the anchored, per-monitor conversion _desktopScale.Current
+    // provides (see ToDesktopDip/ToNativePx below), so the raw per-callback scale is no longer retained.
     private NativeRectPx _startWindowRectPx;
     private NativeVectorPx _originOffsetPx;
     private bool _originResolved;
@@ -134,6 +137,11 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
     /// <see cref="NativeSizingEdge.None"/>, mirroring the Thumb path's
     /// <c>IResizeAffordance</c>-driven overlay disable (plan §1.6, R-9).
     /// </param>
+    /// <param name="desktopScale">
+    /// The per-monitor DPI snapshot provider (release-hardening F, ADR-037) — used for the
+    /// <c>WM_SIZING</c> px↔desktop-DIP conversion (<see cref="ProposeBounds"/>) and, via the delegates
+    /// this constructor builds, the WPF <see cref="Window.Left"/>/<see cref="Window.Top"/> boundary.
+    /// </param>
     public NativePanelResizeController(
         Window window,
         IAppSettings appSettings,
@@ -146,11 +154,12 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
         IGestureDiagnostics diagnostics,
         PanelInteractionTracker tracker,
         INativePanelSizingService nativeSizingService,
-        Func<bool> isResizeEnabled)
+        Func<bool> isResizeEnabled,
+        IDesktopScaleProvider desktopScale)
         : this(
-            GetBoundsDelegate(window),
+            GetBoundsDelegate(window, desktopScale),
             SetWidthDelegate(window),
-            SetBoundsDelegate(window),
+            SetBoundsDelegate(window, desktopScale),
             ScheduleDeferredPersistDelegate(window),
             appSettings,
             windowManager,
@@ -163,6 +172,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
             tracker,
             nativeSizingService,
             isResizeEnabled,
+            desktopScale,
             window as IPanelSizingGridHost)
     {
     }
@@ -221,6 +231,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
     /// <see cref="NativeSizingEdge.None"/>, mirroring the Thumb path's
     /// <c>IResizeAffordance</c>-driven overlay disable (plan §1.6, R-9).
     /// </param>
+    /// <param name="desktopScale">See the public constructor's matching parameter.</param>
     /// <param name="gridHost">
     /// P04 (docs/PLANS/workspace-grid-03-04-integration.md §3.3/§3.4): the ADR-028 workspace-grid seam.
     /// The public constructor supplies <c>window as IPanelSizingGridHost</c>; headless tests supply a
@@ -248,6 +259,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
         PanelInteractionTracker tracker,
         INativePanelSizingService nativeSizingService,
         Func<bool> isResizeEnabled,
+        IDesktopScaleProvider desktopScale,
         IPanelSizingGridHost? gridHost = null,
         Func<bool>? isFreeResizeModifierDown = null)
     {
@@ -265,6 +277,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
         ArgumentNullException.ThrowIfNull(tracker);
         ArgumentNullException.ThrowIfNull(nativeSizingService);
         ArgumentNullException.ThrowIfNull(isResizeEnabled);
+        ArgumentNullException.ThrowIfNull(desktopScale);
 
         _getBounds = getBounds;
         _setWidth = setWidth;
@@ -281,6 +294,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
         _session = new ResizeGestureSession(tracker, isFreeResizeModifierDown);
         _nativeSizingService = nativeSizingService;
         _isResizeEnabled = isResizeEnabled;
+        _desktopScale = desktopScale;
         _gridHost = gridHost;
     }
 
@@ -336,11 +350,11 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
             // every later WM_SIZING/WM_EXITSIZEMOVE/WM_CAPTURECHANGED callback for this cycle (see
             // PanelSizingAttachment.OnSizing/EndCycle) — so this SizeMoveEntered would otherwise never get
             // a matching SizeMoveExited in the triage log. Pair it right here.
-            RecordSizeMoveExited(model?.Id, NativeSizingCoordinateMapper.ToDip(windowRect, dpiScale));
+            RecordSizeMoveExited(model?.Id, ToDesktopDip(windowRect));
             return false;
         }
 
-        var startBoundsDip = NativeSizingCoordinateMapper.ToDip(windowRect, dpiScale);
+        var startBoundsDip = ToDesktopDip(windowRect);
 
         // P04: ONE grid-state resolution per gesture, exactly like the Thumb path's (§1.3). NOTE
         // (MANUAL VERIFY MV-1): startBoundsDip comes from GetWindowRect, i.e. SCREEN space, while
@@ -363,7 +377,6 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
             return false;
         }
 
-        _dpiScale = dpiScale;
         _startWindowRectPx = windowRect;
         _originResolved = false;
         _lastAppliedBoundsDip = startBoundsDip;
@@ -437,7 +450,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
                 proposed.Right + _originOffsetPx.X,
                 proposed.Bottom + _originOffsetPx.Y);
 
-            var targetDip = NativeSizingCoordinateMapper.ToDip(adjustedPx, _dpiScale);
+            var targetDip = ToDesktopDip(adjustedPx);
 
             // D-4: WM_SIZING already carries the gesture's absolute proposed extent (origin + the
             // system's own running total of cursor movement since WM_ENTERSIZEMOVE) — exactly the value
@@ -512,7 +525,7 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
         // `proposed` arrived in. `_originOffsetPx == screenSpace - sizingSpace` (see the remark above), so
         // `sizingSpace == screenSpace - offset` — subtract it back out here. When the two spaces coincide
         // (top-level, offset == (0,0)) this is a no-op, matching the pre-fix behavior exactly.
-        var screenPx = NativeSizingCoordinateMapper.ToPx(applied, _dpiScale);
+        var screenPx = ToNativePx(applied);
         return new NativeRectPx(
             screenPx.Left - _originOffsetPx.X,
             screenPx.Top - _originOffsetPx.Y,
@@ -583,10 +596,15 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
     }
 
     /// <summary>Builds the public constructor's <c>getBounds</c> delegate — also where <c>window</c>'s null check actually happens (evaluated eagerly, as a constructor-initializer argument, before <c>: this(...)</c> runs).</summary>
-    private static Func<Rect> GetBoundsDelegate(Window window)
+    /// <remarks>
+    /// release-hardening F (ADR-037): reads through <see cref="PanelWindowCoordinates"/>
+    /// against <paramref name="desktopScale"/>'s current snapshot, rather than a bare
+    /// <c>Window.Left</c>/<c>Top</c> read — identity on any uniform snapshot.
+    /// </remarks>
+    private static Func<Rect> GetBoundsDelegate(Window window, IDesktopScaleProvider desktopScale)
     {
         ArgumentNullException.ThrowIfNull(window);
-        return () => new Rect(window.Left, window.Top, window.Width, window.Height);
+        return () => PanelWindowCoordinates.ReadDesktopBounds(window, desktopScale.Current);
     }
 
     /// <summary>Builds the public constructor's <c>setWidth</c> delegate.</summary>
@@ -595,15 +613,11 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
     /// <summary>
     /// Builds the public constructor's <c>setBounds</c> delegate (ADR-011 Amendment 2026-09-24, resize
     /// extension) — writes all four of <c>Left</c>/<c>Top</c>/<c>Width</c>/<c>Height</c>, unlike
-    /// <see cref="SetWidthDelegate"/>.
+    /// <see cref="SetWidthDelegate"/>. release-hardening F (ADR-037): writes through
+    /// <see cref="PanelWindowCoordinates"/>, mirroring <see cref="GetBoundsDelegate"/>.
     /// </summary>
-    private static Action<Rect> SetBoundsDelegate(Window window) => bounds =>
-    {
-        window.Left = bounds.Left;
-        window.Top = bounds.Top;
-        window.Width = bounds.Width;
-        window.Height = bounds.Height;
-    };
+    private static Action<Rect> SetBoundsDelegate(Window window, IDesktopScaleProvider desktopScale) => bounds =>
+        PanelWindowCoordinates.WriteDesktopBounds(window, bounds, desktopScale.Current);
 
     /// <summary>Builds the public constructor's <c>scheduleDeferredPersist</c> delegate — the real WPF dispatcher, <see cref="DispatcherPriority.Background"/>, matching pre-seam behavior exactly.</summary>
     private static Action<Action> ScheduleDeferredPersistDelegate(Window window) =>
@@ -616,6 +630,38 @@ public sealed class NativePanelResizeController : INativePanelSizingClient, IPan
     /// </summary>
     private static double ResizeSnapEdgePadding(double cell)
         => AdaptiveGridLayout.EdgePadding(cell, AdaptiveGridLayout.DefaultEdgePaddingRatio);
+
+    /// <summary>
+    /// Converts a <c>WM_SIZING</c>-space physical-pixel rectangle to desktop-DIP through
+    /// <see cref="_desktopScale"/>'s current snapshot — the anchored, per-monitor replacement for the
+    /// pre-F flat <c>NativeSizingCoordinateMapper.ToDip(rect, dpiScale)</c> (release-hardening F §5 #19,
+    /// ADR-037). <c>NativeRectPx</c> is always SCREEN space at every call site here (see
+    /// <see cref="ProposeBounds"/>'s remarks on the WM_SIZING origin offset), which is exactly what
+    /// <see cref="DesktopScaleModel.PxToDip(Rect)"/> expects.
+    /// </summary>
+    /// <param name="rect">The rectangle, in physical screen pixels.</param>
+    /// <returns>The rectangle, in desktop-DIP.</returns>
+    private Rect ToDesktopDip(NativeRectPx rect)
+        => _desktopScale.Current.PxToDip(new Rect(rect.Left, rect.Top, rect.Width, rect.Height));
+
+    /// <summary>
+    /// The inverse of <see cref="ToDesktopDip"/>: converts a desktop-DIP rectangle back to physical
+    /// screen pixels, rounding each edge independently via <see cref="Math.Round(double)"/> — mirrors
+    /// <see cref="NativeSizingCoordinateMapper.ToPx(Rect, double)"/>'s own rounding contract exactly, only
+    /// through the anchored per-monitor conversion instead of a flat scale.
+    /// </summary>
+    /// <param name="dip">The rectangle, in desktop-DIP.</param>
+    /// <returns>The rectangle, in physical screen pixels.</returns>
+    private NativeRectPx ToNativePx(Rect dip)
+    {
+        var px = _desktopScale.Current.DipToPx(dip);
+        var left = (int)Math.Round(px.Left);
+        var top = (int)Math.Round(px.Top);
+        var right = (int)Math.Round(px.Left + px.Width);
+        var bottom = (int)Math.Round(px.Top + px.Height);
+
+        return new NativeRectPx(left, top, right, bottom);
+    }
 
     /// <summary>
     /// The single unified end-of-gesture path — mirrors <c>PanelResizeController.EndResize</c>. Safe to

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- F0 DPI spike probe (docs/PLANS/release-hardening-1.0.md §6 F0). Not part of DesktopOrganizer.sln.
+         Run: dotnet run -c Release (from this folder). The PerMonitorV2 manifest is embedded into the apphost
+         (dpi-probe.exe), which is what `dotnet run` launches. -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net8.0-windows</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <LangVersion>latest</LangVersion>
+        <RootNamespace>DpiProbe</RootNamespace>
+        <AssemblyName>dpi-probe</AssemblyName>
+        <ApplicationManifest>app.manifest</ApplicationManifest>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <AnalysisLevel>latest-recommended</AnalysisLevel>
+    </PropertyGroup>
+
+</Project>

@@ -7,7 +7,7 @@ Run each scenario against legacy and native path during rollout.
 1. Запустить `DesktopOrganizer.UI.exe --diag` (или выставить `DESKTOPORGANIZER_DIAG=1`) — см.
    `diagnostics-log-events.md`.
 2. Воспроизвести сценарий из таблицы ниже.
-3. Открыть свежий файл в `%LOCALAPPDATA%\DesktopOrganizer\Logs\gestures-*.jsonl`, найти последнюю запись
+3. Открыть свежий файл в `%LOCALAPPDATA%\DesktopOrganizer\Logs\app-*.jsonl`, найти последнюю запись
    с `scope`, соответствующим зависшей панели (первые 8 символов её `Guid`).
 4. Записать `name` последнего события в колонку **Last logged event** — это последнее зафиксированное
    состояние gesture lifecycle непосредственно перед зависанием/аномалией. Приложить путь к файлу

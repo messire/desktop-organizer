@@ -1,4 +1,5 @@
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Tools;
 
@@ -84,14 +85,16 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
     private readonly SizingHookInstaller _installer;
     private readonly Dictionary<IntPtr, PanelSizingAttachment> _attachments = new();
     private readonly object _gate = new();
+    private readonly IAppLog? _appLog;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NativePanelSizingService"/> class hooking real
     /// windows through <see cref="HwndSource"/>. This is the constructor DI resolves.
     /// </summary>
     /// <param name="nativeApi">Native API façade (all P/Invoke lives behind it).</param>
-    public NativePanelSizingService(INativeApi nativeApi)
-        : this(nativeApi, InstallHwndSourceHook)
+    /// <param name="appLog">See <see cref="Log"/>.</param>
+    public NativePanelSizingService(INativeApi nativeApi, IAppLog? appLog = null)
+        : this(nativeApi, InstallHwndSourceHook, appLog)
     {
     }
 
@@ -103,11 +106,20 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
     /// </summary>
     /// <param name="nativeApi">Native API façade.</param>
     /// <param name="installer">Hook installer to use instead of <see cref="HwndSource"/>.</param>
-    internal NativePanelSizingService(INativeApi nativeApi, SizingHookInstaller installer)
+    /// <param name="appLog">See <see cref="Log"/>.</param>
+    internal NativePanelSizingService(INativeApi nativeApi, SizingHookInstaller installer, IAppLog? appLog = null)
     {
         _nativeApi = nativeApi;
         _installer = installer;
+        _appLog = appLog;
     }
+
+    /// <summary>
+    /// The log this instance (and its nested <see cref="PanelSizingAttachment"/> attachments) write
+    /// failures to: the one explicitly supplied, falling back to the process-wide ambient
+    /// <see cref="AppLog.Current"/> for tests that construct this type directly without a log.
+    /// </summary>
+    private IAppLog Log => _appLog ?? AppLog.Current;
 
     /// <inheritdoc />
     public IDisposable Attach(IntPtr hwnd, INativePanelSizingClient client)
@@ -122,8 +134,10 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
                 {
                     // Two live hooks on one panel would double every client call; refuse, but never
                     // throw — a second Attach is a wiring bug, not a reason to kill the panel.
-                    Console.Error.WriteLine(
-                        $"NativePanelSizingService: HWND 0x{hwnd.ToInt64():X} is already attached; second Attach ignored.");
+                    Log.Warn(
+                        "NativePanelSizingService",
+                        "AttachIgnoredAlreadyAttached",
+                        new KeyValuePair<string, object?>("hwnd", hwnd.ToInt64()));
                     return NoOpToken.Instance;
                 }
 
@@ -131,8 +145,10 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
                 var registration = _installer(hwnd, attachment.HandleMessage);
                 if (registration is null)
                 {
-                    Console.Error.WriteLine(
-                        $"NativePanelSizingService: no HwndSource for HWND 0x{hwnd.ToInt64():X}; native sizing is unavailable for this panel.");
+                    Log.Warn(
+                        "NativePanelSizingService",
+                        "AttachUnavailableNoHwndSource",
+                        new KeyValuePair<string, object?>("hwnd", hwnd.ToInt64()));
                     return NoOpToken.Instance;
                 }
 
@@ -145,7 +161,7 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
         {
             // Native sizing degrades to "unavailable" (the legacy Thumb path still exists) instead of
             // taking the panel down with it.
-            Console.Error.WriteLine($"NativePanelSizingService.Attach failed: {ex.Message}");
+            Log.Error("NativePanelSizingService", "AttachFailed", ex);
             return NoOpToken.Instance;
         }
     }
@@ -319,8 +335,11 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
                 // Hard invariant: nothing escapes into the window procedure. Reporting the message as
                 // unhandled leaves DefWindowProc/WPF in charge, which is always a valid fallback.
                 handled = false;
-                Console.Error.WriteLine(
-                    $"NativePanelSizingService hook error (msg 0x{msg:X4}): {ex.Message}");
+                _owner.Log.Error(
+                    "NativePanelSizingService",
+                    "HookError",
+                    ex,
+                    new KeyValuePair<string, object?>("msg", msg));
                 return IntPtr.Zero;
             }
         }
@@ -367,8 +386,7 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
 
             if (!_owner._nativeApi.GetWindowRect(hwnd, out var windowRect))
             {
-                Console.Error.WriteLine(
-                    "NativePanelSizingService: GetWindowRect failed on WM_ENTERSIZEMOVE; gesture ignored.");
+                _owner.Log.Warn("NativePanelSizingService", "EnterSizeMoveGetWindowRectFailed");
                 return;
             }
 
@@ -413,8 +431,7 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
             // No trustworthy geometry at the end of the gesture (window already gone). Reporting an
             // all-zero rectangle would invite the client to persist it, so this is reported as an abort:
             // the session still ends, nothing bogus can be saved.
-            Console.Error.WriteLine(
-                "NativePanelSizingService: GetWindowRect failed on WM_EXITSIZEMOVE; reporting the gesture as aborted.");
+            _owner.Log.Warn("NativePanelSizingService", "ExitSizeMoveGetWindowRectFailed");
             _client.SizeMoveAborted();
         }
 
@@ -442,7 +459,7 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
                 // WM_DPICHANGED: HIWORD(wParam) is the new Y-axis DPI (identical to the X-axis one),
                 // lParam points at the suggested window rectangle.
                 var dpi = unchecked((ushort)((wParam.ToInt64() >> 16) & 0xFFFF));
-                newScale = dpi > 0 ? dpi / 96.0 : _owner._nativeApi.GetDpiScaleForWindow(hwnd);
+                newScale = dpi > 0 ? DesktopScaleModel.ScaleFromDpi(dpi) : _owner._nativeApi.GetDpiScaleForWindow(hwnd);
                 suggestedRect = _owner._nativeApi.ReadRect(lParam);
             }
             else
@@ -508,7 +525,7 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"NativePanelSizingService: RemoveHook failed: {ex.Message}");
+                AppLog.Current.Error("NativePanelSizingService", "RemoveHookFailed", ex);
             }
         }
     }

@@ -14,7 +14,7 @@ public class DiagnosticsLogFileNamingTests
 
     /// <summary>
     /// Verifies that <see cref="DiagnosticsLogFileNaming.BuildFileName"/> produces the exact expected
-    /// <c>gestures-yyyyMMdd-HHmmss-pid.jsonl</c> shape for a fixed timestamp and process id.
+    /// <c>app-yyyyMMdd-HHmmss-pid.jsonl</c> shape for a fixed timestamp and process id.
     /// </summary>
     [Fact]
     public void BuildFileName_ProducesExpectedShape()
@@ -23,19 +23,19 @@ public class DiagnosticsLogFileNamingTests
 
         var fileName = DiagnosticsLogFileNaming.BuildFileName(now, 12345);
 
-        Assert.Equal("gestures-20260917-101500-12345.jsonl", fileName);
+        Assert.Equal("app-20260917-101500-12345.jsonl", fileName);
     }
 
     /// <summary>
     /// Verifies that <see cref="DiagnosticsLogFileNaming.BuildFileName"/> always starts with the
-    /// <c>gestures-</c> prefix and ends with the <c>.jsonl</c> extension.
+    /// <c>app-</c> prefix and ends with the <c>.jsonl</c> extension.
     /// </summary>
     [Fact]
     public void BuildFileName_StartsWithPrefixAndEndsWithExtension()
     {
         var fileName = DiagnosticsLogFileNaming.BuildFileName(DateTimeOffset.Now, Environment.ProcessId);
 
-        Assert.StartsWith("gestures-", fileName, StringComparison.Ordinal);
+        Assert.StartsWith("app-", fileName, StringComparison.Ordinal);
         Assert.EndsWith(".jsonl", fileName, StringComparison.Ordinal);
     }
 
@@ -101,16 +101,16 @@ public class DiagnosticsLogFileNamingTests
     {
         var files = new[]
         {
-            "gestures-20260101-000000-1.jsonl",
-            "gestures-20260102-000000-1.jsonl",
-            "gestures-20260103-000000-1.jsonl",
-            "gestures-20260104-000000-1.jsonl",
+            "app-20260101-000000-1.jsonl",
+            "app-20260102-000000-1.jsonl",
+            "app-20260103-000000-1.jsonl",
+            "app-20260104-000000-1.jsonl",
         };
 
         var toDelete = DiagnosticsLogFileNaming.SelectForDeletion(files, keep: 2);
 
         Assert.Equal(
-            ["gestures-20260101-000000-1.jsonl", "gestures-20260102-000000-1.jsonl"],
+            ["app-20260101-000000-1.jsonl", "app-20260102-000000-1.jsonl"],
             toDelete);
     }
 
@@ -121,7 +121,7 @@ public class DiagnosticsLogFileNamingTests
     [Fact]
     public void SelectForDeletion_FewerFilesThanKeep_ReturnsEmpty()
     {
-        var files = new[] { "gestures-20260101-000000-1.jsonl", "gestures-20260102-000000-1.jsonl" };
+        var files = new[] { "app-20260101-000000-1.jsonl", "app-20260102-000000-1.jsonl" };
 
         var toDelete = DiagnosticsLogFileNaming.SelectForDeletion(files, keep: 10);
 
@@ -135,7 +135,7 @@ public class DiagnosticsLogFileNamingTests
     [Fact]
     public void SelectForDeletion_ExactlyKeepCount_ReturnsEmpty()
     {
-        var files = new[] { "gestures-20260101-000000-1.jsonl", "gestures-20260102-000000-1.jsonl" };
+        var files = new[] { "app-20260101-000000-1.jsonl", "app-20260102-000000-1.jsonl" };
 
         var toDelete = DiagnosticsLogFileNaming.SelectForDeletion(files, keep: 2);
 
@@ -161,7 +161,7 @@ public class DiagnosticsLogFileNamingTests
     [Fact]
     public void SelectForDeletion_NegativeKeep_TreatedAsZero_DeletesEverything()
     {
-        var files = new[] { "gestures-20260101-000000-1.jsonl", "gestures-20260102-000000-1.jsonl" };
+        var files = new[] { "app-20260101-000000-1.jsonl", "app-20260102-000000-1.jsonl" };
 
         var toDelete = DiagnosticsLogFileNaming.SelectForDeletion(files, keep: -3);
 
@@ -175,7 +175,7 @@ public class DiagnosticsLogFileNamingTests
     [Fact]
     public void SelectForDeletion_KeepZero_DeletesEverything()
     {
-        var files = new[] { "gestures-20260101-000000-1.jsonl", "gestures-20260102-000000-1.jsonl" };
+        var files = new[] { "app-20260101-000000-1.jsonl", "app-20260102-000000-1.jsonl" };
 
         var toDelete = DiagnosticsLogFileNaming.SelectForDeletion(files, keep: 0);
 
@@ -201,22 +201,22 @@ public class DiagnosticsLogFileNamingTests
     {
         var files = new[]
         {
-            @"C:\Users\someone\AppData\Local\DesktopOrganizer\Logs\gestures-20260101-000000-1.jsonl",
-            @"C:\Users\someone\AppData\Local\DesktopOrganizer\Logs\gestures-20260103-000000-1.jsonl",
-            @"C:\Users\someone\AppData\Local\DesktopOrganizer\Logs\gestures-20260102-000000-1.jsonl",
+            @"C:\Users\someone\AppData\Local\DesktopOrganizer\Logs\app-20260101-000000-1.jsonl",
+            @"C:\Users\someone\AppData\Local\DesktopOrganizer\Logs\app-20260103-000000-1.jsonl",
+            @"C:\Users\someone\AppData\Local\DesktopOrganizer\Logs\app-20260102-000000-1.jsonl",
         };
 
         var toDelete = DiagnosticsLogFileNaming.SelectForDeletion(files, keep: 2);
 
         Assert.Equal(
-            [@"C:\Users\someone\AppData\Local\DesktopOrganizer\Logs\gestures-20260101-000000-1.jsonl"],
+            [@"C:\Users\someone\AppData\Local\DesktopOrganizer\Logs\app-20260101-000000-1.jsonl"],
             toDelete);
     }
 
     /// <summary>
     /// <see cref="DiagnosticsLogFileNaming.SelectForDeletion"/> does no pattern filtering of its own —
     /// callers (e.g. <c>JsonLinesDiagnosticsLog</c>) are expected to pass only files already matched
-    /// against the <c>gestures-*.jsonl</c> glob. A foreign file name participates in the plain ordinal
+    /// against the <c>app-*.jsonl</c> glob. A foreign file name participates in the plain ordinal
     /// sort like any other entry rather than being specially skipped.
     /// </summary>
     [Fact]
@@ -224,15 +224,15 @@ public class DiagnosticsLogFileNamingTests
     {
         var files = new[]
         {
-            "gestures-20260101-000000-1.jsonl",
-            "gestures-20260103-000000-1.jsonl",
-            "not-a-diagnostics-file.txt", // sorts before "gestures-..." ordinally ('n' < 'g'? actually 'n' > 'g')
+            "app-20260101-000000-1.jsonl",
+            "app-20260103-000000-1.jsonl",
+            "not-a-diagnostics-file.txt", // sorts after "app-..." ordinally ('a' < 'n')
         };
 
         var toDelete = DiagnosticsLogFileNaming.SelectForDeletion(files, keep: 2);
 
-        // Ordinal order: "gestures-20260101...", "gestures-20260103...", "not-a-diagnostics-file.txt"
-        // (digits/letters compare by code point; 'g' < 'n'). Keeping the newest 2 deletes the oldest one.
-        Assert.Equal(["gestures-20260101-000000-1.jsonl"], toDelete);
+        // Ordinal order: "app-20260101...", "app-20260103...", "not-a-diagnostics-file.txt"
+        // (digits/letters compare by code point; 'a' < 'n'). Keeping the newest 2 deletes the oldest one.
+        Assert.Equal(["app-20260101-000000-1.jsonl"], toDelete);
     }
 }

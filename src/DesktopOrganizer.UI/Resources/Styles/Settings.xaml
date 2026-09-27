@@ -19,6 +19,7 @@
     -->
     <conv:EnumToBooleanConverter x:Key="EnumToBoolean"/>
     <conv:EnumDisplayNameConverter x:Key="EnumDisplayName"/>
+    <conv:NotBooleanConverter x:Key="NotBoolean"/>
     <BooleanToVisibilityConverter x:Key="BooleanToVisibility"/>
     <!-- Localization (docs/PLANS/localization.md §2.4/§4.5): declared here — the ONE place every
          Views/Settings/*.xaml UserControl already reaches through StaticResource — rather than once

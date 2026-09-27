@@ -1,5 +1,6 @@
 using System.Windows.Controls;
 using System.Windows.Data;
+using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 
 namespace DesktopOrganizer.UI.Views;
@@ -45,7 +46,13 @@ public partial class ChildWindow
     /// measured yet (a panel on an inactive page has never been laid out).
     /// </summary>
     internal Rect GetExpandedBoundsWindowSpace()
-        => WorkspaceGridPlacement.ExpandedBounds(new Point(Left, Top), new Size(ActualWidth, ActualHeight), _model);
+    {
+        // release-hardening F (ADR-037): (Left, Top) is converted through the adapter — desktop-DIP, the
+        // space every consumer of this method (WorkspaceGridPlacement, WindowManager.AlignPanelsToWorkspaceGrid,
+        // this partial's own AlignToWorkspaceGrid) already treats it as. Identity on any uniform snapshot.
+        var position = PanelWindowCoordinates.ToDesktopBounds(this, new Rect(Left, Top, 0, 0), _desktopScale.Current).TopLeft;
+        return WorkspaceGridPlacement.ExpandedBounds(position, new Size(ActualWidth, ActualHeight), _model);
+    }
 
     /// <summary>
     /// <c>HeaderContextMenu</c>'s "Align to workspace grid" item — the explicit, user-driven switch

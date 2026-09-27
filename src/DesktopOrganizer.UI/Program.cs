@@ -5,7 +5,9 @@ using System.Windows;
 using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
+using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.UI.Configuration;
+using DesktopOrganizer.UI.Lifecycle;
 using DesktopOrganizer.UI.State;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -61,7 +63,11 @@ public static class Program
     /// <see cref="System.Threading.WaitHandleCannotBeOpenedException"/>); <c>2</c> —
     /// <c>--restore-state-backup</c> was requested but did not restore anything (no candidate found, the
     /// candidate failed validation, the storage lock could not be acquired, or the write itself failed —
-    /// see <see cref="RunRestoreStateBackup"/>).
+    /// see <see cref="RunRestoreStateBackup"/>); <c>5</c> — a fatal unhandled exception was caught by
+    /// <see cref="DesktopOrganizer.UI.Lifecycle.CrashCoordinator"/> on the UI thread and the crash
+    /// sequence ran to completion (ADR-033 part 2, <see cref="DesktopOrganizer.UI.Lifecycle.ExitCodes.Crashed"/>);
+    /// a fatal exception on a genuine background thread instead ends the process via the CLR's own
+    /// unmanaged-exception termination, with no code this method controls.
     /// </summary>
     /// <param name="args">
     /// Command-line arguments. Unused by protocol <c>DO/1</c> itself (ADR-023 D-5) — the one flag this
@@ -71,14 +77,41 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        // M-4: everything below — DI container construction, resolving ISingleInstanceCoordinator (whose
-        // factory constructs a real named Mutex and reads WindowsIdentity.GetCurrent()/
-        // Process.GetCurrentProcess()), and the handshake itself — runs before any WPF Application or
-        // diagnostics log exists. Unlike the WPF SDK's own auto-generated Main, nothing upstream of this
-        // method catches an exception thrown here; without this guard the process would simply vanish
-        // with no message and a CLR-default exit code.
+        // ADR-033 part 2 (crash safety, release-hardening plan §2): installed as early as possible —
+        // before the single-instance handshake, before the DI container, before any WPF Application
+        // exists. CrashRouting.Handler is still null at this point (App's constructor sets it); every
+        // one of these three delegates tolerates that (see CrashRouting's own remarks) and simply drops
+        // a crash that manages to happen in the narrow window before App is constructed, the same way
+        // the outer try/catch below already covers that window with its own message box.
+        //
+        // TaskScheduler.UnobservedTaskException is deliberately NOT routed through CrashCoordinator —
+        // it is by design non-fatal (.NET's own default behavior: the process survives regardless of
+        // this handler), so this only records it and marks it observed.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            if (e.ExceptionObject is Exception ex)
+                CrashRouting.Handler?.Invoke(ex, CrashOrigin.Background);
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            AppLog.Current.Error("Program", "UnobservedTaskException", e.Exception);
+            e.SetObserved();
+        };
+
+        // M-4: everything below — the WinForms exception bridge, DI container construction, resolving
+        // ISingleInstanceCoordinator (whose factory constructs a real named Mutex and reads
+        // WindowsIdentity.GetCurrent()/Process.GetCurrentProcess()), and the handshake itself — runs
+        // before any WPF Application or diagnostics log exists. Unlike the WPF SDK's own auto-generated
+        // Main, nothing upstream of this method catches an exception thrown here; without this guard the
+        // process would simply vanish with no message and a CLR-default exit code.
         try
         {
+            // Inside the guard (release-hardening review L7): Install touches WinForms' global
+            // Application state, and a throw from it must still end in the startup-failed message box
+            // below rather than an unhandled exception with no message at all.
+            WinFormsExceptionBridge.Install(ex => CrashRouting.Handler?.Invoke(ex, CrashOrigin.WinForms));
+
             // docs/PLANS/localization.md §2.5 step 1 (finding 5): touch SystemCulture before anything
             // below ever assigns CultureInfo.CurrentUICulture, so its static field-initializer snapshot
             // is the real, unmodified Windows UI culture — what "follow Windows" (SupportedLanguages.
@@ -149,10 +182,13 @@ public static class Program
 
         using var provider = services.BuildServiceProvider();
 
+        AppLog.Initialize(provider.GetRequiredService<IAppLog>());
+
         var storageLock = provider.GetRequiredService<IStorageLock>();
         if (!storageLock.TryAcquire())
         {
-            Console.Error.WriteLine(RestoreLockUnavailableMessage);
+            Console.Error.WriteLine(RestoreLockUnavailableMessage); // cli-output
+            AppLog.Current.Warn("Program", "RestoreStateBackupLockUnavailable");
             MessageBox.Show(
                 LocalizationResources.GetString("Restore_LockUnavailable_Message", CultureInfo.CurrentUICulture),
                 AppTitle,
@@ -168,11 +204,17 @@ public static class Program
         if (result.Outcome == StateRestoreOutcome.Restored)
         {
             Console.WriteLine(result.Message);
+            AppLog.Current.Info("Program", "RestoreStateBackupRestored", new KeyValuePair<string, object?>("message", result.Message));
             MessageBox.Show(localizedMessage, AppTitle, MessageBoxButton.OK, MessageBoxImage.Information);
             return 0;
         }
 
-        Console.Error.WriteLine(result.Message);
+        Console.Error.WriteLine(result.Message); // cli-output
+        AppLog.Current.Warn(
+            "Program",
+            "RestoreStateBackupNotRestored",
+            new KeyValuePair<string, object?>("outcome", result.Outcome.ToString()),
+            new KeyValuePair<string, object?>("message", result.Message));
         MessageBox.Show(localizedMessage, AppTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
         return 2;
     }
@@ -221,6 +263,8 @@ public static class Program
         // Side-effect-free: every registration here is a singleton descriptor, none are eagerly
         // resolved by BuildServiceProvider() itself (ADR-023 §2.4).
         using var provider = services.BuildServiceProvider();
+
+        AppLog.Initialize(provider.GetRequiredService<IAppLog>());
 
         var coordinator = provider.GetRequiredService<ISingleInstanceCoordinator>();
 
@@ -286,11 +330,15 @@ public static class Program
             // no-op) rather than aborting startup — killing the process over a stuck lock file would
             // be worse than running without persistence. Logged exactly once, here; every later
             // Save() call re-checks IsWritable silently, without logging again.
-            Console.Error.WriteLine(StorageLockUnavailableMessage);
+            Console.Error.WriteLine(StorageLockUnavailableMessage); // cli-output
             provider.GetRequiredService<IDiagnosticsLog>().Write(
                 "state",
                 "StateStoreLockUnavailable",
                 null,
+                new KeyValuePair<string, object?>("attempts", StorageLockDefaultMaxAttempts));
+            AppLog.Current.Warn(
+                "Program",
+                "StorageLockUnavailable",
                 new KeyValuePair<string, object?>("attempts", StorageLockDefaultMaxAttempts));
         }
 

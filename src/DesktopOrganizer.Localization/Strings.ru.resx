@@ -298,6 +298,12 @@
   <data name="Startup_Failed_Format" xml:space="preserve">
     <value>DesktopOrganizer не удалось запустить: {0}</value>
   </data>
+  <data name="Crash_Dialog_Title" xml:space="preserve">
+    <value>DesktopOrganizer — непредвиденная ошибка</value>
+  </data>
+  <data name="Crash_Dialog_Message" xml:space="preserve">
+    <value>В работе DesktopOrganizer произошла непредвиденная ошибка, и приложение пришлось закрыть. Значки рабочего стола восстановлены, отчёт о сбое сохранён. Открыть папку с журналами?</value>
+  </data>
   <data name="Startup_OtherSession_Message" xml:space="preserve">
     <value>DesktopOrganizer уже запущен в другом сеансе Windows. Переключитесь на этот сеанс, чтобы использовать приложение.</value>
   </data>
@@ -457,7 +463,7 @@
   <!-- ==== END WP-3 ==== -->
   <!-- ==== BEGIN WP-4a Settings window (Settings_) ==== -->
   <data name="Settings_About_Diagnostics_Message" xml:space="preserve">
-    <value>Диагностика: запустите с --diag</value>
+    <value>Диагностика: запустите с --diag для подробного журналирования. Откройте папку логов ниже, чтобы посмотреть файлы журнала.</value>
   </data>
   <data name="Settings_About_OpenFolder_Button" xml:space="preserve">
     <value>Открыть папку</value>
@@ -468,6 +474,59 @@
   <data name="Settings_About_Version_Format" xml:space="preserve">
     <value>Версия {0}</value>
   </data>
+  <!-- ==== BEGIN G2 Update check + About links (Settings_About_Update_/Settings_About_Links_) ==== -->
+  <data name="Settings_About_Update_Available_Format" xml:space="preserve">
+    <value>Доступно обновление: {0}</value>
+  </data>
+  <data name="Settings_About_Update_CheckButton" xml:space="preserve">
+    <value>Проверить обновления</value>
+  </data>
+  <data name="Settings_About_Update_Checking" xml:space="preserve">
+    <value>Проверка обновлений…</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Format" xml:space="preserve">
+    <value>Не удалось проверить обновления: {0}</value>
+  </data>
+  <data name="Settings_About_Update_Failed_InvalidResponse" xml:space="preserve">
+    <value>неожиданный ответ от GitHub</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Network" xml:space="preserve">
+    <value>проблема с сетью</value>
+  </data>
+  <data name="Settings_About_Update_Failed_RateLimited" xml:space="preserve">
+    <value>достигнут лимит запросов GitHub</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Timeout" xml:space="preserve">
+    <value>истекло время ожидания</value>
+  </data>
+  <data name="Settings_About_Update_Failed_Unexpected" xml:space="preserve">
+    <value>неизвестная ошибка</value>
+  </data>
+  <data name="Settings_About_Update_Header" xml:space="preserve">
+    <value>Обновления</value>
+  </data>
+  <data name="Settings_About_Update_NoReleases" xml:space="preserve">
+    <value>Пока не опубликовано ни одного релиза.</value>
+  </data>
+  <data name="Settings_About_Update_UpToDate" xml:space="preserve">
+    <value>У вас установлена последняя версия.</value>
+  </data>
+  <data name="Settings_About_Update_ViewRelease_Button" xml:space="preserve">
+    <value>Открыть релиз</value>
+  </data>
+  <data name="Settings_About_Links_Header" xml:space="preserve">
+    <value>Ссылки</value>
+  </data>
+  <data name="Settings_About_Links_OpenLogsFolder_Button" xml:space="preserve">
+    <value>Открыть папку логов</value>
+  </data>
+  <data name="Settings_About_Links_ProjectPage_Button" xml:space="preserve">
+    <value>Страница проекта</value>
+  </data>
+  <data name="Settings_About_Links_ReportProblem_Button" xml:space="preserve">
+    <value>Сообщить о проблеме</value>
+  </data>
+  <!-- ==== END G2 Update check + About links ==== -->
   <data name="Settings_Backup_CreatedAt_Format" xml:space="preserve">
     <value>{0:g}</value>
   </data>
@@ -764,7 +823,7 @@
   <!-- ==== END WP-4b ==== -->
   <!-- ==== BEGIN WP-5 ViewModels (Settings_Confirm_, Snapshot_, Page_Confirm_) ==== -->
   <data name="Page_Confirm_Remove_ManagedFiles_Message" xml:space="preserve">
-    <value>Страница будет удалена навсегда вместе со всеми панелями на ней. Файлы, перемещённые в эти панели, будут удалены с диска без возможности восстановить их из корзины. Продолжить?</value>
+    <value>Страница будет удалена навсегда вместе со всеми панелями на ней. Файлы, перемещённые в эти панели, будут перемещены в Корзину, откуда их можно восстановить. Продолжить?</value>
   </data>
   <data name="Page_Confirm_Remove_Message" xml:space="preserve">
     <value>Страница и все панели на ней будут удалены. Продолжить?</value>
@@ -779,13 +838,19 @@
     <value>Выровнять все панели по сетке</value>
   </data>
   <data name="Settings_Confirm_RemovePanel_ManagedFiles_Message" xml:space="preserve">
-    <value>Панель будет удалена без возможности восстановления. Файлы, перемещённые в неё, будут удалены с диска без возможности восстановить их из корзины. Продолжить?</value>
+    <value>Панель будет удалена без возможности восстановления. Файлы, перемещённые в неё, будут перемещены в Корзину, откуда их можно восстановить. Продолжить?</value>
   </data>
   <data name="Settings_Confirm_RemovePanel_Message" xml:space="preserve">
     <value>Панель будет удалена. Продолжить?</value>
   </data>
   <data name="Settings_Confirm_RemovePanel_Title" xml:space="preserve">
     <value>Удалить панель</value>
+  </data>
+  <data name="Recycle_Failed_Title" xml:space="preserve">
+    <value>Не удалось переместить в Корзину</value>
+  </data>
+  <data name="Recycle_Failed_Message_Format" xml:space="preserve">
+    <value>Элементов, которые не удалось переместить в Корзину: {0}. Ничего не удалено безвозвратно: эти элементы и панели, в которых они находятся, сохранены. Элементы, которые попали в Корзину, убраны с панелей. Закройте программы, которые могут использовать оставшиеся элементы, и повторите попытку.</value>
   </data>
   <data name="Snapshot_Capture_Label" xml:space="preserve">
     <value>Имя снимка:</value>

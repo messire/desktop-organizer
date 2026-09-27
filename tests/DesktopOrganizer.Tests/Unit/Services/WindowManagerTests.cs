@@ -15,11 +15,11 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 /// Unit tests for the pure model/storage logic inside <see cref="WindowManager"/> that doesn't
 /// require a real WPF <c>ChildWindow</c>:
 /// <list type="bullet">
-/// <item><see cref="WindowManager.ReleaseManagedItems"/> — cleans up app-managed item copies when a
-/// panel is permanently deleted (D3 followups item 3).</item>
+/// <item><see cref="WindowManager.ReleaseManagedItems"/> — moves app-managed item copies to the Recycle
+/// Bin when a panel is permanently deleted (D3 followups item 3, ADR-035).</item>
 /// <item><see cref="WindowManager.ReleaseManagedItemsIfRequested"/> — the <c>releaseManagedItems</c>
 /// gate behind <c>RemoveChildWindow(Guid, bool)</c>, ensuring non-permanent removals (e.g. layout
-/// snapshot restore) never release managed copies.</item>
+/// snapshot restore) never recycle managed copies.</item>
 /// <item><see cref="WindowManager.ClampIntoMonitor"/> — re-clamps a panel's position into a monitor's
 /// (possibly shrunk) work area (D3 followups item 4, exercised via <c>OnMonitorsChanged</c> in
 /// production).</item>
@@ -38,14 +38,15 @@ namespace DesktopOrganizer.Tests.Unit.Services;
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class WindowManagerTests
 {
-    // ── ReleaseManagedItems ──────────────────────────────────────────────────────
+    // ── ReleaseManagedItems (ADR-035: Recycle Bin, one batch) ────────────────────
 
     /// <summary>
-    /// Verifies that <see cref="WindowManager.ReleaseManagedItems"/> releases each managed path exactly
-    /// once and never touches unmanaged paths.
+    /// Verifies that <see cref="WindowManager.ReleaseManagedItems"/> sends exactly the managed paths —
+    /// in one <see cref="IPanelItemStorageService.ReleaseToRecycleBin"/> batch — and never unmanaged ones,
+    /// and passes the storage outcome through.
     /// </summary>
     [Fact]
-    public void ReleaseManagedItems_OnlyReleasesManagedPaths_OnceEach()
+    public void ReleaseManagedItems_RecyclesOnlyManagedPaths_InOneBatch()
     {
         // Arrange
         var storageMock = new Mock<IPanelItemStorageService>();
@@ -56,25 +57,29 @@ public class WindowManagerTests
         storageMock.Setup(s => s.IsManaged(managedA)).Returns(true);
         storageMock.Setup(s => s.IsManaged(managedB)).Returns(true);
         storageMock.Setup(s => s.IsManaged(unmanagedC)).Returns(false);
+        var expected = RecycleOutcome.Create([managedA], [managedB], cancelled: true);
+        storageMock.Setup(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>())).Returns(expected);
 
         var model = new ChildWindowModel { FilePaths = [managedA, unmanagedC, managedB] };
 
         // Act
-        WindowManager.ReleaseManagedItems(model, storageMock.Object);
+        var outcome = WindowManager.ReleaseManagedItems(model, storageMock.Object);
 
         // Assert
-        storageMock.Verify(s => s.Release(managedA), Times.Once);
-        storageMock.Verify(s => s.Release(managedB), Times.Once);
-        storageMock.Verify(s => s.Release(unmanagedC), Times.Never);
+        storageMock.Verify(
+            s => s.ReleaseToRecycleBin(It.Is<IReadOnlyList<string>>(p => p.SequenceEqual(new[] { managedA, managedB }))),
+            Times.Once);
+        storageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Once);
+        Assert.Equal(expected, outcome);
+        Assert.False(outcome.IsComplete);
     }
 
     /// <summary>
-    /// Verifies that <see cref="WindowManager.ReleaseManagedItems"/> never calls
-    /// <see cref="IPanelItemStorageService.Release"/> for a panel with no managed paths (e.g. a Folder
-    /// Portal panel).
+    /// Verifies that <see cref="WindowManager.ReleaseManagedItems"/> never calls the storage service for
+    /// a panel with no managed paths (e.g. a Folder Portal panel) and reports a complete outcome.
     /// </summary>
     [Fact]
-    public void ReleaseManagedItems_NoManagedPaths_NeverCallsRelease()
+    public void ReleaseManagedItems_NoManagedPaths_NeverCallsRecycle()
     {
         // Arrange — e.g. a Folder Portal panel, whose FilePaths never point into managed storage.
         var storageMock = new Mock<IPanelItemStorageService>();
@@ -83,18 +88,19 @@ public class WindowManagerTests
         var model = new ChildWindowModel { FilePaths = [@"C:\Some\Folder\file.txt"] };
 
         // Act
-        WindowManager.ReleaseManagedItems(model, storageMock.Object);
+        var outcome = WindowManager.ReleaseManagedItems(model, storageMock.Object);
 
         // Assert
-        storageMock.Verify(s => s.Release(It.IsAny<string>()), Times.Never);
+        storageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Never);
+        Assert.True(outcome.IsComplete);
     }
 
     /// <summary>
-    /// Verifies that <see cref="WindowManager.ReleaseManagedItems"/> does not throw and never calls
-    /// <see cref="IPanelItemStorageService.Release"/> for a panel with an empty file paths list.
+    /// Verifies that <see cref="WindowManager.ReleaseManagedItems"/> does not throw and never calls the
+    /// storage service for a panel with an empty file paths list.
     /// </summary>
     [Fact]
-    public void ReleaseManagedItems_EmptyFilePaths_DoesNotThrowOrCallRelease()
+    public void ReleaseManagedItems_EmptyFilePaths_DoesNotThrowOrCallRecycle()
     {
         var storageMock = new Mock<IPanelItemStorageService>();
         var model = new ChildWindowModel { FilePaths = [] };
@@ -102,7 +108,7 @@ public class WindowManagerTests
         var exception = Record.Exception(() => WindowManager.ReleaseManagedItems(model, storageMock.Object));
 
         Assert.Null(exception);
-        storageMock.Verify(s => s.Release(It.IsAny<string>()), Times.Never);
+        storageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Never);
     }
 
     // ── ReleaseManagedItemsIfRequested (RemoveChildWindow's releaseManagedItems gate) ─────────────
@@ -113,7 +119,7 @@ public class WindowManagerTests
     /// never touches managed storage, even when the panel's paths are managed.
     /// </summary>
     [Fact]
-    public void ReleaseManagedItemsIfRequested_ReleaseFalse_NeverCallsRelease_EvenForManagedPaths()
+    public void ReleaseManagedItemsIfRequested_ReleaseFalse_NeverRecycles_EvenForManagedPaths()
     {
         // Regression test for the LayoutSnapshotService.Restore data-loss bug: removing a panel that
         // is about to be recreated from a snapshot (releaseManagedItems: false) must never touch
@@ -124,20 +130,21 @@ public class WindowManagerTests
 
         var model = new ChildWindowModel { FilePaths = [managed] };
 
-        WindowManager.ReleaseManagedItemsIfRequested(model, storageMock.Object, releaseManagedItems: false);
+        var outcome = WindowManager.ReleaseManagedItemsIfRequested(model, storageMock.Object, releaseManagedItems: false);
 
-        storageMock.Verify(s => s.Release(It.IsAny<string>()), Times.Never);
+        storageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Never);
+        Assert.True(outcome.IsComplete);
     }
 
     /// <summary>
     /// Verifies that with <c>releaseManagedItems: true</c> (permanent deletion),
-    /// <see cref="WindowManager.ReleaseManagedItemsIfRequested"/> still releases every managed path.
+    /// <see cref="WindowManager.ReleaseManagedItemsIfRequested"/> recycles every managed path.
     /// </summary>
     [Fact]
-    public void ReleaseManagedItemsIfRequested_ReleaseTrue_CallsReleaseForManagedPaths()
+    public void ReleaseManagedItemsIfRequested_ReleaseTrue_RecyclesManagedPaths()
     {
-        // Permanent deletion (MainWindowViewModel.RemovePanel / PageManagerService.RemovePage) must
-        // still release managed copies.
+        // Permanent deletion (MainWindowViewModel.RemovePanel) must still get rid of managed copies —
+        // through the Recycle Bin.
         var storageMock = new Mock<IPanelItemStorageService>();
         const string managed = @"C:\ManagedRoot\a.lnk";
         const string unmanaged = @"C:\Users\someone\Desktop\b.lnk";
@@ -148,8 +155,33 @@ public class WindowManagerTests
 
         WindowManager.ReleaseManagedItemsIfRequested(model, storageMock.Object, releaseManagedItems: true);
 
-        storageMock.Verify(s => s.Release(managed), Times.Once);
-        storageMock.Verify(s => s.Release(unmanaged), Times.Never);
+        storageMock.Verify(
+            s => s.ReleaseToRecycleBin(It.Is<IReadOnlyList<string>>(p => p.Count == 1 && p[0] == managed)),
+            Times.Once);
+    }
+
+    // ── PanelRemovalResult ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>default(PanelRemovalResult)</c> must mean "removed" (loose mocks of <see cref="IWindowManager"/>
+    /// return it), and <see cref="PanelRemovalResult.Blocked"/> carries the remaining paths.
+    /// </summary>
+    [Fact]
+    public void PanelRemovalResult_DefaultIsRemoved_BlockedCarriesRemaining()
+    {
+        var removed = default(PanelRemovalResult);
+        var blocked = PanelRemovalResult.Blocked([@"C:\ManagedRoot\a.lnk"]);
+
+        Assert.True(removed.IsRemoved);
+        Assert.False(removed.IsBlocked);
+        Assert.Empty(removed.Remaining);
+        Assert.Equal(PanelRemovalResult.Removed, removed);
+
+        Assert.True(blocked.IsBlocked);
+        Assert.False(blocked.IsRemoved);
+        Assert.Equal([@"C:\ManagedRoot\a.lnk"], blocked.Remaining);
+
+        Assert.True(PanelRemovalResult.Blocked([]).IsRemoved);
     }
 
     // ── ClampIntoMonitor ─────────────────────────────────────────────────────────
@@ -990,7 +1022,8 @@ public class WindowManagerTests
             monitorServiceMock.Object,
             itemStorageMock.Object,
             applicationStateServiceMock.Object,
-            appSettingsMock.Object);
+            appSettingsMock.Object,
+            FakeDesktopScale.Uniform().Object);
     }
 
     private static WindowManager BuildWindowManager(IReadOnlyList<ChildWindowModel>? panels = null)
@@ -1017,6 +1050,7 @@ public class WindowManagerTests
             monitorServiceMock.Object,
             itemStorageMock.Object,
             applicationStateServiceMock.Object,
-            appSettingsMock.Object);
+            appSettingsMock.Object,
+            FakeDesktopScale.Uniform().Object);
     }
 }

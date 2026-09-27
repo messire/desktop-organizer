@@ -8,6 +8,11 @@
         <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="$(MSLibVersion)"/>
         <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(MSLibVersion)"/>
         <PackageVersion Include="System.IO.Pipes.AccessControl" Version="5.0.0"/>
+        <!-- Package A (crash safety, ADR-033 part 2): Microsoft.Win32.SystemEvents.SessionEnding is the
+             "insurance" fallback alongside WPF's own Application.SessionEnding — this type lives in its
+             own standalone package on .NET (not the WPF/WindowsDesktop shared framework), so it needs an
+             explicit reference even though DesktopOrganizer.UI has no WinForms UI of its own. -->
+        <PackageVersion Include="Microsoft.Win32.SystemEvents" Version="9.0.0"/>
         <PackageVersion Include="coverlet.collector" Version="10.0.1"/>
         <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.6.0"/>
         <PackageVersion Include="Moq" Version="4.20.72"/>

@@ -105,8 +105,9 @@ public class PageManagerServiceTests
     }
 
     /// <summary>
-    /// Verifies that removing a page closes every panel on it, releasing managed items since deleting a
-    /// page permanently destroys its panels.
+    /// Verifies that removing a page closes every panel on it. Managed items were already recycled by
+    /// <see cref="PageManagerService.RemovePage"/> itself (ADR-035), so the panels are removed with
+    /// <c>releaseManagedItems: false</c>.
     /// </summary>
     [Fact]
     public void RemovePage_ClosesAllPanelsOnPage()
@@ -121,9 +122,10 @@ public class PageManagerServiceTests
         sut.RemovePage("work");
 
         // Assert — RemoveChildWindow must have been called for the panel on that page, with
-        // releaseManagedItems: true since deleting a page permanently destroys its panels, and
-        // deferSave: true since RemovePage batches the removals and flushes once at the end (M4).
-        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(panelId, true, true), Times.Once);
+        // releaseManagedItems: false since RemovePage already recycled the page's managed items in one
+        // batch (ADR-035), and deferSave: true since RemovePage batches the removals and flushes once
+        // at the end (M4).
+        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(panelId, false, true), Times.Once);
     }
 
     /// <summary>
@@ -143,7 +145,7 @@ public class PageManagerServiceTests
 
         sut.RemovePage("work");
 
-        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), true, true), Times.Exactly(2));
+        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), false, true), Times.Exactly(2));
         _windowManagerMock.Verify(wm => wm.SaveWindowsStateNow(), Times.Once);
     }
 
@@ -182,11 +184,98 @@ public class PageManagerServiceTests
         Assert.DoesNotContain("work", sut.Pages);
     }
 
+    // ── ADR-035: page deletion recycles managed items in ONE batch; a refusal keeps the page ───────
+
+    /// <summary>
+    /// Verifies that the managed items of ALL panels on the page (and only the managed ones) go to the
+    /// Recycle Bin in a single batch before any panel is removed, and that a complete recycle removes
+    /// the page.
+    /// </summary>
+    [Fact]
+    public void RemovePage_ManagedItems_RecycledInOneBatch_ThenPageRemoved()
+    {
+        var panel1 = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work", FilePaths = ["C:\\managed\\a.txt", "C:\\desktop\\x.lnk"] };
+        var panel2 = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work", FilePaths = ["C:\\managed\\b.txt"] };
+        var other = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "default", FilePaths = ["C:\\managed\\c.txt"] };
+        var sut = BuildSut(panels: [panel1, panel2, other]);
+        sut.AddPage("work");
+        _itemStorageMock.Setup(s => s.IsManaged(It.Is<string>(p => p.StartsWith("C:\\managed", StringComparison.Ordinal)))).Returns(true);
+        var recycleCalledBeforeRemoval = false;
+        _itemStorageMock
+            .Setup(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()))
+            .Callback(() => recycleCalledBeforeRemoval = true)
+            .Returns(RecycleOutcome.Create(["C:\\managed\\a.txt", "C:\\managed\\b.txt"], [], cancelled: false));
+        _windowManagerMock
+            .Setup(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()))
+            .Callback(() => Assert.True(recycleCalledBeforeRemoval, "Items must be recycled before any panel is removed."));
+
+        var removed = sut.RemovePage("work");
+
+        Assert.True(removed);
+        _itemStorageMock.Verify(
+            s => s.ReleaseToRecycleBin(It.Is<IReadOnlyList<string>>(p =>
+                p.Count == 2 && p.Contains("C:\\managed\\a.txt") && p.Contains("C:\\managed\\b.txt"))),
+            Times.Once);
+        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(panel1.Id, false, true), Times.Once);
+        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(panel2.Id, false, true), Times.Once);
+        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(other.Id, It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
+        _confirmationMock.Verify(c => c.Notify(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()), Times.Never);
+        Assert.DoesNotContain("work", sut.Pages);
+    }
+
+    /// <summary>
+    /// Q6 default (fail visibly): if any managed item could not be recycled, the page and all its panels
+    /// are kept, only the recycled items are taken out of the panels, the user gets a warning with the
+    /// number of remaining items, and <see langword="false"/> is returned.
+    /// </summary>
+    [Fact]
+    public void RemovePage_RecycleIncomplete_KeepsPageAndPanels_RemovesRecycledItems_Notifies()
+    {
+        var panel = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work", FilePaths = ["C:\\managed\\a.txt", "C:\\managed\\b.txt"] };
+        var sut = BuildSut(panels: [panel]);
+        sut.AddPage("work");
+        _itemStorageMock.Setup(s => s.IsManaged(It.IsAny<string>())).Returns(true);
+        _itemStorageMock
+            .Setup(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()))
+            .Returns(RecycleOutcome.Create(["C:\\managed\\a.txt"], ["C:\\managed\\b.txt"], cancelled: true));
+
+        var removed = sut.RemovePage("work");
+
+        Assert.False(removed);
+        Assert.Contains("work", sut.Pages);
+        _windowManagerMock.Verify(wm => wm.RemoveChildWindow(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
+        _windowManagerMock.Verify(
+            wm => wm.RemoveItemsFromPanels(It.Is<IReadOnlyCollection<string>>(p => p.Count == 1 && p.Contains("C:\\managed\\a.txt"))),
+            Times.Once);
+        _confirmationMock.Verify(
+            c => c.Notify(
+                It.Is<string>(m => m.StartsWith("1 ", StringComparison.Ordinal)),
+                _localization.GetString("Recycle_Failed_Title"),
+                MessageBoxImage.Warning),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// A page with no managed items never calls the Recycle Bin at all.
+    /// </summary>
+    [Fact]
+    public void RemovePage_NoManagedItems_NeverRecycles()
+    {
+        var panel = new ChildWindowModel { Id = Guid.NewGuid(), PageId = "work", FilePaths = ["C:\\desktop\\x.lnk"] };
+        var sut = BuildSut(panels: [panel]);
+        sut.AddPage("work");
+
+        var removed = sut.RemovePage("work");
+
+        Assert.True(removed);
+        _itemStorageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Never);
+    }
+
     // ── CRITICAL C1 (P08 fix cycle 1, 2026-09-22): confirmation gate mirrors RemovePanel's own ──────
 
     /// <summary>
     /// Verifies that removing a page whose panels reference at least one managed file asks for a warning
-    /// confirmation mentioning that files will be deleted from disk.
+    /// confirmation mentioning that files will be moved to the Recycle Bin.
     /// </summary>
     [Fact]
     public void RemovePage_HasManagedFiles_AsksForWarningConfirmation()
@@ -200,7 +289,7 @@ public class PageManagerServiceTests
 
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => m.Contains("deleted from disk")),
+                It.Is<string>(m => m.Contains("moved to the Recycle Bin")),
                 It.IsAny<string>(),
                 MessageBoxImage.Warning),
             Times.Once);
@@ -221,7 +310,7 @@ public class PageManagerServiceTests
 
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => !m.Contains("deleted from disk")),
+                It.Is<string>(m => !m.Contains("moved to the Recycle Bin")),
                 It.IsAny<string>(),
                 MessageBoxImage.Question),
             Times.Once);
@@ -281,7 +370,7 @@ public class PageManagerServiceTests
 
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => m.Contains("deleted from disk")),
+                It.Is<string>(m => m.Contains("moved to the Recycle Bin")),
                 It.IsAny<string>(),
                 MessageBoxImage.Warning),
             Times.Once);

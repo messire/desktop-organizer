@@ -1,10 +1,23 @@
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Tools;
 
 /// <inheritdoc />
-internal class DesktopIntegrationService(INativeApi nativeApi) : IDesktopIntegrationService
+/// <param name="nativeApi">Native API façade (all P/Invoke lives behind it).</param>
+/// <param name="appLog">
+/// Log for the rare "Explorer did not answer" diagnostic; falls back to the ambient
+/// <see cref="AppLog.Current"/> when <see langword="null"/>.
+/// </param>
+internal class DesktopIntegrationService(INativeApi nativeApi, IAppLog? appLog = null) : IDesktopIntegrationService
 {
+    /// <summary>
+    /// Upper bound, in milliseconds, on how long the calling (UI) thread waits for Explorer to answer the
+    /// <c>0x052C</c> WorkerW-spawn message. A hung Explorer (not pumping for ~5 s) is abandoned at once
+    /// by <c>SMTO_ABORTIFHUNG</c>; this caps a merely slow one. Either way the lookup answers "no host".
+    /// </summary>
+    internal const uint ProgmanMsgTimeoutMs = 1000;
+
     private const uint ProgmanMsg = 0x052C;
     private const int GwlExStyle = -20;
     private const uint WsExToolWindow = 0x00000080;
@@ -50,8 +63,10 @@ internal class DesktopIntegrationService(INativeApi nativeApi) : IDesktopIntegra
     private static readonly IntPtr HwndBottom = new (1);
 
     /// <inheritdoc />
-    public void EmbedInDesktop(IntPtr hwnd)
+    public DesktopEmbedResult EmbedInDesktop(IntPtr hwnd)
     {
+        if (hwnd == IntPtr.Zero) return DesktopEmbedResult.InvalidWindow;
+
         // Applied unconditionally, before the WorkerW lookup below: the WorkerW handle can fail to
         // resolve (e.g. Explorer hasn't spawned it yet, or a shell version where the Progman 0x052C
         // trick no longer creates one) without that affecting whether this window is still hidden
@@ -59,10 +74,58 @@ internal class DesktopIntegrationService(INativeApi nativeApi) : IDesktopIntegra
         // Alt+Tab/taskbar guarantee even when desktop-layer parenting itself isn't available.
         ApplyDesktopWindowStyles(hwnd);
 
+        // Windows 11 24H2+ (measured on build 26200, release-hardening F0 spike): the lookup below
+        // finds no top-level WorkerW behind the SHELLDLL_DefView host, so panels stay top-level there.
+        // That is the expected steady state on those builds, not a failure — the caller gets
+        // NoDesktopLayer and decides what it means for it (ADR-034).
         var workerW = GetOrCreateWorkerW();
-        if (workerW == IntPtr.Zero) return;
+        if (workerW == IntPtr.Zero) return DesktopEmbedResult.NoDesktopLayer;
 
+        // Idempotency for shell-restart recovery (ADR-034): re-embedding a panel that already is a
+        // child of the current WorkerW must not re-parent it again. GA_PARENT rather than GetParent,
+        // because WPF panels are WS_POPUP windows with a hidden owner and GetParent reports the OWNER
+        // of a popup, never its parent.
+        if (nativeApi.GetAncestorParent(hwnd) == workerW) return DesktopEmbedResult.AlreadyEmbedded;
+
+        // SetParent's own return value is not relied on (it only names the PREVIOUS parent): the
+        // outcome is verified by re-reading the real parent with the same GA_PARENT query as above.
         nativeApi.SetParent(hwnd, workerW);
+        if (nativeApi.GetAncestorParent(hwnd) == workerW) return DesktopEmbedResult.Reparented;
+
+        // Re-parenting did not take. A window that died in between is reported as such (recovery
+        // rebuilds it from its model); a live one simply stayed top-level — exactly the NoDesktopLayer
+        // situation, so the caller keeps it above the desktop band instead of assuming it is embedded.
+        return nativeApi.IsWindow(hwnd) ? DesktopEmbedResult.NoDesktopLayer : DesktopEmbedResult.InvalidWindow;
+    }
+
+    /// <inheritdoc />
+    public bool IsWindowAlive(IntPtr hwnd)
+    {
+        try
+        {
+            return nativeApi.IsWindow(hwnd);
+        }
+        catch
+        {
+            // Same degrade-silently policy as the rest of this service; "not alive" makes the caller
+            // rebuild the panel from its model, which is always safe.
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public IntPtr FindDesktopLayerHost()
+    {
+        try
+        {
+            return GetOrCreateWorkerW();
+        }
+        catch
+        {
+            // Same degrade-silently policy as the rest of this service; "no layer" predicts the
+            // top-level mode, which the scale provider corrects as soon as a panel reports its real root.
+            return IntPtr.Zero;
+        }
     }
 
     /// <inheritdoc />
@@ -231,6 +294,7 @@ internal class DesktopIntegrationService(INativeApi nativeApi) : IDesktopIntegra
     /// <summary>
     /// Finds or creates the WorkerW window that sits between the wallpaper and desktop icons.
     /// </summary>
+    /// <returns>The WorkerW, or <see cref="IntPtr.Zero"/> when there is none or Explorer did not answer.</returns>
     private IntPtr GetOrCreateWorkerW()
     {
         var progman = FindProgman();
@@ -238,7 +302,18 @@ internal class DesktopIntegrationService(INativeApi nativeApi) : IDesktopIntegra
 
         // Sending 0x052C to Progman makes Windows spawn a WorkerW between
         // the wallpaper and the icon layer (undocumented but widely used).
-        nativeApi.SendMessage(progman, ProgmanMsg, IntPtr.Zero, IntPtr.Zero);
+        // M9 (release-hardening review): never a plain SendMessage — this runs on the UI thread from
+        // FindDesktopLayerHost on every WM_SETTINGCHANGE/WM_DISPLAYCHANGE and during Explorer-restart
+        // recovery, and a hung Explorer would freeze the whole app. Unanswered = "no host": the panels
+        // stay top-level for now and the next lookup tries again.
+        if (!nativeApi.SendMessageTimeout(progman, ProgmanMsg, IntPtr.Zero, IntPtr.Zero, ProgmanMsgTimeoutMs, out _))
+        {
+            (appLog ?? AppLog.Current).Warn(
+                nameof(DesktopIntegrationService),
+                "ProgmanMessageTimedOut",
+                new KeyValuePair<string, object?>("timeoutMs", ProgmanMsgTimeoutMs));
+            return IntPtr.Zero;
+        }
 
         IntPtr workerW = IntPtr.Zero;
 

@@ -1,7 +1,9 @@
 using System.IO;
 using System.Text.Json;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.Services.Tools;
+using Moq;
 
 namespace DesktopOrganizer.Tests.Unit.Tools;
 
@@ -605,7 +607,7 @@ public class PanelItemStorageServiceTests
     public void Manifest_PersistsAcrossServiceInstances()
     {
         var root = Path.Combine(Path.GetTempPath(), $"DOrgStorage_{Guid.NewGuid():N}");
-        var firstInstance = new PanelItemStorageService(root);
+        var firstInstance = new PanelItemStorageService(root, CreateRecyclingNativeApi().Object);
         var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
         Directory.CreateDirectory(sourceDir);
         var source = Path.Combine(sourceDir, "MyApp.lnk");
@@ -619,7 +621,7 @@ public class PanelItemStorageServiceTests
 
             // Simulate an app restart: a brand-new service instance over the same storage root,
             // sharing no in-memory state with the first.
-            var secondInstance = new PanelItemStorageService(root);
+            var secondInstance = new PanelItemStorageService(root, CreateRecyclingNativeApi().Object);
             var outcome = secondInstance.Restore(managed!);
 
             Assert.Equal(RestoreOutcome.Restored, outcome);
@@ -673,7 +675,7 @@ public class PanelItemStorageServiceTests
     /// paths with a raw <c>string.StartsWith(root)</c>, so a sibling directory that merely shares the
     /// storage root as a string prefix — e.g. <c>...\PanelItems2\foo.txt</c> or
     /// <c>...\PanelItems_backup\bar.txt</c> when the root is <c>...\PanelItems</c> — was incorrectly
-    /// treated as managed. That's dangerous because <see cref="PanelItemStorageService.Release"/> and
+    /// treated as managed. That's dangerous because <see cref="PanelItemStorageService.ReleaseToRecycleBin"/> and
     /// <see cref="PanelItemStorageService.Restore(string, bool)"/> both gate destructive/relocating filesystem
     /// operations on <c>IsManaged</c>: a false positive here could delete or move a directory the app
     /// doesn't own. The fix compares on a path-segment boundary (exact root match, or root + separator
@@ -825,25 +827,241 @@ public class PanelItemStorageServiceTests
         }
     }
 
-    // ── Release ──────────────────────────────────────────────────────────────
+    // ── ReleaseToRecycleBin (ADR-035) ──────────────────────────────────────────
 
     /// <summary>
-    /// Verifies that <see cref="PanelItemStorageService.Release"/> permanently deletes a managed file.
+    /// Only managed paths go to the shell — in ONE batch, with no owner window — and a path outside
+    /// managed storage is never touched nor reported.
     /// </summary>
     [Fact]
-    public void Release_ManagedFile_DeletesIt()
+    public void ReleaseToRecycleBin_PassesOnlyManagedPaths_InSingleBatch()
+    {
+        var native = CreateRecyclingNativeApi();
+        var (service, root) = BuildService(native);
+        var sourceA = NewTempSourceFile("a");
+        var sourceB = NewTempSourceFile("b");
+        var untouchable = Path.Combine(Path.GetTempPath(), $"DOrgUntouchable_{Guid.NewGuid():N}.txt");
+        File.WriteAllText(untouchable, "must survive");
+        try
+        {
+            var managedA = service.MoveIn(sourceA)!;
+            var managedB = service.MoveIn(sourceB)!;
+
+            var outcome = service.ReleaseToRecycleBin([managedA, untouchable, managedB]);
+
+            native.Verify(
+                n => n.RecycleItems(
+                    It.Is<string[]>(paths => paths.Length == 2
+                        && paths.Contains(managedA, StringComparer.OrdinalIgnoreCase)
+                        && paths.Contains(managedB, StringComparer.OrdinalIgnoreCase)),
+                    IntPtr.Zero),
+                Times.Once);
+            native.Verify(n => n.RecycleItems(It.IsAny<string[]>(), It.IsAny<IntPtr>()), Times.Once);
+            Assert.True(File.Exists(untouchable), "A path outside managed storage must never be touched.");
+            Assert.Equal([managedA, managedB], outcome.Recycled);
+            Assert.Empty(outcome.Remaining);
+            Assert.True(outcome.IsComplete);
+            Assert.False(outcome.Cancelled);
+        }
+        finally
+        {
+            SafeDeleteFile(sourceA);
+            SafeDeleteFile(sourceB);
+            SafeDeleteFile(untouchable);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Success: the recycled file and folder are gone, their manifest entries are removed and the
+    /// now-empty per-item GUID wrapper directories are cleaned up.
+    /// </summary>
+    [Fact]
+    public void ReleaseToRecycleBin_ShellRecyclesEverything_ClearsManifestAndGuidDirectories()
     {
         var (service, root) = BuildService();
-        var source = Path.Combine(Path.GetTempPath(), $"DOrgSrc_{Guid.NewGuid():N}.lnk");
-        File.WriteAllText(source, "x");
+        var sourceFile = NewTempSourceFile();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgFolder_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        File.WriteAllText(Path.Combine(sourceDir, "f.txt"), "x");
+        try
+        {
+            var managedFile = service.MoveIn(sourceFile)!;
+            var managedDir = service.MoveInDirectory(sourceDir)!;
+            Assert.Equal(2, ReadManifest(root).Count);
+
+            var outcome = service.ReleaseToRecycleBin([managedFile, managedDir]);
+
+            Assert.True(outcome.IsComplete);
+            Assert.Equal(2, outcome.Recycled.Count);
+            Assert.False(File.Exists(managedFile));
+            Assert.False(Directory.Exists(managedDir));
+            Assert.Empty(ReadManifest(root));
+            Assert.False(Directory.Exists(Path.GetDirectoryName(managedFile)), "Empty GUID wrapper of the file must be removed.");
+            Assert.False(Directory.Exists(Path.GetDirectoryName(managedDir)), "Empty GUID wrapper of the folder must be removed.");
+            Assert.True(Directory.Exists(root), "The storage root itself must never be deleted.");
+        }
+        finally
+        {
+            SafeDeleteFile(sourceFile);
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Failure: the shell reports failure and recycles nothing. Nothing may be deleted by any fallback
+    /// — every file stays on disk, the manifest is intact (Restore still works) and everything is
+    /// reported as remaining.
+    /// </summary>
+    [Fact]
+    public void ReleaseToRecycleBin_ShellFailsAndRecyclesNothing_FilesAndManifestIntact()
+    {
+        var native = new Mock<INativeApi>();
+        native.Setup(n => n.RecycleItems(It.IsAny<string[]>(), It.IsAny<IntPtr>())).Returns(false);
+        var (service, root) = BuildService(native);
+        var sourceFile = NewTempSourceFile("keep me");
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgFolder_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        File.WriteAllText(Path.Combine(sourceDir, "f.txt"), "keep me too");
+        try
+        {
+            var managedFile = service.MoveIn(sourceFile)!;
+            var managedDir = service.MoveInDirectory(sourceDir)!;
+
+            var outcome = service.ReleaseToRecycleBin([managedFile, managedDir]);
+
+            Assert.False(outcome.IsComplete);
+            Assert.True(outcome.Cancelled);
+            Assert.Empty(outcome.Recycled);
+            Assert.Equal([managedFile, managedDir], outcome.Remaining);
+            Assert.Equal("keep me", File.ReadAllText(managedFile));
+            Assert.Equal("keep me too", File.ReadAllText(Path.Combine(managedDir, "f.txt")));
+            Assert.Equal(2, ReadManifest(root).Count);
+
+            // The manifest entry survived, so the item can still go back to where it came from.
+            Assert.Equal(RestoreOutcome.Restored, service.Restore(managedFile));
+            Assert.True(File.Exists(sourceFile));
+        }
+        finally
+        {
+            SafeDeleteFile(sourceFile);
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Partial success (e.g. the second item is locked, or the user declined the "delete permanently?"
+    /// prompt for it): the outcome is decided per item by what still exists, and only the recycled
+    /// item's manifest entry and GUID directory are removed.
+    /// </summary>
+    [Fact]
+    public void ReleaseToRecycleBin_PartialSuccess_OnlyRecycledItemIsForgotten()
+    {
+        string? recycledTarget = null;
+        var native = new Mock<INativeApi>();
+        native.Setup(n => n.RecycleItems(It.IsAny<string[]>(), It.IsAny<IntPtr>()))
+            .Returns((string[] paths, IntPtr _) =>
+            {
+                recycledTarget = paths[0];
+                SimulateRecycle(paths[0]);
+                return false; // fAnyOperationsAborted
+            });
+        var (service, root) = BuildService(native);
+        var sourceA = NewTempSourceFile("a");
+        var sourceB = NewTempSourceFile("b");
+        try
+        {
+            var managedA = service.MoveIn(sourceA)!;
+            var managedB = service.MoveIn(sourceB)!;
+
+            var outcome = service.ReleaseToRecycleBin([managedA, managedB]);
+
+            Assert.Equal(managedA, recycledTarget, StringComparer.OrdinalIgnoreCase);
+            Assert.Equal([managedA], outcome.Recycled);
+            Assert.Equal([managedB], outcome.Remaining);
+            Assert.True(outcome.Cancelled);
+            Assert.False(outcome.IsComplete);
+
+            var manifest = ReadManifest(root);
+            Assert.False(manifest.ContainsKey(managedA));
+            Assert.True(manifest.ContainsKey(managedB));
+            Assert.False(Directory.Exists(Path.GetDirectoryName(managedA)));
+            Assert.True(File.Exists(managedB));
+        }
+        finally
+        {
+            SafeDeleteFile(sourceA);
+            SafeDeleteFile(sourceB);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Only unmanaged paths (or none): the shell is never called and the outcome is empty/complete.
+    /// Covers both files and directories outside managed storage.
+    /// </summary>
+    [Fact]
+    public void ReleaseToRecycleBin_NoManagedPaths_NeverCallsShell()
+    {
+        var native = CreateRecyclingNativeApi();
+        var (service, root) = BuildService(native);
+        var untouchableFile = Path.Combine(Path.GetTempPath(), $"DOrgUntouchable_{Guid.NewGuid():N}.txt");
+        var untouchableDir = Path.Combine(Path.GetTempPath(), $"DOrgUntouchable_{Guid.NewGuid():N}");
+        File.WriteAllText(untouchableFile, "must survive");
+        Directory.CreateDirectory(untouchableDir);
+        try
+        {
+            var outcome = service.ReleaseToRecycleBin([untouchableFile, untouchableDir, string.Empty]);
+            var empty = service.ReleaseToRecycleBin([]);
+
+            native.Verify(n => n.RecycleItems(It.IsAny<string[]>(), It.IsAny<IntPtr>()), Times.Never);
+            Assert.True(File.Exists(untouchableFile));
+            Assert.True(Directory.Exists(untouchableDir));
+            Assert.Empty(outcome.Recycled);
+            Assert.Empty(outcome.Remaining);
+            Assert.True(outcome.IsComplete);
+            Assert.True(empty.IsComplete);
+        }
+        finally
+        {
+            SafeDeleteFile(untouchableFile);
+            SafeDeleteDirectory(untouchableDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// M8 (release-hardening review): <see cref="PanelItemStorageService.IsManaged"/> treats the storage
+    /// root itself, and any per-item GUID wrapper directory immediately below it, as "managed" (by
+    /// design, for other callers) — but <see cref="PanelItemStorageService.ReleaseToRecycleBin"/> must
+    /// never send either to the shell: recycling the root would destroy every managed item and the
+    /// manifest in one shot, and recycling a bare wrapper directory would delete the real item's content
+    /// while leaving a stale, unremovable manifest entry behind (its key is the nested leaf path, never
+    /// the wrapper itself).
+    /// </summary>
+    [Fact]
+    public void ReleaseToRecycleBin_StorageRootOrGuidWrapper_SkippedNotRecycled()
+    {
+        var native = CreateRecyclingNativeApi();
+        var (service, root) = BuildService(native);
+        var source = NewTempSourceFile();
         try
         {
             var managed = service.MoveIn(source)!;
-            Assert.True(File.Exists(managed));
+            var itemDir = Path.GetDirectoryName(managed)!;
 
-            service.Release(managed);
+            var outcome = service.ReleaseToRecycleBin([root, itemDir]);
 
-            Assert.False(File.Exists(managed));
+            native.Verify(n => n.RecycleItems(It.IsAny<string[]>(), It.IsAny<IntPtr>()), Times.Never);
+            Assert.Empty(outcome.Recycled);
+            Assert.Empty(outcome.Remaining);
+            Assert.True(outcome.IsComplete);
+            Assert.True(Directory.Exists(root), "The storage root itself must never be sent to the shell.");
+            Assert.True(Directory.Exists(itemDir), "A bare per-item GUID wrapper directory must never be sent to the shell.");
+            Assert.True(File.Exists(managed), "The real managed item must survive an attempt to recycle its container.");
+            Assert.Single(ReadManifest(root));
         }
         finally
         {
@@ -853,85 +1071,265 @@ public class PanelItemStorageServiceTests
     }
 
     /// <summary>
-    /// Safety net: <see cref="PanelItemStorageService.Release"/> must never delete a file the
-    /// service doesn't own — e.g. a plain reference path from a Folder Portal or a legacy panel item
-    /// that still points straight at a user file.
+    /// M8 must not lock out pre-ADR-013 installs: a legacy flat-layout item is a FILE directly under
+    /// the storage root (no per-item GUID directory). It is a single managed item and must still be
+    /// recyclable, otherwise a panel holding one could never be removed.
     /// </summary>
     [Fact]
-    public void Release_PathOutsideStorageRoot_DoesNotDeleteFile()
+    public void ReleaseToRecycleBin_LegacyFlatLayoutFile_IsRecycled()
     {
-        var (service, _) = BuildService();
-        var untouchable = Path.Combine(Path.GetTempPath(), $"DOrgUntouchable_{Guid.NewGuid():N}.txt");
-        File.WriteAllText(untouchable, "must survive");
+        var native = CreateRecyclingNativeApi();
+        var (service, root) = BuildService(native);
+        Directory.CreateDirectory(root);
+        var legacy = Path.Combine(root, $"Legacy_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(legacy, "legacy-flat-item");
+        var manifestJson = JsonSerializer.Serialize(new Dictionary<string, string> { [legacy] = Path.Combine(Path.GetTempPath(), "Original.lnk") });
+        File.WriteAllText(Path.Combine(root, ".manifest.json"), manifestJson);
         try
         {
-            service.Release(untouchable);
-            Assert.True(File.Exists(untouchable));
+            var outcome = service.ReleaseToRecycleBin([legacy]);
+
+            native.Verify(n => n.RecycleItems(It.Is<string[]>(p => p.Length == 1 && p[0] == legacy), It.IsAny<IntPtr>()), Times.Once);
+            Assert.Single(outcome.Recycled);
+            Assert.Empty(outcome.Remaining);
+            Assert.False(File.Exists(legacy));
+            Assert.True(Directory.Exists(root), "The storage root itself must survive recycling a legacy flat item.");
+            AssertManifestFileIsEmpty(root);
         }
         finally
         {
-            SafeDeleteFile(untouchable);
-        }
-    }
-
-    /// <summary>
-    /// Verifies that <see cref="PanelItemStorageService.Release"/> does not throw for a managed path
-    /// that does not exist on disk.
-    /// </summary>
-    [Fact]
-    public void Release_NonExistentManagedPath_DoesNotThrow()
-    {
-        var (service, root) = BuildService();
-        var path = Path.Combine(root, "never-existed.lnk");
-        var exception = Record.Exception(() => service.Release(path));
-        Assert.Null(exception);
-    }
-
-    /// <summary>
-    /// Verifies that <see cref="PanelItemStorageService.Release"/> recursively deletes a managed directory.
-    /// </summary>
-    [Fact]
-    public void Release_ManagedDirectory_DeletesItRecursively()
-    {
-        var (service, root) = BuildService();
-        var source = Path.Combine(Path.GetTempPath(), $"DOrgFolder_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(source);
-        File.WriteAllText(Path.Combine(source, "f.txt"), "x");
-        try
-        {
-            var managed = service.MoveInDirectory(source)!;
-            Assert.True(Directory.Exists(managed));
-
-            service.Release(managed);
-
-            Assert.False(Directory.Exists(managed));
-        }
-        finally
-        {
-            SafeDeleteDirectory(source);
             SafeDeleteDirectory(root);
         }
     }
 
     /// <summary>
-    /// Same safety guarantee as <see cref="Release_PathOutsideStorageRoot_DoesNotDeleteFile"/>,
-    /// for directories — must never recursively delete a real folder the app doesn't own.
+    /// A managed path that is already gone is not sent to the shell (SHFileOperation would fail the
+    /// whole batch on a missing source) and is reported as recycled — there's nothing left to keep.
     /// </summary>
     [Fact]
-    public void Release_DirectoryOutsideStorageRoot_DoesNotDeleteIt()
+    public void ReleaseToRecycleBin_AlreadyMissingManagedPath_NotSentToShell_ReportedRecycled()
     {
-        var (service, _) = BuildService();
-        var untouchable = Path.Combine(Path.GetTempPath(), $"DOrgUntouchable_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(untouchable);
-        File.WriteAllText(Path.Combine(untouchable, "f.txt"), "must survive");
+        var native = CreateRecyclingNativeApi();
+        var (service, root) = BuildService(native);
+        var missing = Path.Combine(root, Guid.NewGuid().ToString("N"), "never-existed.lnk");
+
+        var outcome = service.ReleaseToRecycleBin([missing]);
+
+        Assert.Equal([missing], outcome.Recycled);
+        Assert.True(outcome.IsComplete);
+        native.Verify(n => n.RecycleItems(It.IsAny<string[]>(), It.IsAny<IntPtr>()), Times.Never);
+        SafeDeleteDirectory(root);
+    }
+
+    /// <summary>
+    /// The same managed path listed twice goes to the shell once (a duplicate would make the second
+    /// delete fail) and is reported once.
+    /// </summary>
+    [Fact]
+    public void ReleaseToRecycleBin_DuplicatePaths_SentOnce()
+    {
+        var native = CreateRecyclingNativeApi();
+        var (service, root) = BuildService(native);
+        var source = NewTempSourceFile();
         try
         {
-            service.Release(untouchable);
-            Assert.True(Directory.Exists(untouchable));
+            var managed = service.MoveIn(source)!;
+
+            var outcome = service.ReleaseToRecycleBin([managed, managed.ToUpperInvariant()]);
+
+            native.Verify(n => n.RecycleItems(It.Is<string[]>(p => p.Length == 1), IntPtr.Zero), Times.Once);
+            Assert.Single(outcome.Recycled);
+            Assert.True(outcome.IsComplete);
         }
         finally
         {
-            SafeDeleteDirectory(untouchable);
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// A throwing <see cref="INativeApi"/> must not escape to the UI thread; the files stay put and are
+    /// reported as remaining.
+    /// </summary>
+    [Fact]
+    public void ReleaseToRecycleBin_NativeThrows_DoesNotThrow_FilesRemain()
+    {
+        var native = new Mock<INativeApi>();
+        native.Setup(n => n.RecycleItems(It.IsAny<string[]>(), It.IsAny<IntPtr>()))
+            .Throws(new InvalidOperationException("boom"));
+        var (service, root) = BuildService(native);
+        var source = NewTempSourceFile();
+        try
+        {
+            var managed = service.MoveIn(source)!;
+
+            var outcome = service.ReleaseToRecycleBin([managed]);
+
+            Assert.Equal([managed], outcome.Remaining);
+            Assert.True(outcome.Cancelled);
+            Assert.True(File.Exists(managed));
+            Assert.True(ReadManifest(root).ContainsKey(managed));
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// DoD-1 of ADR-035 (source guard): no <c>Release*</c> method of the storage service may delete
+    /// item content itself (<c>File.Delete</c>/<c>Directory.Delete</c>) — the Recycle Bin is the only
+    /// way out — and the old hard-deleting <c>Release(string)</c> must not come back. The GUID wrapper
+    /// cleanup it relies on may only ever delete an EMPTY directory (non-recursive).
+    /// </summary>
+    [Fact]
+    public void SourceGuard_ReleaseMethods_NeverHardDeleteContent()
+    {
+        var sourcePath = Path.Combine(
+            RepoRootLocator.Find(), "src", "DesktopOrganizer.Services", "Tools", "PanelItemStorageService.cs");
+        var source = File.ReadAllText(sourcePath).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        Assert.DoesNotContain("public void Release(", source, StringComparison.Ordinal);
+
+        var releaseMethods = System.Text.RegularExpressions.Regex.Matches(
+            source, @"\n    (?:public|internal|private)[^\n(]*\bRelease\w*\(");
+        Assert.NotEmpty(releaseMethods);
+
+        foreach (System.Text.RegularExpressions.Match match in releaseMethods)
+        {
+            var body = ExtractMemberBody(source, match.Index);
+            Assert.DoesNotContain("File.Delete(", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("Directory.Delete(", body, StringComparison.Ordinal);
+        }
+
+        var cleanupStart = source.IndexOf("    private void TryCleanupEmptyItemDirectory(", StringComparison.Ordinal);
+        Assert.True(cleanupStart >= 0);
+        var cleanupBody = ExtractMemberBody(source, cleanupStart);
+        Assert.DoesNotContain("recursive", cleanupBody, StringComparison.Ordinal);
+    }
+
+    // ── ForgetMovedOut (ADR-036, release-hardening-1.0.md §E) ────────────────
+
+    /// <summary>
+    /// The common case: an external drag-out (Explorer/the desktop) actually moved the file away — the
+    /// caller (<c>ChildWindow</c>'s <c>MovedOutVerifier</c>) already confirmed the path is gone before
+    /// calling this, so the manifest entry and the now-empty per-item GUID directory are both cleared.
+    /// </summary>
+    [Fact]
+    public void ForgetMovedOut_PathGone_RemovesManifestEntryAndEmptyGuidDirectory()
+    {
+        var (service, root) = BuildService();
+        var source = NewTempSourceFile();
+        try
+        {
+            var managed = service.MoveIn(source)!;
+            var itemDir = Path.GetDirectoryName(managed)!;
+            Assert.Single(ReadManifest(root));
+
+            // Simulate the external move: the file is gone from its managed path (moved by the shell),
+            // exactly as MovedOutVerifier would have confirmed before calling ForgetMovedOut.
+            File.Delete(managed);
+
+            service.ForgetMovedOut(managed);
+
+            Assert.Empty(ReadManifest(root));
+            Assert.False(Directory.Exists(itemDir), "The now-empty per-item GUID directory must be cleaned up.");
+            Assert.True(Directory.Exists(root), "The storage root itself must never be deleted.");
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// A no-op when the path is still there: <see cref="PanelItemStorageService.ForgetMovedOut"/> must
+    /// never touch the manifest for an item that hasn't actually left — a copy (Ctrl-drag), a cancelled
+    /// drag (Esc), or a drop that landed somewhere that doesn't move the file all leave the source
+    /// exactly as it was, and <c>ForgetMovedOut</c> is the ONLY gate that decides that (never deletes a
+    /// file itself, either).
+    /// </summary>
+    [Fact]
+    public void ForgetMovedOut_PathStillExists_NeverTouchesManifestOrFile()
+    {
+        var (service, root) = BuildService();
+        var source = NewTempSourceFile("still here");
+        try
+        {
+            var managed = service.MoveIn(source)!;
+
+            service.ForgetMovedOut(managed);
+
+            Assert.True(File.Exists(managed));
+            Assert.Equal("still here", File.ReadAllText(managed));
+            Assert.Single(ReadManifest(root));
+
+            // Restore must still work — the manifest entry was left completely intact.
+            Assert.Equal(RestoreOutcome.Restored, service.Restore(managed));
+            Assert.True(File.Exists(source));
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// A path outside managed storage is never touched — <see cref="PanelItemStorageService.ForgetMovedOut"/>
+    /// is a no-op for a referenced-in-place item, same as every other managed-only operation.
+    /// </summary>
+    [Fact]
+    public void ForgetMovedOut_NotManagedPath_NoOp()
+    {
+        var (service, root) = BuildService();
+        var untouchable = Path.Combine(Path.GetTempPath(), $"DOrgUntouchable_{Guid.NewGuid():N}.txt");
+        File.WriteAllText(untouchable, "must survive");
+        try
+        {
+            var exception = Record.Exception(() => service.ForgetMovedOut(untouchable));
+
+            Assert.Null(exception);
+            Assert.True(File.Exists(untouchable));
+        }
+        finally
+        {
+            SafeDeleteFile(untouchable);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// M8 (release-hardening review): mirrors the <see cref="PanelItemStorageService.ReleaseToRecycleBin"/>
+    /// guard above — <see cref="PanelItemStorageService.ForgetMovedOut"/> must never act on the storage
+    /// root itself or a bare per-item GUID wrapper directory, even though
+    /// <see cref="PanelItemStorageService.IsManaged"/> reports both as managed.
+    /// </summary>
+    [Fact]
+    public void ForgetMovedOut_StorageRootOrGuidWrapper_NoOp()
+    {
+        var (service, root) = BuildService();
+        var source = NewTempSourceFile();
+        try
+        {
+            var managed = service.MoveIn(source)!;
+            var itemDir = Path.GetDirectoryName(managed)!;
+
+            service.ForgetMovedOut(root);
+            service.ForgetMovedOut(itemDir);
+
+            Assert.Single(ReadManifest(root));
+            Assert.True(Directory.Exists(root));
+            Assert.True(Directory.Exists(itemDir));
+            Assert.True(File.Exists(managed));
+        }
+        finally
+        {
+            SafeDeleteFile(source);
+            SafeDeleteDirectory(root);
         }
     }
 
@@ -940,9 +1338,9 @@ public class PanelItemStorageServiceTests
     /// <summary>
     /// F-DoD-1: the manifest must be read from disk at most once per service instance, regardless
     /// of how many manifest-touching operations run in the same session. Before this block, every
-    /// <c>MoveIn</c>/<c>Restore</c>/<c>Release</c> re-read the whole JSON file from disk; a
+    /// <c>MoveIn</c>/<c>Restore</c>/<c>ReleaseToRecycleBin</c> re-read the whole JSON file from disk; a
     /// multi-file drag&amp;drop paid that cost once per dropped file. Exercises well over the
-    /// DoD's "&gt;= 50 operations" bar via a mix of MoveIn (write), Restore, and Release
+    /// DoD's "&gt;= 50 operations" bar via a mix of MoveIn (write), Restore, and ReleaseToRecycleBin
     /// (read+write) — all should share the single lazily-loaded cache.
     /// </summary>
     [Fact]
@@ -982,12 +1380,13 @@ public class PanelItemStorageServiceTests
                 }
                 else
                 {
-                    service.Release(managedPaths[i]);
+                    var recycle = service.ReleaseToRecycleBin([managedPaths[i]]);
+                    Assert.True(recycle.IsComplete);
                     Assert.False(File.Exists(managedPaths[i]));
                 }
             }
 
-            // 30 MoveIn + 30 Restore/Release = 60 manifest-touching operations, still a single disk read.
+            // 30 MoveIn + 30 Restore/ReleaseToRecycleBin = 60 manifest-touching operations, still a single disk read.
             Assert.Equal(1, service.ManifestDiskReadCount);
         }
         finally
@@ -1020,7 +1419,7 @@ public class PanelItemStorageServiceTests
 
         try
         {
-            var service = new PanelItemStorageService(root);
+            var service = new PanelItemStorageService(root, CreateRecyclingNativeApi().Object);
             var outcome = service.Restore(managedPath);
 
             Assert.Equal(RestoreOutcome.Restored, outcome);
@@ -1139,7 +1538,7 @@ public class PanelItemStorageServiceTests
             {
                 var outcome = i % 2 == 0
                     ? service.Restore(managedPaths[i]!)
-                    : new PanelItemStorageService(root).Restore(managedPaths[i]!);
+                    : new PanelItemStorageService(root, CreateRecyclingNativeApi().Object).Restore(managedPaths[i]!);
                 Assert.Equal(RestoreOutcome.Restored, outcome);
             }
         }
@@ -1177,7 +1576,7 @@ public class PanelItemStorageServiceTests
         try
         {
             // Populate a real, on-disk manifest entry via a fresh service instance (no cache yet).
-            var writer = new PanelItemStorageService(root);
+            var writer = new PanelItemStorageService(root, CreateRecyclingNativeApi().Object);
             var managed = writer.MoveIn(source);
             Assert.NotNull(managed);
 
@@ -1185,7 +1584,7 @@ public class PanelItemStorageServiceTests
 
             // A second, fresh instance whose very first manifest access hits a locked file —
             // simulates AV/indexer holding an exclusive handle at the wrong moment.
-            var reader = new PanelItemStorageService(root);
+            var reader = new PanelItemStorageService(root, CreateRecyclingNativeApi().Object);
             using (var lockHandle = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.None))
             {
                 var outcomeDuringLock = reader.Restore(managed!);
@@ -1354,11 +1753,11 @@ public class PanelItemStorageServiceTests
     }
 
     /// <summary>
-    /// Verifies that <see cref="PanelItemStorageService.Release"/> deletes the now-empty per-item GUID
-    /// directory after releasing, while never deleting the storage root itself (B2).
+    /// Verifies that <see cref="PanelItemStorageService.ReleaseToRecycleBin"/> deletes the now-empty
+    /// per-item GUID directory after recycling, while never deleting the storage root itself (B2).
     /// </summary>
     [Fact]
-    public void Release_CleansUpTheNowEmptyPerItemGuidDirectory()
+    public void ReleaseToRecycleBin_CleansUpTheNowEmptyPerItemGuidDirectory()
     {
         var (service, root) = BuildService();
         var source = Path.Combine(Path.GetTempPath(), $"DOrgSrc_{Guid.NewGuid():N}.lnk");
@@ -1371,7 +1770,7 @@ public class PanelItemStorageServiceTests
             var itemDir = Path.GetDirectoryName(managed)!;
             Assert.True(Directory.Exists(itemDir));
 
-            service.Release(managed!);
+            service.ReleaseToRecycleBin([managed!]);
 
             Assert.False(Directory.Exists(itemDir), "The now-empty per-item GUID directory must be cleaned up.");
             Assert.True(Directory.Exists(root), "The storage root itself must never be deleted.");
@@ -1420,11 +1819,11 @@ public class PanelItemStorageServiceTests
     }
 
     /// <summary>
-    /// Verifies that <see cref="PanelItemStorageService.Release"/> never deletes the per-item GUID
-    /// directory if a stray, unmanaged file still lives alongside the released item.
+    /// Verifies that <see cref="PanelItemStorageService.ReleaseToRecycleBin"/> never deletes the per-item
+    /// GUID directory if a stray, unmanaged file still lives alongside the recycled item.
     /// </summary>
     [Fact]
-    public void Release_PerItemGuidDirectoryNotEmpty_IsNotDeleted()
+    public void ReleaseToRecycleBin_PerItemGuidDirectoryNotEmpty_IsNotDeleted()
     {
         var (service, root) = BuildService();
         var source = Path.Combine(Path.GetTempPath(), $"DOrgSrc_{Guid.NewGuid():N}.lnk");
@@ -1437,7 +1836,7 @@ public class PanelItemStorageServiceTests
             var itemDir = Path.GetDirectoryName(managed)!;
             File.WriteAllText(Path.Combine(itemDir, "stray.txt"), "leave me alone");
 
-            service.Release(managed!);
+            service.ReleaseToRecycleBin([managed!]);
 
             Assert.True(Directory.Exists(itemDir), "A non-empty per-item directory must never be deleted.");
             Assert.True(File.Exists(Path.Combine(itemDir, "stray.txt")));
@@ -1648,14 +2047,14 @@ public class PanelItemStorageServiceTests
         try
         {
             // Populate a real on-disk manifest entry via a fresh, unrelated service instance.
-            var writer = new PanelItemStorageService(root);
+            var writer = new PanelItemStorageService(root, CreateRecyclingNativeApi().Object);
             var managed = writer.MoveIn(source);
             Assert.NotNull(managed);
 
             var manifestJsonBefore = File.ReadAllText(manifestPath);
 
             // A second, fresh instance whose very first manifest access hits a locked file.
-            var renamer = new PanelItemStorageService(root);
+            var renamer = new PanelItemStorageService(root, CreateRecyclingNativeApi().Object);
             RenameResult result;
             using (var lockHandle = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.None))
             {
@@ -2229,9 +2628,60 @@ public class PanelItemStorageServiceTests
 
     // ── helpers ──────────────────────────────────────────────────────────────
     private static (PanelItemStorageService Service, string Root) BuildService()
+        => BuildService(CreateRecyclingNativeApi());
+
+    private static (PanelItemStorageService Service, string Root) BuildService(Mock<INativeApi> nativeApi)
     {
         var root = Path.Combine(Path.GetTempPath(), $"DOrgStorage_{Guid.NewGuid():N}");
-        return (new PanelItemStorageService(root), root);
+        return (new PanelItemStorageService(root, nativeApi.Object), root);
+    }
+
+    /// <summary>
+    /// An <see cref="INativeApi"/> double whose <see cref="INativeApi.RecycleItems"/> behaves like a
+    /// fully successful shell call: every given path disappears from disk (as if moved to the Recycle
+    /// Bin) and <see langword="true"/> is returned. Never touches the real Recycle Bin.
+    /// </summary>
+    private static Mock<INativeApi> CreateRecyclingNativeApi()
+    {
+        var mock = new Mock<INativeApi>();
+        mock.Setup(n => n.RecycleItems(It.IsAny<string[]>(), It.IsAny<IntPtr>()))
+            .Returns((string[] paths, IntPtr _) =>
+            {
+                foreach (var path in paths) SimulateRecycle(path);
+                return true;
+            });
+        return mock;
+    }
+
+    /// <summary>Makes <paramref name="path"/> vanish from disk, standing in for the shell moving it to the Recycle Bin.</summary>
+    private static void SimulateRecycle(string path)
+    {
+        if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        else if (File.Exists(path)) File.Delete(path);
+    }
+
+    private static Dictionary<string, string> ReadManifest(string root)
+    {
+        var manifestPath = Path.Combine(root, ".manifest.json");
+        if (!File.Exists(manifestPath)) return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        var loaded = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(manifestPath)) ?? [];
+        return new Dictionary<string, string>(loaded, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NewTempSourceFile(string content = "x")
+    {
+        var source = Path.Combine(Path.GetTempPath(), $"DOrgSrc_{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(source, content);
+        return source;
+    }
+
+    /// <summary>Returns the text from <paramref name="start"/> to the member's closing <c>"\n    }\n"</c>.</summary>
+    private static string ExtractMemberBody(string source, int start)
+    {
+        var end = source.IndexOf("\n    }\n", start, StringComparison.Ordinal);
+        Assert.True(end > start, "Could not find the end of the member.");
+        return source[start..end];
     }
 
     private static void SafeDeleteFile(string path)

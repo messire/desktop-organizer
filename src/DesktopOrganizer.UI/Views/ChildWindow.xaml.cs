@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Behaviors;
@@ -66,6 +67,7 @@ public partial class ChildWindow : Window
     private readonly IGestureDiagnostics _diagnostics;
     private readonly ILayoutEditModeService _layoutEditMode;
     private readonly IMonitorService _monitorService;
+    private readonly IDesktopScaleProvider _desktopScale;
 
     // P06 (docs/fix-prompts/06-fit-content.md): backs ChildWindow.ContentSizing.cs's "Apply to all
     // panels…" confirmation dialogs. IConfirmationService is already a DI singleton (Configuration/DiConfig.cs)
@@ -110,6 +112,15 @@ public partial class ChildWindow : Window
     private readonly ListReorderGestureController<FileItem> _reorderController;
     private readonly HintPopupController _hintPopups;
 
+    // ADR-036 (release-hardening-1.0.md §E): coordinates a panel-item drag-out gesture across panels —
+    // process-wide singleton (Configuration/DiConfig.cs), UI-thread-only. See IPanelItemDragOutSession.
+    private readonly IPanelItemDragOutSession _dragOutSession;
+
+    // ADR-036 §E: confirms an external (Explorer/desktop) drag-out actually moved the file before this
+    // panel removes its own entry — see CreatePanelItemDragData/OnPanelDragCompleted below. Lazily
+    // constructed (see its use) so a panel that never drags an item out never pays for a DispatcherTimer.
+    private readonly MovedOutVerifier _movedOutVerifier;
+
     // Stage S (docs/PLANS/workspace-grid-03-04-integration.md §1.5): the single point P03/P04 write
     // Left/Top/Width/Height + the model's Position/Size (+ span/MonitorDeviceId) through together, so
     // OnLocationChanged/OnRenderSizeChanged below never fight a P03/P04-driven geometry write with their
@@ -121,6 +132,17 @@ public partial class ChildWindow : Window
     // one gesture owns capture at a time" is enforced across drag AND resize. Constructed before both
     // behaviours (docs/PLANS/phase-1-resize-stabilization.md §3.5).
     private readonly PanelInteractionTracker _interactionTracker = new();
+
+    // M3 (release-hardening 1.0 review): guards OnLocationChanged for the whole span of a per-monitor DPI
+    // change (WM_DPICHANGED) — Set at the very start of OnDpiChanged, Clear()ed only once a
+    // Dispatcher.BeginInvoke(Background) callback actually runs, i.e. strictly after every Left/Top nudge
+    // WPF's own base.OnDpiChanged rescale (and any further internal adjustment still queued for the same
+    // message) has already produced. Without this, a TRANSIENT Left/Top value synchronously raised
+    // OnLocationChanged mid-transition, writing a position that was neither the pre-DPI-change one nor
+    // the final, adapter-resolved one into ChildWindowModel.Position — see OnDpiChanged/OnLocationChanged's
+    // own remarks. See TransitionLatch's own remarks for why this is a small pure/testable type rather
+    // than a bare bool field.
+    private readonly TransitionLatch _dpiTransition = new();
 
     private ChildWindowModel? _model;
 
@@ -140,6 +162,12 @@ public partial class ChildWindow : Window
     /// <param name="monitorService">Provides monitor topology for placement/anti-overlap/grid resolution.</param>
     /// <param name="confirmation">Gates destructive "apply to all panels" actions behind a user confirmation prompt.</param>
     /// <param name="panelCustomize">Opens the modeless "Customize panel…" dialog for this panel.</param>
+    /// <param name="dragOutSession">Coordinates a panel-item drag-out gesture across panels (ADR-036, release-hardening-1.0.md §E).</param>
+    /// <param name="desktopScale">
+    /// The per-monitor DPI snapshot provider (release-hardening F, ADR-037) — supplies every px↔desktop-DIP
+    /// conversion this window and its behaviors need (<see cref="PanelGeometryWriter"/>,
+    /// <see cref="PanelDragMoveBehavior"/>, the resize controllers, <see cref="OnDpiChanged"/>).
+    /// </param>
     public ChildWindow(
         ChildWindowViewModel viewModel,
         IWindowManager windowManager,
@@ -150,7 +178,9 @@ public partial class ChildWindow : Window
         ILayoutEditModeService layoutEditMode,
         IMonitorService monitorService,
         IConfirmationService confirmation,
-        IPanelCustomizeService panelCustomize)
+        IPanelCustomizeService panelCustomize,
+        IPanelItemDragOutSession dragOutSession,
+        IDesktopScaleProvider desktopScale)
     {
         InitializeComponent();
         _viewModel = viewModel;
@@ -162,6 +192,16 @@ public partial class ChildWindow : Window
         _monitorService = monitorService;
         _confirmation = confirmation;
         _panelCustomize = panelCustomize;
+        _dragOutSession = dragOutSession;
+        _desktopScale = desktopScale;
+
+        // M1 (release-hardening 1.0 review): a FRESH DispatcherDebounceTimer per Schedule() call — never
+        // a single cached instance — so an item dragged out while an earlier drag-out's own 500/2000 ms
+        // recheck is still pending gets its own independent timer instead of silently cancelling the
+        // first item's still-in-flight check (see MovedOutVerifier's own remarks). Every timer this
+        // factory hands out is tracked by MovedOutVerifier itself until its chain finishes; OnClosing
+        // below stops whichever are still pending via _movedOutVerifier.CancelAll().
+        _movedOutVerifier = new MovedOutVerifier(() => new DispatcherDebounceTimer(Dispatcher));
         DataContext = _viewModel;
 
         // Phase 2 (docs/PLANS/phase-2-native-panel-sizing.md §1.6): decide once, here, which resize
@@ -192,7 +232,7 @@ public partial class ChildWindow : Window
 
         // Constructed before _dragMoveBehavior/_resizeController (P03): both branches below hand it to
         // PanelDragMoveBehavior, which commits every GridAligned drop through it (plan §1.5).
-        _geometryWriter = new PanelGeometryWriter(this, () => _model);
+        _geometryWriter = new PanelGeometryWriter(this, () => _model, _desktopScale);
 
         // Constructed before _dragMoveBehavior: its onDoubleClick callback below captures
         // _rollUpBehavior, and assigning it first keeps that a real (non-nullable) reference
@@ -218,7 +258,8 @@ public partial class ChildWindow : Window
                 canMove: CanMove,
                 layoutEditMode: _layoutEditMode,
                 monitorService: _monitorService,
-                geometryWriter: _geometryWriter);
+                geometryWriter: _geometryWriter,
+                desktopScale: _desktopScale);
 
             _nativeResizeController = new NativePanelResizeController(
                 this,
@@ -232,7 +273,8 @@ public partial class ChildWindow : Window
                 diagnostics: _diagnostics,
                 tracker: _interactionTracker,
                 nativeSizingService: nativeSizingService,
-                isResizeEnabled: () => nativeAffordance.IsEnabled);
+                isResizeEnabled: () => nativeAffordance.IsEnabled,
+                desktopScale: _desktopScale);
             _resizeController = _nativeResizeController;
         }
         else
@@ -254,7 +296,8 @@ public partial class ChildWindow : Window
                 canMove: CanMove,
                 layoutEditMode: _layoutEditMode,
                 monitorService: _monitorService,
-                geometryWriter: _geometryWriter);
+                geometryWriter: _geometryWriter,
+                desktopScale: _desktopScale);
 
             _thumbResizeController = new PanelResizeController(
                 this,
@@ -266,7 +309,8 @@ public partial class ChildWindow : Window
                 snapToGrid: _dragMoveBehavior.SnapToGrid,
                 titleBarHeight: TitleBarHeight,
                 diagnostics: _diagnostics,
-                tracker: _interactionTracker);
+                tracker: _interactionTracker,
+                desktopScale: _desktopScale);
             _resizeController = _thumbResizeController;
         }
 
@@ -309,7 +353,10 @@ public partial class ChildWindow : Window
             showInsertionIndicator: ShowReorderInsertionIndicator,
             hideInsertionIndicator: HideReorderInsertionIndicator,
             computeInsertionIndex: ComputeDropInsertionIndex,
-            performReorder: (item, index) => _viewModel.ReorderItem(item, index));
+            performReorder: PerformReorder,
+            createDataObject: CreatePanelItemDragData,
+            onDragCompleted: OnPanelDragCompleted,
+            isForeignPanelDrag: () => _dragOutSession.IsActive && _dragOutSession.SourcePanelId != _model?.Id);
 
         _hintPopups = new HintPopupController(
             Dispatcher, MoveHintPopup, RenameErrorPopup, RenameErrorText, FileListHost, () => _viewModel.EditingItem);
@@ -336,8 +383,15 @@ public partial class ChildWindow : Window
     {
         _model = model;
 
-        Left = model.Position.X;
-        Top = model.Position.Y;
+        // release-hardening F (ADR-037): model.Position is desktop-DIP; converted to this window's Left/
+        // Top through the adapter. Best-effort at this point — the window has no PresentationSource yet
+        // (before Show()), so PanelWindowCoordinates falls back to the snapshot's uniform scale; OnDpiChanged
+        // re-applies once this window's real per-monitor DPI is known. Identity on any uniform snapshot
+        // (every single-scale configuration), matching 0.6.1 bit-for-bit.
+        var initialPosition = PanelWindowCoordinates.ToWindowPosition(
+            this, new System.Windows.Point(model.Position.X, model.Position.Y), _desktopScale.Current);
+        Left = initialPosition.X;
+        Top = initialPosition.Y;
 
         if (model.Size.Width > 0) Width = model.Size.Width;
         if (model.Size.Height > 0) Height = model.Size.Height;
@@ -393,12 +447,74 @@ public partial class ChildWindow : Window
         var hwnd = new WindowInteropHelper(this).Handle;
         _desktopIntegration.EmbedInDesktop(hwnd);
 
+        // release-hardening F (ADR-037, plan §3.2): reports the fact of this panel's root window, so the
+        // desktop-scale provider determines the layer mode (Embedded/TopLevel) from reality rather than
+        // predicting it — and rebuilds the snapshot in case the prediction (or a stale snapshot from
+        // before any panel existed) was wrong.
+        _desktopScale.ReportPanelWindow(hwnd);
+
         // Phase 2 (docs/PLANS/phase-2-native-panel-sizing.md §1.6): the native WM_SIZING hook is
         // installed here — after EmbedInDesktop, once the panel's HWND is both valid and already
         // reparented into WorkerW — even though which controller to use was already decided in the
         // constructor (see its remarks). No-op when the Thumb path is active (_nativeResizeController
         // is null).
         _nativeResizeController?.AttachTo(hwnd);
+    }
+
+    /// <summary>
+    /// Handles a real per-monitor DPI change of this window (release-hardening F §4.1/§5 #14, ADR-037):
+    /// refreshes the desktop-scale snapshot, then re-applies the model's desktop-DIP position through the
+    /// adapter exactly once — <c>Window.Left</c>/<c>Top</c> is interpreted by WPF against this window's
+    /// CURRENT monitor DPI, so the value <see cref="Initialize"/> (or the last drag/resize frame) wrote
+    /// under the OLD DPI can be off until this runs.
+    /// </summary>
+    /// <remarks>
+    /// M3 (release-hardening 1.0 review): the re-apply below is DEFERRED to a
+    /// <see cref="Dispatcher.BeginInvoke(DispatcherPriority, System.Delegate)"/> at
+    /// <see cref="DispatcherPriority.Background"/> — never done synchronously, from inside this override
+    /// itself, the way an earlier version did. The base <c>OnDpiChanged</c> implementation rescales
+    /// <c>Left</c>/<c>Top</c>/<c>Width</c>/<c>Height</c> for the new DPI (and WM_DPICHANGED processing can
+    /// still have further internal Left/Top adjustment queued after this override returns) — a
+    /// synchronous re-apply here raced that, and the window's own
+    /// <see cref="OnLocationChanged"/> override fires synchronously as a side effect of EVERY one of
+    /// those Left/Top writes, TRANSIENT ones included, writing a position that was neither the
+    /// pre-DPI-change one nor the final, adapter-resolved one into <c>ChildWindowModel.Position</c>
+    /// (baseline bug, no loop guard). <see cref="_dpiTransition"/> is set for the whole span from here
+    /// until the deferred callback actually runs — well past every transient Left/Top nudge WPF's own
+    /// machinery still has queued — and <see cref="OnLocationChanged"/> skips its own model write for as
+    /// long as it is set; the deferred callback then re-applies the position exactly once, letting that
+    /// one (correct, final) <see cref="OnLocationChanged"/> write through normally.
+    /// </remarks>
+    /// <param name="oldDpiScale">The window's previous DPI scale. Unused — the model's desktop-DIP position is re-derived fresh, not incrementally adjusted.</param>
+    /// <param name="newDpiScale">The window's new DPI scale. Unused for the same reason.</param>
+    protected override void OnDpiChanged(DpiScale oldDpiScale, DpiScale newDpiScale)
+    {
+        _dpiTransition.Set();
+
+        base.OnDpiChanged(oldDpiScale, newDpiScale);
+
+        _desktopScale.Refresh();
+
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            // Cleared first, unconditionally: even when the guards below skip the actual re-apply (the
+            // model is gone, a gesture/geometry write started while this was queued, …), the DPI
+            // transition itself is over by the time this deferred callback runs at all — OnLocationChanged
+            // must resume its normal model write for whatever comes next (e.g. a real drag the user
+            // started in the meantime).
+            _dpiTransition.Clear();
+
+            // Skipped entirely while a gesture or PanelGeometryWriter write is already in flight (plan
+            // §4.1's "no petли за один цикл" guard) — that write already reflects the new DPI by
+            // construction, and reapplying here would fight it.
+            if (_model is null || _geometryWriter.IsApplying) return;
+            if (_interactionTracker.State != PanelInteractionState.Idle) return;
+
+            var position = PanelWindowCoordinates.ToWindowPosition(
+                this, new System.Windows.Point(_model.Position.X, _model.Position.Y), _desktopScale.Current);
+            Left = position.X;
+            Top = position.Y;
+        });
     }
 
     /// <inheritdoc/>
@@ -427,6 +543,13 @@ public partial class ChildWindow : Window
         _panelVisualState.Dispose();
         _layoutEditModeVisual.Dispose();
         _hintPopups.StopTimers();
+
+        // ADR-036 §E / M1 (release-hardening 1.0 review): cancels every still-pending MovedOutVerifier
+        // re-check — across every drag-out gesture this panel has scheduled, not just the most recent
+        // one (see MovedOutVerifier.CancelAll's own remarks) — so a delayed callback never fires against
+        // this panel's ViewModel after it's about to be disposed below.
+        _movedOutVerifier.CancelAll();
+
         SyncToModel();
         if (DataContext is IDisposable disposable) disposable.Dispose();
         base.OnClosing(e);
@@ -461,6 +584,31 @@ public partial class ChildWindow : Window
         // explicit rather than relying on whatever effect happened to still be set from drag-over.
         e.Effects = DragDropEffects.Move;
 
+        // ADR-036 §E: an in-app panel-item drag-out (see PanelItemDragDataFactory/CreatePanelItemDragData)
+        // carries BOTH this panel's own drag-to-reorder format AND DataFormats.FileDrop — a drop that
+        // lands on FileListHost's own items/empty area never reaches here at all: FileListHost_Drop routes
+        // it to _reorderController first (see its isForeignPanelDrag wiring), which — for a same-panel
+        // drop — calls PerformReorder, and IT (M1: not the reorder controller itself) is what claims the
+        // drag via _dragOutSession.TryClaim. This method only runs for a drop elsewhere in the window: a
+        // DIFFERENT panel entirely, or THIS panel's own drag landing outside FileListHost (e.g. its title
+        // bar) — the TryClaim below is this panel's one remaining path to claiming ITS OWN drag (a
+        // same-panel drop that missed FileListHost, e.g. dropped back on its own title bar).
+        if (files.Length == 1 && _dragOutSession.IsActive)
+        {
+            if (_model is not null && _dragOutSession.TryClaim(_model.Id, files[0]))
+            {
+                // A genuine cross-panel transfer: the managed copy (if any) is shared storage, so this
+                // only adds a reference — never MoveIn's the already-managed path again.
+                _viewModel.AddTransferredItem(files[0]);
+                _windowManager.SaveWindowsState();
+            }
+
+            // Either claimed as a transfer (handled above) or a self-claim that resolves to Reordered
+            // (TryClaim's own remarks) — either way, an active in-app drag-out never falls through to
+            // AddDroppedFiles, which would otherwise try to MoveIn a path that's already managed.
+            return;
+        }
+
         _viewModel.AddDroppedFiles(files);
         _windowManager.SaveWindowsState();
     }
@@ -471,8 +619,17 @@ public partial class ChildWindow : Window
         // Stage S guard (docs/PLANS/workspace-grid-03-04-integration.md §1.5): a PanelGeometryWriter.Apply
         // call already wrote model.Position directly — this handler firing synchronously as a side
         // effect of that same Left/Top assignment must not write it a second, redundant time.
-        if (_model is null || _geometryWriter.IsApplying) return;
-        _model.Position = new Point((int)Left, (int)Top);
+        //
+        // M3 (release-hardening 1.0 review): also skipped for the whole span of an in-flight per-monitor
+        // DPI change (see OnDpiChanged's own remarks) — a Left/Top value WPF's own DPI rescale writes
+        // mid-transition is transient, not a real move, and must never reach ChildWindowModel.Position.
+        if (_model is null || _geometryWriter.IsApplying || _dpiTransition.IsSet) return;
+
+        // release-hardening F (ADR-037): Left/Top through the adapter — desktop-DIP, not necessarily this
+        // window's own space on a mixed-DPI TopLevel desktop. (int)-truncation is unchanged (pre-F
+        // contract, see the finalization remarks elsewhere in this codebase on Math.Round vs (int)).
+        var desktopPosition = PanelWindowCoordinates.ToDesktopBounds(this, new Rect(Left, Top, 0, 0), _desktopScale.Current).TopLeft;
+        _model.Position = new Point((int)desktopPosition.X, (int)desktopPosition.Y);
     }
 
     /// <inheritdoc/>
@@ -948,6 +1105,83 @@ public partial class ChildWindow : Window
     }
 
     private void HideReorderInsertionIndicator() => ReorderInsertionIndicator.Visibility = Visibility.Collapsed;
+
+    /// <summary>
+    /// Applies a same-panel drag-to-reorder drop (ADR-014, <see cref="ListReorderGestureController{TItem}"/>'s
+    /// <c>performReorder</c> callback). M1 (release-hardening 1.0 review): this is the ONLY place a
+    /// same-panel reorder ever runs, so it must be the one to claim <see cref="_dragOutSession"/> on this
+    /// panel's own behalf — before this fix, a plain in-panel reorder never called
+    /// <see cref="IPanelItemDragOutSession.TryClaim"/> at all, so <see cref="OnPanelDragCompleted"/>'s
+    /// later <see cref="IPanelItemDragOutSession.End"/> always resolved to
+    /// <see cref="DragOutOutcomeKind.External"/> (nothing claimed the drag) instead of
+    /// <see cref="DragOutOutcomeKind.Reordered"/> — starting a needless <see cref="_movedOutVerifier"/>
+    /// existence-recheck for an item that never left this panel at all, on EVERY reorder. Claiming with
+    /// this panel's own <c>Id</c> as <c>targetPanelId</c> is a self-claim (see <c>TryClaim</c>'s own
+    /// remarks): it is deliberately never treated as an accepted transfer, but still resolves
+    /// <see cref="IPanelItemDragOutSession.End"/> to <see cref="DragOutOutcomeKind.Reordered"/>.
+    /// </summary>
+    /// <param name="item">The dragged item, as resolved by <see cref="ResolveReorderDragCandidate"/>.</param>
+    /// <param name="index">The target insertion index, as resolved by <see cref="ComputeDropInsertionIndex"/>.</param>
+    private void PerformReorder(FileItem item, int index)
+    {
+        if (_model is not null) _dragOutSession.TryClaim(_model.Id, item.Path);
+        _viewModel.ReorderItem(item, index);
+    }
+
+    /// <summary>
+    /// Builds the drag-out payload for <paramref name="item"/> (ADR-036 §E) and starts
+    /// <see cref="_dragOutSession"/> tracking it as this panel's own — a target panel (or
+    /// Explorer/the desktop) decides the rest via <see cref="IPanelItemDragOutSession.TryClaim"/>.
+    /// Returns <see langword="null"/> (aborting the drag before it starts — see
+    /// <see cref="ListReorderGestureController{TItem}"/>'s own remarks) for a Folder Portal, mirroring
+    /// <see cref="ResolveReorderDragCandidate"/>'s own portal gate (belt-and-suspenders: a portal never
+    /// produces a candidate in the first place, so this is never actually reached for one).
+    /// </summary>
+    /// <param name="item">The drag candidate resolved by <see cref="ResolveReorderDragCandidate"/>.</param>
+    private DataObject? CreatePanelItemDragData(FileItem item)
+    {
+        if (_model is null) return null;
+
+        var data = PanelItemDragDataFactory.Create(PanelItemReorderFormat, item.Path, _viewModel.IsPortal);
+        if (data is null) return null;
+
+        _dragOutSession.Begin(_model.Id, item.Path);
+        return data;
+    }
+
+    /// <summary>
+    /// Resolves how <paramref name="item"/>'s drag-out gesture ended (ADR-036 §E), once
+    /// <see cref="DragDrop.DoDragDrop"/> has fully returned, and applies the corresponding source-side
+    /// cleanup: nothing for a same-panel <see cref="DragOutOutcomeKind.Reordered"/>, an immediate
+    /// reference-only removal for <see cref="DragOutOutcomeKind.TransferredTo"/> a different panel, or
+    /// a delayed existence-recheck (<see cref="_movedOutVerifier"/>) for
+    /// <see cref="DragOutOutcomeKind.External"/> — since the OLE drop effect itself cannot be trusted
+    /// (Explorer's own optimized move frequently reports <see cref="DragDropEffects.None"/> on success).
+    /// </summary>
+    /// <param name="item">The item whose drag-out gesture just finished.</param>
+    private void OnPanelDragCompleted(FileItem item)
+    {
+        var outcome = _dragOutSession.End();
+        switch (outcome.Kind)
+        {
+            case DragOutOutcomeKind.TransferredTo:
+                _viewModel.RemoveTransferredItem(item);
+                _windowManager.SaveWindowsState();
+                break;
+
+            case DragOutOutcomeKind.External:
+                _movedOutVerifier.Schedule(item.Path, () =>
+                {
+                    _viewModel.RemoveMovedOutItem(item);
+                    _windowManager.SaveWindowsState();
+                });
+                break;
+
+            case DragOutOutcomeKind.Reordered:
+            default:
+                break; // the drag never left this panel — nothing else to do.
+        }
+    }
 
     /// <summary>
     /// Explorer-like "right-click selects the item before the context menu opens" behavior (Feature A).

@@ -31,6 +31,7 @@ public class SystemIconsPanelManagerTests
     private readonly Mock<IDesktopIntegrationService> _desktopMock = new();
     private readonly Mock<IMonitorService> _monitorMock = new();
     private readonly Mock<IVirtualDesktopService> _virtualDesktopMock = new();
+    private readonly Mock<IDesktopScaleProvider> _desktopScaleMock = FakeDesktopScale.Uniform();
     private readonly LocalizationService _localizationService = new(CultureInfo.GetCultureInfo("en"));
 
     // Tracks whether the factory delegate was invoked.
@@ -252,6 +253,41 @@ public class SystemIconsPanelManagerTests
         sut.Apply();
 
         // Assert
+        Assert.True(_factoryInvoked);
+    }
+
+    // ── ReassertAfterShellRestart (ADR-034) ──────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="SystemIconsPanelManager.ReassertAfterShellRestart"/> is a complete no-op
+    /// when the sidebar is switched off — an Explorer restart must never create it.
+    /// </summary>
+    [Fact]
+    public void ReassertAfterShellRestart_WhenDisabled_DoesNothing()
+    {
+        var sut = BuildSut(initialState: null);
+        sut.Load();
+
+        sut.ReassertAfterShellRestart();
+
+        Assert.False(_factoryInvoked);
+        _desktopMock.Verify(d => d.ApplyDesktopWindowStyles(It.IsAny<IntPtr>()), Times.Never);
+        _desktopMock.Verify(d => d.SendToBackOfZOrder(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that an enabled sidebar without a live window is rebuilt through the regular open path
+    /// (window factory), and that a failure there never escapes to the recovery caller.
+    /// </summary>
+    [Fact]
+    public void ReassertAfterShellRestart_WhenEnabledWithoutWindow_ReopensPanel()
+    {
+        var sut = BuildSut(initialState: BuildState(isEnabled: true));
+        sut.Load();
+
+        var ex = Record.Exception(sut.ReassertAfterShellRestart);
+
+        Assert.Null(ex);
         Assert.True(_factoryInvoked);
     }
 
@@ -1542,6 +1578,7 @@ public class SystemIconsPanelManagerTests
             _monitorMock.Object,
             _virtualDesktopMock.Object,
             _localizationService,
+            _desktopScaleMock.Object,
             FactoryDelegate);
     }
 }

@@ -1,4 +1,5 @@
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Tools;
 
@@ -15,12 +16,24 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
 {
     private const int WhMouseLl = 14;
 
+    /// <summary>
+    /// Minimum time between two hook-failure log entries (per event kind). A failure that repeats on every
+    /// mouse move is reported once a minute with an <c>occurrences</c> count, not once per event.
+    /// </summary>
+    private static readonly TimeSpan FailureLogInterval = TimeSpan.FromMinutes(1);
+
     private readonly INativeApi _nativeApi;
 
     // Keeps the hook procedure rooted for the lifetime of the hook: the native side holds only an
     // unmanaged thunk, so a collected delegate would crash the whole input pipeline.
     private readonly LowLevelMouseCallback _proc;
     private readonly DesktopGestureStateMachine _state;
+    private readonly IAppLog? _appLog;
+
+    // M6 (release-hardening review): the hook callback never writes a log entry itself — see
+    // DeferredFailureLog. One instance per event kind so the two kinds are rate-limited independently.
+    private readonly DeferredFailureLog _hookFailures;
+    private readonly DeferredFailureLog _subscriberFailures;
     private IntPtr _hookHandle;
 
     /// <inheritdoc />
@@ -33,11 +46,27 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
     /// Initializes a new instance of the <see cref="DesktopGestureService"/> class.
     /// </summary>
     /// <param name="nativeApi">Native API façade (all P/Invoke lives behind it).</param>
-    public DesktopGestureService(INativeApi nativeApi)
+    /// <param name="appLog">See <see cref="Log"/>.</param>
+    public DesktopGestureService(INativeApi nativeApi, IAppLog? appLog = null)
+        : this(nativeApi, appLog, TimeProvider.System)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DesktopGestureService"/> class with an explicit clock
+    /// (tests drive the deferred failure logging through it).
+    /// </summary>
+    /// <param name="nativeApi">Native API façade (all P/Invoke lives behind it).</param>
+    /// <param name="appLog">See <see cref="Log"/>.</param>
+    /// <param name="timeProvider">Clock and timer factory for the deferred failure logging.</param>
+    internal DesktopGestureService(INativeApi nativeApi, IAppLog? appLog, TimeProvider timeProvider)
     {
         _nativeApi = nativeApi;
         _proc = HookCallback;
         _state = new DesktopGestureStateMachine(this);
+        _appLog = appLog;
+        _hookFailures = new DeferredFailureLog(() => Log, nameof(DesktopGestureService), "HookCallbackFailed", FailureLogInterval, timeProvider);
+        _subscriberFailures = new DeferredFailureLog(() => Log, nameof(DesktopGestureService), "SubscriberFailed", FailureLogInterval, timeProvider);
     }
 
     /// <inheritdoc />
@@ -56,17 +85,26 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
         {
             // Do not fail the app: desktop gestures degrade to "unavailable", but the reason must be
             // visible instead of silently no-oping.
-            Console.Error.WriteLine(
-                $"Desktop gesture hook could not be installed (Win32 error {Marshal.GetLastWin32Error()}).");
+            Log.Warn(
+                "DesktopGestureService",
+                "HookInstallFailed",
+                new KeyValuePair<string, object?>("win32Error", Marshal.GetLastWin32Error()));
         }
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_hookHandle == IntPtr.Zero) return;
-        _nativeApi.UnhookWindowsHookEx(_hookHandle);
-        _hookHandle = IntPtr.Zero;
+        if (_hookHandle != IntPtr.Zero)
+        {
+            _nativeApi.UnhookWindowsHookEx(_hookHandle);
+            _hookHandle = IntPtr.Zero;
+        }
+
+        // After the unhook, so no callback can record into a disposed reporter; each flushes its
+        // pending batch synchronously here (outside any hook callback).
+        _hookFailures.Dispose();
+        _subscriberFailures.Dispose();
     }
 
     /// <inheritdoc />
@@ -94,10 +132,20 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
     }
 
     /// <summary>
+    /// The log this instance writes failures to: the one explicitly supplied, falling back to the
+    /// process-wide ambient <see cref="AppLog.Current"/> for tests that construct this type directly
+    /// without a log.
+    /// </summary>
+    private IAppLog Log => _appLog ?? AppLog.Current;
+
+    /// <summary>
     /// The WH_MOUSE_LL callback. This runs on every mouse event of the whole OS, so it does the
     /// absolute minimum and — critically — must never let an exception escape into the hook chain:
     /// an unhandled exception here stalls input system-wide. All real work lives in
     /// <see cref="ProcessMessage"/> / <see cref="DesktopGestureStateMachine"/> behind a try/catch.
+    /// A caught failure is only <i>recorded</i> here; it is logged later, off the hook thread and
+    /// rate-limited, by <see cref="DeferredFailureLog"/> — a log write inside the callback could push it
+    /// past <c>LowLevelHooksTimeout</c>, after which Windows silently drops the hook.
     /// </summary>
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
@@ -114,7 +162,8 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
         {
             // Defensive: never swallow the event on failure — a bug here must not turn into a
             // "right click stopped working" for the entire system. Also covers a garbage lParam.
-            Console.Error.WriteLine($"Desktop gesture hook failed: {ex.Message}");
+            // Record only (never throws) — the log entry is written off the hook thread.
+            _hookFailures.Record(ex);
             swallow = false;
         }
 
@@ -151,7 +200,8 @@ internal sealed class DesktopGestureService : IDesktopGestureService, IDesktopGe
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Desktop gesture subscriber failed: {ex.Message}");
+            // Still inside the hook callback: record only, logged later off the hook thread.
+            _subscriberFailures.Record(ex);
         }
     }
 }

@@ -26,6 +26,9 @@ public class DesktopIntegrationServiceTests
     /// <summary><c>GW_HWNDPREV</c> — the sibling immediately above the given window.</summary>
     private const int GwHwndPrev = 3;
 
+    /// <summary>The undocumented WorkerW-spawn message sent to <c>Progman</c>.</summary>
+    private const uint ProgmanMsg = 0x052C;
+
     private static readonly IntPtr HwndBottom = new (1);
 
     private static readonly IntPtr Hwnd = new (111);
@@ -38,6 +41,7 @@ public class DesktopIntegrationServiceTests
     private static readonly IntPtr SecondWorkerWHwnd = new (888);
 
     private readonly Mock<INativeApi> _nativeApiMock = new ();
+    private readonly Mock<IAppLog> _appLogMock = new ();
     private readonly DesktopIntegrationService _service;
 
     /// <summary>
@@ -45,8 +49,20 @@ public class DesktopIntegrationServiceTests
     /// </summary>
     public DesktopIntegrationServiceTests()
     {
-        _service = new DesktopIntegrationService(_nativeApiMock.Object);
+        _service = new DesktopIntegrationService(_nativeApiMock.Object, _appLogMock.Object);
         _nativeApiMock.Setup(api => api.GetWindowLongPtr(Hwnd, GwlExStyle)).Returns(IntPtr.Zero);
+
+        // Default: Explorer answers the 0x052C WorkerW-spawn message; the hung/timeout path has its own tests.
+        var messageResult = IntPtr.Zero;
+        _nativeApiMock
+            .Setup(api => api.SendMessageTimeout(
+                It.IsAny<IntPtr>(),
+                It.IsAny<uint>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<uint>(),
+                out messageResult))
+            .Returns(true);
 
         // Default the Z-order write to success; the HWND_BOTTOM retry path has its own tests below.
         _nativeApiMock
@@ -111,6 +127,18 @@ public class DesktopIntegrationServiceTests
             api => api.SetWindowLongPtr(Hwnd, GwlExStyle, new IntPtr(WsExToolWindow | WsExNoActivate)),
             Times.Once);
         _nativeApiMock.Verify(api => api.SetParent(Hwnd, WorkerWHwnd), Times.Once);
+
+        // M9: the spawn message is sent through the bounded, abort-if-hung wrapper to Progman.
+        var ignored = IntPtr.Zero;
+        _nativeApiMock.Verify(
+            api => api.SendMessageTimeout(
+                ProgmanHwnd,
+                ProgmanMsg,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                DesktopIntegrationService.ProgmanMsgTimeoutMs,
+                out ignored),
+            Times.Once);
     }
 
     /// <summary>
@@ -174,7 +202,7 @@ public class DesktopIntegrationServiceTests
 
         // Assert — the only native call allowed is the style read/write pair.
         _nativeApiMock.Verify(api => api.SetParent(It.IsAny<IntPtr>(), It.IsAny<IntPtr>()), Times.Never);
-        _nativeApiMock.Verify(api => api.SendMessage(It.IsAny<IntPtr>(), It.IsAny<uint>(), It.IsAny<IntPtr>(), It.IsAny<IntPtr>()), Times.Never);
+        VerifyNoMessageSent();
         _nativeApiMock.Verify(api => api.FindWindow(It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
         _nativeApiMock.Verify(api => api.EnumWindows(It.IsAny<EnumWindowsCallback>(), It.IsAny<IntPtr>()), Times.Never);
         _nativeApiMock.Verify(api => api.FindWindowEx(It.IsAny<IntPtr>(), It.IsAny<IntPtr>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
@@ -492,7 +520,7 @@ public class DesktopIntegrationServiceTests
 
         // Assert
         _nativeApiMock.Verify(api => api.SetParent(It.IsAny<IntPtr>(), It.IsAny<IntPtr>()), Times.Never);
-        _nativeApiMock.Verify(api => api.SendMessage(It.IsAny<IntPtr>(), It.IsAny<uint>(), It.IsAny<IntPtr>(), It.IsAny<IntPtr>()), Times.Never);
+        VerifyNoMessageSent();
         _nativeApiMock.Verify(api => api.EnumWindows(It.IsAny<EnumWindowsCallback>(), It.IsAny<IntPtr>()), Times.Never);
         _nativeApiMock.Verify(api => api.FindWindowEx(It.IsAny<IntPtr>(), It.IsAny<IntPtr>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
         _nativeApiMock.Verify(api => api.SetWindowLongPtr(It.IsAny<IntPtr>(), It.IsAny<int>(), It.IsAny<IntPtr>()), Times.Never);
@@ -556,5 +584,224 @@ public class DesktopIntegrationServiceTests
         // Act & Assert
         var ex = Record.Exception(() => _service.SendToBackOfZOrder(Hwnd));
         Assert.Null(ex);
+    }
+
+    // ── Explorer restart recovery (ADR-034): EmbedInDesktop result + idempotency ──
+
+    /// <summary>
+    /// Windows 11 24H2+ layout (F0 spike): no WorkerW is found → the styles are still applied, nothing
+    /// is re-parented, and the caller is told the window stays top-level.
+    /// </summary>
+    [Fact]
+    public void EmbedInDesktop_NoWorkerW_ReturnsNoDesktopLayer()
+    {
+        _nativeApiMock.Setup(api => api.FindWindow("Progman", null)).Returns(ProgmanHwnd);
+
+        var result = _service.EmbedInDesktop(Hwnd);
+
+        Assert.Equal(DesktopEmbedResult.NoDesktopLayer, result);
+        _nativeApiMock.Verify(api => api.SetParent(It.IsAny<IntPtr>(), It.IsAny<IntPtr>()), Times.Never);
+        _nativeApiMock.Verify(
+            api => api.SetWindowLongPtr(Hwnd, GwlExStyle, new IntPtr(WsExToolWindow | WsExNoActivate)),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// A top-level window is re-parented into the found WorkerW and reported as such — only after re-reading
+    /// its parent confirmed the SetParent took (L2).
+    /// </summary>
+    [Fact]
+    public void EmbedInDesktop_WorkerWFound_NotYetChild_ReparentsAndReportsIt()
+    {
+        SetupWorkerWFound();
+        _nativeApiMock
+            .SetupSequence(api => api.GetAncestorParent(Hwnd))
+            .Returns(new IntPtr(0x10010)) // before: the desktop window
+            .Returns(WorkerWHwnd); // after SetParent: verified
+
+        var result = _service.EmbedInDesktop(Hwnd);
+
+        Assert.Equal(DesktopEmbedResult.Reparented, result);
+        _nativeApiMock.Verify(api => api.SetParent(Hwnd, WorkerWHwnd), Times.Once);
+        _nativeApiMock.Verify(api => api.GetAncestorParent(Hwnd), Times.Exactly(2));
+    }
+
+    /// <summary>
+    /// L2: when SetParent does not take (the parent is still not the WorkerW afterwards) on a live window,
+    /// the window stayed top-level — reported as <see cref="DesktopEmbedResult.NoDesktopLayer"/>, never as
+    /// <see cref="DesktopEmbedResult.Reparented"/>.
+    /// </summary>
+    [Fact]
+    public void EmbedInDesktop_SetParentDidNotTake_LiveWindow_ReturnsNoDesktopLayer()
+    {
+        SetupWorkerWFound();
+        _nativeApiMock.Setup(api => api.GetAncestorParent(Hwnd)).Returns(new IntPtr(0x10010)); // never changes
+        _nativeApiMock.Setup(api => api.IsWindow(Hwnd)).Returns(true);
+
+        var result = _service.EmbedInDesktop(Hwnd);
+
+        Assert.Equal(DesktopEmbedResult.NoDesktopLayer, result);
+        _nativeApiMock.Verify(api => api.SetParent(Hwnd, WorkerWHwnd), Times.Once);
+    }
+
+    /// <summary>
+    /// L2: when SetParent does not take because the window died in between, the caller is told the window
+    /// is gone (<see cref="DesktopEmbedResult.InvalidWindow"/>) so recovery rebuilds it from its model.
+    /// </summary>
+    [Fact]
+    public void EmbedInDesktop_SetParentDidNotTake_DeadWindow_ReturnsInvalidWindow()
+    {
+        SetupWorkerWFound();
+        _nativeApiMock.Setup(api => api.GetAncestorParent(Hwnd)).Returns(IntPtr.Zero);
+        _nativeApiMock.Setup(api => api.IsWindow(Hwnd)).Returns(false);
+
+        var result = _service.EmbedInDesktop(Hwnd);
+
+        Assert.Equal(DesktopEmbedResult.InvalidWindow, result);
+    }
+
+    /// <summary>
+    /// M9: when Explorer does not answer the 0x052C message (hung → SMTO_ABORTIFHUNG, or the 1000 ms timeout),
+    /// the lookup answers "no host" at once: styles are still applied, nothing is enumerated or re-parented,
+    /// and the result is <see cref="DesktopEmbedResult.NoDesktopLayer"/>. A diagnostic is logged.
+    /// </summary>
+    [Fact]
+    public void EmbedInDesktop_ExplorerDoesNotAnswer_ReturnsNoDesktopLayerWithoutEnumerating()
+    {
+        _nativeApiMock.Setup(api => api.FindWindow("Progman", null)).Returns(ProgmanHwnd);
+        SetupMessageTimesOut();
+
+        var result = _service.EmbedInDesktop(Hwnd);
+
+        Assert.Equal(DesktopEmbedResult.NoDesktopLayer, result);
+        _nativeApiMock.Verify(api => api.EnumWindows(It.IsAny<EnumWindowsCallback>(), It.IsAny<IntPtr>()), Times.Never);
+        _nativeApiMock.Verify(api => api.SetParent(It.IsAny<IntPtr>(), It.IsAny<IntPtr>()), Times.Never);
+        _nativeApiMock.Verify(
+            api => api.SetWindowLongPtr(Hwnd, GwlExStyle, new IntPtr(WsExToolWindow | WsExNoActivate)),
+            Times.Once);
+        _appLogMock.Verify(
+            log => log.Warn(nameof(DesktopIntegrationService), "ProgmanMessageTimedOut", It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// M9: <see cref="DesktopIntegrationService.FindDesktopLayerHost"/> (run on every WM_SETTINGCHANGE /
+    /// WM_DISPLAYCHANGE) treats an unanswered 0x052C as "no host" instead of blocking or throwing.
+    /// </summary>
+    [Fact]
+    public void FindDesktopLayerHost_ExplorerDoesNotAnswer_ReturnsZero()
+    {
+        _nativeApiMock.Setup(api => api.FindWindow("Progman", null)).Returns(ProgmanHwnd);
+        SetupMessageTimesOut();
+
+        var host = _service.FindDesktopLayerHost();
+
+        Assert.Equal(IntPtr.Zero, host);
+        _nativeApiMock.Verify(api => api.EnumWindows(It.IsAny<EnumWindowsCallback>(), It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    /// <summary>With Explorer answering, FindDesktopLayerHost returns the WorkerW found by the lookup.</summary>
+    [Fact]
+    public void FindDesktopLayerHost_ExplorerAnswers_ReturnsWorkerW()
+    {
+        SetupWorkerWFound();
+
+        Assert.Equal(WorkerWHwnd, _service.FindDesktopLayerHost());
+    }
+
+    /// <summary>
+    /// Idempotency (plan §4 tests): re-embedding a window whose parent already IS the current WorkerW
+    /// does not call SetParent again, but still re-asserts the styles.
+    /// </summary>
+    [Fact]
+    public void EmbedInDesktop_AlreadyChildOfSameWorkerW_SkipsSetParent()
+    {
+        SetupWorkerWFound();
+        _nativeApiMock.Setup(api => api.GetAncestorParent(Hwnd)).Returns(WorkerWHwnd);
+
+        var first = _service.EmbedInDesktop(Hwnd);
+        var second = _service.EmbedInDesktop(Hwnd);
+
+        Assert.Equal(DesktopEmbedResult.AlreadyEmbedded, first);
+        Assert.Equal(DesktopEmbedResult.AlreadyEmbedded, second);
+        _nativeApiMock.Verify(api => api.SetParent(It.IsAny<IntPtr>(), It.IsAny<IntPtr>()), Times.Never);
+        _nativeApiMock.Verify(
+            api => api.SetWindowLongPtr(Hwnd, GwlExStyle, It.IsAny<IntPtr>()),
+            Times.Exactly(2));
+    }
+
+    /// <summary>A null handle is rejected without touching the shell at all.</summary>
+    [Fact]
+    public void EmbedInDesktop_ZeroHandle_ReturnsInvalidWindow()
+    {
+        var result = _service.EmbedInDesktop(IntPtr.Zero);
+
+        Assert.Equal(DesktopEmbedResult.InvalidWindow, result);
+        _nativeApiMock.Verify(api => api.FindWindow(It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+        _nativeApiMock.Verify(api => api.SetParent(It.IsAny<IntPtr>(), It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    /// <summary>IsWindowAlive forwards to IsWindow.</summary>
+    /// <param name="alive">What the native layer answers.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void IsWindowAlive_ForwardsToIsWindow(bool alive)
+    {
+        _nativeApiMock.Setup(api => api.IsWindow(Hwnd)).Returns(alive);
+
+        Assert.Equal(alive, _service.IsWindowAlive(Hwnd));
+    }
+
+    /// <summary>A throwing native layer degrades to "not alive" (rebuild from the model — always safe).</summary>
+    [Fact]
+    public void IsWindowAlive_NativeThrows_ReturnsFalse()
+    {
+        _nativeApiMock.Setup(api => api.IsWindow(Hwnd)).Throws(new InvalidOperationException("boom"));
+
+        Assert.False(_service.IsWindowAlive(Hwnd));
+    }
+
+    private void SetupMessageTimesOut()
+    {
+        var messageResult = IntPtr.Zero;
+        _nativeApiMock
+            .Setup(api => api.SendMessageTimeout(
+                ProgmanHwnd,
+                ProgmanMsg,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                It.IsAny<uint>(),
+                out messageResult))
+            .Returns(false);
+    }
+
+    private void VerifyNoMessageSent()
+    {
+        var ignored = IntPtr.Zero;
+        _nativeApiMock.Verify(
+            api => api.SendMessageTimeout(
+                It.IsAny<IntPtr>(),
+                It.IsAny<uint>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<IntPtr>(),
+                It.IsAny<uint>(),
+                out ignored),
+            Times.Never);
+    }
+
+    private void SetupWorkerWFound()
+    {
+        _nativeApiMock.Setup(api => api.FindWindow("Progman", null)).Returns(ProgmanHwnd);
+        _nativeApiMock
+            .Setup(api => api.EnumWindows(It.IsAny<EnumWindowsCallback>(), IntPtr.Zero))
+            .Callback<EnumWindowsCallback, IntPtr>((callback, lParam) => callback(ShellHwnd, lParam))
+            .Returns(true);
+        _nativeApiMock
+            .Setup(api => api.FindWindowEx(ShellHwnd, IntPtr.Zero, "SHELLDLL_DefView", null))
+            .Returns(DefViewHwnd);
+        _nativeApiMock
+            .Setup(api => api.FindWindowEx(IntPtr.Zero, ShellHwnd, "WorkerW", null))
+            .Returns(WorkerWHwnd);
     }
 }

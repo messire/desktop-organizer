@@ -351,7 +351,9 @@ public class ChildWindowInitializeTests
                 (ILayoutEditModeService)app.Resources["LayoutEditMode"],
                 Mock.Of<IMonitorService>(),
                 Mock.Of<IConfirmationService>(),
-                Mock.Of<IPanelCustomizeService>());
+                Mock.Of<IPanelCustomizeService>(),
+                Mock.Of<IPanelItemDragOutSession>(),
+                FakeDesktopScale.Uniform().Object);
 
             return new ChildWindowHarness(app, originalResources, ownsApplication, window);
         }

@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Windows;
 using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Models;
@@ -43,6 +44,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
     private readonly IPanelCustomizeService _panelCustomizeService;
     private readonly ILocalizationService _localization;
     private readonly CultureInfo _systemUiCulture;
+    private readonly IAppLog? _appLog;
     private ChildWindowModel? _selectedPanel;
     private SettingsSection _selectedSection = SettingsSection.General;
     private LanguageOption _selectedLanguageOption;
@@ -51,6 +53,15 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// ViewModel for the "Layout snapshots" section.
     /// </summary>
     public LayoutSnapshotsViewModel LayoutSnapshots { get; }
+
+    /// <summary>
+    /// ViewModel for the About section's "Updates"/"Links" cards (release-hardening-1.0.md §G2) — DI
+    /// singleton, injected and stored verbatim (unlike <see cref="GlobalDefaults"/>/<see cref="SystemIconsSettings"/>,
+    /// which this class constructs internally): <c>AboutSection.xaml</c> binds against it directly
+    /// (<c>{Binding About.X}</c>), the same convention <c>BackupSection.xaml</c> already uses for
+    /// <see cref="LayoutSnapshots"/>.
+    /// </summary>
+    public AboutViewModel About { get; }
 
     /// <summary>
     /// Global default settings for new panels and grid/snap behavior (REFACTORING_PLAN.md §5.3).
@@ -460,6 +471,13 @@ public class MainWindowViewModel : INotifyPropertyChanged
     public bool SystemIconsVirtualDesktopFeatureIneffective => SystemIconsSettings.SystemIconsVirtualDesktopFeatureIneffective;
 
     /// <summary>
+    /// The log this instance writes failures to: the one explicitly supplied, falling back to the
+    /// process-wide ambient <see cref="AppLog.Current"/> for tests that construct this type directly
+    /// without a log.
+    /// </summary>
+    private IAppLog Log => _appLog ?? AppLog.Current;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="MainWindowViewModel"/> class.
     /// </summary>
     /// <param name="windowManager">Creates/removes/persists panel windows.</param>
@@ -484,6 +502,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <see cref="LanguageOption"/> instead of each one reaching for that static culture itself, so
     /// tests can exercise both the "en" and "ru" branches deterministically.
     /// </param>
+    /// <param name="about">See <see cref="About"/>.</param>
+    /// <param name="appLog">See <see cref="Log"/>.</param>
     public MainWindowViewModel(
         IWindowManager windowManager,
         IAppSettings appSettings,
@@ -496,7 +516,9 @@ public class MainWindowViewModel : INotifyPropertyChanged
         ILayoutEditModeService layoutEditMode,
         IPanelCustomizeService panelCustomizeService,
         ILocalizationService localization,
-        CultureInfo systemUiCulture)
+        CultureInfo systemUiCulture,
+        AboutViewModel about,
+        IAppLog? appLog = null)
     {
         _windowManager = windowManager;
         _appSettings = appSettings;
@@ -508,7 +530,9 @@ public class MainWindowViewModel : INotifyPropertyChanged
         _panelCustomizeService = panelCustomizeService;
         _localization = localization;
         _systemUiCulture = systemUiCulture ?? throw new ArgumentNullException(nameof(systemUiCulture));
+        _appLog = appLog;
         LayoutSnapshots = layoutSnapshots;
+        About = about ?? throw new ArgumentNullException(nameof(about));
 
         // Language picker (§2.9 C-5): three fixed options, in display order — never rebuilt; each
         // option's own DisplayName is re-resolved in place on CultureChanged below, so the ComboBox's
@@ -817,7 +841,11 @@ public class MainWindowViewModel : INotifyPropertyChanged
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            Console.Error.WriteLine($"Failed to open storage folder '{StorageFolderPath}': {ex.Message}");
+            Log.Error(
+                "MainWindowViewModel",
+                "OpenStorageFolderFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", StorageFolderPath));
         }
     }
 
@@ -858,9 +886,9 @@ public class MainWindowViewModel : INotifyPropertyChanged
         // anything to lose. Without this, a panel removed before its first save still has
         // _selectedPanel.FilePaths pointing at the stale original path (never itself "managed"), so the
         // IsManaged check below is false and the neutral "nothing lost" dialog is shown — but
-        // RemoveChildWindow further down calls SyncToModel() again immediately before Release(), which
-        // DOES pick up the by-then-remapped managed path and deletes it past the Recycle Bin without the
-        // warning the user should have seen (ADR-010 Decision 2).
+        // RemoveChildWindow further down calls SyncToModel() again immediately before recycling, which
+        // DOES pick up the by-then-remapped managed path and sends it to the Recycle Bin without the
+        // warning the user should have seen (ADR-010 Decision 2, amended by ADR-035).
         _windowManager.SyncAllWindowsToModels();
 
         var hasManagedFiles = _selectedPanel.FilePaths.Any(_itemStorage.IsManaged);
@@ -877,7 +905,16 @@ public class MainWindowViewModel : INotifyPropertyChanged
 
         if (!confirmed) return;
 
-        _windowManager.RemoveChildWindow(_selectedPanel.Id, releaseManagedItems: true);
+        // ADR-035: managed items go to the Recycle Bin; if any of them couldn't, the panel is kept
+        // (fail visibly — nothing is ever deleted past the Recycle Bin) and the user is told why.
+        var result = _windowManager.RemoveChildWindow(_selectedPanel.Id, releaseManagedItems: true);
+        if (result.IsBlocked)
+        {
+            _confirmation.Notify(
+                _localization.Format("Recycle_Failed_Message_Format", result.Remaining.Count),
+                _localization.GetString("Recycle_Failed_Title"),
+                MessageBoxImage.Warning);
+        }
     }
 
     private bool CanRemovePanel() => _selectedPanel is not null;

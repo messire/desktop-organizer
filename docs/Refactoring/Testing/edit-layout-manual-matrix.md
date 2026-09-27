@@ -22,7 +22,7 @@
 
 - Настройки: `IAppSettings.IsLayoutLocked` / `IAppSettings.NormalModeLayoutGestures` — `user.config`
   (не JSON-документ состояния, D-8).
-- Диагностика (при `--diag`/Debug-сборке): `%LOCALAPPDATA%\DesktopOrganizer\Logs\gestures-*.jsonl`,
+- Диагностика (при `--diag`/Debug-сборке): `%LOCALAPPDATA%\DesktopOrganizer\Logs\app-*.jsonl`,
   категория `layout`, событие `LayoutModeChanged` — см. `Testing/diagnostics-log-events.md`.
 
 ## Матрица

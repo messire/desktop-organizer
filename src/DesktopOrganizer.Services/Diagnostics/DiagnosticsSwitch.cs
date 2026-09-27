@@ -24,17 +24,18 @@ public static class DiagnosticsSwitch
 #endif
 
     /// <summary>
-    /// Returns <see langword="true"/> if diagnostics logging should be enabled: always in Debug
-    /// builds, and in Release builds only when <see cref="CommandLineFlag"/> is present in
-    /// <paramref name="commandLineArgs"/> or <see cref="EnvironmentVariableName"/> is set to
-    /// <c>"1"</c>.
+    /// Resolves the current process's <see cref="DiagnosticsLevel"/>: always <see cref="DiagnosticsLevel.Verbose"/>
+    /// in Debug builds, and in Release builds only when <see cref="CommandLineFlag"/> is present in
+    /// <paramref name="commandLineArgs"/> or <see cref="EnvironmentVariableName"/> is set to <c>"1"</c> —
+    /// otherwise <see cref="DiagnosticsLevel.Standard"/>. Orthogonal to <c>IAppLog</c>, which writes at
+    /// either level (see <see cref="DiagnosticsDefaults.FileLoggingEnabled"/>).
     /// </summary>
     /// <param name="commandLineArgs">The process's command-line arguments.</param>
     /// <param name="environment">
     /// A lookup for environment variables, e.g. <see cref="Environment.GetEnvironmentVariable(string)"/>.
     /// Injected so this method stays pure/testable.
     /// </param>
-    public static bool IsEnabled(IReadOnlyList<string> commandLineArgs, Func<string, string?> environment)
+    public static DiagnosticsLevel Resolve(IReadOnlyList<string> commandLineArgs, Func<string, string?> environment)
     {
         ArgumentNullException.ThrowIfNull(commandLineArgs);
         ArgumentNullException.ThrowIfNull(environment);
@@ -43,6 +44,16 @@ public static class DiagnosticsSwitch
             string.Equals(arg, CommandLineFlag, StringComparison.OrdinalIgnoreCase));
         var hasEnvironmentFlag = string.Equals(environment(EnvironmentVariableName), "1", StringComparison.Ordinal);
 
-        return IsDebugBuild || hasCommandLineFlag || hasEnvironmentFlag;
+        return IsDebugBuild || hasCommandLineFlag || hasEnvironmentFlag ? DiagnosticsLevel.Verbose : DiagnosticsLevel.Standard;
     }
+
+    /// <summary>
+    /// Backward-compatible boolean view of <see cref="Resolve"/>: <see langword="true"/> exactly when it
+    /// resolves to <see cref="DiagnosticsLevel.Verbose"/>. Existing gesture-diagnostics call sites keep
+    /// using this; new code should prefer <see cref="Resolve"/> directly.
+    /// </summary>
+    /// <param name="commandLineArgs">The process's command-line arguments — forwarded to <see cref="Resolve"/>.</param>
+    /// <param name="environment">The environment-variable lookup — forwarded to <see cref="Resolve"/>.</param>
+    public static bool IsEnabled(IReadOnlyList<string> commandLineArgs, Func<string, string?> environment) =>
+        Resolve(commandLineArgs, environment) == DiagnosticsLevel.Verbose;
 }

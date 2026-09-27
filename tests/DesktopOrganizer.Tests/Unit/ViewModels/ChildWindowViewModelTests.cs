@@ -17,7 +17,7 @@ namespace DesktopOrganizer.Tests.Unit.ViewModels;
 /// <see cref="ChildWindowViewModel.AddDroppedFiles"/> fallback-to-original-path behavior when
 /// <see cref="IPanelItemStorageService.MoveIn"/>/<see cref="IPanelItemStorageService.MoveInDirectory"/>
 /// return <see langword="null"/> (D13), and the <c>RemoveFileItem</c> degradation to
-/// <see cref="IPanelItemStorageService.Release"/> when <see cref="IPanelItemStorageService.Restore"/>
+/// <see cref="IPanelItemStorageService.ReleaseToRecycleBin"/> when <see cref="IPanelItemStorageService.Restore"/>
 /// reports <see cref="RestoreOutcome.OriginalPathUnknown"/> (D9, VM-part — see
 /// docs/PLANS/drag-drop-move-semantics.md, ADR-B legacy-panel degradation).
 /// </summary>
@@ -311,15 +311,16 @@ public class ChildWindowViewModelTests
         }
     }
 
-    // ── D9 (VM-part): RemoveFileItem degrades to Release on OriginalPathUnknown (ADR-B) ─────────
+    // ── D9 (VM-part): RemoveFileItem degrades to the Recycle Bin on OriginalPathUnknown (ADR-B, ADR-035) ──
 
     /// <summary>
     /// Verifies that when <see cref="IPanelItemStorageService.Restore"/> reports
-    /// <see cref="RestoreOutcome.OriginalPathUnknown"/>, removing the item degrades to calling
-    /// <see cref="IPanelItemStorageService.Release"/> (legacy managed copy with no manifest entry).
+    /// <see cref="RestoreOutcome.OriginalPathUnknown"/>, removing the item degrades to
+    /// <see cref="IPanelItemStorageService.ReleaseToRecycleBin"/> (legacy managed copy with no manifest
+    /// entry) — never a permanent delete — and the item leaves the panel once it's recycled.
     /// </summary>
     [Fact]
-    public void RemoveFileItem_RestoreReturnsOriginalPathUnknown_CallsRelease()
+    public void RemoveFileItem_RestoreReturnsOriginalPathUnknown_RecyclesAndRemovesItem()
     {
         // Arrange
         var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
@@ -328,20 +329,52 @@ public class ChildWindowViewModelTests
         var item = Assert.Single(sut.AllItems);
 
         _storageMock.Setup(s => s.Restore(managedPath)).Returns(RestoreOutcome.OriginalPathUnknown);
+        _storageMock.Setup(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()))
+            .Returns(RecycleOutcome.Create([managedPath], [], cancelled: false));
 
         // Act — RemoveFileCommand is the only public entry point to the private RemoveFileItem.
         sut.RemoveFileCommand.Execute(item);
 
-        // Assert — legacy managed copy with no manifest entry degrades to the old Release behavior.
-        _storageMock.Verify(s => s.Release(managedPath), Times.Once);
+        // Assert — legacy managed copy with no manifest entry goes to the Recycle Bin, as a single item.
+        _storageMock.Verify(
+            s => s.ReleaseToRecycleBin(It.Is<IReadOnlyList<string>>(p => p.Count == 1 && p[0] == managedPath)),
+            Times.Once);
+        Assert.Empty(sut.AllItems);
+    }
+
+    /// <summary>
+    /// ADR-035 fail-visibly: if the Recycle Bin refuses the legacy managed copy, the item stays in the
+    /// panel (removing it would orphan the only copy in storage) and nothing is persisted.
+    /// </summary>
+    [Fact]
+    public void RemoveFileItem_OriginalPathUnknown_RecycleFails_KeepsItem()
+    {
+        // Arrange
+        var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
+        using var sut = BuildSut();
+        sut.AddFiles([managedPath]);
+        var item = Assert.Single(sut.AllItems);
+        var filesChanged = 0;
+        sut.FilesChanged += (_, _) => filesChanged++;
+
+        _storageMock.Setup(s => s.Restore(managedPath)).Returns(RestoreOutcome.OriginalPathUnknown);
+        _storageMock.Setup(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()))
+            .Returns(RecycleOutcome.Create([], [managedPath], cancelled: true));
+
+        // Act
+        sut.RemoveFileCommand.Execute(item);
+
+        // Assert
+        Assert.Same(item, Assert.Single(sut.AllItems));
+        Assert.Equal(0, filesChanged);
     }
 
     /// <summary>
     /// Verifies that when <see cref="IPanelItemStorageService.Restore"/> succeeds, removing the item
-    /// does not additionally call <see cref="IPanelItemStorageService.Release"/>.
+    /// does not additionally send anything to the Recycle Bin.
     /// </summary>
     [Fact]
-    public void RemoveFileItem_RestoreSucceeds_DoesNotCallRelease()
+    public void RemoveFileItem_RestoreSucceeds_DoesNotRecycle()
     {
         // Arrange
         var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
@@ -354,13 +387,14 @@ public class ChildWindowViewModelTests
         // Act
         sut.RemoveFileCommand.Execute(item);
 
-        // Assert — successful restore must not additionally Release the (already-moved-back) item.
-        _storageMock.Verify(s => s.Release(It.IsAny<string>()), Times.Never);
+        // Assert — successful restore must not additionally recycle the (already-moved-back) item.
+        _storageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Never);
+        Assert.Empty(sut.AllItems);
     }
 
     /// <summary>
     /// Verifies that only <see cref="RestoreOutcome.OriginalPathUnknown"/> triggers the ADR-B
-    /// degradation to <see cref="IPanelItemStorageService.Release"/>: neither
+    /// degradation to <see cref="IPanelItemStorageService.ReleaseToRecycleBin"/>: neither
     /// <see cref="RestoreOutcome.NotManaged"/> (already a no-op) nor <see cref="RestoreOutcome.Failed"/>
     /// (managed copy intentionally left in storage) calls it.
     /// </summary>
@@ -368,11 +402,11 @@ public class ChildWindowViewModelTests
     [Theory]
     [InlineData(RestoreOutcome.NotManaged)]
     [InlineData(RestoreOutcome.Failed)]
-    public void RemoveFileItem_RestoreReturnsNotManagedOrFailed_DoesNotCallRelease(RestoreOutcome outcome)
+    public void RemoveFileItem_RestoreReturnsNotManagedOrFailed_DoesNotRecycle(RestoreOutcome outcome)
     {
         // Arrange — only OriginalPathUnknown triggers the ADR-B degradation; NotManaged is already a
         // no-op inside Restore, and Failed means the managed copy is intentionally left in storage
-        // (logged, not lost) rather than force-released.
+        // (logged, not lost) rather than force-recycled.
         var path = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
         using var sut = BuildSut();
         sut.AddFiles([path]);
@@ -384,7 +418,118 @@ public class ChildWindowViewModelTests
         sut.RemoveFileCommand.Execute(item);
 
         // Assert
-        _storageMock.Verify(s => s.Release(It.IsAny<string>()), Times.Never);
+        _storageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Never);
+    }
+
+    // ── ADR-036 (release-hardening-1.0.md §E): drag-out transfer / external-move VM glue ─────────
+
+    /// <summary>
+    /// <see cref="ChildWindowViewModel.AddTransferredItem"/> adds a reference to the given path without
+    /// ever calling <see cref="IPanelItemStorageService.MoveIn"/>/<c>MoveInDirectory</c> — the managed
+    /// copy (if any) is shared storage already owned by the source panel's own manifest entry.
+    /// </summary>
+    [Fact]
+    public void AddTransferredItem_AddsReference_NeverCallsMoveIn()
+    {
+        var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
+        using var sut = BuildSut();
+
+        sut.AddTransferredItem(managedPath);
+
+        var item = Assert.Single(sut.AllItems);
+        Assert.Equal(managedPath, item.Path);
+        _storageMock.Verify(s => s.MoveIn(It.IsAny<string>()), Times.Never);
+        _storageMock.Verify(s => s.MoveInDirectory(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// A Folder Portal never accepts a transferred item — defense in depth mirroring
+    /// <c>ChildWindow.OnDrop</c>'s own portal gate, which already refuses the drop before this is reached.
+    /// </summary>
+    [Fact]
+    public void AddTransferredItem_FolderPortal_DoesNotAddItem()
+    {
+        var portalDir = NewTempDirPath();
+        var watcherMock = new Mock<IFolderWatcher>();
+        _watcherFactoryMock.Setup(f => f.Create()).Returns(watcherMock.Object);
+        using var sut = BuildSut();
+        sut.LoadFromModel(new ChildWindowModel { SourceFolderPath = portalDir });
+
+        try
+        {
+            sut.AddTransferredItem(Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt"));
+
+            Assert.Empty(sut.AllItems);
+        }
+        finally
+        {
+            Directory.Delete(portalDir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ChildWindowViewModel.RemoveTransferredItem"/> removes the item from this panel without
+    /// ever calling <see cref="IPanelItemStorageService.Restore"/>/<see cref="IPanelItemStorageService.ReleaseToRecycleBin"/>
+    /// — the underlying managed copy now belongs to the target panel's own reference.
+    /// </summary>
+    [Fact]
+    public void RemoveTransferredItem_RemovesItem_NeverRestoresOrRecycles()
+    {
+        var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
+        using var sut = BuildSut();
+        sut.AddFiles([managedPath]);
+        var item = Assert.Single(sut.AllItems);
+        var filesChanged = 0;
+        sut.FilesChanged += (_, _) => filesChanged++;
+
+        sut.RemoveTransferredItem(item);
+
+        Assert.Empty(sut.AllItems);
+        Assert.Equal(1, filesChanged);
+        _storageMock.Verify(s => s.Restore(It.IsAny<string>()), Times.Never);
+        _storageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Never);
+    }
+
+    /// <summary>
+    /// <see cref="ChildWindowViewModel.RemoveMovedOutItem"/> removes the item and tells the storage
+    /// service to forget it (manifest-only cleanup) — the file itself is already gone by the shell's own
+    /// hand, confirmed by the caller before this is ever invoked.
+    /// </summary>
+    [Fact]
+    public void RemoveMovedOutItem_RemovesItem_AndForgetsManagedPath()
+    {
+        var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
+        using var sut = BuildSut();
+        sut.AddFiles([managedPath]);
+        var item = Assert.Single(sut.AllItems);
+        var filesChanged = 0;
+        sut.FilesChanged += (_, _) => filesChanged++;
+
+        sut.RemoveMovedOutItem(item);
+
+        Assert.Empty(sut.AllItems);
+        Assert.Equal(1, filesChanged);
+        _storageMock.Verify(s => s.ForgetMovedOut(managedPath), Times.Once);
+    }
+
+    /// <summary>
+    /// ADR-036 §E: a raw dropped path that's already inside app-managed storage (e.g. dragged directly
+    /// out of <c>PanelItems</c> via Explorer, bypassing the in-app drag-out session) is rejected outright
+    /// by <see cref="ChildWindowViewModel.AddDroppedFiles"/> — never re-<c>MoveIn</c>'d, which would
+    /// orphan whichever panel's manifest entry already owns it.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_ManagedPathWithoutActiveSession_Rejected()
+    {
+        var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
+        _storageMock.Setup(s => s.IsManaged(managedPath)).Returns(true);
+        using var sut = BuildSut();
+
+        sut.AddDroppedFiles([managedPath]);
+
+        Assert.Empty(sut.AllItems);
+        _storageMock.Verify(s => s.MoveIn(It.IsAny<string>()), Times.Never);
+        _storageMock.Verify(s => s.MoveInDirectory(It.IsAny<string>()), Times.Never);
     }
 
     // ── D3 (Block D, docs/PLANS/phase-7-performance-hardening.md): Model.PropertyChanged

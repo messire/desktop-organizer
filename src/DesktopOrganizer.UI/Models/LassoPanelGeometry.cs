@@ -11,34 +11,37 @@ namespace DesktopOrganizer.UI.Models;
 /// <see cref="ChildWindowModel.Position"/>/<see cref="ChildWindowModel.Size"/> and
 /// <c>Window.Left</c>/<c>Top</c>/<c>Width</c>/<c>Height</c> are DIP. Writing one straight into the other
 /// made a lassoed panel come out 25%/50%/75% too large — and displaced — on any non-100% display, which
-/// is the common case on laptops. The scale used here is
-/// <c>IMonitorService.GetSystemDpiScale()</c>: deliberately the SAME coefficient
-/// <c>MonitorService.GetMonitors()</c> already divides by, so panel geometry and monitor geometry cannot
-/// drift apart (the ADR-028 baseline audit lists "three independent DPI sources" as an existing risk —
-/// this adds none).
+/// is the common case on laptops.
+/// </remarks>
+/// <remarks>
+/// release-hardening F (ADR-037): the scale used here is <see cref="DesktopScaleModel.PxToDip(Rect)"/> —
+/// the lasso rectangle's own PHYSICAL pixels, converted through the monitor it intersects most (tie →
+/// primary), which is the SAME per-monitor conversion every other desktop-layer geometry now goes
+/// through. Bit-identical to the pre-F <c>px / systemDpiScale</c> formula whenever the snapshot is
+/// uniform (single-scale desktop, including every one-monitor setup).
 /// </remarks>
 public static class LassoPanelGeometry
 {
     /// <summary>
-    /// Converts a lasso rectangle from physical screen pixels to DIP and applies the minimum panel size.
+    /// Converts a lasso rectangle from physical screen pixels to desktop-DIP and applies the minimum
+    /// panel size.
     /// </summary>
-    /// <param name="x">Lasso left, in physical pixels.</param>
-    /// <param name="y">Lasso top, in physical pixels.</param>
-    /// <param name="width">Lasso width, in physical pixels.</param>
-    /// <param name="height">Lasso height, in physical pixels.</param>
-    /// <param name="dpiScale">System DPI scale (<c>1.0</c> at 96 DPI). Non-finite/non-positive values are treated as <c>1.0</c>.</param>
+    /// <param name="px">The lasso rectangle, in physical screen pixels.</param>
+    /// <param name="scale">The current desktop-scale snapshot.</param>
     /// <param name="minSize">The minimum panel width/height, in DIP — applied AFTER the conversion, so it means the same thing at every DPI.</param>
-    /// <returns>The lasso rectangle in DIP, never smaller than <paramref name="minSize"/> on either axis.</returns>
-    public static Rect ToDip(int x, int y, int width, int height, double dpiScale, double minSize)
+    /// <returns>The lasso rectangle in desktop-DIP, never smaller than <paramref name="minSize"/> on either axis.</returns>
+    public static Rect ToDip(Rect px, DesktopScaleModel scale, double minSize)
     {
-        var scale = double.IsFinite(dpiScale) && dpiScale > 0d ? dpiScale : 1d;
+        ArgumentNullException.ThrowIfNull(scale);
+
         var safeMin = double.IsFinite(minSize) && minSize > 0d ? minSize : 0d;
+        var dip = scale.PxToDip(px);
 
         return new Rect(
-            x / scale,
-            y / scale,
-            Math.Max(safeMin, width / scale),
-            Math.Max(safeMin, height / scale));
+            dip.X,
+            dip.Y,
+            Math.Max(safeMin, dip.Width),
+            Math.Max(safeMin, dip.Height));
     }
 
     /// <summary>

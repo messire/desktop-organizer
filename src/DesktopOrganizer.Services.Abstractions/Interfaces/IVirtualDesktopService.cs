@@ -114,4 +114,23 @@ public interface IVirtualDesktopService
     /// </para>
     /// </remarks>
     Guid? TryGetDefaultDesktopId();
+
+    /// <summary>
+    /// Drops the cached <c>IVirtualDesktopManager</c> COM object — including a cached "unsupported"
+    /// answer — so the next call activates a fresh one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called after the shell was restarted (ADR-034): the cached RCW is a proxy into the dead
+    /// <c>explorer.exe</c> instance, and every call through it would keep failing (degrading to the
+    /// safe-but-wrong fallback answers) for the rest of the session. A probe that ran while Explorer
+    /// was still coming back may also have cached "unsupported"; resetting clears that too.
+    /// </para>
+    /// <para>
+    /// Cheap and idempotent: it only drops references, it never activates anything itself. A no-op
+    /// after <c>Dispose</c> on the implementation. Same STA thread-affinity contract as every other
+    /// member.
+    /// </para>
+    /// </remarks>
+    void Reset();
 }

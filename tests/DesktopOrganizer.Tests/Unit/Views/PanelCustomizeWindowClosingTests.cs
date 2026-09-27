@@ -169,7 +169,7 @@ public class PanelCustomizeWindowClosingTests
                 Mock.Of<IFolderPickerService>(),
                 TestLocalization.English);
 
-            var window = new PanelCustomizeWindow(viewModel, Mock.Of<IMonitorService>());
+            var window = new PanelCustomizeWindow(viewModel, Mock.Of<IMonitorService>(), FakeDesktopScale.Uniform().Object);
 
             return new PanelCustomizeWindowHarness(app, originalResources, ownsApplication, window, viewModel);
         }

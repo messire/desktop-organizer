@@ -504,7 +504,7 @@ public class NativePanelResizeControllerTests
     public void RealController_ListFreeMode_MatchesLegacyPath_BitForBit_WithNonZeroOriginOffset_AcrossDpiScales(
         ResizeEdge edge, double totalDx, double totalDy, double scale)
     {
-        var harness = CreateHarness(gridSnap: false, viewMode: PanelViewMode.List);
+        var harness = CreateHarness(gridSnap: false, viewMode: PanelViewMode.List, desktopScale: scale);
         var constraints = ResizeConstraintsFactory.BuildConstraints(harness.Model, snapEnabled: false, TitleBarHeight);
 
         var actualScreenPx = RunGestureWithOriginOffset(harness.Controller, StartBoundsDip, edge, totalDx, totalDy, scale);
@@ -618,7 +618,7 @@ public class NativePanelResizeControllerTests
         public int ClearDragObstaclesCount;
         public int SnapToGridCount;
 
-        public ControllerHarness(Rect startBounds, ChildWindowModel model, bool snapEnabled, int gridSize = 0, Func<bool>? isFreeResizeModifierDown = null)
+        public ControllerHarness(Rect startBounds, ChildWindowModel model, bool snapEnabled, int gridSize = 0, Func<bool>? isFreeResizeModifierDown = null, double desktopScale = 1d)
         {
             Bounds = startBounds;
             Model = model;
@@ -641,6 +641,7 @@ public class NativePanelResizeControllerTests
                 Tracker,
                 Mock.Of<INativePanelSizingService>(),
                 isResizeEnabled: () => true,
+                desktopScale: FakeDesktopScale.Uniform(desktopScale).Object, // release-hardening F (ADR-037): must match whatever dpiScale a test drives SizeMoveEntered/ProposeBounds with.
                 gridHost: null,
                 isFreeResizeModifierDown: isFreeResizeModifierDown);
         }
@@ -665,10 +666,11 @@ public class NativePanelResizeControllerTests
         PanelViewMode viewMode = PanelViewMode.List,
         IconLayoutPolicy iconLayoutPolicy = IconLayoutPolicy.LegacyStretch,
         int gridSize = 0,
-        Func<bool>? isFreeResizeModifierDown = null)
+        Func<bool>? isFreeResizeModifierDown = null,
+        double desktopScale = 1d)
     {
         var model = new ChildWindowModel { ViewMode = viewMode, IconSize = iconSize, IconLayoutPolicy = iconLayoutPolicy };
-        return new ControllerHarness(StartBoundsDip, model, gridSnap, gridSize, isFreeResizeModifierDown);
+        return new ControllerHarness(StartBoundsDip, model, gridSnap, gridSize, isFreeResizeModifierDown, desktopScale);
     }
 
     /// <summary>Builds the UNCLAMPED candidate rect (DIP) a real <c>WM_SIZING</c> would report for a raw

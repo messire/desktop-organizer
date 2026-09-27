@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json.Nodes;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Storage;
 
@@ -228,7 +229,11 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
                 // Best effort — same degraded-but-safe posture as QuarantineFile: if the copy fails
                 // (permissions, held handle), the primary is simply left as the only surviving copy,
                 // same as before this method existed.
-                Console.Error.WriteLine($"JsonApplicationStateStore: failed to quarantine loaded document ('{reason}'): {ex.GetType().Name}");
+                AppLog.Current.Error(
+                    "JsonApplicationStateStore",
+                    "QuarantineLoadedDocumentFailed",
+                    ex,
+                    new KeyValuePair<string, object?>("reason", reason));
             }
         }
     }
@@ -398,7 +403,7 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
         {
             // ILegacyStateImporter.TryImport() promises never to throw; defend anyway rather than
             // letting a misbehaving implementation take the whole load down.
-            Console.Error.WriteLine($"JsonApplicationStateStore: legacy importer threw unexpectedly: {ex.GetType().Name}");
+            AppLog.Current.Error("JsonApplicationStateStore", "LegacyImporterThrew", ex);
             return null;
         }
     }
@@ -528,8 +533,10 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
             // Best effort: if the corrupt file can't even be moved (permissions, held handle), leave
             // it where it is. The caller still proceeds with an empty/recovered in-memory state; the
             // file simply keeps failing to parse on every subsequent load, which is a safe (if noisy)
-            // degraded outcome rather than a crash.
-            Console.Error.WriteLine($"JsonApplicationStateStore: failed to quarantine '{Path.GetFileName(sourcePath)}': {ex.GetType().Name}");
+            // degraded outcome rather than a crash. The source file name is deliberately not logged —
+            // it's a fixed, known pattern (a StateStorePaths-generated name), but omitted anyway to
+            // match AtomicJsonFileWriter's own posture of never logging file names from this contour.
+            AppLog.Current.Error("JsonApplicationStateStore", "QuarantineFileFailed", ex);
             return sourcePath;
         }
     }
@@ -619,7 +626,11 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"JsonApplicationStateStore: failed to write pre-migration backup for schema v{fromVersion}: {ex.GetType().Name}");
+            AppLog.Current.Error(
+                "JsonApplicationStateStore",
+                "PreMigrationBackupWriteFailed",
+                ex,
+                new KeyValuePair<string, object?>("fromVersion", fromVersion));
         }
         finally
         {

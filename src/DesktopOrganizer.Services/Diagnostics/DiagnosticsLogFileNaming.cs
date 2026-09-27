@@ -8,12 +8,15 @@ namespace DesktopOrganizer.Services.Diagnostics;
 /// </summary>
 public static class DiagnosticsLogFileNaming
 {
-    private const string Prefix = "gestures-";
+    // L12 (release-hardening review, cosmetic): renamed from "gestures-" — this sink has carried every
+    // app diagnostics event (not just gestures) since ADR-033 part 1, and the old prefix was left over
+    // from before that widened scope.
+    private const string Prefix = "app-";
     private const string Extension = ".jsonl";
 
     /// <summary>
     /// Builds the file name for a new diagnostics session started at <paramref name="now"/> by
-    /// process <paramref name="processId"/>, e.g. <c>gestures-20260917-101500-12345.jsonl</c>.
+    /// process <paramref name="processId"/>, e.g. <c>app-20260917-101500-12345.jsonl</c>.
     /// </summary>
     /// <param name="now">The session start time (local time).</param>
     /// <param name="processId">The current process id, disambiguating concurrent app instances.</param>

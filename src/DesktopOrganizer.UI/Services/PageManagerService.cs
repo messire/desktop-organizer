@@ -38,10 +38,9 @@ public class PageManagerService : IPageManager
     /// <param name="applicationStateService">Persists the pages list and current page.</param>
     /// <param name="confirmation">
     /// Gates <see cref="RemovePage"/> (P08 fix cycle 1, CRITICAL C1, 2026-09-22) — deleting a page
-    /// permanently destroys every panel on it, including any app-managed item copies
-    /// (<see cref="IWindowManager.RemoveChildWindow(Guid, bool, bool)"/>'s <c>releaseManagedItems: true</c>),
-    /// mirroring <c>MainWindowViewModel.RemovePanel</c>'s own confirm gate (ADR-010 Decision 2) instead of
-    /// silently erasing user files past the Recycle Bin with no warning at all.
+    /// permanently destroys every panel on it and moves any app-managed item copies to the Recycle Bin
+    /// (ADR-035), mirroring <c>MainWindowViewModel.RemovePanel</c>'s own confirm gate (ADR-010 Decision 2).
+    /// Also shows the "could not move to the Recycle Bin" message when that fails (the page is kept).
     /// </param>
     /// <param name="itemStorage">
     /// Used to decide whether any panel on the page being removed actually has something to lose (see
@@ -110,15 +109,14 @@ public class PageManagerService : IPageManager
     /// <inheritdoc />
     /// <remarks>
     /// CRITICAL C1 fix (P08 fix cycle 1, 2026-09-22): deleting a page permanently destroys every panel
-    /// on it via <see cref="IWindowManager.RemoveChildWindow(Guid, bool, bool)"/>'s
-    /// <c>releaseManagedItems: true</c> — the exact same irreversible, past-the-Recycle-Bin file deletion
+    /// on it and moves their app-managed items to the Recycle Bin — the same removal
     /// <c>MainWindowViewModel.RemovePanel</c> already gates behind a confirmation (ADR-010 Decision 2).
     /// This mirrors that gate at the page level: every live panel is synced to its model first (so a
     /// stale-original-path remap from <c>ChildWindowViewModel.LoadFromModel</c>, ADR-009 Amendment,
     /// is already reflected in <see cref="Models.ChildWindowModel.FilePaths"/> before it's inspected —
     /// otherwise this check could see "nothing managed" while the per-panel <c>SyncToModel</c> inside
-    /// <see cref="IWindowManager.RemoveChildWindow(Guid, bool, bool)"/> picks up the by-then-remapped
-    /// managed path and deletes it anyway), then the confirmation text/icon depends on whether ANY panel
+    /// recycle step picks up the by-then-remapped managed path anyway), then the confirmation text/icon
+    /// depends on whether ANY panel
     /// on the page actually has a managed file to lose, same warning-vs-neutral split as
     /// <c>MainWindowViewModel.RemovePanel</c>.
     /// <para>
@@ -158,16 +156,38 @@ public class PageManagerService : IPageManager
 
         if (!confirmed) return false;
 
+        // ADR-035: every managed item of every panel on the page goes to the Recycle Bin in ONE batch
+        // (one shell operation, at most one "can't recycle, delete permanently?" prompt). If anything
+        // is still on disk afterwards, the page and ALL its panels are kept — only the items that did
+        // reach the Recycle Bin are taken out of their panels — and the user is told why.
+        var managedPaths = pagePanels
+            .SelectMany(m => m.FilePaths)
+            .Where(_itemStorage.IsManaged)
+            .ToList();
+
+        if (managedPaths.Count > 0)
+        {
+            var outcome = _itemStorage.ReleaseToRecycleBin(managedPaths);
+            if (!outcome.IsComplete)
+            {
+                _windowManager.RemoveItemsFromPanels(outcome.Recycled);
+                _confirmation.Notify(
+                    _localization.Format("Recycle_Failed_Message_Format", outcome.Remaining.Count),
+                    _localization.GetString("Recycle_Failed_Title"),
+                    MessageBoxImage.Warning);
+                return false;
+            }
+        }
+
         // Close all panels belonging to this page
         var toRemove = pagePanels.Select(m => m.Id).ToList();
 
         foreach (var id in toRemove)
         {
-            // Deleting a page permanently destroys every panel on it, so release their app-managed
-            // item copies too (see RemoveChildWindow remarks in WindowManager). deferSave: true avoids
-            // one synchronous full-state write per removed panel (Phase 7 / Block C, M4) —
-            // SaveWindowsStateNow() below flushes the debounced writes once for the whole page.
-            _windowManager.RemoveChildWindow(id, releaseManagedItems: true, deferSave: true);
+            // The managed items are already in the Recycle Bin (above), so releaseManagedItems: false.
+            // deferSave: true avoids one synchronous full-state write per removed panel (Phase 7 /
+            // Block C, M4) — SaveWindowsStateNow() below flushes the debounced writes once for the page.
+            _windowManager.RemoveChildWindow(id, releaseManagedItems: false, deferSave: true);
         }
 
         if (toRemove.Count > 0)

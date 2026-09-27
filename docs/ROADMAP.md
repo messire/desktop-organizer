@@ -2,7 +2,8 @@
 
 **Цель:** приблизить DesktopOrganizer по функциональности и поведению к Stardock Fences.
 
-**Статус на 2026-08-16.** Фазы 0–9 закрыты. Реализованы: встраивание панелей в слой рабочего стола (Progman/WorkerW), убирание из taskbar/Alt+Tab, перетаскивание за заголовок, привязка к сетке, два вида (список/плитка), drag&drop файлов, сохранение состояния в JSON, окно настроек и трей; файловые операции, поведение панелей, внешний вид, десктоп-жесты, Folder Portals, страницы/swipe, снапшоты раскладки, multi-monitor; ресайз кратно сетке иконок, фильтр содержимого панели, кнопка roll-up; скрытие/показ иконок рабочего стола (единый переключатель, без выборочного режима — см. ADR-006); панель системных иконок (SystemIconsPanel) как второй независимый тип desktop-window. Плюс 2026-07-26 (см. `docs/prompts/outstanding-followups.md`, пункты 1–4): one-time Move-хинт, тест кросс-volume `Restore`, очистка managed-копий при удалении панели ([ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md)) и re-clamp панелей при уменьшении рабочей области монитора. Плюс ещё 2026-07-26 (см. `docs/prompts/grid-snap-drag-and-settings-order.md`, [ADR-011](../adr/ADR-011-manual-drag-with-magnetic-grid-snap.md)): магнитное покадровое прилипание к сетке во время перетаскивания панели (не только на drop), новая настройка `GridSnapDistance`, и реорганизация окна настроек (порядок групп + перенос «Привязки к сетке» в «Автозапуск и рабочий стол»). Плюс 2026-08-15 — **Фаза 7 «Производительность, память и отказоустойчивость»** ([docs/PLANS/phase-7-performance-hardening.md](PLANS/phase-7-performance-hardening.md), [ADR-012](../adr/ADR-012-performance-and-resilience-hardening.md)): все 11 находок [docs/PERFORMANCE_AUDIT.md](PERFORMANCE_AUDIT.md) закрыты 6 блоками (A–F) — debounced persistence с синхронным flush для структурных изменений, try/catch вокруг колбэка глобального хука жестов + вынос чистой машины состояний, ограниченный LRU-кеш иконок и замороженные кеш-кисти конвертеров, batch-уведомления и O(1) дедуп коллекций ViewModel, авторитетный in-memory кеш манифеста `PanelItemStorageService` с write-through. Плюс 2026-08-16 — **Фаза 8 «UX-паритет значков: выделение и переименование»** ([docs/PLANS/icon-selection-and-rename.md](PLANS/icon-selection-and-rename.md), [ADR-013](../adr/ADR-013-panel-item-selection-and-rename.md)): визуальное выделение значка в обоих видах панели (`ListBox`-контейнеры, подсветка не зависит от `IsSelectionActive`) и честные имена + inline-переименование значков (F2/контекстное меню, физическое переименование на диске, GUID перенесён из имени файла в имя каталога, синхронизация manifest). Плюс ещё 2026-08-16 — **Фаза 9 «Сортировка и ручной порядок значков панели»** ([docs/PLANS/panel-item-sorting.md](PLANS/panel-item-sorting.md), [ADR-014](../adr/ADR-014-panel-item-sorting-and-manual-order.md)): новая настройка `PanelSortMode` (Manual/Name) в окне настроек и контекстном меню заголовка, немутирующая сортировка по имени (собственный natural-order компаратор, папки вперёд), drag-to-reorder значков мышью в обоих видах панели с трансляцией видимого индекса в полный набор при активном `ContentFilter` и авто-переключением в `Manual`. Остаются сквозные задачи (см. ниже).
+**Статус на 2026-09-27.** Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» закрыта, ждёт manual verify
+(Win10/Win11). Реализованы: встраивание панелей в слой рабочего стола (Progman/WorkerW), убирание из taskbar/Alt+Tab, перетаскивание за заголовок, привязка к сетке, два вида (список/плитка), drag&drop файлов, сохранение состояния в JSON, окно настроек и трей; файловые операции, поведение панелей, внешний вид, десктоп-жесты, Folder Portals, страницы/swipe, снапшоты раскладки, multi-monitor; ресайз кратно сетке иконок, фильтр содержимого панели, кнопка roll-up; скрытие/показ иконок рабочего стола (единый переключатель, без выборочного режима — см. ADR-006); панель системных иконок (SystemIconsPanel) как второй независимый тип desktop-window. Плюс 2026-07-26 (см. `docs/prompts/outstanding-followups.md`, пункты 1–4): one-time Move-хинт, тест кросс-volume `Restore`, очистка managed-копий при удалении панели ([ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md)) и re-clamp панелей при уменьшении рабочей области монитора. Плюс ещё 2026-07-26 (см. `docs/prompts/grid-snap-drag-and-settings-order.md`, [ADR-011](../adr/ADR-011-manual-drag-with-magnetic-grid-snap.md)): магнитное покадровое прилипание к сетке во время перетаскивания панели (не только на drop), новая настройка `GridSnapDistance`, и реорганизация окна настроек (порядок групп + перенос «Привязки к сетке» в «Автозапуск и рабочий стол»). Плюс 2026-08-15 — **Фаза 7 «Производительность, память и отказоустойчивость»** ([docs/PLANS/phase-7-performance-hardening.md](PLANS/phase-7-performance-hardening.md), [ADR-012](../adr/ADR-012-performance-and-resilience-hardening.md)): все 11 находок [docs/PERFORMANCE_AUDIT.md](PERFORMANCE_AUDIT.md) закрыты 6 блоками (A–F) — debounced persistence с синхронным flush для структурных изменений, try/catch вокруг колбэка глобального хука жестов + вынос чистой машины состояний, ограниченный LRU-кеш иконок и замороженные кеш-кисти конвертеров, batch-уведомления и O(1) дедуп коллекций ViewModel, авторитетный in-memory кеш манифеста `PanelItemStorageService` с write-through. Плюс 2026-08-16 — **Фаза 8 «UX-паритет значков: выделение и переименование»** ([docs/PLANS/icon-selection-and-rename.md](PLANS/icon-selection-and-rename.md), [ADR-013](../adr/ADR-013-panel-item-selection-and-rename.md)): визуальное выделение значка в обоих видах панели (`ListBox`-контейнеры, подсветка не зависит от `IsSelectionActive`) и честные имена + inline-переименование значков (F2/контекстное меню, физическое переименование на диске, GUID перенесён из имени файла в имя каталога, синхронизация manifest). Плюс ещё 2026-08-16 — **Фаза 9 «Сортировка и ручной порядок значков панели»** ([docs/PLANS/panel-item-sorting.md](PLANS/panel-item-sorting.md), [ADR-014](../adr/ADR-014-panel-item-sorting-and-manual-order.md)): новая настройка `PanelSortMode` (Manual/Name) в окне настроек и контекстном меню заголовка, немутирующая сортировка по имени (собственный natural-order компаратор, папки вперёд), drag-to-reorder значков мышью в обоих видах панели с трансляцией видимого индекса в полный набор при активном `ContentFilter` и авто-переключением в `Manual`. Остаются сквозные задачи (см. ниже).
 
 Легенда: `[ ]` — не сделано, `[~]` — частично, `[x]` — готово.
 
@@ -1095,6 +1096,94 @@ MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§1
 
 ---
 
+## Фаза 10. Release hardening 1.0
+
+Источник — [docs/PLANS/release-hardening-1.0.md](PLANS/release-hardening-1.0.md) (пакеты A–G2, мастер-план),
+[docs/PLANS/release-hardening-1.0-F-dpi.md](PLANS/release-hardening-1.0-F-dpi.md) (под-план пакета F),
+[docs/PLANS/release-hardening-1.0-f0-results.md](PLANS/release-hardening-1.0-f0-results.md) (спайк F0,
+CLARIFICATION_NEEDED и решение оркестратора). Ветка `feature/release-hardening` от `rc/0.6.1`. **Версия
+осталась 0.6.1** — по явному решению пользователя бампа не было. Архитектурные решения —
+[ADR-033](../adr/ADR-033-crash-safety-and-app-log.md)…[ADR-038](../adr/ADR-038-release-engineering.md).
+`dotnet build`/`dotnet test` — 0 errors, 0 warnings, 4379 тестов.
+
+- [x] **Пакет B — Diagnostics** (фундамент): `IAppLog`/`DiagnosticsAppLog` поверх единого sink
+      `JsonLinesDiagnosticsLog` (ADR-027 не меняется), уровни `Standard` (Release-дефолт, always-on)/
+      `Verbose` (`--diag`/`DESKTOPORGANIZER_DIAG=1`), `LogScrubber` (пути/имя пользователя), ambient
+      `AppLog.Current`, `AppVersionInfo`. См. [ADR-033](../adr/ADR-033-crash-safety-and-app-log.md).
+- [x] **Пакет A — Crash safety**: `CrashCoordinator` (иконки → crash-report+лог → сохранение состояния
+      (только UI-поток) → диалог → выход, код 5), `WinFormsExceptionBridge`, единый `ShutdownSequence`
+      для `OnExit`/оба `SessionEnding`, `StartupIconsSelfHeal`. См.
+      [ADR-033](../adr/ADR-033-crash-safety-and-app-log.md).
+- [x] **Пакет D — Удаление панели/страницы → Корзина** (amends
+      [ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md)): `INativeApi.RecycleItems`,
+      `RecycleOutcome`/`PanelRemovalResult`, никогда не hard-delete, fail-visibly. Закрывает открытый
+      архитектурный вопрос ниже («Сквозные задачи» — «удалить панель стирает managed-файлы мимо
+      Корзины»). См. [ADR-035](../adr/ADR-035-panel-deletion-recycle-bin.md).
+- [x] **Пакет C — Восстановление после рестарта Explorer**: `ExplorerRestartMonitor`
+      (`TaskbarCreated`+Progman-опрос), `DesktopLayerRecoveryPolicy` (коалесинг 1.5с, 6×500мс ретраев),
+      `ShellRecoveryCoordinator`, `WindowManager.RecoverDesktopLayer`. На Win11 24H2+ панели top-level
+      (WorkerW не найден) — amendment к
+      [ADR-001](../adr/ADR-001-desktop-integration.md)/[ADR-019](../adr/ADR-019-sidebar-top-level-virtual-desktop.md)/[ADR-020](../adr/ADR-020-sidebar-zorder-back-without-topmost.md).
+      См. [ADR-034](../adr/ADR-034-explorer-restart-recovery.md).
+- [x] **Пакет E — Drag-out элементов панели** (amends
+      [ADR-009](../adr/ADR-009-drag-drop-move-semantics.md)/[ADR-014](../adr/ADR-014-panel-item-sorting-and-manual-order.md)):
+      один `DoDragDrop` с тремя форматами (reorder+`FileDrop`+`Preferred DropEffect=Move`),
+      `IPanelItemDragOutSession`, `MovedOutVerifier` (0/500/2000мс). Закрывает Risk R7 (Фаза 9 бэклог,
+      см. ниже). См. [ADR-036](../adr/ADR-036-panel-item-drag-out.md).
+- [x] **Пакет F — PerMonitorV2 + двухрежимная шкала desktop-слоя** (amends
+      [ADR-004](../adr/ADR-004-phase5-pages-snapshots-multimonitor.md)/[ADR-022](../adr/ADR-022-native-panel-sizing.md)
+      D-6/[ADR-028](../adr/ADR-028-workspace-grid.md)): манифест PMv2, `DesktopScaleModel`/
+      `IDesktopScaleProvider`, режим E (Embedded, Win10/≤23H2, единый масштаб WorkerW) vs T (TopLevel,
+      Win11 24H2+, per-monitor) по факту (`GA_ROOT`); fast-path bit-в-bit для uniform-конфигураций, без
+      миграции persistence. Закрывает открытый архитектурный вопрос «per-monitor DPI-осведомлённость»
+      (см. ниже). См. [ADR-037](../adr/ADR-037-permonitor-v2-dual-mode-desktop-scale.md).
+- [x] **Пакет G1 — инсталлятор, CI, документы**: ссылки паблишера/поддержки, опциональная подпись по
+      SHA1-отпечатку сертификата, корневые README/LICENSE(MIT, messire)/CHANGELOG,
+      `.github/workflows/ci.yml` (0-warnings гейт, pinned actions/tool versions).
+- [x] **Пакет G2 — ручная проверка обновлений + ссылки в About**: `SemVersion`, `GitHubReleaseUpdateChecker`
+      (без persisted state, `html_url` валидируется структурно), `IExternalLinkLauncher` (только
+      `https://`), `AboutViewModel`. См. [ADR-038](../adr/ADR-038-release-engineering.md).
+
+**Готово, когда:** все 7 пакетов реализованы, `dotnet build`/`dotnet test` — 0 errors/0 warnings, ADR-033…
+ADR-038 приняты, ROADMAP/README/CHANGELOG синхронизированы с кодом. Manual verify (Win10/Win11) — не
+выполнена (среда разработки ограничена `dotnet build`/`dotnet test`).
+
+> ⚠️ **Consolidated manual verify (Win10/Win11) — не выполнена.** Полные чек-листы — в разделах
+> «Manual verify» каждого ADR-033…ADR-038 и в планах. Наивысший приоритет:
+> - **Embedded mode (Win10 22H2)** — панели остаются детьми `WorkerW`, единый масштаб на смешанном DPI
+>   (известное ограничение, ADR-037).
+> - **Top-level mode (Win11 24H2+)** — панели top-level, per-monitor DPI, `WM_DPICHANGED` на самой панели
+>   (ADR-037); recovery после рестарта Explorer в этом режиме (ADR-034).
+> - **Смешанный DPI** — 100%+150% с вторым монитором справа/слева/сверху, смена масштаба на лету, апгрейд
+>   реального профиля 0.6.1 (E6/QF-1 гипотеза якорения не подтверждена — нет стенда с 2 мониторами).
+> - **Рестарт Explorer** — тройной `taskkill /f`/graceful restart на 2 мониторах, во время drag, со
+>   свёрнутой панелью, со скрытыми иконками.
+> - **Краш** — необработанное исключение на UI- и фоновом потоке (debug-команда), `taskkill /f` при
+>   скрытых иконках, выход из системы при скрытых иконках.
+> - **Корзина** — удаление панели/страницы с файлами → Корзина → «Восстановить»; элемент крупнее Корзины;
+>   залоченный файл → `Blocked`.
+> - **Drag-out** — на рабочий стол/Explorer (тот же диск/другой диск/сеть), в другую панель, Esc/Ctrl
+>   посреди drag, портал.
+> - **Проверка обновлений** — онлайн/офлайн, смена языка при показанном статусе, ссылки открываются в
+>   браузере по умолчанию.
+> - **Подпись/CI** — SmartScreen с подписанной/неподписанной сборкой; тег `v*` собирает и прикладывает
+>   инсталлятор к GitHub Release.
+
+**Бэклог, найденный ревью в рамках этого захода (не в объёме 1.0):**
+- Локализованный кастомный диалог подтверждения вместо нативных кнопок `MessageBox` (крайние диалоги
+  краша/Корзины сейчас используют системные Yes/No).
+- Подсветка drag-over на целевой панели при cross-panel drag-out (пакет E) — сейчас нет визуального
+  индикатора «сюда примет».
+- Owner HWND для shell-диалога Корзины (`ReleaseToRecycleBin` вызывает `RecycleItems` с
+  `IntPtr.Zero` — диалог не привязан к окну приложения).
+- Качество иконок через `SHGetImageList` (текущий рендер 96-DPI bitmap мягкий на 150%+, вне объёма
+  пакета F, см. ADR-037 инвентаризацию #28).
+- Нативное shell-контекстное меню на элементах панели (сейчас — собственное WPF-меню, не `IContextMenu`
+  COM, в отличие от `SystemIconsPanel`).
+- Сортировка по типу/дате (сейчас только `PanelSortMode.Manual/Name`, см. ADR-014).
+
+---
+
 ## Сквозные задачи
 
 - [~] Тесты на новые сервисы: `FolderWatcherTests`, `PageManagerServiceTests`, `MonitorServiceTests` реализованы
@@ -1106,12 +1195,14 @@ MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§1
       реализован — `WindowManager.OnMonitorsChanged` пересчитывает позицию панелей, когда монитор не
       исчез, но его рабочая область сократилась; `ClampIntoMonitor` учитывает полный rect (Position+Size).
       Manual verify (Win10/Win11) для этого сценария остаётся открытым.
-      **Осознанно не реализовано, открытый архитектурный вопрос:** полноценная per-monitor DPI-
-      осведомлённость (`WM_DPICHANGED`) — приложение работает в режиме System-DPI-aware (нет
-      `app.manifest`), под которым это сообщение не приходит; переход на Per-Monitor-V2 — отдельное
-      архитектурное решение с широким кругом затрагиваемых мест (WorkerW embedding, координаты во всех
-      chromeless-окнах), требует отдельного планирования (`fences-feature-planner`) при взятии в работу.
-      Обои и виртуальные рабочие столы — по-прежнему не реализовано.
+      **Закрыто 2026-09-27 (Release hardening 1.0, пакет F):** полноценная per-monitor DPI-
+      осведомлённость реализована — `app.manifest` (PerMonitorV2), `DesktopScaleModel`/
+      `IDesktopScaleProvider`, двухрежимная шкала (Embedded — единый масштаб WorkerW, TopLevel —
+      per-monitor на Win11 24H2+). Известное ограничение сохраняется в режиме Embedded (Win10/≤23H2):
+      панели на мониторе с иным DPI по-прежнему рендерятся в едином масштабе слоя, не по-настоящему
+      per-monitor — задокументировано в README и [ADR-037](../adr/ADR-037-permonitor-v2-dual-mode-desktop-scale.md).
+      Гипотеза якорения мультимонитора (QF-1) не подтверждена вживую (нет стенда с 2 мониторами) —
+      manual verify остаётся открытым. Обои и виртуальные рабочие столы — по-прежнему не реализовано.
 - [x] **Move-хинт при drag&drop — закрыто 2026-07-26** (`docs/prompts/outstanding-followups.md`, пункт 1):
       one-time хинт о Move-семантике при первом drop реализован (`IAppSettings.HasShownMoveHint`,
       `ChildWindowViewModel.MoveHintRequested`, `Popup` в `ChildWindow.xaml`, автозакрытие 4с).
@@ -1119,17 +1210,14 @@ MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§1
       (`docs/prompts/outstanding-followups.md`, пункт 3, [ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md)).
 - [x] **Тест на кросс-volume откат в `Restore` — закрыто 2026-07-26**
       (`docs/prompts/outstanding-followups.md`, пункт 2).
-- [ ] **Открытый архитектурный вопрос (не решён, бэклог): «удалить панель» стирает managed-файлы
-      мимо Корзины.** В эталонном Stardock Fences удаление fence никогда не уничтожает файлы — fence
-      чисто визуальная группировка, иконки остаются на рабочем столе. В этом приложении из-за
-      архитектуры `IPanelItemStorageService` (файлы физически перемещаются при попадании в панель,
-      [ADR-009](../adr/ADR-009-drag-drop-move-semantics.md)) удаление панели с managed-файлами —
-      единственный сценарий, где реально стираются пользовательские файлы мимо Корзины. Confirm-диалог
-      ([ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md), Решение 2) митигирует
-      риск неожиданности, но не устраняет расхождение с духом Fences. Возможное направление на
-      будущее — «удалить панель» = вернуть managed-файлы на рабочий стол (переиспользуя
-      `IPanelItemStorageService.Restore`, как уже делает «Убрать из панели» для одного элемента) вместо
-      их стирания. Не реализовывать без отдельного обсуждения с пользователем/`fences-feature-planner`.
+- [x] **Закрыто 2026-09-27 (Release hardening 1.0, пакет D)** — «удалить панель» стирает managed-файлы
+      мимо Корзины. Решено *не* буквальным Fences-паритетом (вернуть файлы на рабочий стол), а
+      минимально достаточным фиксом: удаление панели/страницы теперь всегда проходит через Корзину
+      (`INativeApi.RecycleItems`, `FOF_ALLOWUNDO`), никогда не удаляет содержимое напрямую, и
+      fail-visibly при сбое (панель/страница остаётся). См.
+      [ADR-035](../adr/ADR-035-panel-deletion-recycle-bin.md) (amends ADR-010). Известное ограничение:
+      восстановленные из Корзины файлы попадают в `PanelItems\<guid>\`, не обратно на панель (панель уже
+      удалена к моменту восстановления) — осознанно не устранено, задокументировано в README.
 - [ ] **Manual verify (Win10/Win11) — Move при drag&drop** (см. Фаза 1, [ADR-009](../adr/ADR-009-drag-drop-move-semantics.md)):
       - Drag файла/папки с рабочего стола в панель → курсор показывает **Move** (не Copy), оригинал
         исчезает с десктопа сразу после drop, элемент в панели рабочий.
@@ -1247,6 +1335,6 @@ MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§1
 
 ## Рекомендуемый порядок
 
-Фаза 0 → Фаза 1 → Фаза 2 → Фаза 3 → Фаза 4 → Фаза 5 → Фаза 6 → Фаза 7 → Фаза 8 → Фаза 9.
+Фаза 0 → Фаза 1 → Фаза 2 → Фаза 3 → Фаза 4 → Фаза 5 → Фаза 6 → Фаза 7 → Фаза 8 → Фаза 9 → Фаза 10.
 
 Фазы 1–2 дают максимальный эффект «как Fences» при малых затратах. Фаза 4 (особенно захват реальных иконок) — самый крупный и концептуально важный блок, его стоит начинать только после стабилизации 1–3.

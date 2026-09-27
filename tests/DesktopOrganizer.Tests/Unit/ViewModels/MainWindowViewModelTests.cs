@@ -16,8 +16,8 @@ namespace DesktopOrganizer.Tests.Unit.ViewModels;
 /// Unit tests for <see cref="MainWindowViewModel.RemovePanelCommand"/> (<c>RemovePanel</c>).
 /// Covers the confirmation gate added in front of the irreversible
 /// <see cref="IWindowManager.RemoveChildWindow(Guid, bool)"/> call (fences-ux-parity-reviewer finding
-/// #2): panel deletion moves app-managed item copies past the Recycle Bin (<c>File.Delete</c> /
-/// <c>Directory.Delete</c>), so it must never happen without an explicit user confirmation.
+/// #2): panel deletion moves app-managed item copies to the Recycle Bin (ADR-035), so it must never
+/// happen without an explicit user confirmation — and a blocked removal must be reported to the user.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class MainWindowViewModelTests
@@ -33,9 +33,11 @@ public class MainWindowViewModelTests
     private readonly Mock<IPanelItemStorageService> _itemStorageMock = new();
     private readonly Mock<ILayoutEditModeService> _layoutEditModeMock = new();
     private readonly Mock<IPanelCustomizeService> _panelCustomizeServiceMock = new();
+    private readonly Mock<IUpdateCheckService> _updateCheckServiceMock = new();
+    private readonly Mock<IExternalLinkLauncher> _linkLauncherMock = new();
 
     // A real LocalizationService (English) rather than a mock: several tests below assert actual
-    // confirmation-dialog text (e.g. "deleted from disk", plural panel counts) — the same pattern the
+    // confirmation-dialog text (e.g. "moved to the Recycle Bin", plural panel counts) — the same pattern the
     // localization work packages use throughout (docs/PLANS/localization.md R-5: tests fix culture
     // explicitly rather than relying on the machine's own culture).
     private readonly ILocalizationService _localization = TestLocalization.English;
@@ -263,6 +265,42 @@ public class MainWindowViewModelTests
         _windowManagerMock.Verify(
             w => w.RemoveChildWindow(panel.Id, true),
             Times.Once);
+        _confirmationMock.Verify(
+            c => c.Notify(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// ADR-035 fail-visibly: when <see cref="IWindowManager.RemoveChildWindow(Guid, bool)"/> reports the
+    /// removal as <see cref="PanelRemovalResult.Blocked"/> (some managed items could not be moved to the
+    /// Recycle Bin, so the panel was kept), the user is told — once, with a warning and the number of
+    /// items that stayed.
+    /// </summary>
+    [Fact]
+    public void RemovePanel_RemovalBlocked_NotifiesUserWithRemainingCount()
+    {
+        // Arrange
+        var sut = BuildSut();
+        var panel = new ChildWindowModel { FilePaths = ["C:\\managed\\a.txt", "C:\\managed\\b.txt"] };
+        sut.SelectedPanel = panel;
+        _itemStorageMock.Setup(s => s.IsManaged(It.IsAny<string>())).Returns(true);
+        _confirmationMock
+            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
+            .Returns(true);
+        _windowManagerMock
+            .Setup(w => w.RemoveChildWindow(panel.Id, true))
+            .Returns(PanelRemovalResult.Blocked(["C:\\managed\\a.txt", "C:\\managed\\b.txt"]));
+
+        // Act
+        sut.RemovePanelCommand.Execute(null);
+
+        // Assert
+        _confirmationMock.Verify(
+            c => c.Notify(
+                It.Is<string>(m => m.StartsWith("2 ", StringComparison.Ordinal) && m.Contains("Recycle Bin")),
+                _localization.GetString("Recycle_Failed_Title"),
+                MessageBoxImage.Warning),
+            Times.Once);
     }
 
     /// <summary>
@@ -332,7 +370,7 @@ public class MainWindowViewModelTests
         // Assert
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => m.Contains("deleted from disk")),
+                It.Is<string>(m => m.Contains("moved to the Recycle Bin")),
                 It.IsAny<string>(),
                 MessageBoxImage.Warning),
             Times.Once);
@@ -361,7 +399,7 @@ public class MainWindowViewModelTests
         // Assert — neutral overload (default Question icon), not the Warning one.
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => !m.Contains("deleted from disk")),
+                It.Is<string>(m => !m.Contains("moved to the Recycle Bin")),
                 It.IsAny<string>(),
                 MessageBoxImage.Question),
             Times.Once);
@@ -384,8 +422,8 @@ public class MainWindowViewModelTests
         // ChildWindowViewModel has already remapped it to the managed copy in memory (ADR-009
         // Amendment). SyncAllWindowsToModels() must run — and its effect must already be visible —
         // before hasManagedFiles is computed, or this dialog would wrongly show the neutral
-        // "nothing lost" text right before RemoveChildWindow's own SyncToModel()+Release() silently
-        // deletes the by-then-managed file past the Recycle Bin.
+        // "nothing lost" text right before RemoveChildWindow's own SyncToModel()+recycle silently
+        // sends the by-then-managed file to the Recycle Bin.
         var sut = BuildSut();
         var panel = new ChildWindowModel { FilePaths = ["C:\\stale\\original.lnk"] };
         sut.SelectedPanel = panel;
@@ -406,7 +444,7 @@ public class MainWindowViewModelTests
         // Assert
         _confirmationMock.Verify(
             c => c.Confirm(
-                It.Is<string>(m => m.Contains("deleted from disk")),
+                It.Is<string>(m => m.Contains("moved to the Recycle Bin")),
                 It.IsAny<string>(),
                 MessageBoxImage.Warning),
             Times.Once);
@@ -1483,6 +1521,11 @@ public class MainWindowViewModelTests
             _inputDialogServiceMock.Object,
             _localization);
 
+        // Package G2 wiring fixup only (release-hardening-1.0.md §G2): MainWindowViewModel's constructor
+        // gained an AboutViewModel parameter, same category as WP-C's own IInputDialogService fixup above
+        // — no MainWindowViewModel behavior under test here changed.
+        var about = new AboutViewModel(_updateCheckServiceMock.Object, _linkLauncherMock.Object, localization ?? _localization);
+
         return new MainWindowViewModel(
             _windowManagerMock.Object,
             _appSettingsMock.Object,
@@ -1495,6 +1538,7 @@ public class MainWindowViewModelTests
             _layoutEditModeMock.Object,
             _panelCustomizeServiceMock.Object,
             localization ?? _localization,
-            systemUiCulture ?? CultureInfo.GetCultureInfo("en"));
+            systemUiCulture ?? CultureInfo.GetCultureInfo("en"),
+            about);
     }
 }

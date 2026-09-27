@@ -82,14 +82,36 @@ public static class DiConfig
         services.AddSingleton<INativeApi, NativeApi>();
         services.AddSingleton<INotifyIconAdapter, NotifyIconAdapter>();
 
-        // Diagnostics — off by default in Release (see DiagnosticsSwitch); the JSONL sink owns a
-        // background writer thread, so it must be resolved as a singleton and disposed exactly once
-        // at shutdown (IDisposable singletons are disposed automatically when the root
-        // ServiceProvider is disposed — see App.OnExit).
-        services.AddSingleton<IDiagnosticsLog>(_ =>
-            DiagnosticsSwitch.IsEnabled(Environment.GetCommandLineArgs(), Environment.GetEnvironmentVariable)
-                ? new JsonLinesDiagnosticsLog(diagnosticsLogDirectory ?? DefaultDiagnosticsLogDirectory)
+        // Shared always-eventually-real sink (ADR-033 part 1): owns the single JsonLinesDiagnosticsLog
+        // instance both IDiagnosticsLog (Verbose level only, below) and IAppLog (always, regardless of
+        // level) write through, so gesture and app-log events interleave into the same JSONL file
+        // instead of each owning an independent writer thread. Registered as its own IDisposable
+        // singleton — disposed exactly once when the root ServiceProvider is disposed — and lazy: see
+        // DiagnosticsSink's remarks for why merely resolving it must never touch the file system.
+        services.AddSingleton(_ => new DiagnosticsSink(diagnosticsLogDirectory ?? DefaultDiagnosticsLogDirectory));
+
+        // Diagnostics — gesture/lifecycle tracing, off by default in Release (see DiagnosticsSwitch).
+        // Semantics unchanged by ADR-033 part 1: Standard resolves to the zero-cost no-op sink, Verbose
+        // resolves to the same real sink IAppLog uses (DiagnosticsSink above) rather than a second,
+        // independent JsonLinesDiagnosticsLog instance.
+        services.AddSingleton<IDiagnosticsLog>(sp =>
+            DiagnosticsSwitch.Resolve(Environment.GetCommandLineArgs(), Environment.GetEnvironmentVariable) == DiagnosticsLevel.Verbose
+                ? sp.GetRequiredService<DiagnosticsSink>().Log
                 : NullDiagnosticsLog.Instance);
+
+        // Always-on application-event log (ADR-033 part 1) — replaces every former
+        // Console.Error.WriteLine call site. Gated by the compile-time DiagnosticsDefaults.FileLoggingEnabled
+        // (true in every build today, plan Q3) rather than DiagnosticsSwitch/DiagnosticsLevel — disabling it
+        // requires recompiling, deliberately: there is no runtime/IAppSettings switch for this (CLAUDE.md
+        // persistence-freeze rationale — an always-on error trail must not be silently turned off by a
+        // corrupted settings file). Writes through DiagnosticsSink's Func indirection (not the materialized
+        // sink directly) so resolving IAppLog itself never forces the sink to materialize — only the first
+        // actual Info/Warn/Error call does (ADR-023 R-12, same rationale as ISingleInstanceCoordinator's own
+        // lazily-resolved diagnostics parameter below).
+        services.AddSingleton<IAppLog>(sp =>
+            DiagnosticsDefaults.FileLoggingEnabled
+                ? new DiagnosticsAppLog(() => sp.GetRequiredService<DiagnosticsSink>().Log)
+                : NullAppLog.Instance);
 
         // Services
         services.AddSingleton<IIconProvider, IconProvider>();
@@ -103,8 +125,16 @@ public static class DiConfig
         services.AddSingleton<IPanelItemStorageService, PanelItemStorageService>();
         services.AddSingleton<IFileItemRenameService, FileItemRenameService>();
 
+        // Manual "check for updates" (release-hardening-1.0.md §G2) — owns its own HttpClient, disposed with the root ServiceProvider.
+        services.AddSingleton<IUpdateCheckService, DesktopOrganizer.Services.Updates.GitHubReleaseUpdateChecker>();
+
         // Multi-monitor: self-contained service (owns its own WM_DISPLAYCHANGE listener).
         services.AddSingleton<IMonitorService, MonitorService>();
+        services.AddSingleton<IDesktopScaleProvider, DesktopScaleProvider>(); // per-monitor DPI snapshot (release-hardening F1, ADR-037)
+
+        // Explorer restart detection (ADR-034): its own hidden listener window, deliberately separate
+        // from MonitorService's. Inert until App calls Start(); disposed with the root provider.
+        services.AddSingleton<IExplorerRestartMonitor, ExplorerRestartMonitor>();
 
         // Windows virtual desktops (Task View) — NOT physical monitors. Degrades silently
         // to IsSupported == false when the shell COM object is unavailable.

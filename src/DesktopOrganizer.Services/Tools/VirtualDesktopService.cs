@@ -57,9 +57,25 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
 
     private readonly object _gate = new();
 
+    // Seam for tests (ADR-034 Reset coverage): production activates the real shell COM object.
+    private readonly Func<object?> _activateManager = ActivateManagerInstance;
+
     private IVirtualDesktopManager? _manager;
     private bool _initialized;
     private bool _disposed;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VirtualDesktopService"/> class with a custom COM
+    /// activation function. Test seam only — lets tests observe when (re)activation happens without a
+    /// real shell COM object; production uses the primary constructor.
+    /// </summary>
+    /// <param name="nativeApi">Native API wrapper.</param>
+    /// <param name="activateManager">Returns the activated manager object, or <see langword="null"/>; may throw.</param>
+    internal VirtualDesktopService(INativeApi nativeApi, Func<object?> activateManager)
+        : this(nativeApi)
+    {
+        _activateManager = activateManager ?? throw new ArgumentNullException(nameof(activateManager));
+    }
 
     /// <summary>
     /// The documented virtual desktop manager interface. Declared with <see cref="PreserveSigAttribute"/>
@@ -233,6 +249,27 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Same release strategy as <see cref="Dispose"/>: the stale RCW is only dropped, never
+    /// <see cref="Marshal.FinalReleaseComObject"/>-ed — after an Explorer restart it is a proxy into a
+    /// dead process, and letting its finalizer release it is the one option that can never throw at the
+    /// UI thread. Unlike <see cref="Dispose"/> this re-arms lazy activation (<c>_initialized</c> is
+    /// cleared), so the next call activates a manager bound to the new Explorer instance.
+    /// </remarks>
+    public void Reset()
+    {
+        AssertSta();
+
+        lock (_gate)
+        {
+            if (_disposed) return;
+
+            _manager = null;
+            _initialized = false;
+        }
+    }
+
     /// <summary>
     /// Drops the cached COM object. Safe to call more than once, and safe to call concurrently with
     /// an in-flight call.
@@ -257,6 +294,16 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
             // COM object; it simply degrades to "unsupported".
             _initialized = true;
         }
+    }
+
+    /// <summary>
+    /// Activates <c>CLSID_VirtualDesktopManager</c>, or answers <see langword="null"/> when the CLSID is
+    /// not registered on this system. May throw; <see cref="GetManagerLocked"/> handles that.
+    /// </summary>
+    private static object? ActivateManagerInstance()
+    {
+        var type = Type.GetTypeFromCLSID(VirtualDesktopManagerClsid);
+        return type is null ? null : Activator.CreateInstance(type);
     }
 
     /// <summary>
@@ -409,10 +456,7 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
         object? instance = null;
         try
         {
-            var type = Type.GetTypeFromCLSID(VirtualDesktopManagerClsid);
-            if (type is null) return null;
-
-            instance = Activator.CreateInstance(type);
+            instance = _activateManager();
             _manager = instance as IVirtualDesktopManager;
 
             if (_manager is null && instance is not null)

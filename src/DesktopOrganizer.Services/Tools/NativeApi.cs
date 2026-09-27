@@ -4,7 +4,7 @@ using DesktopOrganizer.Services.Diagnostics;
 namespace DesktopOrganizer.Services.Tools;
 
 /// <inheritdoc />
-internal partial class NativeApi: INativeApi
+internal sealed partial class NativeApi : INativeApi, IDisposable
 {
     private const string ExplorerAdvancedKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
     private const string ExplorerPoliciesKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
@@ -23,6 +23,20 @@ internal partial class NativeApi: INativeApi
     private readonly HandleLogRateLimiter _hitTestFailures;
 
     private readonly IAppLog? _appLog;
+
+    // ── Native shell context menu state (UI thread only) ─────────────────────────────────────────
+    // The hidden helper window that owns every tracked shell context menu (see EnsureShellMenuHost) and
+    // its rooted window-procedure delegate — the native side holds only an unmanaged thunk.
+    private NativeMessageWindow _shellMenuHost;
+    private NativeWindowProc? _shellMenuHostProc;
+
+    // IContextMenu3/IContextMenu2 of the menu currently inside TrackPopupMenuEx; null otherwise. Read by
+    // ShellMenuHostWndProc to forward WM_INITMENUPOPUP/WM_DRAWITEM/WM_MEASUREITEM/WM_MENUCHAR.
+    private NativeMethods.IContextMenu3? _activeMenu3;
+    private NativeMethods.IContextMenu2? _activeMenu2;
+
+    // Re-entrancy guard: never nest a second shell menu into the first one's modal loop.
+    private bool _shellMenuActive;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NativeApi"/> class. Logs through the ambient
@@ -126,21 +140,6 @@ internal partial class NativeApi: INativeApi
     {
         NativeMethods.GetCursorPos(out var pt);
         return new System.Drawing.Point(pt.X, pt.Y);
-    }
-
-    /// <inheritdoc />
-    public bool ShowFileProperties(string path)
-    {
-        var info = new NativeMethods.ShellExecuteInfo
-        {
-            cbSize = Marshal.SizeOf<NativeMethods.ShellExecuteInfo>(),
-            lpVerb = "properties",
-            lpFile = path,
-            nShow = NativeMethods.SwShow,
-            fMask = NativeMethods.SeeMaskInvokeIdList,
-        };
-
-        return NativeMethods.ShellExecuteExW(ref info);
     }
 
     /// <inheritdoc />
@@ -283,7 +282,10 @@ internal partial class NativeApi: INativeApi
 
     /// <inheritdoc />
     /// <remarks>Must be called on an STA thread (WPF UI thread). IShellFolder and IContextMenu are
-    /// apartment-threaded COM objects; TrackPopupMenuEx also requires the owning STA thread.</remarks>
+    /// apartment-threaded COM objects; TrackPopupMenuEx also requires the owning STA thread. Shares the
+    /// tracking/invocation core with <see cref="ShowShellContextMenuForPath"/> (helper-window owner,
+    /// foreground handling, IContextMenu2/3 message forwarding), but keeps its historical <c>CMF_NORMAL</c>
+    /// menu (+ <c>CMF_EXTENDEDVERBS</c> while Shift is held) for the virtual System Icons items.</remarks>
     public void ShowShellContextMenu(IntPtr pidl, IntPtr ownerHwnd, int screenX, int screenY)
     {
         System.Diagnostics.Debug.Assert(
@@ -295,104 +297,89 @@ internal partial class NativeApi: INativeApi
             return;
         }
 
-        var hMenu = IntPtr.Zero;
-        object? parentFolder = null;
-        object? contextMenu = null;
+        // The caller (SystemShellService) owns and frees the pidl.
+        ShowShellContextMenuCore(pidl, ownerHwnd, screenX, screenY, NativeMethods.CmfNormal, ShellVerbIntercepts.None, extension: null);
+    }
+
+    /// <inheritdoc />
+    public ShellContextMenuResult ShowShellContextMenuForPath(string path, IntPtr ownerHwnd, int screenX, int screenY, bool interceptDelete)
+    {
+        System.Diagnostics.Debug.Assert(
+            System.Threading.Thread.CurrentThread.GetApartmentState() == System.Threading.ApartmentState.STA,
+            "ShowShellContextMenuForPath must be called on an STA thread.");
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return new ShellContextMenuResult(ShellContextMenuOutcome.NotShown, null);
+        }
+
+        var extension = GetExtensionForLog(path);
+        var pidl = IntPtr.Zero;
+
+        // MINOR 4: the stage that actually failed goes to the log, not always "ParseDisplayName".
+        var stage = "ParseDisplayName";
         try
         {
-            var iidShellFolder = NativeMethods.IidIShellFolder;
-
-            // childPidl is a pointer INTO the parent's PIDL allocation — do NOT free it with CoTaskMemFree.
-            // The caller (SystemShellService) owns and frees the original pidl separately.
-            var hr = NativeMethods.SHBindToParent(pidl, ref iidShellFolder, out var parentPtr, out var childPidl);
-            if (hr != 0 || parentPtr == IntPtr.Zero || childPidl == IntPtr.Zero)
+            var hr = NativeMethods.SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out _);
+            if (hr != 0 || pidl == IntPtr.Zero)
             {
-                return;
+                LogShellMenuFailure(stage, extension, hr);
+                return new ShellContextMenuResult(ShellContextMenuOutcome.NotShown, null);
             }
 
-            parentFolder = Marshal.GetObjectForIUnknown(parentPtr);
-            Marshal.Release(parentPtr);
-            if (parentFolder is not NativeMethods.IShellFolder shellFolder)
-            {
-                return;
-            }
+            var intercepts = interceptDelete
+                ? ShellVerbIntercepts.Rename | ShellVerbIntercepts.Delete
+                : ShellVerbIntercepts.Rename;
 
-            var apidl = new[] { childPidl };
-            var iidContextMenu = NativeMethods.IidIContextMenu;
-            hr = shellFolder.GetUIObjectOf(ownerHwnd, 1, apidl, ref iidContextMenu, IntPtr.Zero, out var ctxPtr);
-            if (hr != 0 || ctxPtr == IntPtr.Zero)
-            {
-                return;
-            }
-
-            contextMenu = Marshal.GetObjectForIUnknown(ctxPtr);
-            Marshal.Release(ctxPtr);
-            if (contextMenu is not NativeMethods.IContextMenu menu)
-            {
-                return;
-            }
-
-            hMenu = NativeMethods.CreatePopupMenu();
-            if (hMenu == IntPtr.Zero)
-            {
-                return;
-            }
-
-            const uint cmdFirst = 1;
-            const uint cmdLast = 0x7FFF;
-
-            // QueryContextMenu returns an HRESULT whose SUCCESS code carries the number of
-            // inserted items in the low word. A failed query (or an empty menu) must not be
-            // tracked/invoked — doing so passes a stale/empty HMENU into the shell verb
-            // dispatch and is a source of access violations on virtual/broken items.
-            var queryHr = menu.QueryContextMenu(hMenu, 0, cmdFirst, cmdLast, NativeMethods.CmfNormal);
-            if (queryHr < 0)
-            {
-                return;
-            }
-
-            var cmd = NativeMethods.TrackPopupMenuEx(
-                hMenu,
-                NativeMethods.TpmReturnCmd | NativeMethods.TpmRightButton,
+            // The core logs its own stages and never throws; anything reaching the catch below from here on
+            // escaped its cleanup.
+            stage = "ShowMenu";
+            return ShowShellContextMenuCore(
+                pidl,
+                ownerHwnd,
                 screenX,
                 screenY,
-                ownerHwnd,
-                IntPtr.Zero);
-
-            if (cmd == 0)
-            {
-                return;
-            }
-
-            var invoke = new NativeMethods.CmInvokeCommandInfo
-            {
-                cbSize = Marshal.SizeOf<NativeMethods.CmInvokeCommandInfo>(),
-                hwnd = ownerHwnd,
-                lpVerb = (IntPtr)(cmd - cmdFirst),
-                nShow = NativeMethods.SwShow,
-            };
-            menu.InvokeCommand(ref invoke);
+                NativeMethods.CmfNormal | NativeMethods.CmfExplore | NativeMethods.CmfCanRename,
+                intercepts,
+                extension);
         }
-        catch
+        catch (Exception ex)
         {
-            // Degrade silently: a broken/virtual item must never disrupt the UI thread.
+            LogShellMenuFailure(stage, extension, ex.HResult);
+            return new ShellContextMenuResult(ShellContextMenuOutcome.NotShown, null);
         }
         finally
         {
-            if (hMenu != IntPtr.Zero)
+            // SHParseDisplayName allocates the absolute PIDL with the COM task allocator; this method owns it.
+            if (pidl != IntPtr.Zero)
             {
-                NativeMethods.DestroyMenu(hMenu);
+                NativeMethods.CoTaskMemFree(pidl);
             }
+        }
+    }
 
-            if (contextMenu is not null)
-            {
-                Marshal.ReleaseComObject(contextMenu);
-            }
+    /// <inheritdoc />
+    /// <remarks>
+    /// A pure handle comparison against the current helper window — no Win32 call, never throws. Expected on the UI
+    /// thread (the only thread that creates/destroys the helper). Answers <see langword="false"/> for
+    /// <see cref="IntPtr.Zero"/> and before the helper was ever created.
+    /// </remarks>
+    public bool IsOwnHelperWindow(IntPtr hwnd)
+        => hwnd != IntPtr.Zero && _shellMenuHost.IsValid && hwnd == _shellMenuHost.Handle;
 
-            if (parentFolder is not null)
-            {
-                Marshal.ReleaseComObject(parentFolder);
-            }
+    /// <summary>
+    /// Destroys the hidden shell-menu helper window (see <see cref="EnsureShellMenuHost"/>) and unregisters
+    /// its window class. Idempotent. Must run on the thread that created the window (the UI thread) for
+    /// <c>DestroyWindow</c> to succeed; on any other thread the call fails harmlessly and the window dies with
+    /// the process.
+    /// </summary>
+    public void Dispose()
+    {
+        var host = _shellMenuHost;
+        _shellMenuHost = default;
+        if (host.HasResources)
+        {
+            DestroyMessageWindow(host);
         }
     }
 
@@ -772,6 +759,162 @@ internal partial class NativeApi: INativeApi
         return GetSystemDpiScale();
     }
 
+    // ── High-resolution panel item icons (IShellItemImageFactory / system image list) ───────────
+    // Self-contained block: the implementations below plus their own NativeMethods region at the end of
+    // the file. Deliberately shares nothing with ShowShellContextMenu/IShellFolder/IContextMenu;
+    // its declarations live in IconNativeMethods.
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Expected on the UI (STA) thread (see <see cref="INativeApi.GetShellItemImage"/>). The factory's RCW
+    /// and the raw interface pointer are both released in <see langword="finally"/>; on any failure after
+    /// <c>GetImage</c> produced a bitmap, that bitmap is deleted here, so the caller only ever owns a
+    /// handle when the method returned 0.
+    /// </remarks>
+    public int GetShellItemImage(string path, int sizePx, out IntPtr bitmapHandle)
+    {
+        bitmapHandle = IntPtr.Zero;
+        if (string.IsNullOrEmpty(path) || sizePx <= 0) return IconNativeMethods.EInvalidArg;
+
+        var factoryPtr = IntPtr.Zero;
+        object? factory = null;
+        try
+        {
+            var iid = IconNativeMethods.IidIShellItemImageFactory;
+            var hr = IconNativeMethods.SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out factoryPtr);
+            if (hr < 0) return hr;
+            if (factoryPtr == IntPtr.Zero) return IconNativeMethods.EFail;
+
+            factory = Marshal.GetObjectForIUnknown(factoryPtr);
+            if (factory is not IconNativeMethods.IShellItemImageFactory imageFactory) return IconNativeMethods.ENoInterface;
+
+            var size = new IconNativeMethods.SIZE { cx = sizePx, cy = sizePx };
+            hr = imageFactory.GetImage(size, IconNativeMethods.SiigbfIconOnly | IconNativeMethods.SiigbfBiggerSizeOk, out var hbitmap);
+            if (hr < 0 || hbitmap == IntPtr.Zero)
+            {
+                // Defensive: a misbehaving handler reporting failure yet still handing out a bitmap must
+                // not leak it.
+                if (hbitmap != IntPtr.Zero) IconNativeMethods.DeleteObject(hbitmap);
+                return hr < 0 ? hr : IconNativeMethods.EFail;
+            }
+
+            bitmapHandle = hbitmap;
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            // COMException/InvalidCastException/SEHException from a broken shell extension: reported as an
+            // HRESULT so the caller degrades to the next fallback; never thrown into the UI thread.
+            return ex.HResult < 0 ? ex.HResult : IconNativeMethods.EFail;
+        }
+        finally
+        {
+            if (factory is not null) Marshal.ReleaseComObject(factory);
+            if (factoryPtr != IntPtr.Zero) Marshal.Release(factoryPtr);
+        }
+    }
+
+    /// <inheritdoc />
+    public unsafe bool TryReadBitmapPixels(IntPtr bitmapHandle, out NativeBitmapPixels pixels)
+    {
+        pixels = default;
+        if (bitmapHandle == IntPtr.Zero) return false;
+
+        var hdc = IntPtr.Zero;
+        try
+        {
+            if (IconNativeMethods.GetObjectW(bitmapHandle, sizeof(IconNativeMethods.BITMAP), out var bitmap) == 0) return false;
+
+            var width = bitmap.bmWidth;
+            var height = Math.Abs(bitmap.bmHeight);
+            if (width <= 0 || height <= 0 || width > IconNativeMethods.MaxIconBitmapSide || height > IconNativeMethods.MaxIconBitmapSide)
+            {
+                return false;
+            }
+
+            // A negative biHeight asks GetDIBits for a TOP-DOWN 32-bpp copy regardless of how the source
+            // is stored (IShellItemImageFactory hands out bottom-up DIB sections), so the managed consumer
+            // never has to know about DIB orientation. 32 bpp → 32 bpp BI_RGB copies the alpha byte as-is.
+            var info = new IconNativeMethods.BITMAPINFO
+            {
+                bmiHeader = new IconNativeMethods.BITMAPINFOHEADER
+                {
+                    biSize = (uint)sizeof(IconNativeMethods.BITMAPINFOHEADER),
+                    biWidth = width,
+                    biHeight = -height,
+                    biPlanes = 1,
+                    biBitCount = 32,
+                    biCompression = IconNativeMethods.BiRgb,
+                },
+            };
+
+            var buffer = new byte[width * height * 4];
+            hdc = NativeMethods.GetDC(IntPtr.Zero);
+            if (hdc == IntPtr.Zero) return false;
+
+            int lines;
+            fixed (byte* bits = buffer)
+            {
+                lines = IconNativeMethods.GetDIBits(hdc, bitmapHandle, 0, (uint)height, bits, ref info, IconNativeMethods.DibRgbColors);
+            }
+
+            if (lines != height) return false;
+
+            pixels = new NativeBitmapPixels(width, height, buffer);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (hdc != IntPtr.Zero) NativeMethods.ReleaseDC(IntPtr.Zero, hdc);
+        }
+    }
+
+    /// <inheritdoc />
+    public bool DeleteBitmap(IntPtr bitmapHandle)
+        => bitmapHandle != IntPtr.Zero && IconNativeMethods.DeleteObject(bitmapHandle);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Goes through the <c>IImageList</c> COM interface rather than the flat <c>ImageList_GetIcon</c>
+    /// export: the system image list is a comctl32 v6 object, and this WPF process does not necessarily
+    /// activate comctl32 v6 for its flat exports.
+    /// </remarks>
+    public IntPtr GetSystemImageListIcon(int imageList, int iconIndex)
+    {
+        if (iconIndex < 0) return IntPtr.Zero;
+
+        var listPtr = IntPtr.Zero;
+        object? list = null;
+        try
+        {
+            var iid = IconNativeMethods.IidIImageList;
+            var hr = IconNativeMethods.SHGetImageList(imageList, ref iid, out listPtr);
+            if (hr < 0 || listPtr == IntPtr.Zero) return IntPtr.Zero;
+
+            list = Marshal.GetObjectForIUnknown(listPtr);
+            if (list is not IconNativeMethods.IImageList imageListObject) return IntPtr.Zero;
+
+            hr = imageListObject.GetIcon(iconIndex, IconNativeMethods.IldTransparent, out var iconHandle);
+            if (hr >= 0) return iconHandle;
+
+            if (iconHandle != IntPtr.Zero) NativeMethods.DestroyIconByHandle(iconHandle);
+            return IntPtr.Zero;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return IntPtr.Zero;
+        }
+        finally
+        {
+            if (list is not null) Marshal.ReleaseComObject(list);
+            if (listPtr != IntPtr.Zero) Marshal.Release(listPtr);
+        }
+    }
+
     private static System.Drawing.Rectangle ToRectangle(NativeMethods.RECT r)
         => System.Drawing.Rectangle.FromLTRB(r.left, r.top, r.right, r.bottom);
 
@@ -858,6 +1001,432 @@ internal partial class NativeApi: INativeApi
         }
     }
 
+    /// <summary>
+    /// Extension of <paramref name="path"/> for diagnostics — the only part of a path that may be logged
+    /// (privacy invariant, same rule as <c>LogScrubber</c>). Never throws.
+    /// </summary>
+    private static string GetExtensionForLog(string path)
+    {
+        try
+        {
+            return System.IO.Path.GetExtension(path);
+        }
+        catch (ArgumentException)
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Asks the context menu for the canonical verb of the chosen command (<c>GCS_VERBW</c>) — e.g. <c>rename</c>,
+    /// <c>delete</c>, <c>cut</c>. Some handlers do not implement verbs for every command (or fail the call outright)
+    /// — any failure answers <see langword="null"/>. Never throws.
+    /// </summary>
+    private static string? GetCanonicalVerb(NativeMethods.IContextMenu menu, uint commandOffset)
+    {
+        const int maxChars = 64;
+        var bufferBytes = (maxChars + 1) * sizeof(char);
+        var buffer = Marshal.AllocCoTaskMem(bufferBytes);
+        try
+        {
+            // Zero-filled so the result is NUL-terminated even if the handler writes nothing.
+            Marshal.Copy(new byte[bufferBytes], 0, buffer, bufferBytes);
+            var hr = menu.GetCommandString((IntPtr)commandOffset, NativeMethods.GcsVerbW, IntPtr.Zero, buffer, maxChars);
+            return hr == 0 ? Marshal.PtrToStringUni(buffer) : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(buffer);
+        }
+    }
+
+    /// <summary>
+    /// Whether a key is currently held (<c>GetAsyncKeyState</c> high bit). The thread's own key state is not
+    /// reliable here: the panels are <c>WS_EX_NOACTIVATE</c> and never receive keyboard input.
+    /// </summary>
+    private static bool IsKeyDown(int virtualKey) => NativeMethods.GetAsyncKeyState(virtualKey) < 0;
+
+    /// <summary>
+    /// Invokes the command at <paramref name="commandOffset"/> (offset from <c>idCmdFirst</c>) with a
+    /// <c>CMINVOKECOMMANDINFOEX</c> carrying the verb both as an ANSI and a Unicode <c>MAKEINTRESOURCE</c>
+    /// id, the invocation point and the modifier-key state. Returns the handler's <c>HRESULT</c>.
+    /// </summary>
+    private static int InvokeShellCommand(NativeMethods.IContextMenu menu, IntPtr owner, uint commandOffset, int screenX, int screenY, bool shiftDown)
+    {
+        var mask = NativeMethods.CmicMaskUnicode | NativeMethods.CmicMaskPtInvoke;
+        if (shiftDown)
+        {
+            mask |= NativeMethods.CmicMaskShiftDown;
+        }
+
+        if (IsKeyDown(NativeMethods.VkControl))
+        {
+            mask |= NativeMethods.CmicMaskControlDown;
+        }
+
+        var invoke = new NativeMethods.CmInvokeCommandInfoEx
+        {
+            cbSize = Marshal.SizeOf<NativeMethods.CmInvokeCommandInfoEx>(),
+            fMask = mask,
+            hwnd = owner,
+            lpVerb = (IntPtr)commandOffset,
+            lpVerbW = (IntPtr)commandOffset,
+            nShow = NativeMethods.SwShowNormal,
+            ptInvoke = new NativeMethods.POINT { X = screenX, Y = screenY },
+        };
+
+        return menu.InvokeCommand(ref invoke);
+    }
+
+    /// <summary>
+    /// Releases a shell COM object without letting a dead/disconnected RCW throw out of a <see langword="finally"/>.
+    /// </summary>
+    private static void ReleaseComObjectQuietly(object? comObject)
+    {
+        if (comObject is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Marshal.ReleaseComObject(comObject);
+        }
+        catch (Exception)
+        {
+            // An RCW whose server died (Explorer restart, crashed extension) cannot be released any further.
+        }
+    }
+
+    /// <summary>
+    /// Shared core of <see cref="ShowShellContextMenu"/>/<see cref="ShowShellContextMenuForPath"/>: binds
+    /// <paramref name="pidl"/> to its parent folder, builds the item's <c>IContextMenu</c>, tracks it from the
+    /// helper window and invokes the chosen command. Never throws; releases every COM object and the menu in
+    /// <see langword="finally"/>. Does not free <paramref name="pidl"/> (its caller owns it).
+    /// </summary>
+    /// <param name="pidl">Absolute PIDL of the item.</param>
+    /// <param name="fallbackOwner">Owner used only when the helper window cannot be created.</param>
+    /// <param name="screenX">Horizontal menu position, in physical pixels.</param>
+    /// <param name="screenY">Vertical menu position, in physical pixels.</param>
+    /// <param name="flags"><c>CMF_*</c> flags for <c>QueryContextMenu</c>; <c>CMF_EXTENDEDVERBS</c> is added while Shift is held.</param>
+    /// <param name="intercepts">
+    /// Shell verbs that are reported instead of invoked: <c>rename</c> as <see cref="ShellContextMenuOutcome.RenameRequested"/>,
+    /// <c>delete</c> as <see cref="ShellContextMenuOutcome.DeleteRequested"/>.
+    /// </param>
+    /// <param name="extension">The item's extension for diagnostics, or <see langword="null"/> for a virtual item.</param>
+    /// <returns>How the menu ended, plus the invoked command's canonical verb (M-B, release-polish 1.0 final review).</returns>
+    private ShellContextMenuResult ShowShellContextMenuCore(
+        IntPtr pidl,
+        IntPtr fallbackOwner,
+        int screenX,
+        int screenY,
+        uint flags,
+        ShellVerbIntercepts intercepts,
+        string? extension)
+    {
+        // TrackPopupMenuEx pumps messages; a second right-click can never reach here while a menu is up, but a
+        // queued dispatcher operation could — never nest a second shell menu into the first one's modal loop.
+        if (_shellMenuActive)
+        {
+            return new ShellContextMenuResult(ShellContextMenuOutcome.NotShown, null);
+        }
+
+        _shellMenuActive = true;
+        var outcome = ShellContextMenuOutcome.NotShown;
+        string? verb = null;
+        var stage = "BindToParent";
+        var hMenu = IntPtr.Zero;
+        object? parentFolder = null;
+        object? contextMenu = null;
+        try
+        {
+            var host = EnsureShellMenuHost();
+            var owner = host != IntPtr.Zero ? host : fallbackOwner;
+
+            var iidShellFolder = NativeMethods.IidIShellFolder;
+
+            // childPidl is a pointer INTO pidl's allocation — never free it separately.
+            var hr = NativeMethods.SHBindToParent(pidl, ref iidShellFolder, out var parentPtr, out var childPidl);
+            if (hr != 0 || parentPtr == IntPtr.Zero || childPidl == IntPtr.Zero)
+            {
+                if (parentPtr != IntPtr.Zero)
+                {
+                    Marshal.Release(parentPtr);
+                }
+
+                LogShellMenuFailure(stage, extension, hr);
+                return new ShellContextMenuResult(outcome, verb);
+            }
+
+            parentFolder = Marshal.GetObjectForIUnknown(parentPtr);
+            Marshal.Release(parentPtr);
+            if (parentFolder is not NativeMethods.IShellFolder shellFolder)
+            {
+                LogShellMenuFailure(stage, extension, NativeMethods.ENoInterface);
+                return new ShellContextMenuResult(outcome, verb);
+            }
+
+            stage = "GetUIObjectOf";
+            var apidl = new[] { childPidl };
+            var iidContextMenu = NativeMethods.IidIContextMenu;
+            hr = shellFolder.GetUIObjectOf(owner, 1, apidl, ref iidContextMenu, IntPtr.Zero, out var ctxPtr);
+            if (hr != 0 || ctxPtr == IntPtr.Zero)
+            {
+                if (ctxPtr != IntPtr.Zero)
+                {
+                    Marshal.Release(ctxPtr);
+                }
+
+                LogShellMenuFailure(stage, extension, hr);
+                return new ShellContextMenuResult(outcome, verb);
+            }
+
+            contextMenu = Marshal.GetObjectForIUnknown(ctxPtr);
+            Marshal.Release(ctxPtr);
+            if (contextMenu is not NativeMethods.IContextMenu menu)
+            {
+                LogShellMenuFailure(stage, extension, NativeMethods.ENoInterface);
+                return new ShellContextMenuResult(outcome, verb);
+            }
+
+            stage = "CreatePopupMenu";
+            hMenu = NativeMethods.CreatePopupMenu();
+            if (hMenu == IntPtr.Zero)
+            {
+                LogShellMenuFailure(stage, extension, Marshal.GetHRForLastWin32Error());
+                return new ShellContextMenuResult(outcome, verb);
+            }
+
+            var shiftDown = IsKeyDown(NativeMethods.VkShift);
+            if (shiftDown)
+            {
+                flags |= NativeMethods.CmfExtendedVerbs;
+            }
+
+            // QueryContextMenu returns an HRESULT whose SUCCESS code carries the number of inserted items in
+            // the low word. A failed query must not be tracked/invoked — doing so passes a stale/empty HMENU
+            // into the shell verb dispatch and is a source of access violations on virtual/broken items.
+            stage = "QueryContextMenu";
+            hr = menu.QueryContextMenu(hMenu, 0, NativeMethods.ShellMenuCmdFirst, NativeMethods.ShellMenuCmdLast, flags);
+            if (hr < 0)
+            {
+                LogShellMenuFailure(stage, extension, hr);
+                return new ShellContextMenuResult(outcome, verb);
+            }
+
+            stage = "TrackPopupMenu";
+            var command = TrackShellMenu(contextMenu, hMenu, owner, host != IntPtr.Zero, screenX, screenY);
+            outcome = ShellContextMenuOutcome.Dismissed;
+            if (command < NativeMethods.ShellMenuCmdFirst || command > NativeMethods.ShellMenuCmdLast)
+            {
+                return new ShellContextMenuResult(outcome, verb);
+            }
+
+            var commandOffset = command - NativeMethods.ShellMenuCmdFirst;
+            if (intercepts != ShellVerbIntercepts.None)
+            {
+                stage = "GetCommandString";
+                verb = GetCanonicalVerb(menu, commandOffset);
+                if ((intercepts & ShellVerbIntercepts.Rename) != 0 && string.Equals(verb, "rename", StringComparison.OrdinalIgnoreCase))
+                {
+                    outcome = ShellContextMenuOutcome.RenameRequested;
+                    return new ShellContextMenuResult(outcome, verb);
+                }
+
+                if ((intercepts & ShellVerbIntercepts.Delete) != 0 && string.Equals(verb, "delete", StringComparison.OrdinalIgnoreCase))
+                {
+                    outcome = ShellContextMenuOutcome.DeleteRequested;
+                    return new ShellContextMenuResult(outcome, verb);
+                }
+            }
+
+            stage = "InvokeCommand";
+            outcome = ShellContextMenuOutcome.Invoked;
+            hr = InvokeShellCommand(menu, owner, commandOffset, screenX, screenY, shiftDown);
+
+            // A user cancelling a confirmation the command itself showed is not a failure.
+            if (hr < 0 && hr != NativeMethods.HResultCancelled)
+            {
+                LogShellMenuFailure(stage, extension, hr);
+            }
+
+            return new ShellContextMenuResult(outcome, verb);
+        }
+        catch (Exception ex)
+        {
+            // Degrade silently: a broken/virtual item or a faulty shell extension must never disrupt the UI
+            // thread. HRESULT + extension only — never the path.
+            LogShellMenuFailure(stage, extension, ex.HResult);
+            return new ShellContextMenuResult(outcome, verb);
+        }
+        finally
+        {
+            // The re-entrancy flag is cleared no matter what the releases below do: a stuck flag would
+            // silently disable every future shell menu of the session.
+            _shellMenuActive = false;
+
+            if (hMenu != IntPtr.Zero)
+            {
+                NativeMethods.DestroyMenu(hMenu);
+            }
+
+            ReleaseComObjectQuietly(contextMenu);
+            ReleaseComObjectQuietly(parentFolder);
+        }
+    }
+
+    /// <summary>
+    /// Tracks <paramref name="hMenu"/> modally and returns the chosen command id (0 when dismissed). While
+    /// tracking, <see cref="ShellMenuHostWndProc"/> forwards the owner-draw/popup-init messages to the
+    /// menu's <c>IContextMenu3</c>/<c>IContextMenu2</c> (whichever the handler implements). When the helper
+    /// window owns the menu it is made foreground first and nudged with <c>WM_NULL</c> afterwards — the
+    /// documented pattern (KB 135788) without which a menu owned by a non-foreground window never closes on
+    /// an outside click. The panel itself is never activated (it stays <c>WS_EX_NOACTIVATE</c> and keeps
+    /// its Z-order).
+    /// </summary>
+    private uint TrackShellMenu(object contextMenu, IntPtr hMenu, IntPtr owner, bool ownerIsHost, int screenX, int screenY)
+    {
+        _activeMenu3 = contextMenu as NativeMethods.IContextMenu3;
+        _activeMenu2 = _activeMenu3 is null ? contextMenu as NativeMethods.IContextMenu2 : null;
+        try
+        {
+            if (ownerIsHost)
+            {
+                NativeMethods.SetForegroundWindow(owner);
+            }
+
+            // No TPM_NONOTIFY: the WM_INITMENUPOPUP notifications are exactly what fills the lazy submenus.
+            var command = NativeMethods.TrackPopupMenuEx(
+                hMenu,
+                NativeMethods.TpmReturnCmd | NativeMethods.TpmRightButton,
+                screenX,
+                screenY,
+                owner,
+                IntPtr.Zero);
+
+            if (ownerIsHost)
+            {
+                NativeMethods.PostMessageW(owner, NativeMethods.WmNull, IntPtr.Zero, IntPtr.Zero);
+            }
+
+            return command;
+        }
+        finally
+        {
+            _activeMenu3 = null;
+            _activeMenu2 = null;
+        }
+    }
+
+    /// <summary>
+    /// Returns the hidden helper window that owns every tracked shell context menu, creating it on first
+    /// use. A top-level, never-shown <c>WS_POPUP</c> (the same kind <see cref="CreateMessageWindow"/> makes)
+    /// — not a message-only window, which can never become foreground. Kept for the lifetime of this
+    /// (singleton) instance rather than per menu: destroying the foreground window right after the menu
+    /// would hand activation to an arbitrary window and take the foreground away from dialogs the invoked
+    /// command opens asynchronously (Properties, confirmations). Released in <see cref="Dispose"/>.
+    /// </summary>
+    /// <returns>The helper window, or <see cref="IntPtr.Zero"/> when it cannot be created (logged).</returns>
+    private IntPtr EnsureShellMenuHost()
+    {
+        if (_shellMenuHost.IsValid && NativeMethods.IsWindowNative(_shellMenuHost.Handle))
+        {
+            return _shellMenuHost.Handle;
+        }
+
+        if (_shellMenuHost.HasResources)
+        {
+            // The window died (should not happen for a hidden window) — release the leftovers first.
+            DestroyMessageWindow(_shellMenuHost);
+            _shellMenuHost = default;
+        }
+
+        _shellMenuHostProc ??= ShellMenuHostWndProc;
+
+        // Unique per instance: a second NativeApi in the same process (tests) must not collide on the class.
+        var window = CreateMessageWindow($"DesktopOrganizer.ShellMenuHost.{Guid.NewGuid():N}", _shellMenuHostProc);
+        if (!window.IsValid)
+        {
+            Log.Warn(
+                "NativeApi",
+                "ShellMenuHostCreateFailed",
+                new KeyValuePair<string, object?>("win32Error", window.LastError));
+            return IntPtr.Zero;
+        }
+
+        _shellMenuHost = window;
+        return window.Handle;
+    }
+
+    /// <summary>
+    /// Window procedure of the helper window. Forwards the menu messages shell extensions need
+    /// (<c>WM_INITMENUPOPUP</c>, <c>WM_DRAWITEM</c>, <c>WM_MEASUREITEM</c>, <c>WM_MENUCHAR</c>) to the menu being
+    /// tracked; everything else — and anything the handler declines — goes to <c>DefWindowProc</c>. Runs
+    /// inside the menu's modal loop: never lets an exception cross back into native code.
+    /// </summary>
+    private IntPtr ShellMenuHostWndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam)
+    {
+        try
+        {
+            if (msg is NativeMethods.WmInitMenuPopup or NativeMethods.WmDrawItem or NativeMethods.WmMeasureItem or NativeMethods.WmMenuChar)
+            {
+                if (_activeMenu3 is { } menu3)
+                {
+                    if (menu3.HandleMenuMsg2((uint)msg, wParam, lParam, out var result) == 0)
+                    {
+                        return result;
+                    }
+                }
+                else if (_activeMenu2 is { } menu2 && msg != NativeMethods.WmMenuChar)
+                {
+                    if (menu2.HandleMenuMsg((uint)msg, wParam, lParam) == 0)
+                    {
+                        // WM_INITMENUPOPUP returns 0 when processed; WM_DRAWITEM/WM_MEASUREITEM return TRUE.
+                        return msg == NativeMethods.WmInitMenuPopup ? IntPtr.Zero : new IntPtr(1);
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Swallowed on purpose: a faulty shell extension must not take the menu loop down with it.
+        }
+
+        return NativeMethods.DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    /// <summary>
+    /// Writes the single diagnostics entry for a shell context menu that could not be shown or whose command
+    /// failed. Stage + extension + <c>HRESULT</c> only — never the path (privacy invariant).
+    /// </summary>
+    private void LogShellMenuFailure(string stage, string? extension, int hresult)
+        => Log.Warn(
+            "NativeApi",
+            "ShellContextMenuFailed",
+            new KeyValuePair<string, object?>("stage", stage),
+            new KeyValuePair<string, object?>("extension", extension ?? "<virtual>"),
+            new KeyValuePair<string, object?>("hresult", $"0x{hresult:X8}"));
+
+    /// <summary>
+    /// Shell verbs <see cref="ShowShellContextMenuCore"/> reports to its caller instead of invoking them.
+    /// </summary>
+    [Flags]
+    private enum ShellVerbIntercepts
+    {
+        /// <summary>Every chosen command is invoked.</summary>
+        None = 0,
+
+        /// <summary>The canonical <c>rename</c> verb becomes <see cref="ShellContextMenuOutcome.RenameRequested"/>.</summary>
+        Rename = 1,
+
+        /// <summary>The canonical <c>delete</c> verb becomes <see cref="ShellContextMenuOutcome.DeleteRequested"/>.</summary>
+        Delete = 2,
+    }
+
     private static partial class NativeMethods
     {
         // Shell "Properties" dialog
@@ -883,6 +1452,28 @@ internal partial class NativeApi: INativeApi
         public const uint CmfNormal = 0x00000000;
         public const uint TpmReturnCmd = 0x0100;
         public const uint TpmRightButton = 0x0002;
+        public const uint CmfExplore = 0x00000004;
+        public const uint CmfCanRename = 0x00000010;
+        public const uint CmfExtendedVerbs = 0x00000100;
+        public const uint ShellMenuCmdFirst = 1;
+        public const uint ShellMenuCmdLast = 0x7FFF;
+        public const uint GcsVerbW = 0x00000004;
+        public const uint CmicMaskUnicode = 0x00004000;
+        public const uint CmicMaskShiftDown = 0x10000000;
+        public const uint CmicMaskPtInvoke = 0x20000000;
+        public const uint CmicMaskControlDown = 0x40000000;
+        public const int SwShowNormal = 1;
+        public const int VkShift = 0x10;
+        public const int VkControl = 0x11;
+        public const int WmNull = 0x0000;
+        public const int WmDrawItem = 0x002B;
+        public const int WmMeasureItem = 0x002C;
+        public const int WmInitMenuPopup = 0x0117;
+        public const int WmMenuChar = 0x0120;
+        public const int ENoInterface = unchecked((int)0x80004002);
+
+        // HRESULT_FROM_WIN32(ERROR_CANCELLED): the user cancelled a confirmation the invoked command showed.
+        public const int HResultCancelled = unchecked((int)0x800704C7);
 
         // Low-level mouse hook + cross-process LVM_HITTEST
         public const int LvmHitTest = 0x1000 + 18;
@@ -1059,6 +1650,22 @@ internal partial class NativeApi: INativeApi
         [LibraryImport("User32.dll", EntryPoint = "TrackPopupMenuEx")]
         public static partial uint TrackPopupMenuEx(IntPtr hMenu, uint uFlags, int x, int y, IntPtr hwnd, IntPtr lptpm);
 
+        // Native shell context menu for a file-system path (SHParseDisplayName -> SHBindToParent) and the
+        // helper-window foreground dance around TrackPopupMenuEx (SetForegroundWindow + WM_NULL, KB 135788).
+        [LibraryImport("Shell32.dll", EntryPoint = "SHParseDisplayName", StringMarshalling = StringMarshalling.Utf16)]
+        public static partial int SHParseDisplayName(string pszName, IntPtr pbc, out IntPtr ppidl, uint sfgaoIn, out uint psfgaoOut);
+
+        [LibraryImport("User32.dll", EntryPoint = "SetForegroundWindow")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool SetForegroundWindow(IntPtr hWnd);
+
+        [LibraryImport("User32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool PostMessageW(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        [LibraryImport("User32.dll", EntryPoint = "GetAsyncKeyState")]
+        public static partial short GetAsyncKeyState(int vKey);
+
         [StructLayout(LayoutKind.Sequential)]
         public struct ShQueryRbInfo
         {
@@ -1084,8 +1691,13 @@ internal partial class NativeApi: INativeApi
             public string? lpszProgressTitle;
         }
 
+        /// <summary>
+        /// <c>CMINVOKECOMMANDINFOEX</c>. Every string member is a raw pointer: the verb is passed as a
+        /// <c>MAKEINTRESOURCE</c> command offset (in both <c>lpVerb</c> and <c>lpVerbW</c>), never as a real
+        /// string, and the remaining strings are unused (zero).
+        /// </summary>
         [StructLayout(LayoutKind.Sequential)]
-        public struct CmInvokeCommandInfo
+        public struct CmInvokeCommandInfoEx
         {
             public int cbSize;
             public uint fMask;
@@ -1096,6 +1708,12 @@ internal partial class NativeApi: INativeApi
             public int nShow;
             public uint dwHotKey;
             public IntPtr hIcon;
+            public IntPtr lpTitle;
+            public IntPtr lpVerbW;
+            public IntPtr lpParametersW;
+            public IntPtr lpDirectoryW;
+            public IntPtr lpTitleW;
+            public POINT ptInvoke;
         }
 
         /// <summary>
@@ -1197,8 +1815,8 @@ internal partial class NativeApi: INativeApi
         /// </summary>
         /// <remarks>
         /// Declaration order MUST match the native vtable; unused members exist only as vtable slots —
-        /// never remove or reorder. <c>QueryContextMenu</c> and <c>InvokeCommand</c> are called (from
-        /// <c>ShowShellContextMenu</c>); <c>GetCommandString</c> is not.
+        /// never remove or reorder. All three are called from <c>ShowShellContextMenuCore</c>
+        /// (<c>GetCommandString</c> only to recognize the <c>rename</c> verb).
         /// </remarks>
         [ComImport]
         [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -1215,9 +1833,9 @@ internal partial class NativeApi: INativeApi
             int QueryContextMenu(IntPtr hMenu, uint indexMenu, uint idCmdFirst, uint idCmdLast, uint uFlags);
 
             /// <summary><c>IContextMenu.InvokeCommand</c>: carries out the command selected from the context menu.</summary>
-            /// <param name="pici">Structure identifying the command to invoke and its invocation context.</param>
+            /// <param name="pici">Structure identifying the command to invoke and its invocation context (the <c>EX</c> layout, flagged by its <c>cbSize</c>).</param>
             [PreserveSig]
-            int InvokeCommand(ref CmInvokeCommandInfo pici);
+            int InvokeCommand(ref CmInvokeCommandInfoEx pici);
 
             /// <summary><c>IContextMenu.GetCommandString</c>: retrieves a string (e.g. help text or verb) associated with a command.</summary>
             /// <param name="idCmd">Command identifier, always an offset from <c>idCmdFirst</c>.</param>
@@ -1227,6 +1845,105 @@ internal partial class NativeApi: INativeApi
             /// <param name="cchMax">Size, in characters, of the buffer pointed to by <paramref name="pszName"/>.</param>
             [PreserveSig]
             int GetCommandString(IntPtr idCmd, uint uType, IntPtr pReserved, IntPtr pszName, uint cchMax);
+        }
+
+        /// <summary>
+        /// COM interop declaration of <c>IContextMenu2</c>: <see cref="IContextMenu"/> plus
+        /// <c>HandleMenuMsg</c>, through which owner-drawn items and lazily-filled submenus receive
+        /// <c>WM_INITMENUPOPUP</c>/<c>WM_DRAWITEM</c>/<c>WM_MEASUREITEM</c>.
+        /// </summary>
+        /// <remarks>
+        /// A <c>[ComImport]</c> interface does not inherit the vtable slots of its base: the three
+        /// <see cref="IContextMenu"/> members are re-declared first, in vtable order — never remove or reorder.
+        /// Obtained by casting the <see cref="IContextMenu"/> RCW (a <c>QueryInterface</c>); only
+        /// <c>HandleMenuMsg</c> is called through it.
+        /// </remarks>
+        [ComImport]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        [Guid("000214F4-0000-0000-C000-000000000046")]
+        public interface IContextMenu2
+        {
+            /// <summary>Vtable slot of <see cref="IContextMenu.QueryContextMenu"/>.</summary>
+            /// <param name="hMenu">Handle of the menu to add commands to.</param>
+            /// <param name="indexMenu">Zero-based insertion position.</param>
+            /// <param name="idCmdFirst">Lowest command identifier value that may be used.</param>
+            /// <param name="idCmdLast">Highest command identifier value that may be used.</param>
+            /// <param name="uFlags">Combination of <c>CMF_*</c> flags.</param>
+            [PreserveSig]
+            int QueryContextMenu(IntPtr hMenu, uint indexMenu, uint idCmdFirst, uint idCmdLast, uint uFlags);
+
+            /// <summary>Vtable slot of <see cref="IContextMenu.InvokeCommand"/>.</summary>
+            /// <param name="pici">Structure identifying the command to invoke.</param>
+            [PreserveSig]
+            int InvokeCommand(ref CmInvokeCommandInfoEx pici);
+
+            /// <summary>Vtable slot of <see cref="IContextMenu.GetCommandString"/>.</summary>
+            /// <param name="idCmd">Command offset from <c>idCmdFirst</c>.</param>
+            /// <param name="uType">Combination of <c>GCS_*</c> flags.</param>
+            /// <param name="pReserved">Reserved; <see cref="IntPtr.Zero"/>.</param>
+            /// <param name="pszName">Buffer that receives the string.</param>
+            /// <param name="cchMax">Buffer size in characters.</param>
+            [PreserveSig]
+            int GetCommandString(IntPtr idCmd, uint uType, IntPtr pReserved, IntPtr pszName, uint cchMax);
+
+            /// <summary><c>IContextMenu2.HandleMenuMsg</c>: lets the handler process a menu message sent to the owner window.</summary>
+            /// <param name="uMsg">The window message.</param>
+            /// <param name="wParam">The message wParam.</param>
+            /// <param name="lParam">The message lParam.</param>
+            [PreserveSig]
+            int HandleMenuMsg(uint uMsg, IntPtr wParam, IntPtr lParam);
+        }
+
+        /// <summary>
+        /// COM interop declaration of <c>IContextMenu3</c>: <see cref="IContextMenu2"/> plus
+        /// <c>HandleMenuMsg2</c>, which also covers <c>WM_MENUCHAR</c> and returns the message result.
+        /// </summary>
+        /// <remarks>
+        /// Same vtable rule as <see cref="IContextMenu2"/>: every base member is re-declared first, in order.
+        /// Only <c>HandleMenuMsg2</c> is called through it.
+        /// </remarks>
+        [ComImport]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        [Guid("BCFCE0A0-EC17-11D0-8D10-00A0C90F2719")]
+        public interface IContextMenu3
+        {
+            /// <summary>Vtable slot of <see cref="IContextMenu.QueryContextMenu"/>.</summary>
+            /// <param name="hMenu">Handle of the menu to add commands to.</param>
+            /// <param name="indexMenu">Zero-based insertion position.</param>
+            /// <param name="idCmdFirst">Lowest command identifier value that may be used.</param>
+            /// <param name="idCmdLast">Highest command identifier value that may be used.</param>
+            /// <param name="uFlags">Combination of <c>CMF_*</c> flags.</param>
+            [PreserveSig]
+            int QueryContextMenu(IntPtr hMenu, uint indexMenu, uint idCmdFirst, uint idCmdLast, uint uFlags);
+
+            /// <summary>Vtable slot of <see cref="IContextMenu.InvokeCommand"/>.</summary>
+            /// <param name="pici">Structure identifying the command to invoke.</param>
+            [PreserveSig]
+            int InvokeCommand(ref CmInvokeCommandInfoEx pici);
+
+            /// <summary>Vtable slot of <see cref="IContextMenu.GetCommandString"/>.</summary>
+            /// <param name="idCmd">Command offset from <c>idCmdFirst</c>.</param>
+            /// <param name="uType">Combination of <c>GCS_*</c> flags.</param>
+            /// <param name="pReserved">Reserved; <see cref="IntPtr.Zero"/>.</param>
+            /// <param name="pszName">Buffer that receives the string.</param>
+            /// <param name="cchMax">Buffer size in characters.</param>
+            [PreserveSig]
+            int GetCommandString(IntPtr idCmd, uint uType, IntPtr pReserved, IntPtr pszName, uint cchMax);
+
+            /// <summary>Vtable slot of <see cref="IContextMenu2.HandleMenuMsg"/>.</summary>
+            /// <param name="uMsg">The window message.</param>
+            /// <param name="wParam">The message wParam.</param>
+            /// <param name="lParam">The message lParam.</param>
+            [PreserveSig]
+            int HandleMenuMsg(uint uMsg, IntPtr wParam, IntPtr lParam);
+
+            /// <summary><c>IContextMenu3.HandleMenuMsg2</c>: like <c>HandleMenuMsg</c>, but also handles <c>WM_MENUCHAR</c> and returns the message result.</summary>
+            /// <param name="uMsg">The window message.</param>
+            /// <param name="wParam">The message wParam.</param>
+            /// <param name="lParam">The message lParam.</param>
+            /// <param name="plResult">Receives the value the owner window procedure must return for the message.</param>
+            [PreserveSig]
+            int HandleMenuMsg2(uint uMsg, IntPtr wParam, IntPtr lParam, out IntPtr plResult);
         }
 
         // ── Low-level mouse hook, monitors, hidden broadcast window ─────────────────────────────
@@ -1438,5 +2155,198 @@ internal partial class NativeApi: INativeApi
         /// delegate blittable.
         /// </summary>
         public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, IntPtr lprcMonitor, IntPtr dwData);
+    }
+
+    // ── High-resolution panel item icons (IShellItemImageFactory / system image list) ────────────
+    // A separate nested class (not part of NativeMethods above) so this block merges independently of
+    // unrelated shell work (e.g. the context-menu declarations in NativeMethods). Only GetDC/ReleaseDC/
+    // DestroyIconByHandle are reused from NativeMethods.
+    private static partial class IconNativeMethods
+    {
+        /// <summary><c>SIIGBF_BIGGERSIZEOK</c>: a bigger image than requested is acceptable.</summary>
+        public const int SiigbfBiggerSizeOk = 0x00000001;
+
+        /// <summary><c>SIIGBF_ICONONLY</c>: the item's icon, never a thumbnail (Fences/desktop behavior).</summary>
+        public const int SiigbfIconOnly = 0x00000004;
+
+        /// <summary><c>ILD_TRANSPARENT</c>: draw/extract with the image list's mask (keeps alpha).</summary>
+        public const int IldTransparent = 0x00000001;
+
+        /// <summary><c>BI_RGB</c>: uncompressed DIB.</summary>
+        public const uint BiRgb = 0;
+
+        /// <summary><c>DIB_RGB_COLORS</c>.</summary>
+        public const uint DibRgbColors = 0;
+
+        /// <summary>
+        /// Upper bound for a bitmap read back into managed memory: the largest shell icon is 256 px, and
+        /// <c>SIIGBF_BIGGERSIZEOK</c> may round up to at most that; anything larger is not an icon.
+        /// </summary>
+        public const int MaxIconBitmapSide = 1024;
+
+        /// <summary><c>E_FAIL</c>.</summary>
+        public const int EFail = unchecked((int)0x80004005);
+
+        /// <summary><c>E_NOINTERFACE</c>.</summary>
+        public const int ENoInterface = unchecked((int)0x80004002);
+
+        /// <summary><c>E_INVALIDARG</c>.</summary>
+        public const int EInvalidArg = unchecked((int)0x80070057);
+
+        /// <summary><c>IID_IShellItemImageFactory</c>.</summary>
+        public static readonly Guid IidIShellItemImageFactory = new("BCC18B79-BA16-442F-80C4-8A59C30C463B");
+
+        /// <summary><c>IID_IImageList</c>.</summary>
+        public static readonly Guid IidIImageList = new("46EB5926-582E-4017-9FDF-E8998DAA0950");
+
+        // riid = IID_IShellItemImageFactory: asks for the factory interface directly, no intermediate
+        // IShellItem RCW. Requires COM to be initialized on the calling thread (the WPF UI thread is STA).
+        [LibraryImport("Shell32.dll", EntryPoint = "SHCreateItemFromParsingName", StringMarshalling = StringMarshalling.Utf16)]
+        public static partial int SHCreateItemFromParsingName(string pszPath, IntPtr pbc, ref Guid riid, out IntPtr ppv);
+
+        [LibraryImport("Shell32.dll", EntryPoint = "SHGetImageList")]
+        public static partial int SHGetImageList(int iImageList, ref Guid riid, out IntPtr ppvObj);
+
+        [LibraryImport("Gdi32.dll", EntryPoint = "DeleteObject")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool DeleteObject(IntPtr hObject);
+
+        [LibraryImport("Gdi32.dll", EntryPoint = "GetObjectW")]
+        public static partial int GetObjectW(IntPtr h, int c, out BITMAP pv);
+
+        [LibraryImport("Gdi32.dll", EntryPoint = "GetDIBits")]
+        public static unsafe partial int GetDIBits(IntPtr hdc, IntPtr hbm, uint start, uint cLines, byte* lpvBits, ref BITMAPINFO lpbmi, uint usage);
+
+        /// <summary>Native <c>SIZE</c>.</summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct SIZE
+        {
+            public int cx;
+            public int cy;
+        }
+
+        /// <summary>Native <c>BITMAP</c> (as filled by <c>GetObject</c> for an <c>HBITMAP</c>).</summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BITMAP
+        {
+            public int bmType;
+            public int bmWidth;
+            public int bmHeight;
+            public int bmWidthBytes;
+            public ushort bmPlanes;
+            public ushort bmBitsPixel;
+            public IntPtr bmBits;
+        }
+
+        /// <summary>Native <c>BITMAPINFOHEADER</c>.</summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BITMAPINFOHEADER
+        {
+            public uint biSize;
+            public int biWidth;
+            public int biHeight;
+            public ushort biPlanes;
+            public ushort biBitCount;
+            public uint biCompression;
+            public uint biSizeImage;
+            public int biXPelsPerMeter;
+            public int biYPelsPerMeter;
+            public uint biClrUsed;
+            public uint biClrImportant;
+        }
+
+        /// <summary>
+        /// Native <c>BITMAPINFO</c>. A 32-bpp <c>BI_RGB</c> request has no color table, but three
+        /// <c>DWORD</c>s of slack are reserved anyway (room for <c>BI_BITFIELDS</c> masks) so a driver
+        /// writing them can never overrun the structure.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BITMAPINFO
+        {
+            public BITMAPINFOHEADER bmiHeader;
+            public uint bmiColor0;
+            public uint bmiColor1;
+            public uint bmiColor2;
+        }
+
+        /// <summary>
+        /// COM interop declaration of the shell's <c>IShellItemImageFactory</c> interface.
+        /// </summary>
+        [ComImport]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        [Guid("BCC18B79-BA16-442F-80C4-8A59C30C463B")]
+        public interface IShellItemImageFactory
+        {
+            /// <summary><c>IShellItemImageFactory.GetImage</c>: renders the item as an <c>HBITMAP</c>.</summary>
+            /// <param name="size">Requested size in pixels.</param>
+            /// <param name="flags">Combination of <c>SIIGBF_*</c> flags.</param>
+            /// <param name="phbm">Receives the bitmap; the caller owns it (<c>DeleteObject</c>).</param>
+            [PreserveSig]
+            int GetImage(SIZE size, int flags, out IntPtr phbm);
+        }
+
+        /// <summary>
+        /// COM interop declaration of comctl32's <c>IImageList</c> interface, up to <c>GetIcon</c>.
+        /// </summary>
+        /// <remarks>
+        /// Declaration order MUST match the native vtable; the members before <c>GetIcon</c> exist only as
+        /// vtable slots — never remove or reorder. Only <c>GetIcon</c> is called.
+        /// </remarks>
+        [ComImport]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        [Guid("46EB5926-582E-4017-9FDF-E8998DAA0950")]
+        public interface IImageList
+        {
+            /// <summary><c>IImageList.Add</c> (vtable slot only).</summary>
+            /// <param name="hbmImage">Image bitmap.</param>
+            /// <param name="hbmMask">Mask bitmap.</param>
+            /// <param name="pi">Receives the new index.</param>
+            [PreserveSig]
+            int Add(IntPtr hbmImage, IntPtr hbmMask, out int pi);
+
+            /// <summary><c>IImageList.ReplaceIcon</c> (vtable slot only).</summary>
+            /// <param name="i">Index to replace, or -1 to append.</param>
+            /// <param name="hicon">Icon to store.</param>
+            /// <param name="pi">Receives the index.</param>
+            [PreserveSig]
+            int ReplaceIcon(int i, IntPtr hicon, out int pi);
+
+            /// <summary><c>IImageList.SetOverlayImage</c> (vtable slot only).</summary>
+            /// <param name="iImage">Image index.</param>
+            /// <param name="iOverlay">Overlay index.</param>
+            [PreserveSig]
+            int SetOverlayImage(int iImage, int iOverlay);
+
+            /// <summary><c>IImageList.Replace</c> (vtable slot only).</summary>
+            /// <param name="i">Index to replace.</param>
+            /// <param name="hbmImage">Image bitmap.</param>
+            /// <param name="hbmMask">Mask bitmap.</param>
+            [PreserveSig]
+            int Replace(int i, IntPtr hbmImage, IntPtr hbmMask);
+
+            /// <summary><c>IImageList.AddMasked</c> (vtable slot only).</summary>
+            /// <param name="hbmImage">Image bitmap.</param>
+            /// <param name="crMask">Mask color.</param>
+            /// <param name="pi">Receives the new index.</param>
+            [PreserveSig]
+            int AddMasked(IntPtr hbmImage, int crMask, out int pi);
+
+            /// <summary><c>IImageList.Draw</c> (vtable slot only).</summary>
+            /// <param name="pimldp">Pointer to an <c>IMAGELISTDRAWPARAMS</c>.</param>
+            [PreserveSig]
+            int Draw(IntPtr pimldp);
+
+            /// <summary><c>IImageList.Remove</c> (vtable slot only).</summary>
+            /// <param name="i">Index to remove.</param>
+            [PreserveSig]
+            int Remove(int i);
+
+            /// <summary><c>IImageList.GetIcon</c>: creates an icon from an image and mask.</summary>
+            /// <param name="i">Image index.</param>
+            /// <param name="flags">Combination of <c>ILD_*</c> flags.</param>
+            /// <param name="picon">Receives the icon; the caller owns it (<c>DestroyIcon</c>).</param>
+            [PreserveSig]
+            int GetIcon(int i, int flags, out IntPtr picon);
+        }
     }
 }

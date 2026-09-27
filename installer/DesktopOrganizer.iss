@@ -65,6 +65,14 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
+AppCopyright=Copyright (c) 2024-2026 khagen
+; Setup.exe/uninstall.exe's own Win32 version resource (separate from the app exe's, which gets the same
+; values straight from Directory.Build.props's <Company>/<Product>).
+VersionInfoCompany=khagendev
+VersionInfoProductName={#MyAppName}
+; Windows 10/11 only (release-polish 1.0) — matches the app's actual net8.0-windows/WPF requirements;
+; refuses to run Setup on anything older instead of failing later at first launch.
+MinVersion=10.0
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -106,8 +114,10 @@ SignedUninstaller=yes
 #endif
 
 [Languages]
-Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+; English first (release-polish 1.0): Inno Setup falls back to the FIRST [Languages] entry for any UI
+; language it does not recognize, so the default/fallback must be English, not Russian.
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
 [CustomMessages]
 russian.StartWithWindows=Запускать при старте Windows
@@ -129,8 +139,12 @@ english.AppRunningCancelled=Setup cancelled: %1 must be closed before the instal
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-; Everything from the self-contained publish output (exe, dlls, runtime, app.ico, etc.)
-Source: "publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Everything from the self-contained publish output (exe, dlls, runtime, app.ico, etc.), except .pdb
+; (debug symbols) and .xml (GenerateDocumentationFile=true API-doc comments) — neither is needed at
+; runtime, and both just add dead weight to the shipped installer. CI (.github/workflows/ci.yml) never
+; harvests symbols out of this publish folder itself (its only artifact from that folder is the finished
+; Setup.exe), so excluding them here does not remove anything CI currently relies on.
+Source: "publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.pdb,*.xml"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -143,6 +157,14 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 ; (see AutostartCheckBox) so that it can live on the same final page and mirror
 ; the app's live registry state instead of Inno's remembered task selection.
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; Returns the user's panel files to the desktop before the install folder (and the app's own managed
+; PanelItems storage under %LocalAppData%) is touched by uninstall — see the exe's own --restore-panel-items
+; switch for what it actually does. Inno Setup runs [UninstallRun] entries before [UninstallDelete]/the
+; removal of installed files, and InitializeUninstall's EnsureAppClosed (above) has already made sure no
+; instance of the app is running by this point, so the exe is free to launch and exit again here.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--restore-panel-items"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RestorePanelItems"
 
 [UninstallDelete]
 ; Belt-and-braces: remove anything the app may have written under its own

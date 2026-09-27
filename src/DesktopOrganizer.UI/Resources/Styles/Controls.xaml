@@ -7,7 +7,7 @@
     <!--
         Ambient Accent Visual System — minimal control chrome over Typography.xaml/Icons.xaml (D-1).
         Deliberately thin in this commit: PanelHeaderButtonStyle/PanelHeaderToggleButtonStyle/
-        FileContextMenu/FileNameEditBoxStyle etc. stay in Templates.xaml (D-2) until the commit that
+        FileNameEditBoxStyle etc. stay in Templates.xaml (D-2) until the commit that
         migrates their consumers (C4/C6) — moving a style here without its consumer in the same commit
         would leave two near-duplicate styles with hex literals free to drift apart, exactly the trap
         Templates.xaml's own top-of-file comment about SelectionFillBrush/SelectionStrokeBrush already
@@ -24,8 +24,11 @@
          painting the same translucent WHITE — see Control.Button.Icon/PanelHeaderButtonStyle/
          PanelHeaderToggleButtonStyle's own IsMouseOver triggers below for the 3 consumers. Registered
          here (not Panels.xaml) because all 3 consumers live in THIS dictionary; Panels.xaml's own
-         PanelItemContainerStyle hover (icon-tile selection, a different affordance, not part of this
-         finding) is deliberately left on the plain Brush.Overlay.Hover StaticResource. -->
+         PanelItemContainerStyle hover ALSO uses this SAME converter (a later MAJOR-3 review-round fix
+         moved it off the plain Brush.Overlay.Hover StaticResource this comment used to describe), but with
+         ConverterParameter="ItemTile" so a dark surface resolves through HoverOverlayPolicy.ForItemTile
+         instead of HoverOverlayPolicy.For (NEW-1 fix, docs/PLANS/release-polish-1.0.md — see that Style's
+         own IsMouseOver trigger comment in Panels.xaml for why the two consumers need different washes). -->
     <conv:HoverOverlayBrushConverter x:Key="HoverOverlayBrush"/>
 
     <Style x:Key="Control.Button.Icon" TargetType="Button">
@@ -33,7 +36,16 @@
         <Setter Property="Height" Value="{x:Static models:PanelMetrics.HeaderButtonSize}"/>
         <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
         <Setter Property="FontSize" Value="12"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Secondary}"/>
+        <Setter Property="Foreground">
+            <Setter.Value>
+                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Secondary">
+                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <Binding Source="{StaticResource Brush.Text.Secondary}"/>
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Template">
@@ -52,9 +64,13 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Chrome" Property="Background">
                                 <Setter.Value>
+                                    <!-- MAJOR-2 fix: PanelTheme.Accent/Text (Brushes), not Model.AccentColor/
+                                         TextColor directly — see this dictionary's own HoverOverlayBrush
+                                         registration comment above. -->
                                     <MultiBinding Converter="{StaticResource HoverOverlayBrush}">
-                                        <Binding Path="Model.AccentColor"/>
-                                        <Binding Path="Model.SurfaceStyle"/>
+                                        <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.SurfaceStyle)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
                                         <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
                                         <Binding Source="{StaticResource Brush.Overlay.Hover}"/>
                                     </MultiBinding>
@@ -149,7 +165,16 @@
         <Setter Property="Height" Value="{x:Static models:PanelMetrics.HeaderButtonSize}"/>
         <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
         <Setter Property="FontSize" Value="12"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Secondary}"/>
+        <Setter Property="Foreground">
+            <Setter.Value>
+                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Secondary">
+                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <Binding Source="{StaticResource Brush.Text.Secondary}"/>
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Template">
@@ -168,9 +193,13 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="HeaderButtonBorder" Property="Background">
                                 <Setter.Value>
+                                    <!-- MAJOR-2 fix: PanelTheme.Accent/Text (Brushes), not Model.AccentColor/
+                                         TextColor directly — see this dictionary's own HoverOverlayBrush
+                                         registration comment (top of file). -->
                                     <MultiBinding Converter="{StaticResource HoverOverlayBrush}">
-                                        <Binding Path="Model.AccentColor"/>
-                                        <Binding Path="Model.SurfaceStyle"/>
+                                        <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.SurfaceStyle)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
                                         <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
                                         <Binding Source="{StaticResource Brush.Overlay.Hover}"/>
                                     </MultiBinding>
@@ -258,9 +287,13 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="HeaderButtonBorder" Property="Background">
                                 <Setter.Value>
+                                    <!-- MAJOR-2 fix: PanelTheme.Accent/Text (Brushes), not Model.AccentColor/
+                                         TextColor directly — see this dictionary's own HoverOverlayBrush
+                                         registration comment (top of file). -->
                                     <MultiBinding Converter="{StaticResource HoverOverlayBrush}">
-                                        <Binding Path="Model.AccentColor"/>
-                                        <Binding Path="Model.SurfaceStyle"/>
+                                        <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.SurfaceStyle)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
                                         <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
                                         <Binding Source="{StaticResource Brush.Overlay.Hover}"/>
                                     </MultiBinding>
@@ -343,8 +376,28 @@
         <Setter Property="Focusable" Value="False"/>
         <Setter Property="IsTabStop" Value="False"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
-        <Setter Property="Background" Value="{StaticResource Brush.ScrollBar.Thumb}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.ScrollBar.ThumbBorder}"/>
+        <!-- WP-B "ADDITIONAL" (docs/PLANS/color-presets-and-size-step.md): luminance-adaptive, same rule
+             as the header icon buttons above — see PanelChromeForegroundPolicy's own remarks. -->
+        <Setter Property="Background">
+            <Setter.Value>
+                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="ScrollBarThumb">
+                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <Binding Source="{StaticResource Brush.ScrollBar.Thumb}"/>
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
+        <Setter Property="BorderBrush">
+            <Setter.Value>
+                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="ScrollBarThumbBorder">
+                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <Binding Source="{StaticResource Brush.ScrollBar.ThumbBorder}"/>
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
         <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -360,10 +413,28 @@
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Pill" Property="Background" Value="{StaticResource Brush.ScrollBar.ThumbHover}"/>
+                            <Setter TargetName="Pill" Property="Background">
+                                <Setter.Value>
+                                    <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="ScrollBarThumbHover">
+                                        <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                        <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                        <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                        <Binding Source="{StaticResource Brush.ScrollBar.ThumbHover}"/>
+                                    </MultiBinding>
+                                </Setter.Value>
+                            </Setter>
                         </Trigger>
                         <Trigger Property="IsDragging" Value="True">
-                            <Setter TargetName="Pill" Property="Background" Value="{StaticResource Brush.ScrollBar.ThumbPressed}"/>
+                            <Setter TargetName="Pill" Property="Background">
+                                <Setter.Value>
+                                    <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="ScrollBarThumbPressed">
+                                        <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                        <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                        <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                        <Binding Source="{StaticResource Brush.ScrollBar.ThumbPressed}"/>
+                                    </MultiBinding>
+                                </Setter.Value>
+                            </Setter>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>

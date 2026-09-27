@@ -32,7 +32,9 @@ namespace DesktopOrganizer.Tests.Unit.Resources;
 /// <c>ChildWindowViewModelTests.EnsureWpfApplication</c>, needed one because they never construct a
 /// <see cref="System.Windows.Controls.ContextMenu"/> or otherwise touch <c>InputManager</c>). Simply
 /// merging/parsing dictionaries doesn't require it, but this test also has to force every deferred
-/// resource to materialize — including <c>Panels.xaml</c>'s <c>FileContextMenu</c> — and constructing a
+/// resource to materialize — including any <see cref="System.Windows.Controls.ContextMenu"/> element
+/// resource (historically <c>Templates.xaml</c>'s <c>FileContextMenu</c>, since replaced by the native shell
+/// menu) — and constructing a
 /// <see cref="System.Windows.Controls.ContextMenu"/> (a <see cref="System.Windows.FrameworkElement"/>)
 /// requires <see cref="System.Windows.Input.InputManager"/> on the CURRENT thread, which throws
 /// <see cref="System.InvalidOperationException"/> ("The calling thread must be STA") off the ordinary

@@ -29,8 +29,13 @@ public static class AppStorageRoot
 {
     /// <summary>
     /// Folder name (under <c>%LOCALAPPDATA%</c>) a Release build — i.e. the installed, working
-    /// application — stores everything in. Also the root the installer's <c>[UninstallDelete]</c> and
-    /// documentation refer to.
+    /// application — stores everything in. The installer's <c>[UninstallDelete]</c> section does
+    /// <b>not</b> touch this folder — it only ever removes <c>{app}</c> (the program files) — so
+    /// <c>State\</c>/<c>Logs\</c> here are always left in place across an uninstall, and
+    /// <c>PanelItems\</c> is instead emptied out beforehand by the <c>--restore-panel-items</c>
+    /// command-line switch (see <c>PanelItemsUninstallRestorer</c>, wired into <c>[UninstallRun]</c>)
+    /// rather than deleted wholesale, since files under it were moved there, not copied. See the
+    /// README's own "Uninstall" section.
     /// </summary>
     public const string ReleaseFolderName = "DesktopOrganizer";
 

@@ -399,6 +399,11 @@ public partial class ChildWindow : Window
         WindowState = model.WindowState;
         _rollUpBehavior.ExpandedHeight = Height;
 
+        // Best-effort DPI for the very first icon fetch (no PresentationSource yet — same caveat as the
+        // position above); OnSourceInitialized/OnDpiChanged push the real per-monitor value, and the view
+        // model only re-fetches if that moves the icon pixel size to another bucket.
+        _viewModel.IconRenderScale = PanelWindowCoordinates.GetWindowScale(this, _desktopScale.Current);
+
         _viewModel.LoadFromModel(model);
 
         // finalization MAJOR-1 (P05 fix-cycle, ADR-028/ADR-029 amendments): deliberately NO
@@ -440,6 +445,40 @@ public partial class ChildWindow : Window
             _model.FilePaths = _viewModel.AllItems.Select(f => f.Path).ToList();
     }
 
+    /// <summary>
+    /// <see langword="true"/> when <paramref name="source"/> (a routed mouse event's
+    /// <c>OriginalSource</c>) landed inside the inline-rename editor (<c>Templates.xaml</c>'s
+    /// <c>FileNameEditBoxStyle</c> <see cref="TextBox"/>). Extracted as a pure, testable predicate — see
+    /// <see cref="FileListHost_PreviewMouseRightButtonUp"/>'s own remarks.
+    /// </summary>
+    /// <param name="source">The visual-tree element the routed event reports as its source.</param>
+    internal static bool IsInlineRenameEditorHit(DependencyObject source)
+        => FindAncestorOrSelf<TextBox>(source) is not null;
+
+    /// <summary>
+    /// MINOR 9 (release-polish 1.0 final review): <see langword="true"/> when <paramref name="source"/> (a
+    /// routed mouse event's <c>OriginalSource</c>) landed inside a <see cref="ScrollBar"/> — the list/grid
+    /// view's own vertical scrollbar lives inside <see cref="FileListHost"/>, so without this check a
+    /// right-click on it fell through to <see cref="FileListHost_PreviewMouseRightButtonUp"/>'s "empty
+    /// panel body" branch and popped the fence's <c>HeaderContextMenu</c> instead of leaving the scrollbar
+    /// alone. Extracted as a pure, testable predicate, same as <see cref="IsInlineRenameEditorHit"/>.
+    /// </summary>
+    /// <param name="source">The visual-tree element the routed event reports as its source.</param>
+    internal static bool IsScrollBarHit(DependencyObject source)
+        => FindAncestorOrSelf<ScrollBar>(source) is not null;
+
+    /// <summary>
+    /// Resolves the <see cref="FileItem"/> a right-click at <paramref name="source"/> (a routed mouse
+    /// event's <c>OriginalSource</c>) landed on — the item's own <see cref="ListBoxItem"/> container
+    /// (list and grid templates alike), or <see langword="null"/> when the click missed every item (the
+    /// EMPTY panel body — UX parity fix, fences-ux-parity-reviewer, release-polish 1.0 review). Extracted
+    /// as a pure, testable hit-test helper — see <see cref="FileListHost_PreviewMouseRightButtonUp"/>'s
+    /// own remarks.
+    /// </summary>
+    /// <param name="source">The visual-tree element the routed event reports as its source.</param>
+    internal static FileItem? ResolveRightClickedFileItem(DependencyObject source)
+        => FindAncestorOrSelf<ListBoxItem>(source)?.DataContext as FileItem;
+
     /// <inheritdoc/>
     protected override void OnSourceInitialized(EventArgs e)
     {
@@ -452,6 +491,10 @@ public partial class ChildWindow : Window
         // predicting it — and rebuilds the snapshot in case the prediction (or a stale snapshot from
         // before any panel existed) was wrong.
         _desktopScale.ReportPanelWindow(hwnd);
+
+        // The panel's real rendering DPI is known from here on (after embedding): item icons are requested
+        // at IconSize x this scale (see ChildWindowViewModel.IconRenderScale).
+        _viewModel.IconRenderScale = PanelWindowCoordinates.GetWindowScale(this, _desktopScale.Current);
 
         // Phase 2 (docs/PLANS/phase-2-native-panel-sizing.md §1.6): the native WM_SIZING hook is
         // installed here — after EmbedInDesktop, once the panel's HWND is both valid and already
@@ -486,7 +529,15 @@ public partial class ChildWindow : Window
     /// one (correct, final) <see cref="OnLocationChanged"/> write through normally.
     /// </remarks>
     /// <param name="oldDpiScale">The window's previous DPI scale. Unused — the model's desktop-DIP position is re-derived fresh, not incrementally adjusted.</param>
-    /// <param name="newDpiScale">The window's new DPI scale. Unused for the same reason.</param>
+    /// <param name="newDpiScale">
+    /// The window's new DPI scale, per WPF's own <c>WM_DPICHANGED</c> plumbing. Not used for the position
+    /// (same reason as above), and, per MINOR-6 (release-polish 1.0 review), not used for
+    /// <see cref="ChildWindowViewModel.IconRenderScale"/> either — <see cref="PanelWindowCoordinates.GetWindowScale"/>
+    /// (below) is used there instead, the SAME single DPI source <see cref="Initialize"/>/
+    /// <see cref="OnSourceInitialized"/> already push, so <see cref="ChildWindowViewModel.IconRenderScale"/>
+    /// can never disagree with itself across those three call sites and trigger a spurious extra icon
+    /// re-fetch for two values that are, in every normal case, identical anyway.
+    /// </param>
     protected override void OnDpiChanged(DpiScale oldDpiScale, DpiScale newDpiScale)
     {
         _dpiTransition.Set();
@@ -494,6 +545,11 @@ public partial class ChildWindow : Window
         base.OnDpiChanged(oldDpiScale, newDpiScale);
 
         _desktopScale.Refresh();
+
+        // Crisp icons on the new monitor: re-requests item icons only if the snapped pixel size changed
+        // (and even then, debounced — see ChildWindowViewModel.ScheduleIconRefetch, M3). Single DPI
+        // source (MINOR-6): PanelWindowCoordinates.GetWindowScale, same as Initialize/OnSourceInitialized.
+        _viewModel.IconRenderScale = PanelWindowCoordinates.GetWindowScale(this, _desktopScale.Current);
 
         Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
@@ -1185,15 +1241,82 @@ public partial class ChildWindow : Window
 
     /// <summary>
     /// Explorer-like "right-click selects the item before the context menu opens" behavior (Feature A).
-    /// Runs on the Preview (tunneling) pass so the selection is already updated by the time the
-    /// bubbling <c>MouseRightButtonUp</c> shows <c>FileContextMenu</c>.
+    /// Runs on the Preview (tunneling) pass so the selection is already updated on press, before
+    /// <see cref="FileListHost_PreviewMouseRightButtonUp"/> opens the native shell menu on release.
     /// </summary>
     private void FileListHost_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is not DependencyObject source) return;
 
-        if (FindAncestorOrSelf<ListBoxItem>(source)?.DataContext is FileItem item)
+        if (ResolveRightClickedFileItem(source) is { } item)
             _viewModel.SelectedFile = item;
+    }
+
+    /// <summary>
+    /// Right-click release inside <see cref="FileListHost"/>. On a file item (list and grid templates
+    /// alike — both host items in <see cref="ListBoxItem"/> containers): shows the native Windows shell
+    /// context menu for the item's file at the cursor, exactly like Explorer — the panel has no WPF menu
+    /// for items; marking the event handled keeps WPF's <c>ContextMenuService</c> from looking for one.
+    /// On the EMPTY panel body (UX parity fix, fences-ux-parity-reviewer, release-polish 1.0 review) —
+    /// list/grid whitespace inside <see cref="FileListHost"/>, not on an item — opens
+    /// <c>HeaderContextMenu</c> instead, the same fence menu the title bar and
+    /// <see cref="OverflowButton_Click"/> already open: Stardock Fences opens its fence menu anywhere on
+    /// the fence background, not just its title bar.
+    /// <para>
+    /// Coordinates: <see cref="Visual.PointToScreen"/> converts this window's DIP position into physical
+    /// screen pixels through the window's own per-monitor DPI transform — what <c>TrackPopupMenuEx</c> expects
+    /// (same conversion the System Icons panel uses, release-hardening F / ADR-037).
+    /// </para>
+    /// <para>
+    /// A right-click INSIDE the inline-rename editor (MINOR 5, release-polish 1.0 review) is left entirely to the
+    /// <see cref="TextBox"/>: it must show its own Cut/Copy/Paste menu, not commit the rename and open the shell
+    /// menu (or the fence menu) over the half-typed name.
+    /// </para>
+    /// <para>
+    /// A right-click on the list/grid's own <see cref="ScrollBar"/> (MINOR 9, release-polish 1.0 final
+    /// review) is likewise left alone — it lives inside <see cref="FileListHost"/> but is neither a file
+    /// item nor the empty panel body, and popping the fence menu over it every time would be surprising.
+    /// </para>
+    /// </summary>
+    private void FileListHost_PreviewMouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source) return;
+        if (IsInlineRenameEditorHit(source)) return; // the inline-rename editor's own edit menu.
+        if (IsScrollBarHit(source)) return; // let the scrollbar show its own (default: no) menu.
+
+        if (ResolveRightClickedFileItem(source) is { } item)
+        {
+            e.Handled = true;
+
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero) return;
+
+            // Same reasoning as the other gesture entry points: a WS_EX_NOACTIVATE panel never sees the
+            // click as a LostKeyboardFocus, so an in-progress inline rename is committed explicitly first.
+            CommitActiveItemRenameIfAny();
+
+            var screen = PointToScreen(e.GetPosition(this));
+            _viewModel.ShowShellContextMenu(item, hwnd, (int)Math.Round(screen.X), (int)Math.Round(screen.Y));
+            return;
+        }
+
+        // UX parity fix: the release landed on the EMPTY panel body, not on an item — open the fence menu
+        // there too. Reuses the EXACT SAME <c>HeaderContextMenu</c> instance <see cref="OverflowButton_Click"/>
+        // reuses (R-7, ADR-013): this panel carries WS_EX_NOACTIVATE, so a freshly-constructed ContextMenu
+        // would be an unproven input surface with no upside over reusing one already known to receive
+        // input correctly on this window. Anchored at the cursor (PlacementMode.MousePoint) — the same
+        // effective default the title bar's own right-click already gets via ContextMenuService — unlike
+        // OverflowButton_Click's button-anchored placement; HeaderContextMenu_Closed restores the
+        // "unset"/ContextMenuService default afterward regardless of which of the three entry points opened
+        // it. Every item inside is the SAME MenuItem instance, with the SAME CanEnterEditLayout/
+        // IsLayoutLocked-gated bindings as the title-bar and overflow-button entry points, so Edit
+        // Layout/lock-state gating is respected automatically — nothing extra to wire here.
+        CommitActiveItemRenameIfAny();
+
+        e.Handled = true;
+        HeaderContextMenu.PlacementTarget = FileListHost;
+        HeaderContextMenu.Placement = PlacementMode.MousePoint;
+        HeaderContextMenu.IsOpen = true;
     }
 
     /// <summary>

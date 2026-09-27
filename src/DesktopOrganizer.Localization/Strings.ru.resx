@@ -104,16 +104,68 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <!-- ==== BEGIN SHARED (owner: WP-0S; docs/PLANS/localization.md §3.2/§3.3. Prefixes: Common_, Enum_,
-       Plural_, Language_, Page_, Panel_NewTitle, Snapshot_, SystemIcon_, Startup_, Restore_. Exception:
+  <!-- ==== BEGIN SHARED (owner: WP-0S; docs/PLANS/localization.md §3.2/§3.3. Prefixes: Common_, ColorPreset_,
+       Enum_, Plural_, Language_, Page_, Panel_NewTitle, Snapshot_, SystemIcon_, Startup_, Restore_. Exception:
        Settings_General_Language_Header/_Description are also seeded here — they are part of the C-5
        language-picker contract (§2.9) and must exist before WP-4a's Settings_ region (below) is ever
-       populated. WP-4a only *consumes* these two keys, it must not redefine them. ==== -->
+       populated. WP-4a only *consumes* these two keys, it must not redefine them. ColorPreset_ (ADR-042)
+       names the twelve PanelColorPresets, in spectrum order. ==== -->
+  <data name="ColorPreset_Red" xml:space="preserve">
+    <value>Красный</value>
+  </data>
+  <data name="ColorPreset_Orange" xml:space="preserve">
+    <value>Оранжевый</value>
+  </data>
+  <data name="ColorPreset_Amber" xml:space="preserve">
+    <value>Янтарный</value>
+  </data>
+  <data name="ColorPreset_Lime" xml:space="preserve">
+    <value>Лаймовый</value>
+  </data>
+  <data name="ColorPreset_Green" xml:space="preserve">
+    <value>Зелёный</value>
+  </data>
+  <data name="ColorPreset_Teal" xml:space="preserve">
+    <value>Бирюзовый</value>
+  </data>
+  <data name="ColorPreset_Cyan" xml:space="preserve">
+    <value>Голубой</value>
+  </data>
+  <data name="ColorPreset_Blue" xml:space="preserve">
+    <value>Синий</value>
+  </data>
+  <data name="ColorPreset_Violet" xml:space="preserve">
+    <value>Фиолетовый</value>
+  </data>
+  <data name="ColorPreset_Magenta" xml:space="preserve">
+    <value>Пурпурный</value>
+  </data>
+  <data name="ColorPreset_Graphite" xml:space="preserve">
+    <value>Графит</value>
+  </data>
+  <data name="ColorPreset_Stone" xml:space="preserve">
+    <value>Камень</value>
+  </data>
+  <data name="Common_AccentColor_Label" xml:space="preserve">
+    <value>Цвет акцента</value>
+  </data>
+  <data name="Common_Advanced_Description" xml:space="preserve">
+    <value>Hex-значения и сброс</value>
+  </data>
+  <data name="Common_Advanced_Header" xml:space="preserve">
+    <value>Дополнительно</value>
+  </data>
   <data name="Common_Cancel_Button" xml:space="preserve">
     <value>Отмена</value>
   </data>
+  <data name="Common_CustomColor_Button" xml:space="preserve">
+    <value>Другой цвет…</value>
+  </data>
   <data name="Common_EditLayout" xml:space="preserve">
     <value>Изменить расположение</value>
+  </data>
+  <data name="Common_HexColor_Hint" xml:space="preserve">
+    <value>Hex-значение, например #3F7FD9</value>
   </data>
   <data name="Common_IconLayout_Header" xml:space="preserve">
     <value>Расположение значков</value>
@@ -121,14 +173,35 @@
   <data name="Common_IconSize_Header" xml:space="preserve">
     <value>Размер значков</value>
   </data>
+  <data name="Common_IntegerRange_Format" xml:space="preserve">
+    <value>Целое число от {0} до {1}</value>
+  </data>
   <data name="Common_LockLayout" xml:space="preserve">
     <value>Закрепить расположение</value>
   </data>
   <data name="Common_LockedReason" xml:space="preserve">
     <value>Недоступно, пока расположение закреплено.</value>
   </data>
+  <data name="Common_Mode_Description" xml:space="preserve">
+    <value>При смене режима подбирается подходящий цвет текста для этого акцента.</value>
+  </data>
+  <data name="Common_Mode_Header" xml:space="preserve">
+    <value>Режим</value>
+  </data>
   <data name="Common_Ok_Button" xml:space="preserve">
     <value>ОК</value>
+  </data>
+  <data name="Common_PickAccentColor_A11y" xml:space="preserve">
+    <value>Выбрать свой цвет акцента</value>
+  </data>
+  <data name="Common_PickTextColor_A11y" xml:space="preserve">
+    <value>Выбрать свой цвет текста</value>
+  </data>
+  <data name="Common_PixelUnit_Label" xml:space="preserve">
+    <value>пкс</value>
+  </data>
+  <data name="Common_Preview_Header" xml:space="preserve">
+    <value>Предпросмотр</value>
   </data>
   <data name="Common_Remove_Button" xml:space="preserve">
     <value>Удалить</value>
@@ -136,8 +209,20 @@
   <data name="Common_Rename" xml:space="preserve">
     <value>Переименовать</value>
   </data>
+  <data name="Common_ResetToDefaults_Button" xml:space="preserve">
+    <value>По умолчанию</value>
+  </data>
+  <data name="Common_ResetToDefaults_Tooltip" xml:space="preserve">
+    <value>Сбросить к значениям по умолчанию</value>
+  </data>
+  <data name="Common_Surface_Header" xml:space="preserve">
+    <value>Поверхность</value>
+  </data>
   <data name="Common_SurfaceStyle_Header" xml:space="preserve">
-    <value>Стиль поверхности</value>
+    <value>Стиль</value>
+  </data>
+  <data name="Common_TextColor_Label" xml:space="preserve">
+    <value>Цвет текста</value>
   </data>
   <data name="Common_ValuePx_Format" xml:space="preserve">
     <value>{0} пкс</value>
@@ -207,6 +292,12 @@
   </data>
   <data name="Enum_PanelSurfaceStyle_Solid" xml:space="preserve">
     <value>Сплошной</value>
+  </data>
+  <data name="Enum_PanelThemeMode_Dark" xml:space="preserve">
+    <value>Тёмный</value>
+  </data>
+  <data name="Enum_PanelThemeMode_Light" xml:space="preserve">
+    <value>Светлый</value>
   </data>
   <data name="Enum_PanelViewMode_Grid" xml:space="preserve">
     <value>Сетка</value>
@@ -393,21 +484,6 @@
   </data>
   <data name="Panel_Confirm_ApplySizingMode_Title" xml:space="preserve">
     <value>Применение режима размера ко всем панелям</value>
-  </data>
-  <data name="Panel_FileMenu_Open" xml:space="preserve">
-    <value>Открыть</value>
-  </data>
-  <data name="Panel_FileMenu_OpenContainingFolder" xml:space="preserve">
-    <value>Открыть папку с файлом</value>
-  </data>
-  <data name="Panel_FileMenu_Properties" xml:space="preserve">
-    <value>Свойства</value>
-  </data>
-  <data name="Panel_FileMenu_RemoveFromPanel" xml:space="preserve">
-    <value>Удалить из панели</value>
-  </data>
-  <data name="Panel_FileMenu_RemoveFromPanel_Tooltip" xml:space="preserve">
-    <value>Для файлов, перемещённых в панель перетаскиванием, элемент обычно возвращается на исходное место на диске. Для остальных он просто удаляется из панели.</value>
   </data>
   <data name="Panel_Header_More" xml:space="preserve">
     <value>Ещё</value>
@@ -641,9 +717,6 @@
   <data name="Settings_Nav_SystemIcons" xml:space="preserve">
     <value>Системные значки</value>
   </data>
-  <data name="Settings_NewPanelDefaults_AccentColor_Label" xml:space="preserve">
-    <value>Цвет акцента</value>
-  </data>
   <data name="Settings_NewPanelDefaults_Description" xml:space="preserve">
     <value>Задаёт оформление для каждой панели, созданной с этого момента. На уже существующие панели не влияет.</value>
   </data>
@@ -659,6 +732,9 @@
   <data name="Settings_NewPanelDefaults_PanelGeometry_Header" xml:space="preserve">
     <value>Геометрия панели</value>
   </data>
+  <data name="Settings_NewPanelDefaults_ResetColors_Description" xml:space="preserve">
+    <value>Вернуть встроенные цвета</value>
+  </data>
   <data name="Settings_NewPanelDefaults_SurfaceStyle_Description" xml:space="preserve">
     <value>Стекло лучше смотрится на тёмных обоях; для светлых обоев более читаемы Сплошной или Акцентный стиль.</value>
   </data>
@@ -670,9 +746,6 @@
   </data>
   <data name="Settings_NewPanelDefaults_Take_Button" xml:space="preserve">
     <value>Взять</value>
-  </data>
-  <data name="Settings_NewPanelDefaults_TextColor_Label" xml:space="preserve">
-    <value>Цвет текста</value>
   </data>
   <data name="Settings_Pages_AddPage_Button" xml:space="preserve">
     <value>Добавить страницу</value>
@@ -745,12 +818,6 @@
   </data>
   <!-- ==== END WP-4a ==== -->
   <!-- ==== BEGIN WP-4b Customize & dialogs (Customize_, Dialog_) ==== -->
-  <data name="Customize_AccentColor_Header" xml:space="preserve">
-    <value>Цвет акцента (hex)</value>
-  </data>
-  <data name="Customize_Appearance_Header" xml:space="preserve">
-    <value>Внешний вид</value>
-  </data>
   <data name="Customize_AutoSizeToContentGridOnly_Description" xml:space="preserve">
     <value>Только для вида «Сетка» — недоступно в виде «Список».</value>
   </data>
@@ -790,8 +857,20 @@
   <data name="Customize_IconLayout_Description" xml:space="preserve">
     <value>Фиксированный интервал распределяет значки равномерно; адаптивное растяжение заполняет ими всю панель (устар.).</value>
   </data>
+  <data name="Customize_PreviewItem1_Label" xml:space="preserve">
+    <value>Report.pdf</value>
+  </data>
+  <data name="Customize_PreviewItem2_Label" xml:space="preserve">
+    <value>Photo.png</value>
+  </data>
+  <data name="Customize_PreviewItem3_Label" xml:space="preserve">
+    <value>Notes.txt</value>
+  </data>
   <data name="Customize_Layout_Header" xml:space="preserve">
     <value>Расположение</value>
+  </data>
+  <data name="Customize_ResetColors_Description" xml:space="preserve">
+    <value>Вернуть настройки новых панелей</value>
   </data>
   <data name="Customize_SortMode_FolderPortal_Description" xml:space="preserve">
     <value>Панели-порталы папок всегда сортируются по имени.</value>
@@ -803,13 +882,10 @@
     <value>Вручную сохраняет порядок, который вы задали сами; По имени сортирует по алфавиту.</value>
   </data>
   <data name="Customize_SurfaceOpacity_Header" xml:space="preserve">
-    <value>Непрозрачность поверхности</value>
+    <value>Непрозрачность</value>
   </data>
   <data name="Customize_SurfaceStyle_GlassHint_Description" xml:space="preserve">
     <value>Стекло лучше смотрится на тёмных обоях; для светлых обоев более читаемы Сплошной или Акцентный стиль.</value>
-  </data>
-  <data name="Customize_TextColor_Header" xml:space="preserve">
-    <value>Цвет текста (hex)</value>
   </data>
   <data name="Customize_Title_Header" xml:space="preserve">
     <value>Название</value>

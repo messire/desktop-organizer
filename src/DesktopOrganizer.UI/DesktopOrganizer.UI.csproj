@@ -12,6 +12,33 @@
         <!-- release-hardening F1 / ADR-037: PerMonitorV2 DPI awareness (fallback PerMonitor, then
              system-aware) is declared ONLY in this manifest. Rollback = remove this line and the file. -->
         <ApplicationManifest>app.manifest</ApplicationManifest>
+        <!-- Release-polish 1.0: AssemblyTitle becomes the Win32 FileDescription resource string, which is
+             what Task Manager's "Name" column and Explorer's file Properties "Description"/"File
+             description" field actually display — NOT AssemblyName (kept as DesktopOrganizer.UI; renaming
+             it would move the per-user Settings.settings user.config path under
+             %LocalAppData%\...\<AssemblyVersion>\ and reset every user's settings, and both the installer
+             and SingleInstanceNaming reference "DesktopOrganizer.UI.exe" by name) and NOT Product (that
+             only feeds the separate "Product name" field). -->
+        <AssemblyTitle>DesktopOrganizer</AssemblyTitle>
+        <!-- Release-polish 1.0 follow-up (2026-09-28, explicit user approval — see CLAUDE.md's frozen
+             settings-contour note): this override used to pin <Company> to "DesktopOrganizer.UI",
+             independent of Directory.Build.props's solution-wide <Company> ("khagendev"), because
+             System.Configuration derives this exe's per-user Settings.settings user.config folder from
+             AssemblyCompanyAttribute — %LocalAppData%\<Company>\<exe>_Url_<hash>\<AssemblyVersion>\
+             user.config — and changing it would silently move that folder, indistinguishable from
+             resetting every user's settings on upgrade (same hazard as renaming AssemblyName or moving
+             AssemblyVersion — see the AssemblyTitle comment above and the pinned AssemblyVersion comment
+             in Directory.Build.props). The override is removed here so this project now inherits
+             Directory.Build.props's <Company>khagendev</Company> on purpose: Program.cs's
+             UserConfigFolderMigration (DesktopOrganizer.UI\Lifecycle) runs once, at the very start of
+             Main, before anything reads user.config. It resolves this exe's own
+             %LocalAppData%\DesktopOrganizer.UI\DesktopOrganizer.UI_Url_<hash>\ evidence folder (via
+             System.Configuration, without ever touching Properties.Settings.Default) and copies only that
+             one folder into %LocalAppData%\khagendev\ — atomically (via a staging folder + rename),
+             guarded by a named mutex against two processes starting for the first time at once, and
+             resumable if interrupted — never deleting the old copy, so no installed user loses settings.
+             Do not remove that migration if this <Company> value ever needs to change again — add a new
+             one-time migration step instead. -->
     </PropertyGroup>
 
     <ItemGroup>

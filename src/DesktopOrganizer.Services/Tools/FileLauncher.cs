@@ -17,22 +17,25 @@ internal class FileLauncher(INativeApi nativeApi) : IFileLauncher
     }
 
     /// <inheritdoc />
-    public void OpenContainingFolder(string path)
+    public ShellContextMenuResult ShowContextMenu(string path, IntPtr ownerHwnd, int screenX, int screenY, bool interceptDelete)
     {
-        if (string.IsNullOrWhiteSpace(path)) return;
+        if (!Exists(path)) return new ShellContextMenuResult(ShellContextMenuOutcome.NotShown, null);
 
-        if (File.Exists(path))
-            TryRun(() => Process.Start("explorer.exe", $"/select,\"{path}\""));
-        else if (Directory.Exists(path))
-            TryRun(() => Process.Start("explorer.exe", $"\"{path}\""));
-    }
-
-    /// <inheritdoc />
-    public void ShowProperties(string path)
-    {
-        if (!Exists(path)) return;
-
-        TryRun(() => nativeApi.ShowFileProperties(path));
+        try
+        {
+            return nativeApi.ShowShellContextMenuForPath(path, ownerHwnd, screenX, screenY, interceptDelete);
+        }
+        catch (Exception ex)
+        {
+            // INativeApi already degrades silently; this is belt-and-suspenders for the UI thread.
+            // Type name only — never ex.Message, which may embed the path.
+            AppLog.Current.Warn(
+                "FileLauncher",
+                "ShellContextMenuFailed",
+                new KeyValuePair<string, object?>("exception", ex.GetType().Name),
+                new KeyValuePair<string, object?>("extension", Path.GetExtension(path)));
+            return new ShellContextMenuResult(ShellContextMenuOutcome.NotShown, null);
+        }
     }
 
     private static bool Exists(string path)

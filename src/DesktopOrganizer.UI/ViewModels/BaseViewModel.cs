@@ -38,6 +38,13 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
 
     private FileItem? _selectedFile;
 
+    /// <summary>
+    /// Physical pixel size (already snapped — <see cref="IconPixelSize.Snap"/>) every icon of this panel is
+    /// requested at. Starts at <see cref="IconPixelSize.Default"/>; a subclass that knows its display size and
+    /// DPI updates it through <see cref="SetRequestedIconPixelSize"/>.
+    /// </summary>
+    private int _requestedIconPixelSize = IconPixelSize.Default;
+
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -69,6 +76,14 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     protected internal IReadOnlyList<FileItem> AllItems => _allItems;
 
     /// <summary>
+    /// Gets the snapped physical pixel size every item icon of this panel is requested at (see
+    /// <see cref="SetRequestedIconPixelSize"/>). Used for every <see cref="IIconProvider.GetIcon(string, int)"/>
+    /// call this class makes — add, rename, reappearance and placeholder retry alike — so one panel never
+    /// mixes icon resolutions.
+    /// </summary>
+    protected internal int RequestedIconPixelSize => _requestedIconPixelSize;
+
+    /// <summary>
     /// Re-indexes <see cref="_allItemPaths"/> for <paramref name="item"/> after a successful physical
     /// rename (see <c>ChildWindowViewModel.CommitRenameCommand</c>) and relocates the item in place via
     /// <see cref="FileItem.Relocate"/> — the same <see cref="FileItem"/> instance is kept (rather than
@@ -95,7 +110,7 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
         // entries in _allItemPaths pointing at the same FileItem.
         _allItemPaths.Add(newPath);
 
-        item.Relocate(newPath, _iconProvider.GetIcon(newPath));
+        item.Relocate(newPath, _iconProvider.GetIcon(newPath, _requestedIconPixelSize));
     }
 
     /// <summary>
@@ -111,7 +126,7 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     /// <remarks>
     /// A content-change re-fetch for items that stay present throughout (e.g. an <c>.exe</c>'s
     /// embedded icon changing after an in-place update) is intentionally NOT performed here:
-    /// <see cref="IIconProvider.GetIcon"/> already does that freshness check (comparing
+    /// <see cref="IIconProvider.GetIcon(string, int)"/> already does that freshness check (comparing
     /// <c>LastWriteTimeUtc</c>) once actually called, but calling it for every tracked item on every
     /// liveness tick would reintroduce the exact synchronous UI-thread cost this panel's icon pipeline
     /// already measured as expensive for large panels (~2.8ms/item — see
@@ -124,7 +139,7 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     /// whose <em>icon retrieval itself</em> failed transiently — e.g. <c>SHGetFileInfoW</c> called
     /// before the shell has finished initializing during autostart — used to leave the item stuck on
     /// <see cref="IIconProvider"/>'s placeholder for the rest of the session, since nothing ever called
-    /// <see cref="IIconProvider.GetIcon"/> again for an item that was never "missing" to begin with.
+    /// <see cref="IIconProvider.GetIcon(string, int)"/> again for an item that was never "missing" to begin with.
     /// Every existing, still-placeholder item is now retried too, bounded to
     /// <see cref="MaxPlaceholderRetryAttempts"/> attempts with a growing per-tick backoff (see
     /// <see cref="RetryPlaceholderIcon"/>) — NOT unconditionally on every tick, which would reintroduce
@@ -135,14 +150,21 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     /// </remarks>
     internal void RefreshItemsLiveness()
     {
+        List<FileItem>? vanished = null;
+
         foreach (var item in _allItems)
         {
             var wasMissing = !item.Exists;
             item.Refresh();
 
+            if (!wasMissing && !item.Exists)
+            {
+                (vanished ??= []).Add(item);
+            }
+
             if (wasMissing && item.Exists)
             {
-                item.UpdateIcon(_iconProvider.GetIcon(item.Path));
+                item.UpdateIcon(_iconProvider.GetIcon(item.Path, _requestedIconPixelSize));
                 _placeholderRetries.Remove(item); // fresh reappearance supersedes any prior retry state
             }
             else if (item.Exists && _iconProvider.IsPlaceholder(item.Icon))
@@ -156,6 +178,9 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
                 _placeholderRetries.Remove(item);
             }
         }
+
+        // After the loop: a subclass reacting to the transition may remove/relocate items (mutating _allItems).
+        if (vanished is not null) OnItemsVanished(vanished);
     }
 
     /// <summary>
@@ -303,6 +328,57 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     }
 
     /// <summary>
+    /// Re-fetches every tracked item's icon at the current <see cref="RequestedIconPixelSize"/> and swaps
+    /// it into the bound <see cref="FileItem.Icon"/>. Split out of <see cref="SetRequestedIconPixelSize"/>
+    /// (M3, release-polish 1.0 review) so a subclass can defer/debounce this — the actually expensive part
+    /// of a size change — separately from updating <see cref="RequestedIconPixelSize"/> itself, which must
+    /// stay synchronous (see that method's own remarks). Declared <see langword="protected internal"/> —
+    /// ahead of <see cref="SetRequestedIconPixelSize"/> below — to keep this class's member ordering
+    /// (public, internal, protected internal, protected, private) SA1202-clean.
+    /// </summary>
+    protected internal void RefreshAllItemIcons()
+    {
+        foreach (var item in _allItems)
+        {
+            item.UpdateIcon(_iconProvider.GetIcon(item.Path, _requestedIconPixelSize));
+            _placeholderRetries.Remove(item);
+        }
+    }
+
+    /// <summary>
+    /// Changes the pixel size this panel's icons are requested at and, when it actually changed (after
+    /// snapping — <see cref="IconPixelSize.Snap"/>), re-fetches the icon of every tracked item at the new
+    /// size. The per-panel icon size slider is continuous, but the snapped size only changes at bucket
+    /// boundaries, so dragging it costs one re-fetch per crossed bucket, not one per tick; revisiting a size
+    /// is a cache hit in <see cref="IIconProvider"/>.
+    /// </summary>
+    /// <remarks>
+    /// Any pending placeholder-retry bookkeeping is dropped for re-fetched items: the fresh call below is
+    /// itself a new attempt, and <see cref="RefreshItemsLiveness"/> starts over for an item that is still
+    /// on the placeholder afterwards.
+    /// </remarks>
+    /// <param name="pixelSize">Desired physical pixel size (DIP size × DPI scale); snapped here.</param>
+    /// <param name="refreshExisting">
+    /// <see langword="false"/> when the caller is about to rebuild the whole item set anyway (e.g. right
+    /// before <see cref="ReplaceAll"/>), so the existing items are not fetched twice, OR when the caller
+    /// wants the size to take effect immediately (so a new item added right after this call is fetched
+    /// at the right size — see <see cref="RequestedIconPixelSize"/>) while deferring the actual refetch of
+    /// already-tracked items to its own debounced call to <see cref="RefreshAllItemIcons"/> (M3,
+    /// release-polish 1.0 review — see <c>ChildWindowViewModel.UpdateRequestedIconPixelSize</c>).
+    /// </param>
+    /// <returns><see langword="true"/> when the snapped size changed.</returns>
+    protected bool SetRequestedIconPixelSize(int pixelSize, bool refreshExisting = true)
+    {
+        var snapped = IconPixelSize.Snap(pixelSize);
+        if (snapped == _requestedIconPixelSize) return false;
+
+        _requestedIconPixelSize = snapped;
+        if (refreshExisting) RefreshAllItemIcons();
+
+        return true;
+    }
+
+    /// <summary>
     /// Removes a file item from the full collection.
     /// </summary>
     /// <param name="file">File item to be removed.</param>
@@ -398,7 +474,7 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
             // Mark the path as tracked only after the item is fully constructed and added — if
             // GetIcon throws, the path must not be left "claimed" in _allItemPaths with no
             // corresponding _allItems entry, or this file could never be added again.
-            var icon = _iconProvider.GetIcon(file);
+            var icon = _iconProvider.GetIcon(file, _requestedIconPixelSize);
             _allItems.Add(new FileItem(file, icon, displayName: ResolveDisplayName(file)));
             _allItemPaths.Add(file);
             added = true;
@@ -408,7 +484,7 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     }
 
     /// <summary>
-    /// Retries <see cref="IIconProvider.GetIcon"/> for <paramref name="item"/> — an item that exists on
+    /// Retries <see cref="IIconProvider.GetIcon(string, int)"/> for <paramref name="item"/> — an item that exists on
     /// disk but is still showing the icon pipeline's own placeholder (see
     /// <see cref="RefreshItemsLiveness"/>) — bounded to <see cref="MaxPlaceholderRetryAttempts"/> total
     /// attempts, with a growing per-liveness-tick backoff between attempts (1 tick before the 2nd try,
@@ -432,7 +508,7 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
         state.AttemptsRemaining--;
         state.TicksUntilNextAttempt = MaxPlaceholderRetryAttempts - state.AttemptsRemaining; // 1, then 2, ...
 
-        var icon = _iconProvider.GetIcon(item.Path);
+        var icon = _iconProvider.GetIcon(item.Path, _requestedIconPixelSize);
         if (_iconProvider.IsPlaceholder(icon)) return; // still stuck — leave the counted-down state as-is
 
         item.UpdateIcon(icon);
@@ -444,6 +520,19 @@ public abstract class BaseViewModel(IIconProvider iconProvider) : INotifyPropert
     {
         public int AttemptsRemaining = MaxPlaceholderRetryAttempts;
         public int TicksUntilNextAttempt;
+    }
+
+    /// <summary>
+    /// Hook invoked by <see cref="RefreshItemsLiveness"/> — once per call, after the whole refresh — with every item
+    /// that was present on the previous check and is missing now (the present → missing transition only; an item
+    /// that stays missing is never reported again, so a stable panel costs nothing extra). The default
+    /// implementation is a no-op; <c>ChildWindowViewModel</c> reconciles vanished app-managed items (e.g. Cut in
+    /// the shell menu followed by Paste elsewhere, which happens after the menu already closed). An override may
+    /// remove or relocate the reported items.
+    /// </summary>
+    /// <param name="items">The items that just went missing, in panel order.</param>
+    protected virtual void OnItemsVanished(IReadOnlyList<FileItem> items)
+    {
     }
 
     /// <summary>

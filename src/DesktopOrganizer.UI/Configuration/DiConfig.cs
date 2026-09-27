@@ -75,7 +75,8 @@ public static class DiConfig
             sp.GetRequiredService<IPanelCustomizeService>(),
             sp.GetRequiredService<ILocalizationService>(),
             SystemCulture.OriginalUiCulture,
-            sp.GetRequiredService<AboutViewModel>()));
+            sp.GetRequiredService<AboutViewModel>(),
+            sp.GetRequiredService<IColorPickerService>()));
         services.AddTransient<ChildWindowViewModel>();       // Per-panel VM — has file state
         services.AddSingleton<LayoutSnapshotsViewModel>();  // Snapshots section VM
         services.AddSingleton<AboutViewModel>();            // About section VM (release-hardening-1.0.md §G2)

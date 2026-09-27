@@ -56,7 +56,7 @@
 | B | — (ключей нет, логи на английском) | — | — |
 | C | — (UI-текста нет) | — | — |
 | D | `Recycle_*` | `Settings_Confirm_RemovePanel_Title` | значения `Settings_Confirm_RemovePanel_ManagedFiles_Message`, `Page_Confirm_Remove_ManagedFiles_Message` |
-| E | `DragOut_*` (если понадобится) | `Panel_FileMenu_RemoveFromPanel_Tooltip` | — |
+| E | `DragOut_*` (если понадобится) | `Panel_FileMenu_RemoveFromPanel_Tooltip` (**ключ и весь якорь удалены 2026-09-27, release polish 1.0** — собственное `FileContextMenu` убрано целиком, элемент панели показывает нативное shell-меню; см. [ADR-040](../../adr/ADR-040-native-shell-context-menu.md)) | — |
 | G2 | `Settings_About_Update_*`, `Settings_About_Links_*` | `Settings_About_Version_Format` | значение `Settings_About_Diagnostics_Message` |
 
 ### 0.4 Версия приложения

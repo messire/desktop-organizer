@@ -82,6 +82,39 @@ public class VirtualDesktopServiceResetTests
         Assert.Equal(2, _activations);
     });
 
+    /// <summary>
+    /// MINOR 9 (release-polish 1.0 review): right after a native shell context menu the foreground window is this
+    /// process's own never-shown helper window. It is never asked for its virtual desktop (it has no meaningful
+    /// one — at best untracked, at worst stale): "current desktop" is unknown and moving a panel degrades to
+    /// <see langword="false"/> without even touching the shell.
+    /// </summary>
+    [Fact]
+    public void TryMoveWindowToCurrentDesktop_ForegroundIsOwnHelperWindow_DegradesWithoutConsultingShell() => StaTestRunner.Run(() =>
+    {
+        var helper = new IntPtr(0x5150);
+        _nativeApi.Setup(n => n.GetForegroundWindow()).Returns(helper);
+        _nativeApi.Setup(n => n.IsOwnHelperWindow(helper)).Returns(true);
+        var sut = CreateSut();
+
+        Assert.False(sut.TryMoveWindowToCurrentDesktop(new IntPtr(0x1234)));
+        Assert.Equal(0, _activations);
+    });
+
+    /// <summary>
+    /// Control for the test above: any OTHER foreground window is consulted as before.
+    /// </summary>
+    [Fact]
+    public void TryMoveWindowToCurrentDesktop_ForegroundIsOtherWindow_ConsultsShell() => StaTestRunner.Run(() =>
+    {
+        var other = new IntPtr(0x6160);
+        _nativeApi.Setup(n => n.GetForegroundWindow()).Returns(other);
+        _nativeApi.Setup(n => n.IsOwnHelperWindow(other)).Returns(false);
+        var sut = CreateSut();
+
+        Assert.False(sut.TryMoveWindowToCurrentDesktop(new IntPtr(0x1234))); // unsupported fake
+        Assert.Equal(1, _activations);
+    });
+
     private VirtualDesktopService CreateSut() => new(_nativeApi.Object, () =>
     {
         _activations++;

@@ -6,6 +6,7 @@ using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Diagnostics;
+using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.UI.Configuration;
 using DesktopOrganizer.UI.Lifecycle;
 using DesktopOrganizer.UI.State;
@@ -31,6 +32,12 @@ public static class Program
     // Not a localizable string — a command-line flag, always ASCII/English.
     private const string RestoreStateBackupFlag = "--restore-state-backup";
 
+    // A second, unrelated one-shot recovery switch — see RunRestorePanelItems remarks. Wired into
+    // installer/DesktopOrganizer.iss's [UninstallRun], run by the installer itself (headless, already
+    // past InitializeUninstall's EnsureAppClosed) rather than typed by a user at a terminal, but the
+    // flag is still plain ASCII/English like every other command-line switch this process reads.
+    private const string RestorePanelItemsFlag = "--restore-panel-items";
+
     // English, printed to Console.Error only (never shown in a message box) so scripts/developers
     // reading the terminal always see the same text regardless of UI language (docs/PLANS/
     // localization.md §2.8/§0.2 — diagnostics and console output stay English). The message box shown
@@ -38,6 +45,25 @@ public static class Program
     // RunRestoreStateBackup.
     private const string RestoreLockUnavailableMessage =
         "DesktopOrganizer could not restore application state: another running instance holds the storage lock. Close DesktopOrganizer and try again.";
+
+    // Console-only (see RestoreLockUnavailableMessage remarks on why) — but unlike that switch,
+    // RunRestorePanelItems never shows a message box for ANY outcome (see its own remarks: it runs
+    // headless from the uninstaller, where nobody is present to dismiss one).
+    private const string RestorePanelItemsLockUnavailableMessage =
+        "DesktopOrganizer could not restore panel items: another running instance holds the storage lock. Nothing was moved.";
+
+    // M1 (release-polish 1.0 code review): the exact string PanelItemsUninstallRestorer.RestoreAll()
+    // itself would report for "no managed PanelItems storage folder found" — duplicated here so
+    // RunRestorePanelItems can report the same outcome without constructing DI/AppLog/the storage lock
+    // at all (see MINOR 3 remarks on RunRestorePanelItems).
+    private const string RestorePanelItemsNothingToRestoreMessage =
+        "No managed PanelItems storage folder found — nothing to restore.";
+
+    // M1: printed (and best-effort logged) when RunRestorePanelItems itself throws — see its own
+    // remarks on why this path must never let an exception reach Main's outer try/catch (which shows a
+    // MessageBox that would hang a headless uninstall).
+    private const string RestorePanelItemsUnexpectedFailureMessage =
+        "DesktopOrganizer could not restore panel items: an unexpected error occurred. Nothing further was moved.";
 
     // ADR-024 D-8: printed once, to Console.Error only (no message box — a normal launch must not
     // gain a new modal dialog over a degraded-but-working session, see D-8's own rationale), when the
@@ -49,6 +75,16 @@ public static class Program
     // Mirrors StorageFileLock()'s production default (maxAttempts: 3) purely for the diagnostics
     // payload below; TryAcquire() itself does not report how many attempts it actually made.
     private const int StorageLockDefaultMaxAttempts = 3;
+
+    // --restore-panel-items exit codes — distinct from --restore-state-backup's (0/2) and from the
+    // single-instance handshake's (0/1/3/4), documented alongside them on Main's own remarks below.
+    private const int RestorePanelItemsLockUnavailableExitCode = 6;
+    private const int RestorePanelItemsPartialFailureExitCode = 7;
+
+    // M1: a new, documented exit code — see Main's remarks — for an unexpected exception inside
+    // RunRestorePanelItems that its own try/catch had to swallow instead of letting it reach Main's
+    // outer catch (whose MessageBox would hang a headless `runhidden waituntilterminated` uninstall).
+    private const int RestorePanelItemsUnexpectedFailureExitCode = 8;
 
     /// <summary>
     /// Entry point. Exit codes (consumed by <c>tools/lifecycle/Invoke-SingleInstanceStress.ps1</c>,
@@ -67,12 +103,21 @@ public static class Program
     /// <see cref="DesktopOrganizer.UI.Lifecycle.CrashCoordinator"/> on the UI thread and the crash
     /// sequence ran to completion (ADR-033 part 2, <see cref="DesktopOrganizer.UI.Lifecycle.ExitCodes.Crashed"/>);
     /// a fatal exception on a genuine background thread instead ends the process via the CLR's own
-    /// unmanaged-exception termination, with no code this method controls.
+    /// unmanaged-exception termination, with no code this method controls; <c>6</c> —
+    /// <c>--restore-panel-items</c> was requested but the storage lock could not be acquired (another
+    /// running instance holds it) — nothing was moved; <c>7</c> — <c>--restore-panel-items</c> ran but
+    /// one or more items could not be moved and remain in managed storage (see
+    /// <see cref="RunRestorePanelItems"/>) — every item it could move was still moved; <c>8</c> —
+    /// <c>--restore-panel-items</c> threw an unexpected exception, caught entirely inside
+    /// <see cref="RunRestorePanelItems"/>'s own try/catch (M1, release-polish 1.0 code review) so it
+    /// never reaches this method's own message-box-showing catch below, which would otherwise hang a
+    /// headless <c>runhidden waituntilterminated</c> uninstall with nobody present to dismiss it.
     /// </summary>
     /// <param name="args">
-    /// Command-line arguments. Unused by protocol <c>DO/1</c> itself (ADR-023 D-5) — the one flag this
-    /// process reads directly is <c>--restore-state-backup</c> (ADR-024 §7 scenario C), checked before
-    /// the single-instance handshake ever starts.
+    /// Command-line arguments. Unused by protocol <c>DO/1</c> itself (ADR-023 D-5) — the two flags this
+    /// process reads directly are <c>--restore-state-backup</c> (ADR-024 §7 scenario C) and
+    /// <c>--restore-panel-items</c> (see <see cref="RunRestorePanelItems"/>), both checked before the
+    /// single-instance handshake ever starts.
     /// </param>
     [STAThread]
     public static int Main(string[] args)
@@ -107,6 +152,26 @@ public static class Program
         // process would simply vanish with no message and a CLR-default exit code.
         try
         {
+            // M1 (release-polish 1.0 code review): dispatched before anything else in this method —
+            // ahead of the WinForms exception bridge and the culture/user.config bootstrap below, not
+            // just ahead of the single-instance handshake. This flag is only ever set by the installer's
+            // headless, English-only [UninstallRun] entry (see RunRestorePanelItems remarks); it needs
+            // none of the WinForms bridge, WPF culture, or user.config reads that follow, and
+            // RunRestorePanelItems's own try/catch guarantees this never throws back into this method's
+            // message-box-showing catch below (which would hang that headless uninstall).
+            if (args.Any(a => string.Equals(a, RestorePanelItemsFlag, StringComparison.OrdinalIgnoreCase)))
+                return RunRestorePanelItems();
+
+            // 2026-09-28 (explicit user approval, see CLAUDE.md's frozen settings-contour note and
+            // DesktopOrganizer.UI.csproj's <Company> comment): one-time, idempotent, exception-safe
+            // migration of the per-user user.config folder from the old pinned Company
+            // ("DesktopOrganizer.UI") to the new one ("khagendev"). Must run before the very first read
+            // of Properties.Settings.Default anywhere below — TryReadLanguagePreference() a few lines
+            // down is the earliest one — but after the RestorePanelItemsFlag check above: that headless
+            // uninstall path never reads user.config at all, so running this ahead of it would be pure
+            // overhead on every uninstall.
+            UserConfigFolderMigration.Run();
+
             // Inside the guard (release-hardening review L7): Install touches WinForms' global
             // Application state, and a throw from it must still end in the startup-failed message box
             // below rather than an unhandled exception with no message at all.
@@ -255,6 +320,106 @@ public static class Program
         };
     }
 
+    /// <summary>
+    /// Implements the <c>--restore-panel-items</c> command-line switch: the uninstall-time counterpart
+    /// to <see cref="IPanelItemStorageService"/>'s live Move semantics (see
+    /// <see cref="IPanelItemsUninstallRestorer"/> remarks). Wired into
+    /// <c>installer/DesktopOrganizer.iss</c>'s <c>[UninstallRun]</c>, invoked by the uninstaller itself
+    /// — headless, after <c>InitializeUninstall</c>'s <c>EnsureAppClosed</c> has already made sure no
+    /// instance of the app is running — strictly before <c>{app}</c>'s files (and, separately, this
+    /// command's own target folder) are removed.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="RunRestoreStateBackup"/>, this never shows a <see cref="MessageBox"/> for any
+    /// outcome: it is invoked non-interactively by the uninstaller (typically with
+    /// <c>Flags: runhidden waituntilterminated</c>), where a modal dialog would have nobody present to
+    /// dismiss it and would simply hang the uninstall. Every outcome is instead reported only to the
+    /// console (English, same rationale as <see cref="RestoreLockUnavailableMessage"/>) and the
+    /// diagnostics log, via a deterministic exit code (see <see cref="Main"/>'s own remarks).
+    /// <para>
+    /// Acquires the same advisory storage lock <see cref="RunRestoreStateBackup"/> and the normal
+    /// startup path use (ADR-024 D-8) before touching any file: running this concurrently with a live,
+    /// writing DesktopOrganizer instance would be exactly the two-writer hazard the lock exists to
+    /// prevent (though in practice <c>EnsureAppClosed</c> should already guarantee no such instance
+    /// exists by the time the uninstaller reaches this switch).
+    /// </para>
+    /// <para>
+    /// MINOR 3 (release-polish 1.0 code review): before any of that, checks whether the managed
+    /// <c>PanelItems</c> folder even exists — resolved the same side-effect-free way
+    /// <see cref="DesktopOrganizer.Services.Tools.PanelItemsUninstallRestorer"/>'s own production
+    /// constructor does, via <see cref="AppStorageRoot.Default"/> — and returns immediately if not. On a
+    /// machine where the app never ran (or a second uninstall re-run after a clean first one), this
+    /// avoids building the DI container / initializing <see cref="IAppLog"/> / creating
+    /// <c>Logs\</c>/<c>State\</c> purely to report "nothing to restore".
+    /// </para>
+    /// <para>
+    /// M1 (release-polish 1.0 code review): the entire body below the existence check runs inside its
+    /// own try/catch. An exception here must never propagate to <see cref="Main"/>'s outer catch — that
+    /// catch shows a <see cref="MessageBox"/>, which on this headless uninstall path has nobody present
+    /// to dismiss it and would hang the uninstall indefinitely.
+    /// </para>
+    /// </remarks>
+    private static int RunRestorePanelItems()
+    {
+        // MINOR 3: mirrors PanelItemsUninstallRestorer's own `Directory.Exists(_storageRoot)` guard, but
+        // ahead of DI/AppLog/the storage lock — Path.Combine/AppStorageRoot.Default and Directory.Exists
+        // are the only two calls made here, neither of which creates anything.
+        var panelItemsRoot = Path.Combine(AppStorageRoot.Default, "PanelItems");
+        if (!Directory.Exists(panelItemsRoot))
+        {
+            Console.WriteLine(RestorePanelItemsNothingToRestoreMessage); // cli-output
+            return 0;
+        }
+
+        try
+        {
+            var services = new ServiceCollection();
+            services.ConfigureServices();
+
+            using var provider = services.BuildServiceProvider();
+
+            AppLog.Initialize(provider.GetRequiredService<IAppLog>());
+
+            var storageLock = provider.GetRequiredService<IStorageLock>();
+            if (!storageLock.TryAcquire())
+            {
+                Console.Error.WriteLine(RestorePanelItemsLockUnavailableMessage); // cli-output
+                AppLog.Current.Warn("Program", "RestorePanelItemsLockUnavailable");
+                return RestorePanelItemsLockUnavailableExitCode;
+            }
+
+            var restorer = provider.GetRequiredService<IPanelItemsUninstallRestorer>();
+            var result = restorer.RestoreAll();
+
+            if (result.Success)
+            {
+                Console.WriteLine(result.Message); // cli-output
+                AppLog.Current.Info(
+                    "Program",
+                    "RestorePanelItemsCompleted",
+                    new KeyValuePair<string, object?>("restored", result.RestoredCount));
+                return 0;
+            }
+
+            Console.Error.WriteLine(result.Message); // cli-output
+            AppLog.Current.Warn(
+                "Program",
+                "RestorePanelItemsCompletedWithFailures",
+                new KeyValuePair<string, object?>("restored", result.RestoredCount),
+                new KeyValuePair<string, object?>("failed", result.FailedCount));
+            return RestorePanelItemsPartialFailureExitCode;
+        }
+        catch (Exception ex)
+        {
+            // M1: best-effort only — AppLog.Current defaults to NullAppLog.Instance until Initialize()
+            // runs, so this is always safe to call even if the exception happened before DI/AppLog were
+            // ever constructed above.
+            Console.Error.WriteLine($"{RestorePanelItemsUnexpectedFailureMessage} {ex.Message}"); // cli-output
+            AppLog.Current.Error("Program", "RestorePanelItemsUnexpectedFailure", ex);
+            return RestorePanelItemsUnexpectedFailureExitCode;
+        }
+    }
+
     private static int RunSingleInstanceHandshakeAndApp(string[] args)
     {
         var services = new ServiceCollection();
@@ -265,6 +430,17 @@ public static class Program
         using var provider = services.BuildServiceProvider();
 
         AppLog.Initialize(provider.GetRequiredService<IAppLog>());
+
+        // Code-review hardening (2026-09-28): UserConfigFolderMigration ran before AppLog existed, so any
+        // outcome it had to report went only to its own migration.log file. Hand that one-line summary to
+        // the now-initialized structured log too, so it also shows up in a normal session's diagnostics.
+        if (UserConfigFolderMigration.PendingLogSummary is { } userConfigMigrationSummary)
+        {
+            AppLog.Current.Info(
+                "Program",
+                "UserConfigFolderMigrationSummary",
+                new KeyValuePair<string, object?>("summary", userConfigMigrationSummary));
+        }
 
         var coordinator = provider.GetRequiredService<ISingleInstanceCoordinator>();
 

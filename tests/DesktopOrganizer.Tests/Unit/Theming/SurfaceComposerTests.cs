@@ -16,6 +16,44 @@ public class SurfaceComposerTests
     private static readonly Color AccentA = Color.FromRgb(0x3B, 0x82, 0xF6); // Blue
     private static readonly Color AccentB = Color.FromRgb(0xA8, 0x55, 0xF7); // Violet
 
+    /// <summary>The app's own default text colour (<c>Color.Text.Primary</c>, <c>#DDDDDD</c>) — used as a stand-in <c>text</c> argument wherever a test only cares about the accent-luminance branch of <see cref="SurfaceComposer.ResolveNeutralBase"/> (MAJOR-2 fix, review round, orchestrator decision "variant A").</summary>
+    private static readonly Color DefaultText = Color.FromRgb(0xDD, 0xDD, 0xDD);
+
+    // --- ResolveNeutralBase theory data (docs/PLANS/color-presets-and-size-step.md Q-1, variant B) -------
+    // Declared here, with this class's other static members, per StyleCop's static-before-instance member
+    // ordering (SA1204) — not next to the [Theory]/[Fact] methods that consume them further down.
+
+    /// <summary>
+    /// Provides every one of <see cref="AccentPalette"/>'s legacy accents (Neutral + all six legacy
+    /// <c>Presets</c>) as theory data — every one of these, paired with the app's own light default text,
+    /// must keep resolving to <see cref="SurfaceComposer.DarkNeutralBase"/>, unchanged, after ADR-042.
+    /// </summary>
+    public static IEnumerable<object[]> LegacyDarkAccentHexValues()
+    {
+        yield return new object[] { AccentPalette.Neutral };
+        foreach (var preset in AccentPalette.Presets)
+            yield return new object[] { preset };
+    }
+
+    /// <summary>
+    /// The twelve <see cref="PanelColorPresets"/> accents (ADR-042), each paired with its OWN
+    /// <see cref="PanelColorPreset.LightModeTextHex"/> — every one of these pairs must resolve to
+    /// <see cref="SurfaceComposer.LightNeutralBase"/>, since <see cref="PanelThemeRules.IsLightSurface"/>
+    /// only ever looks at the text colour (paired with a DIFFERENT, light text instead, the SAME accent
+    /// must resolve dark — see
+    /// <see cref="SurfaceComposerTests.ResolveNeutralBase_LightAccentPairedWithLightText_ReturnsDarkNeutralBase"/>).
+    /// Raw hex, not a reference to <c>DesktopOrganizer.UI.Theming.PanelColorPresets</c>'s own fields, to
+    /// keep this theory data self-contained.
+    /// </summary>
+    public static IEnumerable<object[]> NewLightAccentHexValues()
+    {
+        yield return new object[] { "#D9534F", "#4A1F1E" }; // Red
+        yield return new object[] { "#E0812F", "#4B2A0C" }; // Orange
+        yield return new object[] { "#D6A324", "#453309" }; // Amber
+        yield return new object[] { "#3F7FD9", "#172F4B" }; // Blue
+        yield return new object[] { "#7A5BE7", "#2B2350" }; // Violet
+    }
+
     // --- ClampOpacity -------------------------------------------------------------------
 
     /// <summary>
@@ -293,5 +331,128 @@ public class SurfaceComposerTests
         var exception = Record.Exception(() => SurfaceComposer.AccentTint(AccentA, alpha));
 
         Assert.Null(exception);
+    }
+
+    // --- ResolveNeutralBase (ADR-042: derived from the TEXT colour's own PanelThemeMode, not an
+    // (accent, text) pair) ------------------------------------------------------------------------------
+    // Theory data (LegacyDarkAccentHexValues/NewLightAccentHexValues) lives in this class's own
+    // static-member block near the top, per StyleCop's static-before-instance ordering (SA1204).
+
+    /// <summary>
+    /// Verifies that every legacy accent, paired with the app's own light default text, still resolves to
+    /// <see cref="SurfaceComposer.DarkNeutralBase"/>, byte-identical — ADR-042 does not read the accent at
+    /// all, so this also proves the accent parameter is irrelevant to the result.
+    /// </summary>
+    /// <param name="accentHex">The legacy accent hex value under test.</param>
+    [Theory]
+    [MemberData(nameof(LegacyDarkAccentHexValues))]
+    public void ResolveNeutralBase_LegacyDarkAccent_ReturnsDarkNeutralBase(string accentHex)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+
+        var result = SurfaceComposer.ResolveNeutralBase(accent, DefaultText);
+
+        Assert.Equal(SurfaceComposer.DarkNeutralBase, result);
+        Assert.Equal(NeutralBase, result); // NeutralBase == #1E1E1E, this class's own pre-existing constant
+    }
+
+    /// <summary>
+    /// Verifies that every one of the sampled <see cref="PanelColorPresets"/> accents — paired with its
+    /// OWN light-mode dark text — resolves to <see cref="SurfaceComposer.LightNeutralBase"/> (ADR-042:
+    /// the text colour's own <see cref="PanelThemeMode"/> decides this, not the accent).
+    /// </summary>
+    /// <param name="accentHex">The accent hex value under test (irrelevant to the result — see remarks above).</param>
+    /// <param name="textHex">The paired dark (light-mode) text hex value under test.</param>
+    [Theory]
+    [MemberData(nameof(NewLightAccentHexValues))]
+    public void ResolveNeutralBase_NewLightAccent_ReturnsLightNeutralBase(string accentHex, string textHex)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+        var text = (Color)ColorConverter.ConvertFromString(textHex)!;
+
+        var result = SurfaceComposer.ResolveNeutralBase(accent, text);
+
+        Assert.Equal(SurfaceComposer.LightNeutralBase, result);
+    }
+
+    /// <summary>
+    /// ADR-042: verifies that the SAME light-mode-capable accents, when paired with the app's own DARK
+    /// default text (<c>#DDDDDD</c>) instead of a light-mode dark text, resolve to
+    /// <see cref="SurfaceComposer.DarkNeutralBase"/> — proving the decision is a property of the TEXT
+    /// colour alone, not the accent.
+    /// </summary>
+    /// <param name="accentHex">The accent hex value under test (irrelevant to the result).</param>
+    [Theory]
+    [InlineData("#D9534F")] // Red
+    [InlineData("#E0812F")] // Orange
+    [InlineData("#D6A324")] // Amber
+    [InlineData("#3F7FD9")] // Blue
+    [InlineData("#7A5BE7")] // Violet
+    public void ResolveNeutralBase_LightAccentPairedWithLightText_ReturnsDarkNeutralBase(string accentHex)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+
+        var result = SurfaceComposer.ResolveNeutralBase(accent, DefaultText);
+
+        Assert.Equal(SurfaceComposer.DarkNeutralBase, result);
+    }
+
+    /// <summary>
+    /// Verifies that every ADR-042 preset's <see cref="PanelColorPreset.LightModeTextHex"/> contrasts
+    /// STRICTLY BETTER against <see cref="SurfaceComposer.LightNeutralBase"/> than against
+    /// <see cref="SurfaceComposer.DarkNeutralBase"/> (M1: the rule <see cref="PanelThemeRules.FromTextColor(Color)"/>
+    /// itself now uses), while the app's own legacy default text does the opposite.
+    /// </summary>
+    [Fact]
+    public void ResolveNeutralBase_ContrastRule_SeparatesLegacyFromPresetLightModeText()
+    {
+        var legacyContrastOnDark = ContrastCalculator.ContrastRatio(DefaultText, SurfaceComposer.DarkNeutralBase);
+        var legacyContrastOnLight = ContrastCalculator.ContrastRatio(DefaultText, SurfaceComposer.LightNeutralBase);
+        Assert.True(legacyContrastOnDark > legacyContrastOnLight, "#DDDDDD should contrast better on the dark base.");
+
+        foreach (var preset in PanelColorPresets.All)
+        {
+            var text = (Color)ColorConverter.ConvertFromString(preset.LightModeTextHex)!;
+            var contrastOnLight = ContrastCalculator.ContrastRatio(text, SurfaceComposer.LightNeutralBase);
+            var contrastOnDark = ContrastCalculator.ContrastRatio(text, SurfaceComposer.DarkNeutralBase);
+            Assert.True(contrastOnLight > contrastOnDark, $"{preset.Id} LightModeTextHex {preset.LightModeTextHex} should contrast better on the light base.");
+        }
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.DarkNeutralBase"/> is byte-identical to the single neutral
+    /// base this app shipped before ADR-042 (<c>#1E1E1E</c>, this class's own <see cref="NeutralBase"/> constant).
+    /// </summary>
+    [Fact]
+    public void DarkNeutralBase_IsByteIdenticalToPreAdr042SingleBase()
+    {
+        Assert.Equal(NeutralBase, SurfaceComposer.DarkNeutralBase);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="SurfaceComposer.LightNeutralBase"/>'s own WCAG relative luminance is itself
+    /// well above <see cref="SurfaceComposer.DarkNeutralBase"/>'s — i.e. it really is a "light" base.
+    /// </summary>
+    [Fact]
+    public void LightNeutralBase_OwnLuminance_IsWellAboveDarkNeutralBase()
+    {
+        var lightLuminance = ContrastCalculator.RelativeLuminance(SurfaceComposer.LightNeutralBase);
+        var darkLuminance = ContrastCalculator.RelativeLuminance(SurfaceComposer.DarkNeutralBase);
+
+        Assert.True(lightLuminance > darkLuminance + 0.5);
+    }
+
+    /// <summary>
+    /// ADR-042: verifies that <see cref="SurfaceComposer.ResolveNeutralBase"/> ignores its
+    /// <c>accent</c> parameter entirely — two wildly different accents, paired with the SAME text colour,
+    /// always resolve to the same neutral base.
+    /// </summary>
+    [Fact]
+    public void ResolveNeutralBase_IgnoresAccent_SameTextDifferentAccentsResolveSame()
+    {
+        var withAccentA = SurfaceComposer.ResolveNeutralBase(AccentA, DefaultText);
+        var withAccentB = SurfaceComposer.ResolveNeutralBase(AccentB, DefaultText);
+
+        Assert.Equal(withAccentA, withAccentB);
     }
 }

@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming">
     <!--
         Ambient Accent Visual System — typography tokens over Brushes.xaml (D-1). FontFamily is
         deliberately left unset (inherits the default system font) rather than switching to a variable
@@ -7,27 +8,69 @@
         and the fixed Height="32" TextBlock/TextBox pair in Templates.xaml's GridViewTemplate (R-4) —
         changing either FontSize or FontFamily without also revisiting that metric would desync
         grid-snap math. No consumers yet (commit C1).
+
+        WP-B "ADDITIONAL" (docs/PLANS/color-presets-and-size-step.md): every Foreground below is now
+        luminance-adaptive (PanelChromeForegroundBrush, registered in Brushes.xaml) instead of the fixed
+        Brush.Text.Primary/Muted it used before Q-1 variant B — see PanelChromeForegroundPolicy's own
+        remarks. Dark-surface accents render byte-identical to the old fixed tokens; the 3rd MultiBinding
+        value is the High Contrast passthrough fallback (same shape as HoverOverlayBrush's consumers).
     -->
     <Style x:Key="Typography.PanelTitle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Primary}"/>
+        <Setter Property="Foreground">
+            <Setter.Value>
+                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Primary">
+                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <Binding Source="{StaticResource Brush.Text.Primary}"/>
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style x:Key="Typography.IconLabel" TargetType="TextBlock">
         <Setter Property="FontSize" Value="11"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Primary}"/>
+        <Setter Property="Foreground">
+            <Setter.Value>
+                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Primary">
+                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <Binding Source="{StaticResource Brush.Text.Primary}"/>
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
         <Setter Property="TextAlignment" Value="Center"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
     </Style>
 
     <Style x:Key="Typography.Body" TargetType="TextBlock">
         <Setter Property="FontSize" Value="12"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Primary}"/>
+        <Setter Property="Foreground">
+            <Setter.Value>
+                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Primary">
+                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <Binding Source="{StaticResource Brush.Text.Primary}"/>
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style x:Key="Typography.Caption" TargetType="TextBlock">
         <Setter Property="FontSize" Value="11"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Muted}"/>
+        <Setter Property="Foreground">
+            <Setter.Value>
+                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Muted">
+                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <Binding Source="{StaticResource Brush.Text.Muted}"/>
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
     </Style>
 </ResourceDictionary>

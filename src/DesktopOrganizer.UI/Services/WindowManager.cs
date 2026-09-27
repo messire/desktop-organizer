@@ -1,5 +1,6 @@
 using System.IO;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
@@ -431,7 +432,11 @@ public class WindowManager : IWindowManager
     public void LoadWindowsState()
     {
         var states = _applicationStateService.Panels;
-        if (states.Count == 0) return;
+        if (states.Count == 0)
+        {
+            CreateFirstRunPanelIfApplicable();
+            return;
+        }
 
         // M1 fix (P08 fix cycle 1, 2026-09-22): resolve stale original->managed remaps across ALL
         // panels up front, before any of them is constructed — see ResolveStalePanelPaths' remarks for
@@ -562,6 +567,27 @@ public class WindowManager : IWindowManager
     /// <returns>The recycle outcome; an empty (complete) outcome when <paramref name="releaseManagedItems"/> is <see langword="false"/>.</returns>
     internal static RecycleOutcome ReleaseManagedItemsIfRequested(ChildWindowModel model, IPanelItemStorageService storage, bool releaseManagedItems)
         => releaseManagedItems ? ReleaseManagedItems(model, storage) : default;
+
+    /// <summary>
+    /// The decision <see cref="CreateFirstRunPanelIfApplicable"/> gates itself on: exactly one panel
+    /// should be seeded when, and only when, there are no panels to restore AND the document load that
+    /// produced that empty list is <see cref="StateLoadStatus.FirstRun"/> — no JSON store existed yet and
+    /// legacy <c>user.config</c> was empty/default (see that member's remarks). Every other status that
+    /// can also report zero panels — <see cref="StateLoadStatus.Loaded"/> (the user deliberately deleted
+    /// every panel from an existing document), <see cref="StateLoadStatus.Quarantined"/>/
+    /// <see cref="StateLoadStatus.RecoveredFromBackup"/> (a corrupt/recovered document, not "nothing
+    /// configured yet"), <see cref="StateLoadStatus.ImportedFromLegacy"/> (a legacy install, handled by
+    /// its own import path), and <see cref="StateLoadStatus.NewerSchema"/> (a read-only session against a
+    /// newer on-disk schema this build must never write to) — must all return <see langword="false"/>.
+    /// </summary>
+    /// <remarks>
+    /// Extracted as its own internal static member so this decision is directly unit-testable without a
+    /// real WPF <c>ChildWindow</c>/DI graph — mirrors <see cref="CreateEachIsolated"/>/<see cref="SyncEachIsolated"/>.
+    /// </remarks>
+    /// <param name="existingPanelCount">How many panels the just-completed load actually returned.</param>
+    /// <param name="loadStatus">Which rung of the recovery ladder produced that load.</param>
+    internal static bool ShouldCreateFirstRunPanel(int existingPanelCount, StateLoadStatus loadStatus)
+        => existingPanelCount == 0 && loadStatus == StateLoadStatus.FirstRun;
 
     /// <summary>
     /// Cross-panel-aware counterpart to <c>ChildWindowViewModel.LoadFromModel</c>'s own per-panel
@@ -1018,6 +1044,49 @@ public class WindowManager : IWindowManager
         var bounds = new List<Rect>();
         CollectOtherPanelBounds(excludingId: null, bounds);
         return bounds;
+    }
+
+    /// <summary>
+    /// Seeds a brand-new install with exactly one empty panel (README.md's "On first run it creates one
+    /// empty panel" — Install step 3, both language sections), so a user who just installed the app sees
+    /// something rather than an entirely blank desktop. Only ever fires on a genuine first run — see
+    /// <see cref="ShouldCreateFirstRunPanel"/> — never when the user has simply deleted every panel
+    /// (that document already existed and loaded as
+    /// <see cref="StateLoadStatus.Loaded"/> with an empty <c>panels</c> array), and never on the
+    /// read-only <see cref="StateLoadStatus.NewerSchema"/> rung or after a quarantine/backup-recovery
+    /// load (<see cref="StateLoadStatus.Quarantined"/>/<see cref="StateLoadStatus.RecoveredFromBackup"/>),
+    /// where the real panels are either unreadable by this build or already being recovered — inventing a
+    /// new one on top would be actively misleading.
+    /// </summary>
+    /// <remarks>
+    /// Goes through the exact same creation path as the "Add panel" toolbar/tray action
+    /// (<c>MainWindowViewModel.AddPanel</c>): <see cref="PanelDefaults.CreateNew"/> for the localized
+    /// default title/page/appearance defaults, <see cref="PanelDefaults.ReconcileGridAlignedSpans"/> for
+    /// a self-consistent size, then <see cref="PlaceNewPanelOnFreeSlot"/> for a snapped, non-overlapping
+    /// position on the primary monitor's work area (there are no other panels yet, so this always finds
+    /// the top-left-most slot) — no bespoke geometry or persistence logic. The resulting panel is
+    /// persisted through the ordinary debounced <see cref="SaveWindowsState"/> path, exactly like any
+    /// other structural change made during <see cref="LoadWindowsState"/> (e.g.
+    /// <see cref="ResolveMonitorPlacement"/>'s own grid-size normalization save above it) — the debounce
+    /// timer only fires once the dispatcher starts pumping, by which point
+    /// <see cref="IApplicationStateService.ConsumersReady"/> is already <see langword="true"/>
+    /// (<c>App.StartApp</c> calls <c>MarkConsumersReady()</c> synchronously, still inside the same
+    /// Startup handler that called <see cref="LoadWindowsState"/>), so nothing extra is needed to make
+    /// this land on disk.
+    /// </remarks>
+    private void CreateFirstRunPanelIfApplicable()
+    {
+        if (!ShouldCreateFirstRunPanel(_applicationStateService.Panels.Count, _applicationStateService.LastLoadStatus))
+            return;
+
+        var model = PanelDefaults.CreateNew(_appSettings, PageManager.CurrentPage);
+        PanelDefaults.ReconcileGridAlignedSpans(model);
+        PlaceNewPanelOnFreeSlot(model);
+        CreateChildWindow(model);
+
+        // Structural change, but not urgent enough to warrant a synchronous flush during startup — same
+        // debounced path every other load-time structural adjustment in this class already uses.
+        SaveWindowsState();
     }
 
     /// <summary>

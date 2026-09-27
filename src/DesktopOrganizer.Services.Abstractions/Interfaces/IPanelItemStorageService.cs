@@ -260,4 +260,74 @@ public interface IPanelItemStorageService
     /// </summary>
     /// <param name="path">A path previously returned by <see cref="MoveIn"/>/<see cref="MoveInDirectory"/>, confirmed by the caller to no longer exist.</param>
     void ForgetMovedOut(string path);
+
+    /// <summary>
+    /// Brings the manifest back in line with a managed item that vanished from disk behind this service's back
+    /// WITHOUT a before-command snapshot of its per-item directory — the panel's periodic liveness check noticed
+    /// the present → missing transition (typically Cut in the item's shell context menu followed by Paste
+    /// elsewhere, after the menu had already closed). Only ever acts on a per-item managed item
+    /// (<c>{storageRoot}\{guid}\{name}</c>) whose path no longer exists:
+    /// <list type="bullet">
+    /// <item><description>per-item directory empty or missing — the item was deleted/moved away: the manifest entry is released and the empty directory removed (same cleanup as <see cref="ForgetMovedOut"/>), <see cref="ManagedItemReconcileKind.Deleted"/>;</description></item>
+    /// <item><description>anything else (still exists, not managed, a legacy flat-layout item, any entry left in the per-item directory) — <see cref="ManagedItemReconcileKind.Unchanged"/>, nothing touched.</description></item>
+    /// </list>
+    /// A rename is never inferred here: without knowing which entries existed before, a leftover entry (e.g. an
+    /// archive a shell command created next to the item) is indistinguishable from the renamed item — use
+    /// <see cref="ReconcileExternalChange(string, IReadOnlyCollection{string})"/> for that. Never deletes or moves
+    /// a file itself and never throws.
+    /// </summary>
+    /// <param name="storedPath">A managed path a panel currently references.</param>
+    /// <returns>What was concluded; see <see cref="ManagedItemReconcileKind"/>.</returns>
+    ManagedItemReconcileResult ReconcileExternalChange(string storedPath);
+
+    /// <summary>
+    /// Reconciles a managed item after a native shell command from its context menu ran, given the per-item
+    /// directory's entries from right BEFORE the command (<see cref="GetItemDirectoryEntries"/>). Only ever acts
+    /// on a per-item managed item (<c>{storageRoot}\{guid}\{name}</c>). "New" entries are those not in
+    /// <paramref name="entriesBefore"/>:
+    /// <list type="bullet">
+    /// <item><description>item still exists — every new entry was created by the command next to it (a shortcut, an archive): each one is ADOPTED as a new managed item (moved into a per-item directory of its own; original path = the item's original directory + the entry's name) and listed in <see cref="ManagedItemReconcileResult.AdoptedPaths"/>; <see cref="ManagedItemReconcileKind.Unchanged"/>;</description></item>
+    /// <item><description>item vanished and exactly ONE new entry appeared — renamed in place: the manifest entry is re-keyed to it (the recorded original path gets the new name, exactly like <see cref="RenameManaged"/>), <see cref="ManagedItemReconcileKind.Renamed"/>;</description></item>
+    /// <item><description>item vanished and no new entry appeared — deleted/moved away: the manifest entry is released and the per-item directory removed if empty, <see cref="ManagedItemReconcileKind.Deleted"/>;</description></item>
+    /// <item><description>item vanished and two or more new entries appeared — ambiguous: <see cref="ManagedItemReconcileKind.Unchanged"/>, nothing touched.</description></item>
+    /// </list>
+    /// An entry still being written (a file another handle holds open for writing, a directory modified during
+    /// the last two seconds) is not adopted yet; calling again later with the same snapshot picks it up. Never
+    /// deletes a file and never throws.
+    /// </summary>
+    /// <param name="storedPath">The managed path the command was invoked on.</param>
+    /// <param name="entriesBefore">The per-item directory's entries before the command (full paths).</param>
+    /// <returns>What was concluded; see <see cref="ManagedItemReconcileKind"/>.</returns>
+    ManagedItemReconcileResult ReconcileExternalChange(string storedPath, IReadOnlyCollection<string> entriesBefore);
+
+    /// <summary>
+    /// Snapshot of the entries (full paths) of the per-item directory of a per-item managed item
+    /// (<c>{storageRoot}\{guid}\{name}</c> → the entries of <c>{storageRoot}\{guid}</c>), taken right before a
+    /// shell command runs so <see cref="ReconcileExternalChange(string, IReadOnlyCollection{string})"/> can tell
+    /// created entries from pre-existing ones. Empty for anything else (not managed, legacy flat item, content
+    /// inside a managed folder). Read-only; never throws.
+    /// </summary>
+    /// <param name="storedPath">A managed path a panel currently references.</param>
+    /// <returns>The entries' full paths, or an empty list.</returns>
+    IReadOnlyList<string> GetItemDirectoryEntries(string storedPath);
+
+    /// <summary>
+    /// Deletes a managed item the way the user expects from "Delete" in its shell context menu: the item is
+    /// first moved back to its ORIGINAL location (<see cref="Restore"/>) and recycled from there
+    /// (<c>FOF_ALLOWUNDO</c>, the same Recycle Bin call as <see cref="ReleaseToRecycleBin"/>, ADR-035), so a later
+    /// "Restore" from the Recycle Bin puts it back where the user can see it instead of into the hidden storage
+    /// folder.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><description>Restored and recycled — <see cref="ManagedRecycleKind.Recycled"/>.</description></item>
+    /// <item><description>Restored, but the shell did not recycle it (cancelled, the "delete permanently?" warning declined, a failure) — the item is moved back into managed storage (<see cref="MoveIn"/>/<see cref="MoveInDirectory"/>; if even that fails it stays at its original location): <see cref="ManagedRecycleKind.Kept"/> with the item's current path.</description></item>
+    /// <item><description>Cannot be restored (a legacy item without an original path, the original location cannot be recreated, the move back failed) — recycled from managed storage instead (<see cref="ReleaseToRecycleBin"/>, exactly what the shell's own Delete would have done): <see cref="ManagedRecycleKind.Recycled"/>, or <see cref="ManagedRecycleKind.Kept"/> with the unchanged path.</description></item>
+    /// </list>
+    /// Never deletes permanently, never loses the item, never throws. Must be called on the UI (STA) thread — the
+    /// shell may show UI.
+    /// </remarks>
+    /// <param name="storedPath">A managed path a panel currently references.</param>
+    /// <returns>What happened; see <see cref="ManagedRecycleKind"/>.</returns>
+    ManagedRecycleResult RecycleManagedItem(string storedPath);
 }

@@ -71,7 +71,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> for a real, existing executable returns a
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> for a real, existing executable returns a
     /// frozen, non-transparent bitmap that is distinct from the pipeline's own placeholder icon.
     /// </summary>
     [Fact]
@@ -90,7 +90,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> for a real, existing folder returns a frozen,
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> for a real, existing folder returns a frozen,
     /// non-transparent bitmap that is distinct from the pipeline's own placeholder icon.
     /// </summary>
     [Fact]
@@ -104,7 +104,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> for a <c>.lnk</c> shortcut pointing at a real
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> for a <c>.lnk</c> shortcut pointing at a real
     /// existing target returns a frozen, non-transparent bitmap, distinct from the placeholder icon.
     /// </summary>
     [Fact]
@@ -124,7 +124,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> for a <c>.lnk</c> shortcut whose target no
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> for a <c>.lnk</c> shortcut whose target no
     /// longer exists returns the shell's own opaque fallback icon, never this pipeline's placeholder
     /// (P00 baseline H12).
     /// </summary>
@@ -150,7 +150,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> for an <c>.url</c> internet shortcut file
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> for an <c>.url</c> internet shortcut file
     /// returns a frozen, non-transparent bitmap, distinct from the placeholder icon.
     /// </summary>
     [Fact]
@@ -167,7 +167,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> for a nonexistent path never returns a fully
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> for a nonexistent path never returns a fully
     /// transparent bitmap (regression for the P00 baseline defect where the placeholder rendered
     /// before its <c>DrawingContext</c> closed).
     /// </summary>
@@ -191,7 +191,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> returns the exact same cached bitmap instance
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> returns the exact same cached bitmap instance
     /// when called twice for the same existing file path.
     /// </summary>
     [Fact]
@@ -206,7 +206,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> never caches the result for a still-missing
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> never caches the result for a still-missing
     /// path: two successive calls re-resolve independently, and both must still be valid, frozen,
     /// non-transparent bitmaps even though they are not required to be the same instance (MINOR-1 fix,
     /// P08 fix cycle 2).
@@ -239,7 +239,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     // ── UX P1 (P08 fix cycle 1, 2026-09-22): generic-by-extension fallback for a missing path ───────
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> for a missing path with a recognized extension
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> for a missing path with a recognized extension
     /// resolves a real, type-specific shell icon via <c>SHGFI_USEFILEATTRIBUTES</c> rather than falling
     /// back to this pipeline's own placeholder (UX P1, P08 fix cycle 1).
     /// </summary>
@@ -260,7 +260,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> for a missing path with an unrecognized
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> for a missing path with an unrecognized
     /// extension never throws and always returns a valid, frozen, non-transparent bitmap, regardless
     /// of whether Windows synthesizes a generic icon or the pipeline falls back to its own placeholder.
     /// </summary>
@@ -282,7 +282,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> for a missing, extension-less path treats it as
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> for a missing, extension-less path treats it as
     /// a folder (best-effort heuristic) and still returns a valid, frozen, non-transparent bitmap.
     /// </summary>
     [Fact]
@@ -302,7 +302,7 @@ public sealed class IconExtractionIntegrationTests : IDisposable
     // ── M4 (P08 fix cycle 1, 2026-09-22): prove distinct executables actually get distinct icons ─────
 
     /// <summary>
-    /// Verifies that <see cref="IconProvider.GetIcon"/> returns pixel-distinct bitmaps for two
+    /// Verifies that <see cref="IconProvider.GetIcon(string, int)"/> returns pixel-distinct bitmaps for two
     /// different executables, ruling out an accidental "same generic icon for every <c>.exe</c>"
     /// regression (M4, P08 fix cycle 1).
     /// </summary>
@@ -320,6 +320,115 @@ public sealed class IconExtractionIntegrationTests : IDisposable
         Assert.False(
             GetPbgra32Pixels(notepadIcon).SequenceEqual(GetPbgra32Pixels(explorerIcon)),
             "notepad.exe and explorer.exe must not resolve to pixel-identical icons.");
+    }
+
+    // ── release-polish 1.0: high-resolution per-file icons (IShellItemImageFactory stage) ───────────
+    // Run on an STA thread, like the WPF UI thread GetIcon is called from in production.
+
+    /// <summary>
+    /// Verifies the native <c>IShellItemImageFactory</c> stage end to end on an STA thread: a real executable
+    /// yields a bitmap at least as large as requested, whose pixels can be read back and which can be released.
+    /// </summary>
+    [Fact]
+    public void NativeShellItemImage_Executable_OnSta_ReturnsReadableLargeBitmap()
+    {
+        Assert.True(File.Exists(NotepadPath), $"Test assumption: '{NotepadPath}' must exist on this machine.");
+
+        var (hr, width, height, opaque, deleted) = StaTestRunner.Run(() =>
+        {
+            var nativeApi = new NativeApi();
+            var result = nativeApi.GetShellItemImage(NotepadPath, 96, out var bitmap);
+            if (result != 0 || bitmap == IntPtr.Zero) return (result, 0, 0, 0, false);
+
+            try
+            {
+                Assert.True(nativeApi.TryReadBitmapPixels(bitmap, out var pixels));
+                var span = pixels.Bgra.Span;
+                var opaqueCount = 0;
+                for (var i = 3; i < span.Length; i += 4)
+                {
+                    if (span[i] != 0) opaqueCount++;
+                }
+
+                return (result, pixels.Width, pixels.Height, opaqueCount, true);
+            }
+            finally
+            {
+                Assert.True(nativeApi.DeleteBitmap(bitmap));
+            }
+        });
+
+        Assert.Equal(0, hr);
+        Assert.True(deleted);
+        Assert.True(width >= 96, $"Expected >= 96 px, got {width}.");
+        Assert.True(height >= 96, $"Expected >= 96 px, got {height}.");
+        Assert.True(opaque > 0, "The executable's icon must not be blank.");
+    }
+
+    /// <summary>
+    /// Verifies that the provider now returns a genuinely large bitmap for a large request (the pre-1.0 path was
+    /// capped at 32 px and upscaled), and a small one for a small request.
+    /// </summary>
+    [Fact]
+    public void GetIcon_Executable_RequestedSize_IsHonored()
+    {
+        Assert.True(File.Exists(NotepadPath), $"Test assumption: '{NotepadPath}' must exist on this machine.");
+
+        var (small, large) = StaTestRunner.Run(() =>
+        {
+            var smallIcon = (BitmapSource)_iconProvider.GetIcon(NotepadPath, 16);
+            var largeIcon = (BitmapSource)_iconProvider.GetIcon(NotepadPath, 96);
+            return (smallIcon, largeIcon);
+        });
+
+        Assert.True(large.IsFrozen);
+        Assert.True(large.PixelWidth >= 96, $"Expected >= 96 px, got {large.PixelWidth}.");
+        Assert.True(small.PixelWidth < large.PixelWidth, $"16 px request produced {small.PixelWidth} px, 96 px request {large.PixelWidth} px.");
+        Assert.True(CountOpaquePixels(large) > 0);
+    }
+
+    /// <summary>
+    /// Verifies that a <c>.lnk</c> to an executable shows the TARGET's own icon (like Explorer/Fences), not the
+    /// generic shortcut icon: same pixels as the executable itself at the same size.
+    /// </summary>
+    [Fact]
+    public void GetIcon_ShortcutToExecutable_ShowsTargetIcon()
+    {
+        Assert.True(File.Exists(NotepadPath), $"Test assumption: '{NotepadPath}' must exist on this machine.");
+
+        var shortcutPath = Path.Combine(_tempDir, "notepad-target.lnk");
+        ShellLinkTestHelper.CreateShortcut(shortcutPath, NotepadPath);
+
+        var (target, shortcut) = StaTestRunner.Run(() =>
+        {
+            var targetIcon = (BitmapSource)_iconProvider.GetIcon(NotepadPath, 48);
+            var shortcutIcon = (BitmapSource)_iconProvider.GetIcon(shortcutPath, 48);
+            return (targetIcon, shortcutIcon);
+        });
+
+        Assert.Equal(target.PixelWidth, shortcut.PixelWidth);
+        Assert.True(
+            GetPbgra32Pixels(target).SequenceEqual(GetPbgra32Pixels(shortcut)),
+            "A shortcut to notepad.exe must render notepad's own icon.");
+    }
+
+    /// <summary>
+    /// Verifies the native system image list stage on an STA thread: the item's own index (no
+    /// <c>SHGFI_USEFILEATTRIBUTES</c>) is extracted as an <c>HICON</c> that can be destroyed.
+    /// </summary>
+    [Fact]
+    public void NativeSystemImageList_Folder_OnSta_ReturnsIcon()
+    {
+        var (iconCreated, destroyed) = StaTestRunner.Run(() =>
+        {
+            var nativeApi = new NativeApi();
+            var handler = new IconHandler(nativeApi, NullDiagnosticsLog.Instance);
+            var icon = handler.GetSystemImageListIconHandle(_tempDir, 48);
+            return (icon != IntPtr.Zero, icon != IntPtr.Zero && nativeApi.DestroyIcon(icon));
+        });
+
+        Assert.True(iconCreated);
+        Assert.True(destroyed);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

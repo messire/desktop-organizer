@@ -6,9 +6,11 @@
         xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
         xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
         xmlns:uimodels="clr-namespace:DesktopOrganizer.UI.Models"
+        xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
+        xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
         mc:Ignorable="d"
         Title="{Binding WindowTitle}"
-        Height="560" Width="420"
+        Height="640" Width="420"
         ResizeMode="NoResize"
         ShowInTaskbar="True"
         Topmost="False"
@@ -25,143 +27,211 @@
         re-evaluated on every hot language switch. WindowTitle/SortModeDescription/IconLayoutDescription/
         AutoSizeToContentDescription stay plain {Binding …} to a VM string property: the VM itself
         re-raises them on ILocalizationService.CultureChanged (PanelCustomizeViewModel remarks).
+
+        ADR-042: this window's cards adopt the SAME "Settings card" visual language
+        (Settings.CardBorder/CardHeader/CardDescription/SegmentedGroup/SegmentedItem, Resources/Styles/
+        Settings.xaml, merged app-wide by App.xaml.cs) as the Settings window — replacing the three plain
+        Expanders (Appearance/Content/Layout) this window used to have with a flat, scrollable stack of
+        cards. Content/Layout keep their EXACT prior behaviour — only their visuals (card wrapper, segmented
+        controls where there are 2 options) changed.
     -->
     <Window.Resources>
         <!-- Fix-cycle 1 Cleanup §7.4 re-check: Settings.xaml (app-wide) already declares an
              "EnumDisplayName" x:Key (Resources/Styles/Settings.xaml), and WpfApplicationHost's own merge list includes
              Settings.xaml, so a naive dedup looked safe — but PanelCustomizeWindowClosingTests.Build()
-             does NOT go through WpfApplicationHost's list: its own MergeResourceDictionaries(Application)
-             deliberately merges a NARROWER app-resource set (Colors/Spacing/Brushes/Typography/Icons/
-             Controls/Panels/Templates) that excludes Settings.xaml, to keep that fixture from depending
-             on the (unrelated) settings-window palette. Removing this local declaration broke that
-             fixture with "Cannot find resource named 'EnumDisplayName'" — restored deliberately; this
-             window keeps its own instance, same as ChildWindow.xaml's "Icon layout" context-menu radio
-             group and MainWindow.xaml's "Defaults for new panels" combos (P06 fix-cycle UX-P1). -->
+             used to deliberately merge a NARROWER app-resource set that excluded Settings.xaml; ADR-042
+             added Settings.xaml to that fixture's own merge list too (this window now genuinely depends on
+             its card styles), but this local declaration is kept anyway — same "consumer declares its own
+             instance" convention as MainWindow.xaml's own combos and ChildWindow.xaml's "Icon layout"
+             context-menu radio group. -->
         <conv:EnumDisplayNameConverter x:Key="EnumDisplayName"/>
     </Window.Resources>
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16,12,16,12">
         <StackPanel>
-            <TextBlock x:Name="TitleLabel" Text="{loc:Loc Customize_Title_Header}" VerticalAlignment="Center" Margin="0,0,0,4"/>
-            <TextBox Text="{Binding Appearance.SelectedPanelTitle, UpdateSourceTrigger=PropertyChanged}"
-                     AutomationProperties.LabeledBy="{Binding ElementName=TitleLabel}"
-                     Margin="0,0,0,12"/>
+            <!-- Release-polish-1.0 visual review item 7: the panel title now lives inside a
+                 Settings.CardBorder card like every other control below it, instead of sitting directly on
+                 the ScrollViewer's own background. This window is a fixed, non-resizable 420px
+                 (ResizeMode="NoResize") — too narrow for "label left, editable title box right" to read
+                 comfortably next to each other — so the label sits above a full-width TextBox below it,
+                 the same label-above-control shape the Folder Portal path/Advanced hex boxes already use. -->
+            <Border Style="{StaticResource Settings.CardBorder}">
+                <StackPanel>
+                    <TextBlock x:Name="TitleLabel" Text="{loc:Loc Customize_Title_Header}" Style="{StaticResource Settings.CardHeader}" Margin="0,0,0,6"/>
+                    <TextBox Text="{Binding Appearance.SelectedPanelTitle, UpdateSourceTrigger=PropertyChanged}"
+                             AutomationProperties.LabeledBy="{Binding ElementName=TitleLabel}"/>
+                </StackPanel>
+            </Border>
 
-            <!-- ── Appearance ─────────────────────────────────────────────────────────────────── -->
-            <Expander Header="{loc:Loc Customize_Appearance_Header}" IsExpanded="True" Margin="0,0,0,12">
-                <Grid Margin="0,10,0,0">
+            <!-- ── Preview ────────────────────────────────────────────────────────────────────── -->
+            <controls:PanelPreviewCard PreviewTitle="{Binding Appearance.SelectedPanelTitle}"
+                                        AccentHex="{Binding Colors.AccentColor}"
+                                        TextHex="{Binding Colors.TextColor}"
+                                        SurfaceStyle="{Binding Appearance.SelectedPanelSurfaceStyle}"
+                                        SurfaceOpacity="{Binding Appearance.SelectedPanelSurfaceOpacity}"
+                                        IconSize="{Binding Appearance.SelectedPanelIconSize}"/>
+
+            <!-- ── Mode / Accent colour / Advanced ────────────────────────────────────────────── -->
+            <controls:PanelColorEditor x:Name="ColorEditor" DataContext="{Binding Colors}"/>
+
+            <!-- ── Surface (style + opacity) ──────────────────────────────────────────────────── -->
+            <Border Style="{StaticResource Settings.CardBorder}">
+                <StackPanel>
+                    <TextBlock Text="{loc:Loc Common_Surface_Header}" Style="{StaticResource Settings.CardHeader}" Margin="0,0,0,10"/>
+
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="SurfaceStyleLabel" Grid.Column="0" Text="{loc:Loc Common_SurfaceStyle_Header}" VerticalAlignment="Center"/>
+                        <!-- m2 (release-polish-1.0 review round): AutomationProperties.LabeledBy lives on
+                             each RadioButton, not the grouping Border — see PanelColorEditor.xaml's Mode
+                             card for the same fix and its own remarks. -->
+                        <Border Grid.Column="1" Style="{StaticResource Settings.SegmentedGroup}">
+                            <UniformGrid Rows="1" Columns="3"
+                                         KeyboardNavigation.TabNavigation="Once"
+                                         KeyboardNavigation.DirectionalNavigation="Contained">
+                                <RadioButton GroupName="PanelCustomizeSurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
+                                             AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                             Command="{Binding Appearance.SetSurfaceStyleCommand}" CommandParameter="{x:Static uimodels:PanelSurfaceStyle.Solid}"
+                                             Content="{loc:LocBinding Source={x:Static uimodels:PanelSurfaceStyle.Solid}, Converter={StaticResource EnumDisplayName}}">
+                                    <RadioButton.IsChecked>
+                                        <Binding Path="Appearance.SelectedPanelSurfaceStyle" Mode="OneWay"
+                                                 Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static uimodels:PanelSurfaceStyle.Solid}"/>
+                                    </RadioButton.IsChecked>
+                                </RadioButton>
+                                <RadioButton GroupName="PanelCustomizeSurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
+                                             AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                             Command="{Binding Appearance.SetSurfaceStyleCommand}" CommandParameter="{x:Static uimodels:PanelSurfaceStyle.Ambient}"
+                                             Content="{loc:LocBinding Source={x:Static uimodels:PanelSurfaceStyle.Ambient}, Converter={StaticResource EnumDisplayName}}">
+                                    <RadioButton.IsChecked>
+                                        <Binding Path="Appearance.SelectedPanelSurfaceStyle" Mode="OneWay"
+                                                 Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static uimodels:PanelSurfaceStyle.Ambient}"/>
+                                    </RadioButton.IsChecked>
+                                </RadioButton>
+                                <RadioButton GroupName="PanelCustomizeSurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
+                                             AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                             Command="{Binding Appearance.SetSurfaceStyleCommand}" CommandParameter="{x:Static uimodels:PanelSurfaceStyle.Glass}"
+                                             Content="{loc:LocBinding Source={x:Static uimodels:PanelSurfaceStyle.Glass}, Converter={StaticResource EnumDisplayName}}">
+                                    <RadioButton.IsChecked>
+                                        <Binding Path="Appearance.SelectedPanelSurfaceStyle" Mode="OneWay"
+                                                 Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static uimodels:PanelSurfaceStyle.Glass}"/>
+                                    </RadioButton.IsChecked>
+                                </RadioButton>
+                            </UniformGrid>
+                        </Border>
+                    </Grid>
+                    <TextBlock x:Name="SurfaceStyleGlassHint"
+                               Text="{loc:Loc Customize_SurfaceStyle_GlassHint_Description}"
+                               Style="{StaticResource Settings.CardDescription}" Margin="0,0,0,10"/>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="40"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="OpacityLabel" Grid.Column="0" Text="{loc:Loc Customize_SurfaceOpacity_Header}" VerticalAlignment="Center"/>
+                        <!-- UX#2 (release-polish-1.0 visual review): Minimum bound to
+                             SurfaceComposer.MinSurfaceOpacity (0.35, the same floor
+                             SurfaceComposer.ClampOpacity already enforces at render time) rather than a
+                             second hardcoded 0.35 literal. Verified (OpacitySliderMinimumCoercionTests) that
+                             WPF's own Value-coercion here only clamps the DISPLAYED position — it never
+                             writes the coerced value back through this TwoWay binding, so opening this
+                             dialog for a panel persisted below the floor cannot silently rewrite its stored
+                             opacity. -->
+                        <Slider    x:Name="OpacitySlider" Grid.Column="1" VerticalAlignment="Center"
+                                   AutomationProperties.LabeledBy="{Binding ElementName=OpacityLabel}"
+                                   Minimum="{x:Static theming:SurfaceComposer.MinSurfaceOpacity}" Maximum="1" TickFrequency="1" Value="{Binding Appearance.SelectedPanelSurfaceOpacity, Mode=TwoWay}"/>
+                        <!-- docs/PLANS/localization.md §2.4: {0:P0} needs a live-culture dependency of its
+                             own — WPF only re-runs a Binding's format conversion when its SOURCE value
+                             changes, never merely because ILocalizationService.CurrentCulture (and the
+                             Language it drives) did. {loc:CultureBinding} supplies that as an extra,
+                             otherwise-unused MultiBinding child so this percentage re-formats on a hot
+                             language switch exactly like every other localized value on this window. -->
+                        <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center">
+                            <TextBlock.Text>
+                                <MultiBinding StringFormat="{}{0:P0}">
+                                    <Binding Path="Appearance.SelectedPanelSurfaceOpacity"/>
+                                    <loc:CultureBinding/>
+                                </MultiBinding>
+                            </TextBlock.Text>
+                        </TextBlock>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- ── Icons ──────────────────────────────────────────────────────────────────────── -->
+            <Border Style="{StaticResource Settings.CardBorder}">
+                <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="130"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="180"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{loc:Loc Common_IconSize_Header}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
+                    <controls:SteppedValueEditor x:Name="IconSizeEditor" Grid.Column="1"
+                                                  Minimum="{x:Static uimodels:SizeStepPolicy.IconSizeMinimum}"
+                                                  Maximum="{x:Static uimodels:SizeStepPolicy.IconSizeMaximum}"
+                                                  Value="{Binding Appearance.SelectedPanelIconSize, Mode=TwoWay}"
+                                                  AutomationName="{loc:Loc Common_IconSize_Header}"/>
+                </Grid>
+            </Border>
+
+            <!-- ── Content ────────────────────────────────────────────────────────────────────── -->
+            <TextBlock Text="{loc:Loc Customize_Content_Header}" Style="{StaticResource Settings.PageHeader}" FontSize="14" Margin="4,8,0,6"/>
+
+            <!-- View — segmented control over PanelViewMode's two values (ADR-042; replaces the plain
+                 RadioButton row), for consistency with the app's other 2/3-option selectors. EnumEquals
+                 (one-way "is this the active value") + a Command per option is the same pattern
+                 ChildWindow.xaml's HeaderContextMenu "Icon layout"/"Arrange icons" radio groups already use
+                 — both converters are globally merged (Resources/Templates.xaml), so no local instance is
+                 declared for them here. -->
+            <Border Style="{StaticResource Settings.CardBorder}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-
-                    <TextBlock x:Name="AccentColorLabel" Grid.Row="0" Grid.Column="0" Text="{loc:Loc Customize_AccentColor_Header}" VerticalAlignment="Center" Margin="0,4"/>
-                    <TextBox   x:Name="AccentColorTextBox" Grid.Row="0" Grid.Column="1" Margin="0,4"
-                               AutomationProperties.LabeledBy="{Binding ElementName=AccentColorLabel}"
-                               Text="{Binding Appearance.SelectedPanelAccentColor, UpdateSourceTrigger=LostFocus}"/>
-                    <Border    Grid.Row="0" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
-                               BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
-                               Background="{Binding Appearance.SelectedPanelAccentColor, Converter={StaticResource HexBrush}}"/>
-
-                    <TextBlock x:Name="TextColorLabel" Grid.Row="1" Grid.Column="0" Text="{loc:Loc Customize_TextColor_Header}" VerticalAlignment="Center" Margin="0,4"/>
-                    <TextBox   x:Name="TextColorTextBox" Grid.Row="1" Grid.Column="1" Margin="0,4"
-                               AutomationProperties.LabeledBy="{Binding ElementName=TextColorLabel}"
-                               Text="{Binding Appearance.SelectedPanelTextColor, UpdateSourceTrigger=LostFocus}"/>
-                    <Border    Grid.Row="1" Grid.Column="2" Width="24" Height="24" Margin="8,4,0,4" CornerRadius="3"
-                               BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
-                               Background="{Binding Appearance.SelectedPanelTextColor, Converter={StaticResource HexBrush}}"/>
-
-                    <TextBlock x:Name="OpacityLabel" Grid.Row="2" Grid.Column="0" Text="{loc:Loc Customize_SurfaceOpacity_Header}" VerticalAlignment="Center" Margin="0,4"/>
-                    <Slider    x:Name="OpacitySlider" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="0,4"
-                               AutomationProperties.LabeledBy="{Binding ElementName=OpacityLabel}"
-                               Minimum="0" Maximum="1" TickFrequency="1" Value="{Binding Appearance.SelectedPanelSurfaceOpacity, Mode=TwoWay}"/>
-                    <!-- docs/PLANS/localization.md §2.4: {0:P0} needs a live-culture dependency of its
-                         own — WPF only re-runs a Binding's format conversion when its SOURCE value
-                         changes, never merely because ILocalizationService.CurrentCulture (and the
-                         Language it drives) did. {loc:CultureBinding} supplies that as an extra,
-                         otherwise-unused MultiBinding child so this percentage re-formats on a hot
-                         language switch exactly like every other localized value on this window. -->
-                    <TextBlock Grid.Row="2" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center">
-                        <TextBlock.Text>
-                            <MultiBinding StringFormat="{}{0:P0}">
-                                <Binding Path="Appearance.SelectedPanelSurfaceOpacity"/>
-                                <loc:CultureBinding/>
-                            </MultiBinding>
-                        </TextBlock.Text>
-                    </TextBlock>
-
-                    <TextBlock x:Name="SurfaceStyleLabel" Grid.Row="3" Grid.Column="0" Text="{loc:Loc Common_SurfaceStyle_Header}" VerticalAlignment="Top" Margin="0,4"/>
-                    <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4">
-                        <ComboBox ItemsSource="{Binding Appearance.SurfaceStyles}"
-                                  SelectedItem="{Binding Appearance.SelectedPanelSurfaceStyle, Mode=TwoWay}"
-                                  AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
-                                  AutomationProperties.HelpText="{Binding ElementName=SurfaceStyleGlassHint, Path=Text}">
-                            <ComboBox.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{loc:LocBinding Converter={StaticResource EnumDisplayName}}"/>
-                                </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                        </ComboBox>
-                        <TextBlock x:Name="SurfaceStyleGlassHint"
-                                   Text="{loc:Loc Customize_SurfaceStyle_GlassHint_Description}"
-                                   Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11"
-                                   TextWrapping="Wrap" Margin="0,4,0,0"/>
-                    </StackPanel>
-
-                    <TextBlock x:Name="IconSizeLabel" Grid.Row="4" Grid.Column="0" Text="{loc:Loc Common_IconSize_Header}" VerticalAlignment="Center" Margin="0,4"/>
-                    <Slider    Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" Margin="0,4"
-                               AutomationProperties.LabeledBy="{Binding ElementName=IconSizeLabel}"
-                               Minimum="16" Maximum="96" TickFrequency="4" IsSnapToTickEnabled="True" Value="{Binding Appearance.SelectedPanelIconSize, Mode=TwoWay}"/>
-                    <TextBlock Grid.Row="4" Grid.Column="2" Margin="8,4,0,4" VerticalAlignment="Center"
-                               Text="{loc:LocBinding Appearance.SelectedPanelIconSize, FormatKey=Common_ValuePx_Format}"/>
+                    <TextBlock x:Name="ViewLabel" Grid.Column="0" Text="{loc:Loc Customize_View_Header}" VerticalAlignment="Center"/>
+                    <Border Grid.Column="1" Style="{StaticResource Settings.SegmentedGroup}">
+                        <UniformGrid Rows="1" Columns="2"
+                                     KeyboardNavigation.TabNavigation="Once"
+                                     KeyboardNavigation.DirectionalNavigation="Contained">
+                            <RadioButton GroupName="PanelCustomizeViewMode" Style="{StaticResource Settings.SegmentedItem}"
+                                         AutomationProperties.LabeledBy="{Binding ElementName=ViewLabel}"
+                                         Content="{loc:LocBinding Source={x:Static uimodels:PanelViewMode.List}, Converter={StaticResource EnumDisplayName}}"
+                                         Command="{Binding Appearance.SetViewModeCommand}"
+                                         CommandParameter="{x:Static uimodels:PanelViewMode.List}">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="Appearance.SelectedPanelViewMode" Mode="OneWay"
+                                             Converter="{StaticResource EnumEquals}"
+                                             ConverterParameter="{x:Static uimodels:PanelViewMode.List}"/>
+                                </RadioButton.IsChecked>
+                            </RadioButton>
+                            <RadioButton GroupName="PanelCustomizeViewMode" Style="{StaticResource Settings.SegmentedItem}"
+                                         AutomationProperties.LabeledBy="{Binding ElementName=ViewLabel}"
+                                         Content="{loc:LocBinding Source={x:Static uimodels:PanelViewMode.Grid}, Converter={StaticResource EnumDisplayName}}"
+                                         Command="{Binding Appearance.SetViewModeCommand}"
+                                         CommandParameter="{x:Static uimodels:PanelViewMode.Grid}">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="Appearance.SelectedPanelViewMode" Mode="OneWay"
+                                             Converter="{StaticResource EnumEquals}"
+                                             ConverterParameter="{x:Static uimodels:PanelViewMode.Grid}"/>
+                                </RadioButton.IsChecked>
+                            </RadioButton>
+                        </UniformGrid>
+                    </Border>
                 </Grid>
-            </Expander>
+            </Border>
 
-            <!-- ── Content ────────────────────────────────────────────────────────────────────── -->
-            <Expander Header="{loc:Loc Customize_Content_Header}" IsExpanded="True" Margin="0,0,0,12">
-                <StackPanel Margin="0,10,0,0">
-                    <!-- View — RadioButton group over PanelViewMode's two values (FIX-B fix-cycle minor
-                         finding 11), for consistency with the settings window's own gesture radio
-                         groups. EnumEquals (one-way "is this the active value") + a Command per option
-                         is the same pattern ChildWindow.xaml's HeaderContextMenu "Icon layout"/"Arrange
-                         icons" radio groups already use — both converters are globally merged
-                         (Resources/Templates.xaml), so no local instance is declared for them here.
-                         docs/PLANS/localization.md WP-4b: Content is now {loc:LocBinding Source={x:Static
-                         …}, Converter={StaticResource EnumDisplayName}} instead of a hardcoded English
-                         literal (L-9) — same Enum_PanelViewMode_* keys the ComboBoxes elsewhere use. -->
-                    <TextBlock x:Name="ViewLabel" Text="{loc:Loc Customize_View_Header}" VerticalAlignment="Center" Margin="0,0,0,4"/>
-                    <StackPanel Orientation="Horizontal" AutomationProperties.LabeledBy="{Binding ElementName=ViewLabel}">
-                        <RadioButton GroupName="PanelCustomizeViewMode" Margin="0,0,16,0"
-                                     Content="{loc:LocBinding Source={x:Static uimodels:PanelViewMode.List}, Converter={StaticResource EnumDisplayName}}"
-                                     Command="{Binding Appearance.SetViewModeCommand}"
-                                     CommandParameter="{x:Static uimodels:PanelViewMode.List}">
-                            <RadioButton.IsChecked>
-                                <Binding Path="Appearance.SelectedPanelViewMode" Mode="OneWay"
-                                         Converter="{StaticResource EnumEquals}"
-                                         ConverterParameter="{x:Static uimodels:PanelViewMode.List}"/>
-                            </RadioButton.IsChecked>
-                        </RadioButton>
-                        <RadioButton GroupName="PanelCustomizeViewMode"
-                                     Content="{loc:LocBinding Source={x:Static uimodels:PanelViewMode.Grid}, Converter={StaticResource EnumDisplayName}}"
-                                     Command="{Binding Appearance.SetViewModeCommand}"
-                                     CommandParameter="{x:Static uimodels:PanelViewMode.Grid}">
-                            <RadioButton.IsChecked>
-                                <Binding Path="Appearance.SelectedPanelViewMode" Mode="OneWay"
-                                         Converter="{StaticResource EnumEquals}"
-                                         ConverterParameter="{x:Static uimodels:PanelViewMode.Grid}"/>
-                            </RadioButton.IsChecked>
-                        </RadioButton>
-                    </StackPanel>
-
-                    <TextBlock x:Name="ContentFilterLabel" Text="{loc:Loc Customize_ContentFilter_Header}" VerticalAlignment="Center" Margin="0,12,0,4"/>
-                    <ComboBox ItemsSource="{Binding ContentFilters}"
+            <Border Style="{StaticResource Settings.CardBorder}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="160"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ContentFilterLabel" Grid.Column="0" Text="{loc:Loc Customize_ContentFilter_Header}" VerticalAlignment="Center"/>
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding ContentFilters}"
                               SelectedItem="{Binding ContentFilter, Mode=TwoWay}"
                               AutomationProperties.LabeledBy="{Binding ElementName=ContentFilterLabel}">
                         <ComboBox.ItemTemplate>
@@ -170,42 +240,61 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
+                </Grid>
+            </Border>
 
-                    <!-- Sort order — RadioButton group over PanelSortMode's two values (finding 11).
-                         Both options are disabled together while the panel is a Folder Portal, matching
-                         the previous single ComboBox's IsEnabled — sort order isn't a per-option choice
-                         in that state, the whole control is moot. -->
-                    <TextBlock x:Name="SortModeLabel" Text="{loc:Loc Customize_SortMode_Header}" VerticalAlignment="Center" Margin="0,12,0,4"/>
-                    <StackPanel Orientation="Horizontal" AutomationProperties.LabeledBy="{Binding ElementName=SortModeLabel}"
+            <!-- Sort order — segmented control over PanelSortMode's two values (ADR-042). Both options are
+                 disabled together while the panel is a Folder Portal, matching the previous single
+                 ComboBox's IsEnabled — sort order isn't a per-option choice in that state, the whole
+                 control is moot. -->
+            <Border Style="{StaticResource Settings.CardBorder}">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="SortModeLabel" Grid.Column="0" Text="{loc:Loc Customize_SortMode_Header}" VerticalAlignment="Center"/>
+                        <Border Grid.Column="1" Style="{StaticResource Settings.SegmentedGroup}"
                                 IsEnabled="{Binding Appearance.SelectedPanelSupportsManualOrder}">
-                        <RadioButton GroupName="PanelCustomizeSortMode" Margin="0,0,16,0"
-                                     Content="{loc:LocBinding Source={x:Static uimodels:PanelSortMode.Manual}, Converter={StaticResource EnumDisplayName}}"
-                                     Command="{Binding Appearance.SetSortModeCommand}"
-                                     CommandParameter="{x:Static uimodels:PanelSortMode.Manual}">
-                            <RadioButton.IsChecked>
-                                <Binding Path="Appearance.SelectedPanelSortMode" Mode="OneWay"
-                                         Converter="{StaticResource EnumEquals}"
-                                         ConverterParameter="{x:Static uimodels:PanelSortMode.Manual}"/>
-                            </RadioButton.IsChecked>
-                        </RadioButton>
-                        <RadioButton GroupName="PanelCustomizeSortMode"
-                                     Content="{loc:LocBinding Source={x:Static uimodels:PanelSortMode.Name}, Converter={StaticResource EnumDisplayName}}"
-                                     Command="{Binding Appearance.SetSortModeCommand}"
-                                     CommandParameter="{x:Static uimodels:PanelSortMode.Name}">
-                            <RadioButton.IsChecked>
-                                <Binding Path="Appearance.SelectedPanelSortMode" Mode="OneWay"
-                                         Converter="{StaticResource EnumEquals}"
-                                         ConverterParameter="{x:Static uimodels:PanelSortMode.Name}"/>
-                            </RadioButton.IsChecked>
-                        </RadioButton>
-                    </StackPanel>
+                            <UniformGrid Rows="1" Columns="2"
+                                         KeyboardNavigation.TabNavigation="Once"
+                                         KeyboardNavigation.DirectionalNavigation="Contained">
+                                <RadioButton GroupName="PanelCustomizeSortMode" Style="{StaticResource Settings.SegmentedItem}"
+                                             AutomationProperties.LabeledBy="{Binding ElementName=SortModeLabel}"
+                                             Content="{loc:LocBinding Source={x:Static uimodels:PanelSortMode.Manual}, Converter={StaticResource EnumDisplayName}}"
+                                             Command="{Binding Appearance.SetSortModeCommand}"
+                                             CommandParameter="{x:Static uimodels:PanelSortMode.Manual}">
+                                    <RadioButton.IsChecked>
+                                        <Binding Path="Appearance.SelectedPanelSortMode" Mode="OneWay"
+                                                 Converter="{StaticResource EnumEquals}"
+                                                 ConverterParameter="{x:Static uimodels:PanelSortMode.Manual}"/>
+                                    </RadioButton.IsChecked>
+                                </RadioButton>
+                                <RadioButton GroupName="PanelCustomizeSortMode" Style="{StaticResource Settings.SegmentedItem}"
+                                             AutomationProperties.LabeledBy="{Binding ElementName=SortModeLabel}"
+                                             Content="{loc:LocBinding Source={x:Static uimodels:PanelSortMode.Name}, Converter={StaticResource EnumDisplayName}}"
+                                             Command="{Binding Appearance.SetSortModeCommand}"
+                                             CommandParameter="{x:Static uimodels:PanelSortMode.Name}">
+                                    <RadioButton.IsChecked>
+                                        <Binding Path="Appearance.SelectedPanelSortMode" Mode="OneWay"
+                                                 Converter="{StaticResource EnumEquals}"
+                                                 ConverterParameter="{x:Static uimodels:PanelSortMode.Name}"/>
+                                    </RadioButton.IsChecked>
+                                </RadioButton>
+                            </UniformGrid>
+                        </Border>
+                    </Grid>
                     <TextBlock x:Name="SortModeDescriptionText" Text="{Binding SortModeDescription}"
                                AutomationProperties.HelpText="{Binding ElementName=SortModeDescriptionText, Path=Text}"
-                               Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11"
-                               TextWrapping="Wrap" Margin="0,4,0,0"/>
+                               Style="{StaticResource Settings.CardDescription}"/>
+                </StackPanel>
+            </Border>
 
-                    <TextBlock x:Name="FolderPortalLabel" Text="{loc:Loc Customize_FolderPortal_Header}" VerticalAlignment="Center" Margin="0,12,0,4"/>
-                    <TextBox Text="{Binding FolderPortalPath, Mode=OneWay}" IsReadOnly="True" Margin="0,0,0,4"
+            <Border Style="{StaticResource Settings.CardBorder}">
+                <StackPanel>
+                    <TextBlock x:Name="FolderPortalLabel" Text="{loc:Loc Customize_FolderPortal_Header}" Style="{StaticResource Settings.CardHeader}" Margin="0,0,0,6"/>
+                    <TextBox Text="{Binding FolderPortalPath, Mode=OneWay}" IsReadOnly="True" Margin="0,0,0,6"
                              AutomationProperties.LabeledBy="{Binding ElementName=FolderPortalLabel}"/>
                     <StackPanel Orientation="Horizontal">
                         <Button Content="{loc:Loc Customize_Browse_Button}" Command="{Binding BrowseFolderCommand}" Padding="10,4" Margin="0,0,8,0"
@@ -216,44 +305,52 @@
                     <TextBlock x:Name="FolderPortalDescriptionText"
                                Text="{loc:Loc Customize_FolderPortal_Description}"
                                AutomationProperties.HelpText="{Binding ElementName=FolderPortalDescriptionText, Path=Text}"
-                               Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11"
-                               TextWrapping="Wrap" Margin="0,4,0,0"/>
+                               Style="{StaticResource Settings.CardDescription}"/>
                 </StackPanel>
-            </Expander>
+            </Border>
 
             <!-- ── Layout ─────────────────────────────────────────────────────────────────────── -->
-            <Expander Header="{loc:Loc Customize_Layout_Header}" IsExpanded="True" Margin="0,0,0,12">
-                <StackPanel Margin="0,10,0,0">
-                    <!-- FIX-B fix-cycle MAJOR finding M-1 (ADR-026): both controls below are gated by
-                         CanChangeLayout, exactly like the panel's own context menu's "Icon layout"/
-                         "Auto-size to content" items, and each shows the disabled reason as a
-                         description — not only a tooltip. -->
-                    <TextBlock x:Name="IconLayoutLabel" Text="{loc:Loc Common_IconLayout_Header}" VerticalAlignment="Center" Margin="0,4"/>
-                    <ComboBox ItemsSource="{Binding IconLayoutPolicies}"
-                              SelectedItem="{Binding IconLayoutPolicy, Mode=TwoWay}"
-                              IsEnabled="{Binding CanChangeLayout}"
-                              AutomationProperties.LabeledBy="{Binding ElementName=IconLayoutLabel}"
-                              AutomationProperties.HelpText="{Binding ElementName=IconLayoutDescriptionText, Path=Text}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{loc:LocBinding Converter={StaticResource EnumDisplayName}}"/>
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <TextBlock x:Name="IconLayoutDescriptionText" Text="{Binding IconLayoutDescription}"
-                               Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11"
-                               TextWrapping="Wrap" Margin="0,4,0,0"/>
+            <TextBlock Text="{loc:Loc Customize_Layout_Header}" Style="{StaticResource Settings.PageHeader}" FontSize="14" Margin="4,8,0,6"/>
 
+            <!-- FIX-B fix-cycle MAJOR finding M-1 (ADR-026): both controls below are gated by
+                 CanChangeLayout, exactly like the panel's own context menu's "Icon layout"/
+                 "Auto-size to content" items, and each shows the disabled reason as a
+                 description — not only a tooltip. -->
+            <Border Style="{StaticResource Settings.CardBorder}">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="180"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="IconLayoutLabel" Grid.Column="0" Text="{loc:Loc Common_IconLayout_Header}" VerticalAlignment="Center"/>
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding IconLayoutPolicies}"
+                                  SelectedItem="{Binding IconLayoutPolicy, Mode=TwoWay}"
+                                  IsEnabled="{Binding CanChangeLayout}"
+                                  AutomationProperties.LabeledBy="{Binding ElementName=IconLayoutLabel}"
+                                  AutomationProperties.HelpText="{Binding ElementName=IconLayoutDescriptionText, Path=Text}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{loc:LocBinding Converter={StaticResource EnumDisplayName}}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </Grid>
+                    <TextBlock x:Name="IconLayoutDescriptionText" Text="{Binding IconLayoutDescription}"
+                               Style="{StaticResource Settings.CardDescription}"/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Settings.CardBorder}">
+                <StackPanel>
                     <CheckBox x:Name="AutoSizeToContentCheckBox" Content="{loc:Loc Customize_AutoSizeToContent_Header}"
                               IsChecked="{Binding IsAutoSizeToContent, Mode=TwoWay}"
                               IsEnabled="{Binding CanToggleAutoSizeToContent}"
-                              AutomationProperties.HelpText="{Binding ElementName=AutoSizeToContentDescriptionText, Path=Text}"
-                              Margin="0,12,0,0"/>
+                              AutomationProperties.HelpText="{Binding ElementName=AutoSizeToContentDescriptionText, Path=Text}"/>
                     <TextBlock x:Name="AutoSizeToContentDescriptionText" Text="{Binding AutoSizeToContentDescription}"
-                               Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11"
-                               TextWrapping="Wrap" Margin="0,4,0,0"/>
+                               Style="{StaticResource Settings.CardDescription}"/>
                 </StackPanel>
-            </Expander>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Window>

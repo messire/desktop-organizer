@@ -23,6 +23,8 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     private readonly ILayoutEditModeService _layoutEditMode;
     private readonly IFolderPickerService _folderPicker;
     private readonly ILocalizationService _localization;
+    private readonly IColorPickerService _colorPicker;
+    private readonly IAppSettings _appSettings;
     private ChildWindowModel _target;
 
     /// <inheritdoc />
@@ -49,16 +51,26 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     /// instance: it unsubscribes in <see cref="Dispose"/>, called by
     /// <c>Views.PanelCustomizeWindow.OnClosed</c>.
     /// </param>
+    /// <param name="colorPicker">Backs <see cref="Colors"/>' "Custom…" commands (docs/PLANS/color-presets-and-size-step.md §3.7).</param>
+    /// <param name="appSettings">
+    /// Read-only source for <see cref="Colors"/>' "Reset to defaults" button (ADR-042): resets this panel's
+    /// opacity/surface style/icon size back to the app's CURRENT new-panel defaults. Never mutated by this
+    /// class.
+    /// </param>
     public PanelCustomizeViewModel(
         IWindowManager windowManager,
         ILayoutEditModeService layoutEditMode,
         IFolderPickerService folderPicker,
-        ILocalizationService localization)
+        ILocalizationService localization,
+        IColorPickerService colorPicker,
+        IAppSettings appSettings)
     {
         _windowManager = windowManager;
         _layoutEditMode = layoutEditMode;
         _folderPicker = folderPicker;
         _localization = localization;
+        _colorPicker = colorPicker;
+        _appSettings = appSettings;
         _localization.CultureChanged += OnCultureChanged;
 
         // Placeholder target until IPanelCustomizeService.Show/PanelCustomizeWindow.Retarget assigns
@@ -70,6 +82,16 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
         Appearance = new SelectedPanelSettingsViewModel(windowManager);
         Appearance.SetPanel(_target);
         Appearance.PropertyChanged += OnAppearancePropertyChanged;
+
+        Colors = new PanelColorEditorViewModel(
+            _colorPicker,
+            () => Appearance.SelectedPanelAccentColor,
+            v => Appearance.SelectedPanelAccentColor = v,
+            () => Appearance.SelectedPanelTextColor,
+            v => Appearance.SelectedPanelTextColor = v,
+            Appearance.ApplyColors,
+            ResetAppearanceToDefaults,
+            "Customize_ResetColors_Description");
 
         _layoutEditMode.PropertyChanged += OnLayoutEditModePropertyChanged;
 
@@ -84,6 +106,14 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
     /// e.g. <c>{Binding Appearance.SelectedPanelTitle}</c>.
     /// </summary>
     public SelectedPanelSettingsViewModel Appearance { get; }
+
+    /// <summary>
+    /// The panel's accent/text colour editor (docs/PLANS/color-presets-and-size-step.md §3.7) — presets,
+    /// "Custom…", and the advanced hex boxes, all proxying <see cref="Appearance"/>'s own
+    /// <see cref="SelectedPanelSettingsViewModel.SelectedPanelAccentColor"/>/<see cref="SelectedPanelSettingsViewModel.SelectedPanelTextColor"/>.
+    /// The dialog's Appearance section binds directly to this instance, e.g. <c>{Binding Colors.AccentColor}</c>.
+    /// </summary>
+    public PanelColorEditorViewModel Colors { get; }
 
     /// <summary>
     /// The panel this dialog is currently editing. Reassigning this property re-targets every section
@@ -240,6 +270,23 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
         Appearance.Dispose();
     }
 
+    /// <summary>
+    /// Backs <see cref="Colors"/>' "Reset to defaults" button (release-polish-1.0 review round M7): resets
+    /// <see cref="Target"/>'s accent/text/opacity/surface style/icon size to the app's CURRENT new-panel
+    /// defaults — read-only <see cref="IAppSettings"/> use, never mutates settings — batched into a SINGLE
+    /// <see cref="SelectedPanelSettingsViewModel.ApplyAppearance"/> call (one save), REPLACING
+    /// <see cref="PanelColorEditorViewModel"/>'s own default colour-reset behaviour entirely (unlike the
+    /// pre-M7 shape, this Customize-window host does not fall back to <c>PanelColorPresets.Default</c>'s
+    /// fixed pair — it always mirrors whatever the user has currently configured as the new-panel defaults).
+    /// </summary>
+    private void ResetAppearanceToDefaults() =>
+        Appearance.ApplyAppearance(
+            _appSettings.DefaultBackgroundColor,
+            _appSettings.DefaultTextColor,
+            _appSettings.DefaultOpacity,
+            PanelSurfaceStyleParser.ParseOrAmbient(_appSettings.DefaultSurfaceStyle),
+            _appSettings.DefaultIconSize);
+
     private void BrowseFolder()
     {
         var path = _folderPicker.PickFolder(_localization.GetString("Customize_BrowseFolder_Title"), _target.SourceFolderPath);
@@ -304,6 +351,15 @@ public sealed class PanelCustomizeViewModel : INotifyPropertyChanged, IDisposabl
             OnPropertyChanged(nameof(CanAutoSizeToContent));
             OnPropertyChanged(nameof(CanToggleAutoSizeToContent));
             OnPropertyChanged(nameof(AutoSizeToContentDescription));
+        }
+
+        // §3.7: SetPanel (called from the Target setter, i.e. every retarget) re-raises both of these,
+        // so Colors picks up the new panel's colours/selected-preset highlight without its own separate
+        // subscription to Target.
+        if (e.PropertyName is nameof(SelectedPanelSettingsViewModel.SelectedPanelAccentColor)
+            or nameof(SelectedPanelSettingsViewModel.SelectedPanelTextColor))
+        {
+            Colors.Refresh();
         }
     }
 

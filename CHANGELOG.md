@@ -10,6 +10,54 @@ tracked — `0.1.0` is the first tagged history point.
 
 ## [Unreleased]
 
+Release polish, colour and size controls (ADR-042, redesigned same day), 2026-09-28:
+
+- The panel Customize window and Settings → New panel defaults now use an explicit Light/Dark mode switch,
+  a 12-colour accent palette (spanning the spectrum, from Red through Violet/Magenta to two neutrals), and a
+  redesigned, Windows 11 Personalization-style layout: a live preview card, a Mode segmented control, a
+  12-swatch accent grid with a 13th "Custom…" cell, and a collapsible Advanced section for raw hex input and
+  Reset — replacing the earlier flat 10-preset grid plus two hex boxes.
+  - Switching Light/Dark re-derives the panel's text colour for its current accent (each of the 12 presets
+    carries its own light- and dark-mode text colour) instead of the accent alone deciding readability; light
+    panels now render on their own light surface so their (dark) text stays reliably readable, instead of the
+    text-contrast problem some light presets had on the app's original always-dark surface.
+  - A "Custom…" swatch (rather than a separate button) opens the system colour picker (RGB, custom-colour
+    slots pre-filled from the presets) for full RGB control and shows the resulting colour as selected when it
+    doesn't match any of the 12 presets; the hex boxes remain available as a third, advanced way to enter a
+    colour, and surface style (Solid/Ambient/Glass) plus opacity — with an honestly-enforced opacity floor —
+    moved into the same card layout.
+- Icon-size and grid-step sliders now move in fixed steps of 8 (icon size up to 128, up from 96) with an
+  adjacent numeric box for typing an exact value; opening a settings window no longer silently rewrites an
+  existing size value.
+- The "Customize panel…" window now fits on a 1366×768 display at 125% scaling instead of being clipped off
+  the bottom of the screen.
+- The grid-step control in Layout & snapping now has a visible "Grid step" caption (it previously only had a
+  screen-reader name).
+- Known gap, tracked for follow-up: in High Contrast mode, the active Mode/Surface segment and the selected
+  accent swatch are not yet tied to the system highlight colour (only a thin hairline currently marks them).
+- Product metadata: Company is now khagendev; existing settings are migrated automatically on first start.
+
+Release polish (ADR-039–ADR-041, plus an ADR-038 amendment), 2026-09-27:
+
+- Real, high-resolution panel icons: shortcuts and custom-icon folders now show their actual icon instead of
+  a generic type icon, and icons render at the panel's own size instead of an upscaled 32px bitmap
+  (`IShellItemImageFactory`, with the previous attribute-only lookup kept as a fallback and the only path for
+  a missing file).
+- Panel items now show the real Windows shell context menu (the same one Explorer shows, including "Open
+  with", "Send to", and third-party shell extensions) instead of a bespoke four-item menu. "Remove from
+  panel" is gone as a menu command — removing an item from a panel is now a drag-out gesture (unchanged from
+  the previous round); deleting a managed item through the shell menu restores it to a visible location
+  first, then recycles it.
+- First run now creates one empty panel instead of showing a blank desktop with no entry point.
+- Uninstalling the app now returns any file you had dragged into a panel to its original location (or the
+  desktop, if that location is gone) instead of deleting it along with the app's data folder.
+- Task Manager and Explorer's file Properties now show "DesktopOrganizer" as the process/file name; the
+  copyright holder is unified as "khagen" across the app, the installer, and `LICENSE`.
+- The installer now defaults to English, refuses to run on anything older than Windows 10, and no longer
+  bundles debug symbols/XML doc comments.
+- Documentation: the Release hardening 1.0 manual-verify items were closed after testing on Windows 11 24H2;
+  panel item sorting (`Manual`/`Name`) was finalized as-is.
+
 Release hardening 1.0 (ADR-033–ADR-038): crash safety, automatic Explorer-restart recovery, panel/page
 deletion through the Recycle Bin, drag-out of panel items, PerMonitorV2, and a release-engineering pass.
 Version intentionally stays 0.6.1 for this round.

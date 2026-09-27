@@ -68,6 +68,23 @@ public class ApplicationStateServiceTests
     }
 
     /// <summary>
+    /// Verifies that <see cref="ApplicationStateService.LastLoadStatus"/> retains the same status
+    /// <see cref="ApplicationStateService.Load"/> returned, for consumers that run after
+    /// <c>Program.Main</c> already consumed <c>Load</c>'s return value directly (e.g.
+    /// <c>WindowManager.LoadWindowsState</c>'s first-run panel decision).
+    /// </summary>
+    [Fact]
+    public void Load_SetsLastLoadStatus_ToTheStoresStatus()
+    {
+        _storeMock.Setup(s => s.Load()).Returns(MakeLoadResult(StateLoadStatus.FirstRun, []));
+        var sut = BuildSut();
+
+        sut.Load();
+
+        Assert.Equal(StateLoadStatus.FirstRun, sut.LastLoadStatus);
+    }
+
+    /// <summary>
     /// Verifies that a panel entry present in the store's payload is deserialized into
     /// <see cref="ApplicationStateService.Panels"/> with its id and title preserved.
     /// </summary>

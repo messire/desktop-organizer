@@ -41,10 +41,17 @@
     <Color x:Key="Color.Border.Hover">#45FFFFFF</Color>
     <Color x:Key="Color.Border.Focus">#3B82F6</Color>
 
-    <!-- Overlay: non-accent hover/press washes. Color.Overlay.Hover reuses the exact literal already
-         used twice today (PanelHeaderButtonStyle's and PanelItemContainerStyle's IsMouseOver trigger,
-         Templates.xaml) — named here ahead of the commit that migrates those triggers onto it, so the
-         migration is a pure rename with zero visual change. -->
+    <!-- Overlay: non-accent hover/press washes. Color.Overlay.Hover originally reused the exact literal
+         both PanelHeaderButtonStyle's and PanelItemContainerStyle's IsMouseOver trigger painted directly
+         (Templates.xaml) — named here ahead of the commit that migrated those triggers onto it, so the
+         migration was a pure rename with zero visual change. Both triggers were later moved onto the
+         luminance-adaptive HoverOverlayBrush converter (Theming/HoverOverlayPolicy.cs; MAJOR-3 fix,
+         docs/PLANS/workspace-grid-07-visual.md fix-cycle 1 and its color-presets-and-size-step.md review
+         round), so this token is no longer painted directly by either — Brush.Overlay.Hover (Brushes.xaml)
+         now only feeds that converter's High Contrast passthrough fallback (Controls.xaml/Panels.xaml), and
+         HoverOverlayPolicy.LightenWash keeps a byte-identical copy of this same literal for
+         PanelItemContainerStyle's icon-tile hover on a dark surface (NEW-1 fix,
+         docs/PLANS/release-polish-1.0.md). -->
     <Color x:Key="Color.Overlay.Hover">#1AFFFFFF</Color>
     <Color x:Key="Color.Overlay.Pressed">#26FFFFFF</Color>
 

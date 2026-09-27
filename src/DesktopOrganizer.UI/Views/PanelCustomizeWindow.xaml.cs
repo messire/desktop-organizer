@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Windows;
-using System.Windows.Controls;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
@@ -18,6 +17,9 @@ namespace DesktopOrganizer.UI.Views;
 /// </summary>
 public partial class PanelCustomizeWindow : Window, IPanelCustomizeDialog
 {
+    /// <summary>Defensive floor for <see cref="ClampHeightToWorkArea"/> — see that method's own remarks.</summary>
+    private const double MinReasonableHeight = 200d;
+
     private readonly IMonitorService _monitorService;
     private readonly IDesktopScaleProvider _desktopScale;
 
@@ -122,27 +124,41 @@ public partial class PanelCustomizeWindow : Window, IPanelCustomizeDialog
     }
 
     /// <summary>
-    /// Forces the two colour hex <see cref="TextBox"/>es' pending edits into
-    /// <see cref="PanelCustomizeViewModel.Target"/> before the window actually closes. Both boxes commit
-    /// on <c>LostFocus</c> (<c>PanelCustomizeWindow.xaml</c>) so the swatch/model don't repaint on every
-    /// keystroke of an in-progress hex value — but closing the window via the X button, Alt+F4, or
-    /// <see cref="IWindowManager.OnChildWindowRemoved"/>-triggered <c>Close()</c> (M-3) never raises
-    /// <c>LostFocus</c> for whichever box still has focus, silently dropping a typed value (FIX-B
-    /// fix-cycle minor finding 8).
+    /// H-1 fix (review round): the pure clamp math behind <see cref="ApplyCentered"/> — never returns more
+    /// than <paramref name="desiredHeight"/> (this dialog's own designed <c>640</c>, via the same
+    /// <see cref="IDesktopScaleProvider"/> plumbing <see cref="ResolveWorkArea"/> already resolves), and
+    /// never less than <see cref="MinReasonableHeight"/> (a defensive floor against a degenerate/zero
+    /// work-area snapshot — this dialog would rather overflow off-screen than collapse to nothing).
+    /// <see langword="internal"/> (not <see langword="private"/>) so it is unit-testable as a pure function
+    /// without needing a real <see cref="Window"/>/monitor.
+    /// </summary>
+    /// <param name="desiredHeight">The dialog's own designed height (its XAML <c>Height="640"</c>).</param>
+    /// <param name="workAreaHeight">The resolved monitor work area's height, in DIP.</param>
+    internal static double ClampHeightToWorkArea(double desiredHeight, double workAreaHeight)
+    {
+        if (!double.IsFinite(workAreaHeight) || workAreaHeight <= 0) return desiredHeight;
+
+        return Math.Clamp(Math.Min(desiredHeight, workAreaHeight), Math.Min(MinReasonableHeight, desiredHeight), desiredHeight);
+    }
+
+    /// <summary>
+    /// Forces the colour editor's two hex <see cref="System.Windows.Controls.TextBox"/>es AND the icon-size editor's manual-entry
+    /// box's pending edits into <see cref="PanelCustomizeViewModel.Target"/> before the window actually
+    /// closes. All three commit on <c>LostFocus</c> (<c>PanelCustomizeWindow.xaml</c>,
+    /// <c>Controls/PanelColorEditor.xaml</c>/<c>Controls/IntegerInputBox.cs</c>) so the swatch/model
+    /// don't repaint on every keystroke of an in-progress edit — but closing the window via the X button,
+    /// Alt+F4, or <see cref="IWindowManager.OnChildWindowRemoved"/>-triggered <c>Close()</c> (M-3) never
+    /// raises <c>LostFocus</c> for whichever control still has focus, silently dropping a typed value
+    /// (FIX-B fix-cycle minor finding 8).
     /// </summary>
     /// <param name="e">Event data — forwarded to the base implementation unchanged; this override never cancels closing.</param>
     protected override void OnClosing(CancelEventArgs e)
     {
-        // MINOR-3 (FIX round 2): only push the binding when it actually has a pending (uncommitted) edit
-        // — UpdateSource() on a clean binding is a harmless no-op for the Target, but IS a needless extra
-        // write through TwoWay's Source setter (Target -> ConvertBack -> Model.AccentColor/TextColor
-        // setter -> PropertyChanged) for every single close of this dialog, whether or not the user ever
-        // touched either box.
-        if (AccentColorTextBox.GetBindingExpression(TextBox.TextProperty) is { IsDirty: true } accentBinding)
-            accentBinding.UpdateSource();
-
-        if (TextColorTextBox.GetBindingExpression(TextBox.TextProperty) is { IsDirty: true } textBinding)
-            textBinding.UpdateSource();
+        // MINOR-3 (FIX round 2): ColorEditor.CommitPendingEdits() only pushes a binding that actually has
+        // a pending (uncommitted) edit — see that method's own remarks — the same "no needless extra
+        // write on every close" guard this dialog always had.
+        ColorEditor.CommitPendingEdits();
+        IconSizeEditor.CommitPendingEdit();
 
         base.OnClosing(e);
     }
@@ -212,12 +228,25 @@ public partial class PanelCustomizeWindow : Window, IPanelCustomizeDialog
         ApplyCentered(ResolveWorkArea(monitor.DeviceName, monitor.WorkArea));
     }
 
+    /// <summary>
+    /// H-1 fix (review round): this dialog's fixed <c>Height="640"</c> (<c>ResizeMode="NoResize"</c>) does
+    /// not fit a 1366x768 @125% work area (~582 DIP) — clamps <see cref="FrameworkElement.MaxHeight"/> to
+    /// the resolved work area's height so WPF itself coerces the actual rendered height down to that cap
+    /// (never the declared <see cref="FrameworkElement.Height"/> itself — <see cref="FrameworkElement.MaxHeight"/>'s
+    /// own coercion is what actually shrinks a <see cref="Window"/> smaller than its <c>Height</c>), letting
+    /// the existing <c>ScrollViewer</c> (<c>PanelCustomizeWindow.xaml</c>) absorb whatever content no
+    /// longer fits. <paramref name="workArea"/>'s height then also drives the vertical centering math
+    /// below, so the dialog centers against its OWN actual (possibly clamped) height, not the nominal 640.
+    /// </summary>
     private void ApplyCentered(Rect workArea)
     {
+        var effectiveHeight = ClampHeightToWorkArea(Height, workArea.Height);
+        MaxHeight = effectiveHeight;
+
         var left = workArea.Left + ((workArea.Width - Width) / 2);
-        var top = workArea.Top + ((workArea.Height - Height) / 2);
+        var top = workArea.Top + ((workArea.Height - effectiveHeight) / 2);
 
         Left = Math.Clamp(left, workArea.Left, Math.Max(workArea.Left, workArea.Right - Width));
-        Top = Math.Clamp(top, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - Height));
+        Top = Math.Clamp(top, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - effectiveHeight));
     }
 }

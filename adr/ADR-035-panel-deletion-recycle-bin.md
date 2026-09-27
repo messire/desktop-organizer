@@ -1,6 +1,6 @@
 # ADR-035: Panel/Page Deletion Goes to the Recycle Bin
 
-Status: Accepted (2026-09-27) — amends ADR-010
+Status: Accepted (2026-09-27) — amends ADR-010; amended 2026-09-27 by ADR-040
 
 ## Context
 
@@ -119,3 +119,16 @@ outcome, message shown, panel/page kept.
 - ADR-009 (Drag&Drop Move Semantics) — the managed-storage layout (`PanelItems\<guid>\`) this ADR recycles
   from and restores into is unchanged.
 - `docs/ROADMAP.md` "Сквозные задачи" — the backlog item this ADR closes.
+
+## Amendment (2026-09-27, release polish 1.0 — ADR-040)
+
+[ADR-040](ADR-040-native-shell-context-menu.md) (same day, later in this release round) adds a **second**,
+narrower Recycle Bin path: a managed item's own "Delete" verb in its native shell context menu, intercepted
+and routed through the new `IPanelItemStorageService.RecycleManagedItem` — which restores the item to its
+original location (or the desktop) **first**, via the same mechanism `Restore` already used (ADR-009), and
+only recycles it **from there**. This closes the "Known limitation" section above (restored items land under
+a new GUID, not their original slot) for that one specific path: an item deleted through its own shell menu
+restores to a **visible** location on Explorer "Restore", not into `PanelItems\<guid>\`. The limitation as
+originally documented — panel-/page-level deletion (`ReleaseToRecycleBin`, `PageManagerService.RemovePage`)
+still recycles content from inside managed storage — remains open and is not addressed by this amendment;
+`ReleaseToRecycleBin`/`RecycleOutcome`/the all-or-kept page semantics are otherwise unchanged.

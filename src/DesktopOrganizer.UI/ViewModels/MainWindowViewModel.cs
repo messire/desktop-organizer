@@ -154,7 +154,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Snap-to-grid cell size in pixels. 1 = no snapping, 4–128 = snap.
+    /// Snap-to-grid cell size in pixels. 1 = no snapping, 2–128 = snap.
     /// </summary>
     public int GridSize
     {
@@ -234,6 +234,13 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>Toggles Edit Layout mode — bound to <c>Ctrl+E</c> in <c>MainWindow.xaml.cs</c> (D-9 #3).</summary>
     public ICommand ToggleEditLayoutCommand { get; }
 
+    /// <summary>
+    /// The "New panel defaults" section's accent/text colour editor — forwards
+    /// <see cref="GlobalDefaultsViewModel.DefaultColors"/> verbatim (docs/PLANS/color-presets-and-size-step.md
+    /// §3.7), the same instance every time (not re-created per read).
+    /// </summary>
+    public PanelColorEditorViewModel DefaultColors => GlobalDefaults.DefaultColors;
+
     /// <summary>Default background colour (hex) for new panels.</summary>
     public string DefaultBackgroundColor
     {
@@ -268,9 +275,6 @@ public class MainWindowViewModel : INotifyPropertyChanged
         get => GlobalDefaults.DefaultSurfaceStyle;
         set => GlobalDefaults.DefaultSurfaceStyle = value;
     }
-
-    /// <summary>Available options for the default-surface-style selector (settings window).</summary>
-    public IReadOnlyList<PanelSurfaceStyle> SurfaceStyleOptions => GlobalDefaults.SurfaceStyleOptions;
 
     /// <summary>
     /// Default <see cref="PanelGeometryMode"/> for new panels (ADR-028; P06, <c>docs/fix-prompts/06-fit-content.md</c>) —
@@ -503,6 +507,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// tests can exercise both the "en" and "ru" branches deterministically.
     /// </param>
     /// <param name="about">See <see cref="About"/>.</param>
+    /// <param name="colorPicker">Forwarded to <see cref="GlobalDefaults"/>' <see cref="GlobalDefaultsViewModel.DefaultColors"/> (docs/PLANS/color-presets-and-size-step.md §3.7).</param>
     /// <param name="appLog">See <see cref="Log"/>.</param>
     public MainWindowViewModel(
         IWindowManager windowManager,
@@ -518,6 +523,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
         ILocalizationService localization,
         CultureInfo systemUiCulture,
         AboutViewModel about,
+        IColorPickerService colorPicker,
         IAppLog? appLog = null)
     {
         _windowManager = windowManager;
@@ -547,7 +553,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
             ?? LanguageOptions[0];
         _localization.CultureChanged += OnLocalizationCultureChanged;
 
-        GlobalDefaults = new GlobalDefaultsViewModel(appSettings, windowManager);
+        GlobalDefaults = new GlobalDefaultsViewModel(appSettings, windowManager, colorPicker);
         SystemIconsSettings = new SystemIconsSettingsViewModel(systemIconsPanelManager);
 
         // Re-raise every sub-ViewModel's own PropertyChanged verbatim on this ViewModel — the property

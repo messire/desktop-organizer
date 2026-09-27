@@ -67,6 +67,9 @@ internal sealed class ApplicationStateService : IApplicationStateService
     public SystemIconsPanelStateDto? SystemIconsPanel { get; private set; }
 
     /// <inheritdoc />
+    public StateLoadStatus LastLoadStatus { get; private set; }
+
+    /// <inheritdoc />
     public StateLoadStatus Load()
     {
         var result = _store.Load();
@@ -136,6 +139,7 @@ internal sealed class ApplicationStateService : IApplicationStateService
             ? document.SystemIconsPanel
             : null;
 
+        LastLoadStatus = status;
         return status;
     }
 

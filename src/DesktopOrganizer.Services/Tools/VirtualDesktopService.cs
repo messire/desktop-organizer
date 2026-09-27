@@ -428,13 +428,24 @@ internal sealed class VirtualDesktopService(INativeApi nativeApi) : IVirtualDesk
     /// autostart there may be no foreground window at all, and <c>Progman</c> — a plausible
     /// foreground window on an empty desktop — is not tracked; both degrade to
     /// <see langword="null"/>.
+    /// <para>
+    /// MINOR 9 (release-polish 1.0 review): after a native shell context menu the foreground window is
+    /// this process's own hidden helper window (<see cref="INativeApi.IsOwnHelperWindow"/> — the
+    /// <c>TrackPopupMenu</c> foreground pattern, KB 135788). It was never shown, so the shell either does
+    /// not track it (the call below would already answer <see langword="null"/>) or — worse — could keep
+    /// whatever desktop it was created on, which after a desktop switch is a STALE id that would move panels
+    /// to the wrong desktop. It is therefore never consulted: the answer is "unknown" (<see langword="null"/>),
+    /// the same clean degradation as "no foreground window", until the user activates any real window.
+    /// </para>
     /// </remarks>
     private Guid? TryGetCurrentDesktopId()
     {
         try
         {
             var foreground = nativeApi.GetForegroundWindow();
-            return foreground == IntPtr.Zero ? null : TryGetWindowDesktopId(foreground);
+            if (foreground == IntPtr.Zero || nativeApi.IsOwnHelperWindow(foreground)) return null;
+
+            return TryGetWindowDesktopId(foreground);
         }
         catch
         {

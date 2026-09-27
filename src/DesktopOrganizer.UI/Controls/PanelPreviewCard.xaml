@@ -1,0 +1,153 @@
+<UserControl x:Class="DesktopOrganizer.UI.Controls.PanelPreviewCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:local="clr-namespace:DesktopOrganizer.UI.Controls"
+             xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
+             xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+             xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             mc:Ignorable="d"
+             x:Name="Root"
+             d:DesignWidth="380">
+    <!--
+        ADR-042 "Preview" card — see this control's own code-behind remarks for why every visual input is a
+        plain dependency property rather than a shared ViewModel. Rendered with the SAME brushes/converters
+        a real panel uses (theming:PanelTheme.Accent/Text set on PanelRoot below, PanelSurfaceBrush,
+        PanelChromeForegroundBrush) over a two-tone "wallpaper" backdrop, so opacity/Glass are visible.
+        Local PreviewIconSize converter registered here (not globally): its only consumer is this control.
+    -->
+    <UserControl.Resources>
+        <conv:PreviewIconSizeConverter x:Key="PreviewIconSize"/>
+    </UserControl.Resources>
+    <Border Style="{StaticResource Settings.CardBorder}" Padding="0" ClipToBounds="True"
+            Focusable="False" AutomationProperties.Name="{loc:Loc Common_Preview_Header}">
+        <StackPanel>
+            <!-- UX#4 (release-polish-1.0 visual review): a VISIBLE card header, matching every other
+                 Settings.CardBorder card in these two hosts — the AutomationProperties.Name above already
+                 gave this card an accessible name, but sighted users had no on-screen label at all. -->
+            <TextBlock Text="{loc:Loc Common_Preview_Header}" Style="{StaticResource Settings.CardHeader}"
+                       Margin="14,12,14,0"/>
+            <Grid Height="104" Margin="0,8,0,0">
+            <!-- Two-tone "wallpaper" backdrop — a generic desktop-like diagonal gradient, purely so the
+                 mini panel's own opacity/Glass composition has something to blend against. -->
+            <Rectangle>
+                <Rectangle.Fill>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#FF4A6FA5" Offset="0"/>
+                        <GradientStop Color="#FF8A7B63" Offset="1"/>
+                    </LinearGradientBrush>
+                </Rectangle.Fill>
+            </Rectangle>
+
+            <!-- The mini panel itself. -->
+            <Grid x:Name="PanelRoot" Margin="14,10"
+                  theming:PanelTheme.Accent="{Binding AccentHex, ElementName=Root, Converter={StaticResource HexBrush}}"
+                  theming:PanelTheme.Text="{Binding TextHex, ElementName=Root, Converter={StaticResource HexBrush}}">
+                <Border CornerRadius="{StaticResource Radius.Control}" BorderThickness="1">
+                    <!-- Release-polish-1.0 visual review item 6: a mode-adaptive hairline (the SAME
+                         PanelChromeForegroundBrush/"Border" kind a real panel's own chrome hairline uses —
+                         see PanelChromeForegroundPolicy.Border's own remarks) replaces a fixed translucent
+                         BLACK that read fine on a dark-surface preview but nearly vanished on a light-surface
+                         one against this card's own light-toned backdrop corner. -->
+                    <Border.BorderBrush>
+                        <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Border">
+                            <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                            <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                            <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                            <Binding Source="{StaticResource Brush.Border.Default}"/>
+                        </MultiBinding>
+                    </Border.BorderBrush>
+                    <Border.Background>
+                        <MultiBinding Converter="{StaticResource PanelSurfaceBrush}">
+                            <Binding Path="AccentHex" ElementName="Root"/>
+                            <Binding Path="SurfaceOpacity" ElementName="Root"/>
+                            <Binding Path="SurfaceStyle" ElementName="Root"/>
+                            <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                            <Binding Path="TextHex" ElementName="Root"/>
+                        </MultiBinding>
+                    </Border.Background>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="22"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Title bar: panel title + 4 decorative header glyphs (Sort/View/RollUp/Overflow),
+                             exactly like the real panel's own header (ChildWindow.xaml). -->
+                        <Grid Grid.Row="0" Margin="8,0">
+                            <!-- M4 (release-polish-1.0 review round): the title reads the panel's OWN
+                                 TextHex directly (same HexBrush converter the real ChildWindow.xaml title
+                                 uses) — not a chrome token. Chrome tokens (PanelChromeForegroundBrush) stay
+                                 reserved for FIXED, non-configurable chrome (header glyphs, the hairline
+                                 border below) that isn't the user's own text colour. -->
+                            <TextBlock x:Name="TitleText"
+                                       Text="{Binding PreviewTitle, ElementName=Root}"
+                                       Foreground="{Binding TextHex, ElementName=Root, Converter={StaticResource HexBrush}}"
+                                       VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        IsHitTestVisible="False">
+                                <StackPanel.Resources>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="FontFamily" Value="Segoe MDL2 Assets, Segoe Fluent Icons"/>
+                                        <Setter Property="FontSize" Value="9"/>
+                                        <Setter Property="Margin" Value="3,0,0,0"/>
+                                        <Setter Property="VerticalAlignment" Value="Center"/>
+                                        <Setter Property="Foreground">
+                                            <Setter.Value>
+                                                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Secondary">
+                                                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                                                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                                                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                                    <Binding Source="{StaticResource Brush.Text.Secondary}"/>
+                                                </MultiBinding>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </StackPanel.Resources>
+                                <TextBlock Text="{StaticResource Icon.Glyph.Sort}"/>
+                                <TextBlock Text="{StaticResource Icon.Glyph.ViewGrid}"/>
+                                <TextBlock Text="{StaticResource Icon.Glyph.RollUp}"/>
+                                <TextBlock Text="{StaticResource Icon.Glyph.Overflow}"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- 3 vector placeholder item tiles — no shell icons (this control has no
+                             file-system access); PreviewIconSize scales them proportionally to IconSize. -->
+                        <UniformGrid Grid.Row="1" Rows="1" Columns="3" Margin="8,2,8,6">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Border Background="{StaticResource Brush.Accent.Coral}" CornerRadius="3"
+                                        Width="{Binding IconSize, ElementName=Root, Converter={StaticResource PreviewIconSize}}"
+                                        Height="{Binding IconSize, ElementName=Root, Converter={StaticResource PreviewIconSize}}"/>
+                                <TextBlock Text="{loc:Loc Customize_PreviewItem1_Label}"
+                                           Foreground="{Binding TextHex, ElementName=Root, Converter={StaticResource HexBrush}}"
+                                           FontSize="8" Margin="0,2,0,0"
+                                           HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="56"/>
+                            </StackPanel>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Border Background="{StaticResource Brush.Accent.Blue}" CornerRadius="3"
+                                        Width="{Binding IconSize, ElementName=Root, Converter={StaticResource PreviewIconSize}}"
+                                        Height="{Binding IconSize, ElementName=Root, Converter={StaticResource PreviewIconSize}}"/>
+                                <TextBlock Text="{loc:Loc Customize_PreviewItem2_Label}"
+                                           Foreground="{Binding TextHex, ElementName=Root, Converter={StaticResource HexBrush}}"
+                                           FontSize="8" Margin="0,2,0,0"
+                                           HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="56"/>
+                            </StackPanel>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Border Background="{StaticResource Brush.Accent.Green}" CornerRadius="3"
+                                        Width="{Binding IconSize, ElementName=Root, Converter={StaticResource PreviewIconSize}}"
+                                        Height="{Binding IconSize, ElementName=Root, Converter={StaticResource PreviewIconSize}}"/>
+                                <TextBlock Text="{loc:Loc Customize_PreviewItem3_Label}"
+                                           Foreground="{Binding TextHex, ElementName=Root, Converter={StaticResource HexBrush}}"
+                                           FontSize="8" Margin="0,2,0,0"
+                                           HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="56"/>
+                            </StackPanel>
+                        </UniformGrid>
+                    </Grid>
+                </Border>
+            </Grid>
+            </Grid>
+        </StackPanel>
+    </Border>
+</UserControl>

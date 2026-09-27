@@ -4,7 +4,6 @@
                     xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
                     xmlns:behaviors="clr-namespace:DesktopOrganizer.UI.Behaviors"
                     xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
-                    xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
                     xmlns:models="clr-namespace:DesktopOrganizer.Core;assembly=DesktopOrganizer.Core">
 
     <conv:HexBrushConverter x:Key="HexBrush"/>
@@ -28,33 +27,11 @@
     -->
 
     <!--
-        Shared context menu for a file item.
-        PlacementTarget is the item root element:
-          .Tag         → ChildWindowViewModel (set on the item root via the Window ancestor)
-          .DataContext → the FileItem the menu was opened on
+        A file item has no WPF context menu of its own: right-click shows the native Windows shell menu
+        for the file (ChildWindow.FileListHost_PreviewMouseRightButtonUp -> ChildWindowViewModel.
+        ShowShellContextMenu -> IFileLauncher.ShowContextMenu), the same menu Explorer shows. Removing an
+        item from a panel is a drag-out (ADR-036); F2 starts the inline rename.
     -->
-    <ContextMenu x:Key="FileContextMenu">
-        <MenuItem Header="{loc:Loc Panel_FileMenu_Open}"
-                  Command="{Binding PlacementTarget.Tag.OpenFileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-        <MenuItem Header="{loc:Loc Panel_FileMenu_OpenContainingFolder}"
-                  Command="{Binding PlacementTarget.Tag.OpenContainingFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-        <Separator/>
-        <MenuItem Header="{loc:Loc Common_Rename}"
-                  InputGestureText="F2"
-                  Command="{Binding PlacementTarget.Tag.BeginRenameCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-        <Separator/>
-        <MenuItem Header="{loc:Loc Panel_FileMenu_Properties}"
-                  Command="{Binding PlacementTarget.Tag.ShowPropertiesCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-        <Separator/>
-        <MenuItem Header="{loc:Loc Panel_FileMenu_RemoveFromPanel}"
-                  ToolTip="{loc:Loc Panel_FileMenu_RemoveFromPanel_Tooltip}"
-                  Command="{Binding PlacementTarget.Tag.RemoveFileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-    </ContextMenu>
 
     <!-- Greys out items whose file/folder no longer exists on disk. TargetType="Panel" (not
          "StackPanel") since UX-P2 fix (docs/PLANS/workspace-grid-07-visual.md fix-cycle 1): List mode's
@@ -62,11 +39,9 @@
          (see ListViewTemplate below) — a Style's TargetType must be the element's own type or a base of
          it, and Panel is the common base both StackPanel (GridViewTemplate's own item root, unchanged)
          and Grid (ListViewTemplate's new item root) share; none of this Style's Setters
-         (Background/Tag/ContextMenu/Opacity) are StackPanel-specific. -->
+         (Background/Opacity) are StackPanel-specific. -->
     <Style x:Key="FileItemRootStyle" TargetType="Panel">
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"/>
-        <Setter Property="ContextMenu" Value="{StaticResource FileContextMenu}"/>
         <Style.Triggers>
             <DataTrigger Binding="{Binding Exists}" Value="False">
                 <Setter Property="Opacity" Value="0.45"/>
@@ -214,7 +189,8 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Image Grid.Column="0" Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"/>
+                        <Image Grid.Column="0" Source="{Binding Icon}" Width="16" Height="16" Margin="0,0,6,0"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
                         <TextBlock x:Name="DisplayNameText"
                                    Grid.Column="1"
                                    Text="{Binding DisplayName}"

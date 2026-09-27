@@ -60,8 +60,10 @@ public class HoverOverlayPolicyTests
     }
 
     /// <summary>
-    /// Verifies that a relative luminance at or above the dark-surface threshold returns
-    /// <see cref="HoverOverlayPolicy.LightenWash"/>.
+    /// MAJOR-3 fix (review round, docs/PLANS/color-presets-and-size-step.md): verifies that a relative
+    /// luminance at or above the dark-surface threshold returns <see cref="HoverOverlayPolicy.LightSurfaceDarkenWash"/>,
+    /// NOT <see cref="HoverOverlayPolicy.LightenWash"/> — lightening an already near-white surface
+    /// (<see cref="SurfaceComposer.LightNeutralBase"/>) is imperceptible.
     /// </summary>
     /// <param name="luminance">The relative luminance value under test.</param>
     [Theory]
@@ -69,9 +71,12 @@ public class HoverOverlayPolicyTests
     [InlineData(0.5001)]
     [InlineData(0.9)]
     [InlineData(1.0)]
-    public void For_LuminanceAtOrAboveThreshold_ReturnsLightenWash(double luminance)
+    public void For_LuminanceAtOrAboveThreshold_ReturnsLightSurfaceDarkenWash_NotLightenWash(double luminance)
     {
-        Assert.Equal(HoverOverlayPolicy.LightenWash, HoverOverlayPolicy.For(luminance));
+        var result = HoverOverlayPolicy.For(luminance);
+
+        Assert.Equal(HoverOverlayPolicy.LightSurfaceDarkenWash, result);
+        Assert.NotEqual(HoverOverlayPolicy.LightenWash, result);
     }
 
     /// <summary>
@@ -84,16 +89,76 @@ public class HoverOverlayPolicyTests
         Assert.Equal(HoverOverlayPolicy.DarkenWash, HoverOverlayPolicy.For(double.NaN));
     }
 
+    // --- NEW-1 fix (docs/PLANS/release-polish-1.0.md) — ForItemTile ------------------------------------
+
     /// <summary>
-    /// Verifies that <see cref="HoverOverlayPolicy.DarkenWash"/> and <see cref="HoverOverlayPolicy.LightenWash"/>
-    /// share the same alpha, so switching direction never also changes the wash's overall strength.
+    /// NEW-1 fix: verifies that a relative luminance below the dark-surface threshold returns
+    /// <see cref="HoverOverlayPolicy.LightenWash"/> — unlike <see cref="HoverOverlayPolicy.For"/>, which
+    /// returns <see cref="HoverOverlayPolicy.DarkenWash"/> there (nearly invisible over
+    /// <c>PanelItemContainerStyle</c>'s own dark surfaces).
+    /// </summary>
+    /// <param name="luminance">The relative luminance value under test.</param>
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(0.1)]
+    [InlineData(0.4999)]
+    public void ForItemTile_LuminanceBelowThreshold_ReturnsLightenWash(double luminance)
+    {
+        Assert.Equal(HoverOverlayPolicy.LightenWash, HoverOverlayPolicy.ForItemTile(luminance));
+    }
+
+    /// <summary>
+    /// NEW-1 fix: verifies that a relative luminance at or above the dark-surface threshold returns
+    /// <see cref="HoverOverlayPolicy.LightSurfaceDarkenWash"/>, the SAME light-surface wash
+    /// <see cref="HoverOverlayPolicy.For"/> returns there.
+    /// </summary>
+    /// <param name="luminance">The relative luminance value under test.</param>
+    [Theory]
+    [InlineData(0.5)]
+    [InlineData(0.5001)]
+    [InlineData(0.9)]
+    [InlineData(1.0)]
+    public void ForItemTile_LuminanceAtOrAboveThreshold_ReturnsLightSurfaceDarkenWash(double luminance)
+    {
+        Assert.Equal(HoverOverlayPolicy.LightSurfaceDarkenWash, HoverOverlayPolicy.ForItemTile(luminance));
+    }
+
+    /// <summary>
+    /// NEW-1 fix: verifies that a NaN luminance value is treated as dark, returning
+    /// <see cref="HoverOverlayPolicy.LightenWash"/> instead of throwing.
     /// </summary>
     [Fact]
-    public void DarkenWash_AndLightenWash_ShareTheSameAlpha()
+    public void ForItemTile_NaN_TreatsAsDark_DoesNotThrow()
     {
-        // Same intensity/alpha in both directions — only the RGB polarity differs — so switching
-        // direction is not also silently changing the wash's overall strength.
-        Assert.Equal(HoverOverlayPolicy.DarkenWash.A, HoverOverlayPolicy.LightenWash.A);
+        Assert.Equal(HoverOverlayPolicy.LightenWash, HoverOverlayPolicy.ForItemTile(double.NaN));
+    }
+
+    /// <summary>
+    /// MAJOR-3 fix: <see cref="HoverOverlayPolicy.LightSurfaceDarkenWash"/> is deliberately WEAKER
+    /// (lower alpha) than <see cref="HoverOverlayPolicy.DarkenWash"/> — both are black washes, but the
+    /// light-surface one only needs to be perceptible, not as strong as the dark-surface one.
+    /// </summary>
+    [Fact]
+    public void LightSurfaceDarkenWash_IsWeakerThanDarkenWash_BothBlack()
+    {
+        Assert.True(HoverOverlayPolicy.LightSurfaceDarkenWash.A < HoverOverlayPolicy.DarkenWash.A);
+        Assert.Equal(0, HoverOverlayPolicy.LightSurfaceDarkenWash.R);
+        Assert.Equal(0, HoverOverlayPolicy.LightSurfaceDarkenWash.G);
+        Assert.Equal(0, HoverOverlayPolicy.LightSurfaceDarkenWash.B);
+    }
+
+    /// <summary>
+    /// MAJOR-3 fix: verifies that darkening <see cref="SurfaceComposer.LightNeutralBase"/> by
+    /// <see cref="HoverOverlayPolicy.LightSurfaceDarkenWash"/> keeps the light-surface chrome's own
+    /// "Secondary" text/icon token (<c>#666666</c>) at/above <see cref="ContrastCalculator.MinimumIconContrast"/>.
+    /// </summary>
+    [Fact]
+    public void LightSurfaceDarkenWash_OverLightNeutralBase_KeepsLightSecondaryChromeReadable()
+    {
+        var darkened = ContrastCalculator.CompositeOverOpaque(HoverOverlayPolicy.LightSurfaceDarkenWash, SurfaceComposer.LightNeutralBase);
+        var contrast = ContrastCalculator.ContrastRatio(PanelChromeForegroundPolicy.LightSecondary, darkened);
+
+        Assert.True(contrast >= ContrastCalculator.MinimumIconContrast, $"expected >= {ContrastCalculator.MinimumIconContrast}:1; got {contrast:F2}.");
     }
 
     /// <summary>

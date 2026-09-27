@@ -177,13 +177,6 @@ internal interface INativeApi
     System.Drawing.Point GetCursorPos();
 
     /// <summary>
-    /// Opens the Windows shell "Properties" dialog for the given file or folder.
-    /// </summary>
-    /// <param name="path">Full path of the file or folder.</param>
-    /// <returns><see langword="true"/> if the dialog was invoked successfully.</returns>
-    bool ShowFileProperties(string path);
-
-    /// <summary>
     /// Sets the show state of a window (e.g. hide/show).
     /// </summary>
     /// <param name="hwnd">Window handle.</param>
@@ -272,11 +265,68 @@ internal interface INativeApi
     /// <summary>
     /// Shows the native shell context menu for the given absolute PIDL at the supplied screen coordinates.
     /// </summary>
+    /// <remarks>
+    /// Same tracking core as <see cref="ShowShellContextMenuForPath"/> (hidden foreground helper window as
+    /// the menu owner, <c>IContextMenu2</c>/<c>IContextMenu3</c> message forwarding), with <c>CMF_NORMAL</c>
+    /// (+ <c>CMF_EXTENDEDVERBS</c> while Shift is held) and no rename interception. Never throws.
+    /// </remarks>
     /// <param name="pidl">Absolute PIDL of the shell item the menu is shown for.</param>
-    /// <param name="ownerHwnd">Owner window for the menu.</param>
+    /// <param name="ownerHwnd">The window the menu is opened from; the menu owner only when the helper window cannot be created.</param>
     /// <param name="screenX">Horizontal screen coordinate, in physical pixels, where the menu is shown.</param>
     /// <param name="screenY">Vertical screen coordinate, in physical pixels, where the menu is shown.</param>
     void ShowShellContextMenu(IntPtr pidl, IntPtr ownerHwnd, int screenX, int screenY);
+
+    /// <summary>
+    /// Shows the native shell context menu of a file-system item — the same menu Explorer shows for it —
+    /// at the supplied screen coordinates, and invokes the command the user picks.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Must be called on the UI (STA) thread. The path is parsed into a PIDL (<c>SHParseDisplayName</c>),
+    /// bound to its parent <c>IShellFolder</c> (<c>SHBindToParent</c>) and asked for its <c>IContextMenu</c>
+    /// (<c>GetUIObjectOf</c>). The menu is built with <c>CMF_NORMAL | CMF_EXPLORE | CMF_CANRENAME</c>
+    /// (+ <c>CMF_EXTENDEDVERBS</c> while Shift is held) and tracked from a hidden, process-owned helper
+    /// window that is made foreground for the duration of the menu (the panels are
+    /// <c>WS_EX_NOACTIVATE</c>, and a menu whose owner is not foreground never dismisses on an outside
+    /// click); the helper forwards <c>WM_INITMENUPOPUP</c>/<c>WM_DRAWITEM</c>/<c>WM_MEASUREITEM</c>/
+    /// <c>WM_MENUCHAR</c> to <c>IContextMenu3::HandleMenuMsg2</c> (or <c>IContextMenu2::HandleMenuMsg</c>) so
+    /// owner-drawn and lazily-filled submenus ("Open with", "Send to", "New") work.
+    /// </para>
+    /// <para>
+    /// The shell's own "rename" verb is never invoked (it needs Explorer's view to host an editor) — it is
+    /// reported as <see cref="ShellContextMenuOutcome.RenameRequested"/> instead. With
+    /// <paramref name="interceptDelete"/> the canonical <c>delete</c> verb is likewise reported as
+    /// <see cref="ShellContextMenuOutcome.DeleteRequested"/> and NOT invoked (the caller recycles the item
+    /// itself — for an app-managed item from its original location, so a later "Restore" from the Recycle
+    /// Bin puts it somewhere the user can see). Both verbs are recognized through <c>GetCommandString(GCS_VERBW)</c>;
+    /// a handler that reports no canonical verb is invoked as usual. Every failure degrades to
+    /// <see cref="ShellContextMenuOutcome.NotShown"/> with a diagnostics entry carrying only the failing stage,
+    /// the item's extension and the <c>HRESULT</c>, never the path. Never throws.
+    /// </para>
+    /// </remarks>
+    /// <param name="path">Full path of an existing file or folder.</param>
+    /// <param name="ownerHwnd">
+    /// The window the menu is opened from. Used as the menu owner only when the helper window cannot be
+    /// created.
+    /// </param>
+    /// <param name="screenX">Horizontal screen coordinate, in physical pixels, where the menu is shown.</param>
+    /// <param name="screenY">Vertical screen coordinate, in physical pixels, where the menu is shown.</param>
+    /// <param name="interceptDelete">Report the <c>delete</c> verb instead of invoking it.</param>
+    /// <returns>How the menu ended, plus the invoked command's canonical verb; see <see cref="ShellContextMenuResult"/>.</returns>
+    ShellContextMenuResult ShowShellContextMenuForPath(string path, IntPtr ownerHwnd, int screenX, int screenY, bool interceptDelete);
+
+    /// <summary>
+    /// Whether <paramref name="hwnd"/> is this process's hidden shell-menu helper window — the never-shown
+    /// top-level window that owns the tracked shell context menus and, per the <c>TrackPopupMenu</c> foreground
+    /// pattern (KB 135788), stays the foreground window after a menu closed.
+    /// </summary>
+    /// <remarks>
+    /// Lets foreground-window heuristics (e.g. "which virtual desktop is the user looking at") ignore it: the
+    /// helper was never shown, so it has no meaningful virtual-desktop assignment. Never throws.
+    /// </remarks>
+    /// <param name="hwnd">The window to test.</param>
+    /// <returns><see langword="true"/> for the helper window; <see langword="false"/> otherwise (including <see cref="IntPtr.Zero"/>).</returns>
+    bool IsOwnHelperWindow(IntPtr hwnd);
 
     /// <summary>
     /// Queries the Recycle Bin contents across all drives.
@@ -538,6 +588,81 @@ internal interface INativeApi
     /// <param name="hwnd">Window whose DPI is requested.</param>
     /// <returns>Scale factor, 1.0 at 96 DPI. Never returns 0 and never throws.</returns>
     double GetDpiScaleForWindow(IntPtr hwnd);
+
+    // ── High-resolution panel item icons (IShellItemImageFactory / system image list) ───────────
+    // Kept as one contiguous block (with its own region in NativeApi.cs) so it merges cleanly with
+    // unrelated shell work (e.g. the context-menu code above).
+
+    /// <summary>
+    /// Renders the shell's own icon for an existing file-system item as a bitmap
+    /// (<c>SHCreateItemFromParsingName</c> → <c>IShellItemImageFactory::GetImage</c> with
+    /// <c>SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK</c>). This is what Explorer shows: a <c>.lnk</c>
+    /// resolves to its target's icon, an <c>.exe</c>/<c>.ico</c> to its embedded icon, a folder to its
+    /// <c>desktop.ini</c> custom icon — at the requested size instead of the 32 px shell icon.
+    /// </summary>
+    /// <remarks>
+    /// Expected on the UI (STA) thread: some third-party icon handlers are apartment-threaded. Works on
+    /// an MTA thread for the built-in handlers. Never throws — a COM/marshalling exception is reported
+    /// as its <see cref="Exception.HResult"/>.
+    /// </remarks>
+    /// <param name="path">Full path of an existing file or folder.</param>
+    /// <param name="sizePx">Requested square size in physical pixels. The result may be larger (<c>SIIGBF_BIGGERSIZEOK</c>).</param>
+    /// <param name="bitmapHandle">
+    /// Receives the <c>HBITMAP</c> on success, <see cref="IntPtr.Zero"/> otherwise. The caller owns it and
+    /// must release it through <see cref="DeleteBitmap"/>.
+    /// </param>
+    /// <returns>The <c>HRESULT</c> of the failing step, or 0 (<c>S_OK</c>) on success.</returns>
+    int GetShellItemImage(string path, int sizePx, out IntPtr bitmapHandle);
+
+    /// <summary>
+    /// Copies the pixels of a 32-bpp <c>HBITMAP</c> (e.g. from <see cref="GetShellItemImage"/>) into a
+    /// managed, top-down BGRA buffer (<c>GetObject</c> + <c>GetDIBits</c>). Does not take ownership of the
+    /// handle. Never throws.
+    /// </summary>
+    /// <param name="bitmapHandle">The bitmap to read. Must not be selected into a device context.</param>
+    /// <param name="pixels">Receives the pixel data on success; <see langword="default"/> otherwise.</param>
+    /// <returns><see langword="true"/> when the whole bitmap was read.</returns>
+    bool TryReadBitmapPixels(IntPtr bitmapHandle, out NativeBitmapPixels pixels);
+
+    /// <summary>
+    /// Releases a bitmap handle (<c>DeleteObject</c>). <see cref="IntPtr.Zero"/> answers <see langword="false"/>.
+    /// Never throws.
+    /// </summary>
+    /// <param name="bitmapHandle">The <c>HBITMAP</c> to delete.</param>
+    /// <returns><see langword="true"/> when the handle was released.</returns>
+    bool DeleteBitmap(IntPtr bitmapHandle);
+
+    /// <summary>
+    /// Extracts icon <paramref name="iconIndex"/> of one of the shell's system image lists
+    /// (<c>SHGetImageList</c> → <c>ImageList_GetIcon(ILD_TRANSPARENT)</c>). The index comes from
+    /// <see cref="GetFileInfo"/> with <c>SHGFI_SYSICONINDEX</c>.
+    /// </summary>
+    /// <remarks>Same threading expectation as <see cref="GetShellItemImage"/>. Never throws.</remarks>
+    /// <param name="imageList">
+    /// One of the <c>SHIL_*</c> constants: <c>SHIL_LARGE</c> = 0 (32 px), <c>SHIL_SMALL</c> = 1 (16 px),
+    /// <c>SHIL_EXTRALARGE</c> = 2 (48 px), <c>SHIL_JUMBO</c> = 4 (256 px). Sizes are at 100 % system scale.
+    /// </param>
+    /// <param name="iconIndex">Index into the system image list.</param>
+    /// <returns>
+    /// A new <c>HICON</c> the caller must release through <see cref="DestroyIcon"/>, or
+    /// <see cref="IntPtr.Zero"/> on failure.
+    /// </returns>
+    IntPtr GetSystemImageListIcon(int imageList, int iconIndex);
+}
+
+/// <summary>
+/// Pixels of a native bitmap copied into managed memory by <see cref="INativeApi.TryReadBitmapPixels"/>:
+/// 32 bits per pixel, byte order B, G, R, A, rows top-down, stride = <see cref="Width"/> × 4. The alpha
+/// channel is passed through as-is — whether it is premultiplied (or present at all) is decided by the
+/// consumer (<c>IconFactory</c>).
+/// </summary>
+/// <param name="Width">Width in pixels.</param>
+/// <param name="Height">Height in pixels.</param>
+/// <param name="Bgra">Pixel buffer, <c>Width × Height × 4</c> bytes.</param>
+internal readonly record struct NativeBitmapPixels(int Width, int Height, ReadOnlyMemory<byte> Bgra)
+{
+    /// <summary>Gets the number of bytes per row.</summary>
+    public int Stride => Width * 4;
 }
 
 /// <summary>

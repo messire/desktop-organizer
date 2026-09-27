@@ -69,7 +69,12 @@
          chosen high-contrast system colors, the same as every other chrome color in this file. -->
     <x:Static x:Key="Color.Settings.ChromeBackground" Member="sysc:SystemColors.ControlColor"/>
     <x:Static x:Key="Color.Settings.ChromeBorder" Member="sysc:SystemColors.ActiveBorderColor"/>
-    <x:Static x:Key="Color.Settings.TabActiveBackground" Member="sysc:SystemColors.WindowColor"/>
+    <!-- m7 (release-polish-1.0 review round): HighlightColor, not WindowColor — this key doubled as
+         Color.Settings.CardBackground's own HC value (both WindowColor), which made every "selected"
+         state that relies on it (Settings.SegmentedItem's checked segment, the sidebar's selected
+         ListBoxItem/About toggle) render IDENTICAL to its own unselected card background — i.e. no
+         visible selection at all under Windows High Contrast. -->
+    <x:Static x:Key="Color.Settings.TabActiveBackground" Member="sysc:SystemColors.HighlightColor"/>
     <x:Static x:Key="Color.Settings.IconMuted" Member="sysc:SystemColors.GrayTextColor"/>
     <x:Static x:Key="Color.Settings.TextMuted" Member="sysc:SystemColors.GrayTextColor"/>
     <x:Static x:Key="Color.Settings.SwatchBorder" Member="sysc:SystemColors.ActiveBorderColor"/>

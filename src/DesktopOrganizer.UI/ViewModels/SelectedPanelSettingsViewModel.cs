@@ -36,6 +36,7 @@ public class SelectedPanelSettingsViewModel : INotifyPropertyChanged, IDisposabl
 
         SetViewModeCommand = new RelayCommand<PanelViewMode>(mode => SelectedPanelViewMode = mode);
         SetSortModeCommand = new RelayCommand<PanelSortMode>(mode => SelectedPanelSortMode = mode, _ => SelectedPanelSupportsManualOrder);
+        SetSurfaceStyleCommand = new RelayCommand<PanelSurfaceStyle>(style => SelectedPanelSurfaceStyle = style);
     }
 
     /// <summary>Whether a panel is selected (drives enabled state of the editor section).</summary>
@@ -67,6 +68,44 @@ public class SelectedPanelSettingsViewModel : INotifyPropertyChanged, IDisposabl
     }
 
     /// <summary>
+    /// Applies a colour-preset pair atomically (docs/PLANS/color-presets-and-size-step.md §3.7): both
+    /// <see cref="ChildWindowModel.AccentColor"/> and <see cref="ChildWindowModel.TextColor"/> are set
+    /// inside a single <see cref="Apply"/> call, so choosing a preset persists with exactly one
+    /// <see cref="IWindowManager.SaveWindowsState"/> instead of the two <see cref="SelectedPanelAccentColor"/>/
+    /// <see cref="SelectedPanelTextColor"/> setters would cost if called separately.
+    /// </summary>
+    /// <param name="accent">The preset's accent colour, canonical uppercase <c>#RRGGBB</c>.</param>
+    /// <param name="text">The preset's text colour, canonical uppercase <c>#RRGGBB</c>.</param>
+    public void ApplyColors(string accent, string text) =>
+        Apply(p =>
+        {
+            p.AccentColor = accent;
+            p.TextColor = text;
+        });
+
+    /// <summary>
+    /// Applies a full appearance reset atomically (release-polish-1.0 review round M7, Customize window's
+    /// own "Reset to defaults"): accent, text, surface opacity, surface style, and icon size are all set
+    /// inside a SINGLE <see cref="Apply"/> call, so resetting the panel persists with exactly one
+    /// <see cref="IWindowManager.SaveWindowsState"/> instead of the five separate setters would cost if
+    /// called independently.
+    /// </summary>
+    /// <param name="accent">The default accent colour, canonical uppercase <c>#RRGGBB</c>.</param>
+    /// <param name="text">The default text colour, canonical uppercase <c>#RRGGBB</c>.</param>
+    /// <param name="surfaceOpacity">The default surface opacity (0-1).</param>
+    /// <param name="surfaceStyle">The default surface style.</param>
+    /// <param name="iconSize">The default icon size (px).</param>
+    public void ApplyAppearance(string accent, string text, double surfaceOpacity, PanelSurfaceStyle surfaceStyle, double iconSize) =>
+        Apply(p =>
+        {
+            p.AccentColor = accent;
+            p.TextColor = text;
+            p.SurfaceOpacity = surfaceOpacity;
+            p.SurfaceStyle = surfaceStyle;
+            p.IconSize = iconSize;
+        });
+
+    /// <summary>
     /// Surface opacity (0–1) of the selected panel — proxies <see cref="ChildWindowModel.SurfaceOpacity"/>
     /// (ADR-025 D-10; renamed from <c>SelectedPanelOpacity</c>, see the remarks on
     /// <see cref="SelectedPanelAccentColor"/>).
@@ -87,8 +126,12 @@ public class SelectedPanelSettingsViewModel : INotifyPropertyChanged, IDisposabl
         set => Apply(p => p.SurfaceStyle = value);
     }
 
-    /// <summary>All <see cref="PanelSurfaceStyle"/> members, for the settings window's surface-style selector.</summary>
-    public IReadOnlyList<PanelSurfaceStyle> SurfaceStyles { get; } = Enum.GetValues<PanelSurfaceStyle>();
+    /// <summary>
+    /// Sets <see cref="SelectedPanelSurfaceStyle"/> from a <see cref="PanelSurfaceStyle"/> command
+    /// parameter — backs the "Customize panel…" dialog's Style segmented control (ADR-042), the same
+    /// Command+CommandParameter shape as <see cref="SetViewModeCommand"/>/<see cref="SetSortModeCommand"/>.
+    /// </summary>
+    public ICommand SetSurfaceStyleCommand { get; }
 
     /// <summary>Icon size (px) of the selected panel.</summary>
     public double SelectedPanelIconSize

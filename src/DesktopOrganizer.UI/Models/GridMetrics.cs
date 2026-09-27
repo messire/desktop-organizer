@@ -215,8 +215,11 @@ public static class GridMetrics
     /// </para>
     /// <para>
     /// Clamped up to <see cref="MinPanelSize"/> because the unclamped icon-grid minimum (72/84/96/108px
-    /// for <c>IconSize ∈ {16,20,24,28}</c>, the low end of the slider) is smaller than that hard
-    /// <c>Window.MinWidth</c> floor. Without this clamp, <c>ChildWindow.Resize_DragDelta</c> could
+    /// for legacy <c>IconSize</c> values at the old tick-4 slider's low end) is smaller than that hard
+    /// <c>Window.MinWidth</c> floor. As of docs/PLANS/color-presets-and-size-step.md (§2.1 D-S1), the
+    /// slider's step is 8, so the low end it can actually reach is now only
+    /// <c>IconSize ∈ {16, 24}</c> (<see cref="SizeStepPolicy.Step"/>) — the same clamp still applies to
+    /// both. Without this clamp, <c>ChildWindow.Resize_DragDelta</c> could
     /// compute a <see cref="System.Windows.FrameworkElement.Width"/> below what WPF will actually coerce the
     /// window to, desynchronizing the code's own <see cref="System.Windows.Window.Left"/> math (set
     /// from the uncoerced value) from the window's real, coerced <c>Width</c> — visibly jumping the

@@ -1,3 +1,4 @@
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -15,6 +16,7 @@ public class GlobalDefaultsViewModelTests
 {
     private readonly Mock<IAppSettings> _appSettingsMock = new();
     private readonly Mock<IWindowManager> _windowManagerMock = new();
+    private readonly Mock<IColorPickerService> _colorPickerMock = new();
 
     /// <summary>
     /// Verifies that changing <see cref="GlobalDefaultsViewModel.GridSize"/> to a different value
@@ -213,6 +215,41 @@ public class GlobalDefaultsViewModelTests
         _appSettingsMock.Verify(s => s.Save(), Times.Never);
     }
 
+    // ── SetDefaultSurfaceStyleCommand (release-polish-1.0 visual review item 5): backs the "New panel
+    // defaults" section's Surface style segmented control, replacing its previous ComboBox — same
+    // Command+CommandParameter shape as SelectedPanelSettingsViewModel.SetSurfaceStyleCommand. ──────────
+
+    /// <summary>
+    /// Verifies that executing <see cref="GlobalDefaultsViewModel.SetDefaultSurfaceStyleCommand"/> with a
+    /// <see cref="PanelSurfaceStyle"/> parameter writes it through the SAME
+    /// <see cref="GlobalDefaultsViewModel.DefaultSurfaceStyle"/> property (and therefore the same
+    /// <see cref="IAppSettings.DefaultSurfaceStyle"/> setter) a direct property assignment would.
+    /// </summary>
+    [Fact]
+    public void SetDefaultSurfaceStyleCommand_Execute_WritesDefaultSurfaceStyleAndSaves()
+    {
+        _appSettingsMock.SetupProperty(s => s.DefaultSurfaceStyle, nameof(PanelSurfaceStyle.Ambient));
+        var sut = BuildSut();
+
+        sut.SetDefaultSurfaceStyleCommand.Execute(PanelSurfaceStyle.Glass);
+
+        Assert.Equal(PanelSurfaceStyle.Glass, sut.DefaultSurfaceStyle);
+        Assert.Equal(nameof(PanelSurfaceStyle.Glass), _appSettingsMock.Object.DefaultSurfaceStyle);
+        _appSettingsMock.Verify(s => s.Save(), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="GlobalDefaultsViewModel.SetDefaultSurfaceStyleCommand"/> can always execute
+    /// (no <c>CanExecute</c> gating — every <see cref="PanelSurfaceStyle"/> member is always a legal default).
+    /// </summary>
+    [Fact]
+    public void SetDefaultSurfaceStyleCommand_CanExecute_IsAlwaysTrue()
+    {
+        var sut = BuildSut();
+
+        Assert.True(sut.SetDefaultSurfaceStyleCommand.CanExecute(PanelSurfaceStyle.Solid));
+    }
+
     // ── ApplyFromPanel (settings-window redesign item 6, "Take from selected panel") ────────────────
 
     /// <summary>
@@ -337,5 +374,5 @@ public class GlobalDefaultsViewModelTests
         _appSettingsMock.Verify(s => s.Save(), Times.Once);
     }
 
-    private GlobalDefaultsViewModel BuildSut() => new(_appSettingsMock.Object, _windowManagerMock.Object);
+    private GlobalDefaultsViewModel BuildSut() => new(_appSettingsMock.Object, _windowManagerMock.Object, _colorPickerMock.Object);
 }

@@ -16,10 +16,9 @@ namespace DesktopOrganizer.Tests.Unit.ViewModels;
 /// Unit tests for <see cref="ChildWindowViewModel"/>'s Move-semantics glue: the
 /// <see cref="ChildWindowViewModel.AddDroppedFiles"/> fallback-to-original-path behavior when
 /// <see cref="IPanelItemStorageService.MoveIn"/>/<see cref="IPanelItemStorageService.MoveInDirectory"/>
-/// return <see langword="null"/> (D13), and the <c>RemoveFileItem</c> degradation to
-/// <see cref="IPanelItemStorageService.ReleaseToRecycleBin"/> when <see cref="IPanelItemStorageService.Restore"/>
-/// reports <see cref="RestoreOutcome.OriginalPathUnknown"/> (D9, VM-part — see
-/// docs/PLANS/drag-drop-move-semantics.md, ADR-B legacy-panel degradation).
+/// return <see langword="null"/> (D13 — see docs/PLANS/drag-drop-move-semantics.md), and the rest of the
+/// panel ViewModel behavior (drag-out glue, inline rename, portals, liveness). The native shell context menu
+/// glue has its own fixture, <c>ChildWindowViewModelShellMenuTests</c>.
 /// </summary>
 /// <remarks>
 /// <see cref="ChildWindowViewModel"/>'s constructor resolves view templates via
@@ -53,7 +52,7 @@ public class ChildWindowViewModelTests
     public ChildWindowViewModelTests()
     {
         EnsureWpfApplication();
-        _iconProviderMock.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((System.Windows.Media.ImageSource)null!);
+        _iconProviderMock.Setup(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>())).Returns((System.Windows.Media.ImageSource)null!);
 
         // Default: the one-time Move-semantics hint hasn't been shown yet. Individual tests that
         // care about the already-shown case override this via SetupProperty again.
@@ -309,116 +308,6 @@ public class ChildWindowViewModelTests
             File.Delete(sourceA);
             File.Delete(sourceB);
         }
-    }
-
-    // ── D9 (VM-part): RemoveFileItem degrades to the Recycle Bin on OriginalPathUnknown (ADR-B, ADR-035) ──
-
-    /// <summary>
-    /// Verifies that when <see cref="IPanelItemStorageService.Restore"/> reports
-    /// <see cref="RestoreOutcome.OriginalPathUnknown"/>, removing the item degrades to
-    /// <see cref="IPanelItemStorageService.ReleaseToRecycleBin"/> (legacy managed copy with no manifest
-    /// entry) — never a permanent delete — and the item leaves the panel once it's recycled.
-    /// </summary>
-    [Fact]
-    public void RemoveFileItem_RestoreReturnsOriginalPathUnknown_RecyclesAndRemovesItem()
-    {
-        // Arrange
-        var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
-        using var sut = BuildSut();
-        sut.AddFiles([managedPath]);
-        var item = Assert.Single(sut.AllItems);
-
-        _storageMock.Setup(s => s.Restore(managedPath)).Returns(RestoreOutcome.OriginalPathUnknown);
-        _storageMock.Setup(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()))
-            .Returns(RecycleOutcome.Create([managedPath], [], cancelled: false));
-
-        // Act — RemoveFileCommand is the only public entry point to the private RemoveFileItem.
-        sut.RemoveFileCommand.Execute(item);
-
-        // Assert — legacy managed copy with no manifest entry goes to the Recycle Bin, as a single item.
-        _storageMock.Verify(
-            s => s.ReleaseToRecycleBin(It.Is<IReadOnlyList<string>>(p => p.Count == 1 && p[0] == managedPath)),
-            Times.Once);
-        Assert.Empty(sut.AllItems);
-    }
-
-    /// <summary>
-    /// ADR-035 fail-visibly: if the Recycle Bin refuses the legacy managed copy, the item stays in the
-    /// panel (removing it would orphan the only copy in storage) and nothing is persisted.
-    /// </summary>
-    [Fact]
-    public void RemoveFileItem_OriginalPathUnknown_RecycleFails_KeepsItem()
-    {
-        // Arrange
-        var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
-        using var sut = BuildSut();
-        sut.AddFiles([managedPath]);
-        var item = Assert.Single(sut.AllItems);
-        var filesChanged = 0;
-        sut.FilesChanged += (_, _) => filesChanged++;
-
-        _storageMock.Setup(s => s.Restore(managedPath)).Returns(RestoreOutcome.OriginalPathUnknown);
-        _storageMock.Setup(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()))
-            .Returns(RecycleOutcome.Create([], [managedPath], cancelled: true));
-
-        // Act
-        sut.RemoveFileCommand.Execute(item);
-
-        // Assert
-        Assert.Same(item, Assert.Single(sut.AllItems));
-        Assert.Equal(0, filesChanged);
-    }
-
-    /// <summary>
-    /// Verifies that when <see cref="IPanelItemStorageService.Restore"/> succeeds, removing the item
-    /// does not additionally send anything to the Recycle Bin.
-    /// </summary>
-    [Fact]
-    public void RemoveFileItem_RestoreSucceeds_DoesNotRecycle()
-    {
-        // Arrange
-        var managedPath = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
-        using var sut = BuildSut();
-        sut.AddFiles([managedPath]);
-        var item = Assert.Single(sut.AllItems);
-
-        _storageMock.Setup(s => s.Restore(managedPath)).Returns(RestoreOutcome.Restored);
-
-        // Act
-        sut.RemoveFileCommand.Execute(item);
-
-        // Assert — successful restore must not additionally recycle the (already-moved-back) item.
-        _storageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Never);
-        Assert.Empty(sut.AllItems);
-    }
-
-    /// <summary>
-    /// Verifies that only <see cref="RestoreOutcome.OriginalPathUnknown"/> triggers the ADR-B
-    /// degradation to <see cref="IPanelItemStorageService.ReleaseToRecycleBin"/>: neither
-    /// <see cref="RestoreOutcome.NotManaged"/> (already a no-op) nor <see cref="RestoreOutcome.Failed"/>
-    /// (managed copy intentionally left in storage) calls it.
-    /// </summary>
-    /// <param name="outcome">The <see cref="RestoreOutcome"/> value <see cref="IPanelItemStorageService.Restore"/> returns.</param>
-    [Theory]
-    [InlineData(RestoreOutcome.NotManaged)]
-    [InlineData(RestoreOutcome.Failed)]
-    public void RemoveFileItem_RestoreReturnsNotManagedOrFailed_DoesNotRecycle(RestoreOutcome outcome)
-    {
-        // Arrange — only OriginalPathUnknown triggers the ADR-B degradation; NotManaged is already a
-        // no-op inside Restore, and Failed means the managed copy is intentionally left in storage
-        // (logged, not lost) rather than force-recycled.
-        var path = Path.Combine(Path.GetTempPath(), $"DOrgVmTestManaged_{Guid.NewGuid():N}.txt");
-        using var sut = BuildSut();
-        sut.AddFiles([path]);
-        var item = Assert.Single(sut.AllItems);
-
-        _storageMock.Setup(s => s.Restore(path)).Returns(outcome);
-
-        // Act
-        sut.RemoveFileCommand.Execute(item);
-
-        // Assert
-        _storageMock.Verify(s => s.ReleaseToRecycleBin(It.IsAny<IReadOnlyList<string>>()), Times.Never);
     }
 
     // ── ADR-036 (release-hardening-1.0.md §E): drag-out transfer / external-move VM glue ─────────
@@ -821,7 +710,7 @@ public class ChildWindowViewModelTests
     /// <summary>
     /// Regression for P00 baseline finding H3: verifies that when a missing file reappears,
     /// <see cref="BaseViewModel.RefreshItemsLiveness"/> re-resolves its icon via
-    /// <see cref="IIconProvider.GetIcon"/> instead of leaving it stuck on the placeholder.
+    /// <see cref="IIconProvider.GetIcon(string, int)"/> instead of leaving it stuck on the placeholder.
     /// </summary>
     [Fact]
     public void RefreshItemsLiveness_ItemReappears_ReResolvesIconViaProvider()
@@ -842,7 +731,7 @@ public class ChildWindowViewModelTests
             File.WriteAllText(path, "now exists");
 
             var freshIcon = new System.Windows.Media.DrawingImage();
-            _iconProviderMock.Setup(p => p.GetIcon(path)).Returns(freshIcon);
+            _iconProviderMock.Setup(p => p.GetIcon(path, It.IsAny<int>())).Returns(freshIcon);
 
             sut.RefreshItemsLiveness();
 
@@ -857,7 +746,7 @@ public class ChildWindowViewModelTests
 
     /// <summary>
     /// Verifies that <see cref="BaseViewModel.RefreshItemsLiveness"/> does not re-call
-    /// <see cref="IIconProvider.GetIcon"/> for an item that stays missing across ticks.
+    /// <see cref="IIconProvider.GetIcon(string, int)"/> for an item that stays missing across ticks.
     /// </summary>
     [Fact]
     public void RefreshItemsLiveness_ItemStaysMissing_NeverCallsIconProviderAgain()
@@ -873,12 +762,12 @@ public class ChildWindowViewModelTests
 
         var item = Assert.Single(sut.AllItems);
         Assert.False(item.Exists);
-        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>()), Times.Never);
+        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
     }
 
     /// <summary>
     /// Verifies that <see cref="BaseViewModel.RefreshItemsLiveness"/> does not re-call
-    /// <see cref="IIconProvider.GetIcon"/> for an item that stays present across ticks.
+    /// <see cref="IIconProvider.GetIcon(string, int)"/> for an item that stays present across ticks.
     /// </summary>
     [Fact]
     public void RefreshItemsLiveness_ItemStaysPresent_NeverCallsIconProviderAgain()
@@ -900,7 +789,7 @@ public class ChildWindowViewModelTests
 
             var item = Assert.Single(sut.AllItems);
             Assert.True(item.Exists);
-            _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>()), Times.Never);
+            _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
         }
         finally
         {
@@ -927,7 +816,7 @@ public class ChildWindowViewModelTests
 
         _iconProviderMock.Setup(p => p.IsPlaceholder(placeholder)).Returns(true);
         _iconProviderMock.Setup(p => p.IsPlaceholder(realIcon)).Returns(false);
-        _iconProviderMock.Setup(p => p.GetIcon(path)).Returns(placeholder);
+        _iconProviderMock.Setup(p => p.GetIcon(path, It.IsAny<int>())).Returns(placeholder);
 
         using var sut = BuildSut();
 
@@ -940,18 +829,18 @@ public class ChildWindowViewModelTests
 
             // Tick 1: first retry attempt — provider still returns the placeholder.
             sut.RefreshItemsLiveness();
-            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Once);
+            _iconProviderMock.Verify(p => p.GetIcon(path, It.IsAny<int>()), Times.Once);
             Assert.Same(placeholder, item.Icon);
 
             // Tick 2: backoff — must NOT re-hit the provider on every single tick.
             sut.RefreshItemsLiveness();
-            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Once);
+            _iconProviderMock.Verify(p => p.GetIcon(path, It.IsAny<int>()), Times.Once);
 
             // Tick 3: backoff elapsed — second attempt; the provider now succeeds.
-            _iconProviderMock.Setup(p => p.GetIcon(path)).Returns(realIcon);
+            _iconProviderMock.Setup(p => p.GetIcon(path, It.IsAny<int>())).Returns(realIcon);
             sut.RefreshItemsLiveness();
 
-            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Exactly(2));
+            _iconProviderMock.Verify(p => p.GetIcon(path, It.IsAny<int>()), Times.Exactly(2));
             Assert.Same(realIcon, item.Icon);
         }
         finally
@@ -973,7 +862,7 @@ public class ChildWindowViewModelTests
         var placeholder = new System.Windows.Media.DrawingImage();
 
         _iconProviderMock.Setup(p => p.IsPlaceholder(placeholder)).Returns(true);
-        _iconProviderMock.Setup(p => p.GetIcon(path)).Returns(placeholder);
+        _iconProviderMock.Setup(p => p.GetIcon(path, It.IsAny<int>())).Returns(placeholder);
 
         using var sut = BuildSut();
 
@@ -988,12 +877,12 @@ public class ChildWindowViewModelTests
                 sut.RefreshItemsLiveness();
             }
 
-            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Exactly(3));
+            _iconProviderMock.Verify(p => p.GetIcon(path, It.IsAny<int>()), Times.Exactly(3));
 
             // Bounded, not merely "slow": further ticks never attempt again.
             sut.RefreshItemsLiveness();
             sut.RefreshItemsLiveness();
-            _iconProviderMock.Verify(p => p.GetIcon(path), Times.Exactly(3));
+            _iconProviderMock.Verify(p => p.GetIcon(path, It.IsAny<int>()), Times.Exactly(3));
         }
         finally
         {
@@ -1307,15 +1196,14 @@ public class ChildWindowViewModelTests
         }
     }
 
-    // ── R10/C3: rename in a Folder Portal panel is allowed (unlike RemoveFileCommand) ──────────
+    // ── R10/C3: rename in a Folder Portal panel is allowed ──────────────────────────────────────
 
     /// <summary>
-    /// Verifies that in a Folder Portal panel, <see cref="ChildWindowViewModel.RemoveFileCommand"/>
-    /// cannot execute, while <see cref="ChildWindowViewModel.BeginRenameCommand"/> and
+    /// Verifies that in a Folder Portal panel <see cref="ChildWindowViewModel.BeginRenameCommand"/> and
     /// <see cref="ChildWindowViewModel.CommitRenameCommand"/> can always execute.
     /// </summary>
     [Fact]
-    public void RemoveFileCommand_CanExecute_FalseInPortal_ButBeginRenameAndCommitRename_AlwaysCanExecute()
+    public void BeginRenameAndCommitRename_AlwaysCanExecute_InPortal()
     {
         var portalDir = NewTempDirPath();
         var watcherMock = new Mock<IFolderWatcher>();
@@ -1328,7 +1216,6 @@ public class ChildWindowViewModelTests
             sut.LoadFromModel(new ChildWindowModel { SourceFolderPath = portalDir });
             Assert.True(sut.IsPortal);
 
-            Assert.False(sut.RemoveFileCommand.CanExecute(null));
             Assert.True(sut.BeginRenameCommand.CanExecute(null));
             Assert.True(sut.CommitRenameCommand.CanExecute(null));
         }
@@ -2779,6 +2666,226 @@ public class ChildWindowViewModelTests
         Assert.Null(sidebarPanel.SelectedItem);
     }
 
+    // ── release-polish 1.0: icons are requested at the panel's own pixel size (IconSize x DPI) ──────
+
+    /// <summary>
+    /// Verifies that a list-view panel requests its icons at the list template's fixed 16 DIP size (scale 1.0).
+    /// </summary>
+    [Fact]
+    public void LoadFromModel_ListView_RequestsIconsAtListIconSize()
+    {
+        const string path = @"C:\fake\list-item.txt";
+        using var sut = BuildSut();
+
+        sut.LoadFromModel(new ChildWindowModel { FilePaths = [path], ViewMode = PanelViewMode.List, IconSize = 96 });
+
+        _iconProviderMock.Verify(p => p.GetIcon(path, 16), Times.Once);
+        _iconProviderMock.Verify(p => p.GetIcon(path, It.Is<int>(size => size != 16)), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that a grid-view panel requests its icons at its own <see cref="ChildWindowModel.IconSize"/>
+    /// multiplied by the pushed DPI scale and snapped up to a shell size bucket (48 DIP at 150 % → 72 px).
+    /// </summary>
+    [Fact]
+    public void LoadFromModel_GridView_RequestsIconSizeTimesDpiScale()
+    {
+        const string path = @"C:\fake\grid-item.txt";
+        using var sut = BuildSut();
+        sut.IconRenderScale = 1.5;
+
+        sut.LoadFromModel(new ChildWindowModel { FilePaths = [path], ViewMode = PanelViewMode.Grid, IconSize = 48 });
+
+        _iconProviderMock.Verify(p => p.GetIcon(path, 72), Times.Once);
+        _iconProviderMock.Verify(p => p.GetIcon(path, It.Is<int>(size => size != 72)), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that changing the panel's <see cref="ChildWindowModel.IconSize"/> re-fetches every item's icon
+    /// at the new size and swaps it into the bound <see cref="FileItem.Icon"/> — once the debounce window
+    /// (M3, release-polish 1.0 review) elapses; the re-fetch itself is deferred, not immediate.
+    /// </summary>
+    [Fact]
+    public void IconSizeChange_CrossingABucket_RefetchesAndReplacesEveryIconAfterDebounceWindow()
+    {
+        const string pathA = @"C:\fake\a.txt";
+        const string pathB = @"C:\fake\b.txt";
+        var largeIcon = new System.Windows.Media.DrawingImage();
+        _iconProviderMock.Setup(p => p.GetIcon(It.IsAny<string>(), 96)).Returns(largeIcon);
+
+        var timer = new FakeDebounceTimer();
+        using var sut = BuildSut(iconResizeDebounceTimerProvider: () => timer);
+        var model = new ChildWindowModel { FilePaths = [pathA, pathB], ViewMode = PanelViewMode.Grid, IconSize = 48 };
+        sut.LoadFromModel(model);
+        _iconProviderMock.Invocations.Clear();
+
+        model.IconSize = 96;
+
+        // Not yet — only the debounce window's timer was (re)armed so far.
+        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        Assert.Equal(1, timer.StartCount);
+
+        timer.Fire(); // simulates the debounce window elapsing
+
+        _iconProviderMock.Verify(p => p.GetIcon(pathA, 96), Times.Once);
+        _iconProviderMock.Verify(p => p.GetIcon(pathB, 96), Times.Once);
+        Assert.All(sut.AllItems, item => Assert.Same(largeIcon, item.Icon));
+    }
+
+    /// <summary>
+    /// Verifies that an <see cref="ChildWindowModel.IconSize"/> change that stays inside the same size bucket
+    /// (the slider is continuous) does not arm the debounce timer or re-fetch anything.
+    /// </summary>
+    [Fact]
+    public void IconSizeChange_WithinTheSameBucket_DoesNotRefetch()
+    {
+        const string path = @"C:\fake\same-bucket.txt";
+        var timer = new FakeDebounceTimer();
+        using var sut = BuildSut(iconResizeDebounceTimerProvider: () => timer);
+        var model = new ChildWindowModel { FilePaths = [path], ViewMode = PanelViewMode.Grid, IconSize = 42 };
+        sut.LoadFromModel(model);
+        _iconProviderMock.Invocations.Clear();
+
+        model.IconSize = 47.5; // 42 → 48 px bucket, 47.5 → still the 48 px bucket
+
+        Assert.Equal(0, timer.StartCount);
+        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that several <see cref="ChildWindowModel.IconSize"/> bucket crossings inside the debounce
+    /// window (M3, release-polish 1.0 review — the live slider dragging across 8+ buckets) collapse into
+    /// exactly one re-fetch, at whatever size was current when the window finally elapsed.
+    /// </summary>
+    [Fact]
+    public void IconSizeChange_SeveralBucketCrossingsWithinDebounceWindow_ResultInExactlyOneRefetch()
+    {
+        const string path = @"C:\fake\dragged.txt";
+        var timer = new FakeDebounceTimer();
+        using var sut = BuildSut(iconResizeDebounceTimerProvider: () => timer);
+        var model = new ChildWindowModel { FilePaths = [path], ViewMode = PanelViewMode.Grid, IconSize = 16 };
+        sut.LoadFromModel(model);
+        _iconProviderMock.Invocations.Clear();
+
+        // Simulates dragging the slider across several buckets — each re-arms the same debounce timer
+        // rather than firing its own re-fetch.
+        model.IconSize = 32;
+        model.IconSize = 48;
+        model.IconSize = 64;
+        model.IconSize = 96;
+
+        Assert.Equal(4, timer.StartCount); // every crossing (re)armed the timer...
+        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>()), Times.Never); // ...but nothing fetched yet.
+
+        timer.Fire();
+
+        // ...and exactly one re-fetch happens, at the LAST size the slider landed on.
+        _iconProviderMock.Verify(p => p.GetIcon(path, 96), Times.Once);
+        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>(), It.Is<int>(size => size != 96)), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that a new item added WHILE a debounced icon re-fetch is still pending (M3, release-polish
+    /// 1.0 review) is fetched at the CURRENT (already-updated) pixel size right away — never a stale,
+    /// pre-debounce one — since <see cref="BaseViewModel.RequestedIconPixelSize"/> updates synchronously
+    /// even though the existing items' re-fetch is deferred.
+    /// </summary>
+    [Fact]
+    public void AddFiles_WhileIconResizeDebouncePending_UsesTheNewCurrentPixelSize()
+    {
+        const string existingPath = @"C:\fake\existing.txt";
+        const string newPath = @"C:\fake\new.txt";
+        var timer = new FakeDebounceTimer();
+        using var sut = BuildSut(iconResizeDebounceTimerProvider: () => timer);
+        var model = new ChildWindowModel { FilePaths = [existingPath], ViewMode = PanelViewMode.Grid, IconSize = 48 };
+        sut.LoadFromModel(model);
+        _iconProviderMock.Invocations.Clear();
+
+        model.IconSize = 96; // arms the debounce timer; existingPath is NOT re-fetched yet
+
+        sut.AddFiles([newPath]);
+
+        // The new item is fetched at the new size immediately, without waiting for the debounce window.
+        _iconProviderMock.Verify(p => p.GetIcon(newPath, 96), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that switching list → grid re-fetches icons at the grid size once the debounce window
+    /// (M3, release-polish 1.0 review) elapses.
+    /// </summary>
+    [Fact]
+    public void ViewModeChange_ListToGrid_RefetchesAtGridIconSizeAfterDebounceWindow()
+    {
+        const string path = @"C:\fake\view-switch.txt";
+        var timer = new FakeDebounceTimer();
+        using var sut = BuildSut(iconResizeDebounceTimerProvider: () => timer);
+        var model = new ChildWindowModel { FilePaths = [path], ViewMode = PanelViewMode.List, IconSize = 64 };
+        sut.LoadFromModel(model);
+        _iconProviderMock.Invocations.Clear();
+
+        model.ViewMode = PanelViewMode.Grid;
+        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+
+        timer.Fire();
+
+        _iconProviderMock.Verify(p => p.GetIcon(path, 64), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that a DPI change pushed by the window (moving the panel to a 200 % monitor) re-fetches icons at
+    /// the new pixel size once the debounce window (M3, release-polish 1.0 review) elapses, and that invalid
+    /// scale values are ignored (and never arm the timer).
+    /// </summary>
+    [Fact]
+    public void IconRenderScaleChange_RefetchesAtScaledSizeAfterDebounceWindow_AndIgnoresInvalidValues()
+    {
+        const string path = @"C:\fake\dpi.txt";
+        var timer = new FakeDebounceTimer();
+        using var sut = BuildSut(iconResizeDebounceTimerProvider: () => timer);
+        sut.LoadFromModel(new ChildWindowModel { FilePaths = [path], ViewMode = PanelViewMode.Grid, IconSize = 48 });
+        _iconProviderMock.Invocations.Clear();
+
+        sut.IconRenderScale = double.NaN;
+        sut.IconRenderScale = 0;
+        Assert.Equal(0, timer.StartCount);
+        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+
+        sut.IconRenderScale = 2.0;
+        Assert.Equal(1, timer.StartCount);
+        _iconProviderMock.Verify(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+
+        timer.Fire();
+
+        _iconProviderMock.Verify(p => p.GetIcon(path, 96), Times.Once);
+        Assert.Equal(2.0, sut.IconRenderScale);
+    }
+
+    /// <summary>
+    /// Verifies that items added after a size change (drop, portal resync, reappearance) use the panel's current
+    /// pixel size rather than the default one.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_AfterSizeChange_UsesCurrentPixelSize()
+    {
+        var source = NewTempFilePath();
+        File.WriteAllText(source, "content");
+        _storageMock.Setup(s => s.MoveIn(source)).Returns((string?)null);
+
+        using var sut = BuildSut();
+        sut.LoadFromModel(new ChildWindowModel { ViewMode = PanelViewMode.Grid, IconSize = 32 });
+
+        try
+        {
+            sut.AddDroppedFiles([source]);
+
+            _iconProviderMock.Verify(p => p.GetIcon(source, 32), Times.Once);
+        }
+        finally
+        {
+            File.Delete(source);
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -2857,7 +2964,9 @@ public class ChildWindowViewModelTests
         return dir;
     }
 
-    private ChildWindowViewModel BuildSut(IPanelSelectionCoordinator? selectionCoordinator = null) => new(
+    private ChildWindowViewModel BuildSut(
+        IPanelSelectionCoordinator? selectionCoordinator = null,
+        Func<IDebounceTimer?>? iconResizeDebounceTimerProvider = null) => new(
         _iconProviderMock.Object,
         _fileLauncherMock.Object,
         _watcherFactoryMock.Object,
@@ -2865,5 +2974,41 @@ public class ChildWindowViewModelTests
         _renameServiceMock.Object,
         _appSettingsMock.Object,
         selectionCoordinator ?? _selectionCoordinatorMock.Object,
-        _diagnosticsMock.Object);
+        _diagnosticsMock.Object,
+        iconResizeDebounceTimerProvider);
+
+    /// <summary>
+    /// Minimal <see cref="IDebounceTimer"/> test double for the icon-resize debounce (M3, release-polish
+    /// 1.0 review) — mirrors <c>SaveSchedulerTests</c>' own private fake: "last <see cref="Start"/> wins"
+    /// semantics (each call replaces the previously-armed callback rather than queuing a second one),
+    /// with no actual timing involved.
+    /// </summary>
+    private sealed class FakeDebounceTimer : IDebounceTimer
+    {
+        private Action? _callback;
+
+        public int StartCount { get; private set; }
+
+        public int StopCount { get; private set; }
+
+        public void Start(TimeSpan window, Action callback)
+        {
+            StartCount++;
+            _callback = callback;
+        }
+
+        public void Stop()
+        {
+            StopCount++;
+            _callback = null;
+        }
+
+        /// <summary>Simulates the debounce window elapsing: invokes and clears the armed callback, if any.</summary>
+        public void Fire()
+        {
+            var callback = _callback;
+            _callback = null;
+            callback?.Invoke();
+        }
+    }
 }

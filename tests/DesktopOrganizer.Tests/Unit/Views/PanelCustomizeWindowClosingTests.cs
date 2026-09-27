@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Models;
@@ -59,8 +60,8 @@ public class PanelCustomizeWindowClosingTests
             // updates Text this way specifically so an active Binding stays attached and tracks the
             // pending edit — a plain SetValue (what the `Text = ...` CLR setter does) replaces the
             // property's local value outright and never registers as a dirty, uncommitted edit.
-            harness.Window.AccentColorTextBox.SetCurrentValue(TextBox.TextProperty, "#ABCDEF"); // Never lost focus.
-            Assert.True(harness.Window.AccentColorTextBox.GetBindingExpression(TextBox.TextProperty)!.IsDirty);
+            harness.Window.ColorEditor.AccentHexBox.SetCurrentValue(TextBox.TextProperty, "#ABCDEF"); // Never lost focus.
+            Assert.True(harness.Window.ColorEditor.AccentHexBox.GetBindingExpression(TextBox.TextProperty)!.IsDirty);
 
             harness.Window.Close();
 
@@ -82,8 +83,8 @@ public class PanelCustomizeWindowClosingTests
 
             harness.ShowOffscreen();
 
-            harness.Window.TextColorTextBox.SetCurrentValue(TextBox.TextProperty, "#123456");
-            Assert.True(harness.Window.TextColorTextBox.GetBindingExpression(TextBox.TextProperty)!.IsDirty);
+            harness.Window.ColorEditor.TextHexBox.SetCurrentValue(TextBox.TextProperty, "#123456");
+            Assert.True(harness.Window.ColorEditor.TextHexBox.GetBindingExpression(TextBox.TextProperty)!.IsDirty);
 
             harness.Window.Close();
 
@@ -108,8 +109,8 @@ public class PanelCustomizeWindowClosingTests
 
             harness.ShowOffscreen();
 
-            Assert.False(harness.Window.AccentColorTextBox.GetBindingExpression(TextBox.TextProperty)!.IsDirty);
-            Assert.False(harness.Window.TextColorTextBox.GetBindingExpression(TextBox.TextProperty)!.IsDirty);
+            Assert.False(harness.Window.ColorEditor.AccentHexBox.GetBindingExpression(TextBox.TextProperty)!.IsDirty);
+            Assert.False(harness.Window.ColorEditor.TextHexBox.GetBindingExpression(TextBox.TextProperty)!.IsDirty);
 
             var cancelled = false;
             harness.Window.Closing += (_, e) => cancelled = e.Cancel;
@@ -120,6 +121,84 @@ public class PanelCustomizeWindowClosingTests
             Assert.Equal("#111111", model.AccentColor);
             Assert.Equal("#EEEEEE", model.TextColor);
         });
+    }
+
+    /// <summary>
+    /// Verifies that <c>IconSizeEditor</c> — the third of docs/PLANS/color-presets-and-size-step.md §5.4's
+    /// "three XAML places" (the other two are covered by <c>SizeEditorsWiringTests</c>) — is wired to
+    /// <see cref="SizeStepPolicy.IconSizeMinimum"/>/<see cref="SizeStepPolicy.IconSizeMaximum"/>/
+    /// <see cref="SizeStepPolicy.Step"/>, not a leftover pre-feature literal.
+    /// </summary>
+    [Fact]
+    public void IconSizeEditor_UsesIconSizeRange()
+    {
+        RunOnStaThread(() =>
+        {
+            using var harness = PanelCustomizeWindowHarness.Build();
+
+            Assert.Equal(SizeStepPolicy.IconSizeMinimum, harness.Window.IconSizeEditor.Minimum);
+            Assert.Equal(SizeStepPolicy.IconSizeMaximum, harness.Window.IconSizeEditor.Maximum);
+            Assert.Equal(SizeStepPolicy.Step, harness.Window.IconSizeEditor.Step);
+        });
+    }
+
+    /// <summary>
+    /// Verifies that closing the window with a genuinely dirty, uncommitted edit in BOTH the accent hex
+    /// box AND <c>IconSizeEditor</c>'s manual integer box — typed but never blurred/Entered — still commits
+    /// both to the target panel (docs/PLANS/color-presets-and-size-step.md §7 T-close addition):
+    /// <c>PanelCustomizeWindow.OnClosing</c> flushes <c>ColorEditor.CommitPendingEdits()</c> AND
+    /// <c>IconSizeEditor.CommitPendingEdit()</c>, independently of one another.
+    /// </summary>
+    [Fact]
+    public void OnClosing_DirtyHexAndIconSizeBoxes_CommitsBothToModel()
+    {
+        RunOnStaThread(() =>
+        {
+            using var harness = PanelCustomizeWindowHarness.Build();
+            var model = new ChildWindowModel { AccentColor = "#111111", IconSize = 48 };
+            harness.ViewModel.Target = model;
+
+            harness.ShowOffscreen();
+
+            harness.Window.ColorEditor.AccentHexBox.SetCurrentValue(TextBox.TextProperty, "#ABCDEF");
+            Assert.True(harness.Window.ColorEditor.AccentHexBox.GetBindingExpression(TextBox.TextProperty)!.IsDirty);
+
+            TypeText(harness.Window.IconSizeEditor.ValueBox, "72");
+
+            harness.Window.Close();
+
+            Assert.Equal("#ABCDEF", model.AccentColor);
+            Assert.Equal(72, model.IconSize);
+        });
+    }
+
+    /// <summary>
+    /// Simulates typing <paramref name="text"/> into <paramref name="box"/> via a real
+    /// <see cref="TextCompositionEventArgs"/> on <see cref="UIElement.PreviewTextInputEvent"/>/
+    /// <see cref="UIElement.TextInputEvent"/> — same technique as <c>IntegerInputBoxTests.TypeText</c> and
+    /// <c>SteppedValueEditorTests.TypeText</c> (duplicated here per this codebase's existing per-fixture
+    /// convention for small STA input helpers), needed so <c>IntegerInputBox</c>'s own dirty-tracking
+    /// actually engages before this test's <see cref="Window.Close"/>.
+    /// </summary>
+    private static void TypeText(TextBox box, string text)
+    {
+        box.ApplyTemplate();
+        box.SelectAll();
+
+        var composition = new TextComposition(InputManager.Current, box, text);
+
+        var previewArgs = new TextCompositionEventArgs(InputManager.Current.PrimaryKeyboardDevice, composition)
+        {
+            RoutedEvent = UIElement.PreviewTextInputEvent,
+        };
+        box.RaiseEvent(previewArgs);
+        if (previewArgs.Handled) return;
+
+        var bubbleArgs = new TextCompositionEventArgs(InputManager.Current.PrimaryKeyboardDevice, composition)
+        {
+            RoutedEvent = UIElement.TextInputEvent,
+        };
+        box.RaiseEvent(bubbleArgs);
     }
 
     private static void RunOnStaThread(Action action) => StaTestRunner.Run(action);
@@ -167,7 +246,9 @@ public class PanelCustomizeWindowClosingTests
                 Mock.Of<IWindowManager>(),
                 Mock.Of<ILayoutEditModeService>(),
                 Mock.Of<IFolderPickerService>(),
-                TestLocalization.English);
+                TestLocalization.English,
+                Mock.Of<IColorPickerService>(),
+                Mock.Of<IAppSettings>());
 
             var window = new PanelCustomizeWindow(viewModel, Mock.Of<IMonitorService>(), FakeDesktopScale.Uniform().Object);
 
@@ -209,6 +290,13 @@ public class PanelCustomizeWindowClosingTests
                          "/Resources/Styles/Controls.xaml",
                          "/Resources/Styles/Panels.xaml",
                          "/Resources/Templates.xaml",
+
+                         // ADR-042: PanelCustomizeWindow.xaml/Controls/PanelColorEditor.xaml/Controls/
+                         // PanelPreviewCard.xaml now reuse the Settings window's own card visual language
+                         // (Settings.CardBorder/CardHeader/CardDescription/SegmentedGroup/SegmentedItem) —
+                         // this fixture's merge list has to include it too, unlike before ADR-042 (see the
+                         // stale comment this replaced in PanelCustomizeWindow.xaml's own remarks).
+                         "/Resources/Styles/Settings.xaml",
                      })
             {
                 merged.Add(new ResourceDictionary { Source = new Uri($"/DesktopOrganizer.UI;component{relativePath}", UriKind.Relative) });

@@ -45,7 +45,8 @@
     -->
     <Grid x:Name="PanelRoot"
           theming:PanelTheme.Accent="{Binding Model.AccentColor, Converter={StaticResource AccentBrush}, ConverterParameter=indicator}"
-          theming:PanelTheme.SurfaceStyle="{Binding Model.SurfaceStyle}">
+          theming:PanelTheme.SurfaceStyle="{Binding Model.SurfaceStyle}"
+          theming:PanelTheme.Text="{Binding Model.TextColor, Converter={StaticResource HexBrush}}">
         <Grid.Resources>
             <!--
                 Overlay scrollbar (docs/prompts/scrollbar-pack): implicit ScrollBar style scoped to this
@@ -92,6 +93,10 @@
                     <Binding Path="Model.SurfaceOpacity"/>
                     <Binding Path="Model.SurfaceStyle"/>
                     <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <!-- MAJOR-2 fix (review round, orchestrator decision "variant A"): 5th value, the
+                         panel's own text colour — SurfaceComposer.ResolveNeutralBase now needs the
+                         (accent, text) PAIR, not the accent alone, to decide the light/dark neutral base. -->
+                    <Binding Path="Model.TextColor"/>
                 </MultiBinding>
             </controls:PanelChrome.SurfaceBrush>
 
@@ -488,6 +493,7 @@
                             PreviewMouseLeftButtonDown="FileListHost_PreviewMouseLeftButtonDown"
                             PreviewMouseLeftButtonUp="FileListHost_PreviewMouseLeftButtonUp"
                             PreviewMouseRightButtonDown="FileListHost_PreviewMouseRightButtonDown"
+                            PreviewMouseRightButtonUp="FileListHost_PreviewMouseRightButtonUp"
                             PreviewMouseMove="FileListHost_PreviewMouseMove"
                             AllowDrop="True"
                             DragOver="FileListHost_DragOver"

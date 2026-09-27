@@ -229,7 +229,7 @@ public class ResizeOverlayGeometryTests
             app.Resources["LayoutEditMode"] = Mock.Of<ILayoutEditModeService>();
 
             var iconProvider = new Mock<IIconProvider>();
-            iconProvider.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((ImageSource)null!);
+            iconProvider.Setup(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>())).Returns((ImageSource)null!);
 
             var viewModel = new ChildWindowViewModel(
                 iconProvider.Object,

@@ -14,10 +14,12 @@ namespace DesktopOrganizer.Tests.Unit.Diagnostics;
 /// <remarks>
 /// Reads source files directly off disk (<see cref="RepoRootLocator"/>), mirroring
 /// <c>XamlLiteralGuardTests</c>' own approach for the same reason: it catches a regression the moment
-/// it's typed, not only after a rebuild. The only allowed survivors are the three <c>Program.cs</c> lines
-/// marked with the <c>// cli-output</c> comment (plan §1: CLI-only <c>--restore-state-backup</c> output
-/// that intentionally stays on the console, in English, for scripts/developers reading the terminal —
-/// each is also duplicated into <c>AppLog</c> right next to it).
+/// it's typed, not only after a rebuild. The only allowed survivors are the six <c>Program.cs</c> lines
+/// marked with the <c>// cli-output</c> comment (plan §1: CLI-only <c>--restore-state-backup</c>/
+/// <c>--restore-panel-items</c> output that intentionally stays on the console, in English, for
+/// scripts/developers reading the terminal — each is also duplicated into <c>AppLog</c> right next to it
+/// where one is available; release-polish 1.0 M1 added the sixth, for <c>RunRestorePanelItems</c>'s own
+/// catch block).
 /// </remarks>
 [Trait(UnitTests, "Gates")]
 public class ConsoleErrorGuardTests
@@ -60,12 +62,12 @@ public class ConsoleErrorGuardTests
     }
 
     /// <summary>
-    /// Pins the allowlist itself at exactly three lines, all in <c>Program.cs</c> — a regression that
+    /// Pins the allowlist itself at exactly six lines, all in <c>Program.cs</c> — a regression that
     /// either loses the marker off a real CLI line, or (more likely) copies the marker onto a new call
     /// site to dodge the gate above, would otherwise pass silently.
     /// </summary>
     [Fact]
-    public void Allowlist_IsExactlyThreeLinesInProgramCs()
+    public void Allowlist_IsExactlySixLinesInProgramCs()
     {
         var repoRoot = RepoRootLocator.Find();
         var srcRoot = Path.Combine(repoRoot, "src");
@@ -83,7 +85,7 @@ public class ConsoleErrorGuardTests
             }
         }
 
-        Assert.Equal(3, allowlisted.Count);
+        Assert.Equal(6, allowlisted.Count);
         Assert.All(allowlisted, entry => Assert.StartsWith("src/DesktopOrganizer.UI/Program.cs:", entry, StringComparison.Ordinal));
     }
 }

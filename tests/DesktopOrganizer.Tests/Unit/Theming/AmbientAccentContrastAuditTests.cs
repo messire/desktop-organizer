@@ -77,6 +77,64 @@ public class AmbientAccentContrastAuditTests
         }
     }
 
+    /// <summary>
+    /// Every (accent, light-mode text) pair from all twelve ADR-042 <c>PanelColorPresets</c> as theory
+    /// data — raw hex, not a reference to <c>DesktopOrganizer.UI.Theming.PanelColorPresets</c>'s own
+    /// fields, to keep this theory data self-contained (the same convention this class already used before
+    /// ADR-042).
+    /// </summary>
+    public static IEnumerable<object[]> Adr042PresetLightModeTextPairs()
+    {
+        yield return new object[] { "Red", "#D9534F", "#4A1F1E" };
+        yield return new object[] { "Orange", "#E0812F", "#4B2A0C" };
+        yield return new object[] { "Amber", "#D6A324", "#453309" };
+        yield return new object[] { "Lime", "#8FB43A", "#2F3D11" };
+        yield return new object[] { "Green", "#3F9A5A", "#173A24" };
+        yield return new object[] { "Teal", "#2F9C93", "#12403C" };
+        yield return new object[] { "Cyan", "#2E98C8", "#123B4E" };
+        yield return new object[] { "Blue", "#3F7FD9", "#172F4B" };
+        yield return new object[] { "Violet", "#7A5BE7", "#2B2350" };
+        yield return new object[] { "Magenta", "#C8559E", "#4A1F3B" };
+        yield return new object[] { "Graphite", "#596273", "#22262E" };
+        yield return new object[] { "Stone", "#7D7468", "#2E2A26" };
+    }
+
+    /// <summary>
+    /// Every ADR-042 preset accent paired with the shared <see cref="PanelThemeRules.DefaultDarkModeText"/>-style
+    /// dark-mode text (<c>#FFFFFF</c>, every preset's own <c>DarkModeTextHex</c>) as theory data — same
+    /// accent set as <see cref="Adr042PresetLightModeTextPairs"/>, self-contained raw hex.
+    /// </summary>
+    public static IEnumerable<object[]> Adr042PresetDarkModeAccents()
+    {
+        yield return new object[] { "Red", "#D9534F" };
+        yield return new object[] { "Orange", "#E0812F" };
+        yield return new object[] { "Amber", "#D6A324" };
+        yield return new object[] { "Lime", "#8FB43A" };
+        yield return new object[] { "Green", "#3F9A5A" };
+        yield return new object[] { "Teal", "#2F9C93" };
+        yield return new object[] { "Cyan", "#2E98C8" };
+        yield return new object[] { "Blue", "#3F7FD9" };
+        yield return new object[] { "Violet", "#7A5BE7" };
+        yield return new object[] { "Magenta", "#C8559E" };
+        yield return new object[] { "Graphite", "#596273" };
+        yield return new object[] { "Stone", "#7D7468" };
+    }
+
+    /// <summary>
+    /// ADR-042 (this class's own SA1204-compliant placement): provides legacy (light accent, light text)
+    /// pairs that must stay resolved to <see cref="SurfaceComposer.DarkNeutralBase"/> — under ADR-042 this
+    /// holds for ANY accent, since the accent is not read by <see cref="SurfaceComposer.ResolveNeutralBase"/>
+    /// at all; kept as a named theory set for readability/history.
+    /// </summary>
+    public static IEnumerable<object[]> LegacyLightAccentLightTextPairs()
+    {
+        yield return new object[] { "#FFD700", "#DDDDDD" }; // gold accent, default text
+        yield return new object[] { "#BBBBBB", "#FFFFFF" }; // light-grey accent, pure-white text
+        yield return new object[] { AccentPalette.Neutral, "#DDDDDD" };
+        foreach (var preset in AccentPalette.Presets)
+            yield return new object[] { preset, "#DDDDDD" };
+    }
+
     // --- Default opacity (0.8, ChildWindowModel's own default SurfaceOpacity) passes today ----------
 
     /// <summary>
@@ -98,6 +156,36 @@ public class AmbientAccentContrastAuditTests
             Assert.True(
                 contrast >= ContrastCalculator.MinimumTextContrast,
                 $"{style} at 0.8 opacity over {wallpaper} scored {contrast:F2}, below the {ContrastCalculator.MinimumTextContrast}:1 target.");
+        }
+    }
+
+    /// <summary>
+    /// ADR-042: verifies that every one of the twelve <c>PanelColorPresets</c> accents, in
+    /// <see cref="PanelThemeMode.Dark"/> (shared <c>#FFFFFF</c> text, <see cref="SurfaceComposer.DarkNeutralBase"/>),
+    /// meets the minimum text contrast target for <see cref="PanelSurfaceStyle.Solid"/>/
+    /// <see cref="PanelSurfaceStyle.Ambient"/> at the default 0.8 opacity, on both a light and a dark
+    /// wallpaper.
+    /// </summary>
+    /// <param name="name">The preset's display name (theory data readability only).</param>
+    /// <param name="accentHex">The preset's accent hex value under test.</param>
+    [Theory]
+    [MemberData(nameof(Adr042PresetDarkModeAccents))]
+    public void Adr042Preset_DarkMode_DefaultOpacity_SolidOrAmbient_PassesTextContrastOnBothWallpapers(string name, string accentHex)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+        var text = (Color)ColorConverter.ConvertFromString(PanelThemeRules.DefaultDarkModeText)!; // every preset's own DarkModeTextHex, #FFFFFF
+
+        foreach (var style in new[] { PanelSurfaceStyle.Solid, PanelSurfaceStyle.Ambient })
+        {
+            foreach (var wallpaper in new[] { LightWallpaper, DarkWallpaper })
+            {
+                var surface = SurfaceComposer.ComposeSurface(SurfaceComposer.DarkNeutralBase, accent, style, 0.8);
+                var contrast = ContrastCalculator.ContrastAgainstComposited(text, surface, wallpaper);
+
+                Assert.True(
+                    contrast >= ContrastCalculator.MinimumTextContrast,
+                    $"{name} ({style} @ 0.8 over {wallpaper}) scored {contrast:F2}, below the {ContrastCalculator.MinimumTextContrast}:1 target.");
+            }
         }
     }
 
@@ -316,6 +404,144 @@ public class AmbientAccentContrastAuditTests
                 highlightedContrast >= ContrastCalculator.MinimumTextContrast,
                 $"{style}@{opacity} accent={accentHex} over {wallpaper}: PART_SurfaceHighlight pushed a PASSING combination ({baselineContrast:F3}) below the {ContrastCalculator.MinimumTextContrast}:1 threshold ({highlightedContrast:F3}).");
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ADR-042: every one of the twelve PanelColorPresets accents, in PanelThemeMode.Light (paired with its
+    // OWN LightModeTextHex) — SurfaceComposer resolves a LIGHT neutral base for these via
+    // ResolveNeutralBase (driven purely by the text colour), instead of the single dark #1E1E1E base every
+    // other test in this class exercises. Raw hex pairs (not a reference to
+    // DesktopOrganizer.UI.Theming.PanelColorPresets's own fields, to keep this theory data self-contained).
+    // See Adr042PresetLightModeTextPairs (class-level static-member block above) for the theory data.
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Verifies that every preset's light-mode text meets <see cref="ContrastCalculator.MinimumTextContrast"/>
+    /// (4.5:1) against its OWN <see cref="PanelSurfaceStyle.Solid"/>/<see cref="PanelSurfaceStyle.Ambient"/>
+    /// surface (composed via <see cref="SurfaceComposer.ResolveNeutralBase"/>'s light base) at the default
+    /// 0.8 opacity, on both a light and a dark representative wallpaper.
+    /// </summary>
+    /// <param name="name">The preset's display name (theory data readability only).</param>
+    /// <param name="accentHex">The preset's accent hex value.</param>
+    /// <param name="textHex">The preset's own light-mode text hex value.</param>
+    [Theory]
+    [MemberData(nameof(Adr042PresetLightModeTextPairs))]
+    public void Adr042Preset_LightMode_DefaultOpacity_SolidOrAmbient_PassesTextContrastOnBothWallpapers(string name, string accentHex, string textHex)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+        var text = (Color)ColorConverter.ConvertFromString(textHex)!;
+        var neutralBase = SurfaceComposer.ResolveNeutralBase(accent, text);
+        Assert.Equal(SurfaceComposer.LightNeutralBase, neutralBase); // sanity: this preset really is "light"
+
+        foreach (var style in new[] { PanelSurfaceStyle.Solid, PanelSurfaceStyle.Ambient })
+        {
+            foreach (var wallpaper in new[] { LightWallpaper, DarkWallpaper })
+            {
+                var surface = SurfaceComposer.ComposeSurface(neutralBase, accent, style, 0.8);
+                var contrast = ContrastCalculator.ContrastAgainstComposited(text, surface, wallpaper);
+
+                Assert.True(
+                    contrast >= ContrastCalculator.MinimumTextContrast,
+                    $"{name} ({style} @ 0.8 over {wallpaper}) scored {contrast:F2}, below the {ContrastCalculator.MinimumTextContrast}:1 target.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Verifies that every preset's light-mode text meets <see cref="ContrastCalculator.MinimumIconContrast"/>
+    /// (3:1) for <see cref="PanelSurfaceStyle.Glass"/> at <see cref="SurfaceComposer.MinSurfaceOpacity"/> over
+    /// a LIGHT wallpaper — the light-base mirror of <c>KnownGap_Glass_OnDarkWallpaper_StillPassesTextContrast</c>
+    /// above (dark base: Glass-at-floor passes over the SAME-brightness wallpaper it leans toward).
+    /// </summary>
+    /// <param name="name">The preset's display name (theory data readability only).</param>
+    /// <param name="accentHex">The preset's accent hex value.</param>
+    /// <param name="textHex">The preset's own light-mode text hex value.</param>
+    [Theory]
+    [MemberData(nameof(Adr042PresetLightModeTextPairs))]
+    public void Adr042Preset_KnownGap_Glass_AtMinimumOpacity_OnLightWallpaper_PassesIconContrast(string name, string accentHex, string textHex)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+        var text = (Color)ColorConverter.ConvertFromString(textHex)!;
+        var neutralBase = SurfaceComposer.ResolveNeutralBase(accent, text);
+
+        var surface = SurfaceComposer.ComposeSurface(neutralBase, accent, PanelSurfaceStyle.Glass, SurfaceComposer.MinSurfaceOpacity);
+        var contrast = ContrastCalculator.ContrastAgainstComposited(text, surface, LightWallpaper);
+
+        Assert.True(contrast >= ContrastCalculator.MinimumIconContrast, $"{name}: expected >= 3:1 over a light wallpaper; got {contrast:F2}.");
+    }
+
+    /// <summary>
+    /// Verifies the known, accepted MIRROR gap: <see cref="PanelSurfaceStyle.Glass"/> at
+    /// <see cref="SurfaceComposer.MinSurfaceOpacity"/> cannot reach the minimum icon contrast target over a
+    /// DARK wallpaper, for a preset's light-mode text — the light-base mirror of this class's own pre-existing
+    /// <c>KnownGap_MinSurfaceOpacityFloor_OnLightWallpaper_FailsTextContrast</c> (dark base: floor opacity
+    /// leans toward whichever wallpaper shows through; for a LIGHT base that means the gap flips to the DARK
+    /// wallpaper instead). Not fixed here, same rationale as the pre-existing gap: the floor opacity is a
+    /// global slider affecting every panel, not something a preset-only change should silently alter.
+    /// </summary>
+    /// <param name="name">The preset's display name (theory data readability only).</param>
+    /// <param name="accentHex">The preset's accent hex value.</param>
+    /// <param name="textHex">The preset's own light-mode text hex value.</param>
+    [Theory]
+    [MemberData(nameof(Adr042PresetLightModeTextPairs))]
+    public void Adr042Preset_KnownGap_Glass_AtMinimumOpacity_OnDarkWallpaper_FailsIconContrast(string name, string accentHex, string textHex)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+        var text = (Color)ColorConverter.ConvertFromString(textHex)!;
+        var neutralBase = SurfaceComposer.ResolveNeutralBase(accent, text);
+
+        var surface = SurfaceComposer.ComposeSurface(neutralBase, accent, PanelSurfaceStyle.Glass, SurfaceComposer.MinSurfaceOpacity);
+        var contrast = ContrastCalculator.ContrastAgainstComposited(text, surface, DarkWallpaper);
+
+        Assert.True(contrast < ContrastCalculator.MinimumIconContrast, $"{name}: expected the known mirrored gap (< 3:1) over a dark wallpaper; got {contrast:F2}.");
+        Assert.InRange(contrast, 1.5, 2.5);
+    }
+
+    /// <summary>
+    /// Verifies that every legacy accent (<see cref="AccentPalette.Neutral"/> plus its six
+    /// <see cref="AccentPalette.Presets"/>), paired with the app's own default text, still resolves to the
+    /// single dark neutral base — this class's own <see cref="NeutralSurfaceBase"/> — proving ADR-042
+    /// changes zero pixels for any pre-existing accent this audit already covers above.
+    /// </summary>
+    /// <param name="accentHex">The legacy accent hex value under test.</param>
+    [Theory]
+    [MemberData(nameof(AllAccentHexValues))]
+    public void ResolveNeutralBase_EveryLegacyAccent_StaysOnDarkNeutralBase(string accentHex)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+
+        var neutralBase = SurfaceComposer.ResolveNeutralBase(accent, TextPrimary);
+
+        Assert.Equal(NeutralSurfaceBase, neutralBase);
+        Assert.Equal(SurfaceComposer.DarkNeutralBase, neutralBase);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ADR-042: a LEGACY panel that happens to pair a custom LIGHT accent with the app's own light default
+    // text (#DDDDDD/#FFFFFF) must NOT flip to the light neutral base — under ADR-042's text-only rule the
+    // accent is never even read, so these stay byte-identical dark regardless of the accent. Theory data
+    // (LegacyLightAccentLightTextPairs) lives in this class's own static-member block near the top, per
+    // StyleCop's static-before-instance member ordering (SA1204).
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Verifies that every legacy (light-accent, light-text) pairing from
+    /// <see cref="LegacyLightAccentLightTextPairs"/> resolves to <see cref="SurfaceComposer.DarkNeutralBase"/>
+    /// — ADR-042 derives the mode from the TEXT colour alone, so an accent whose own luminance is high does
+    /// not matter.
+    /// </summary>
+    /// <param name="accentHex">The legacy accent hex value under test.</param>
+    /// <param name="textHex">The legacy (light) text hex value under test.</param>
+    [Theory]
+    [MemberData(nameof(LegacyLightAccentLightTextPairs))]
+    public void ResolveNeutralBase_LegacyLightAccentPairedWithLightText_StaysDarkNeutralBase(string accentHex, string textHex)
+    {
+        var accent = (Color)ColorConverter.ConvertFromString(accentHex)!;
+        var text = (Color)ColorConverter.ConvertFromString(textHex)!;
+
+        var neutralBase = SurfaceComposer.ResolveNeutralBase(accent, text);
+
+        Assert.Equal(SurfaceComposer.DarkNeutralBase, neutralBase);
     }
 
     // --- helpers -------------------------------------------------------------------------------------

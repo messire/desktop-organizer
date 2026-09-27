@@ -15,6 +15,13 @@ namespace DesktopOrganizer.UI.ViewModels;
 /// </summary>
 public class ChildWindowViewModel : BaseViewModel, IDisposable
 {
+    /// <summary>
+    /// Display size, in DIP, of an item icon in the list view — must match the fixed
+    /// <c>Width="16" Height="16"</c> of the list item template's <c>Image</c> (Resources/Templates.xaml,
+    /// <c>ListViewTemplate</c>). The grid view uses <see cref="ChildWindowModel.IconSize"/> instead.
+    /// </summary>
+    internal const double ListIconSizeDip = 16;
+
     private const string ListViewTemplate = nameof(ListViewTemplate);
     private const string GridViewTemplate = nameof(GridViewTemplate);
 
@@ -23,6 +30,39 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// by <c>SystemShellService</c>'s Recycle Bin watcher, so panel behavior stays consistent.
     /// </summary>
     private const int ExistenceCheckIntervalMs = 3000;
+
+    /// <summary>
+    /// How many liveness ticks (<see cref="ExistenceCheckIntervalMs"/> apart — about two minutes) entries created
+    /// next to a managed item by a shell command keep being looked for after the command returned — see
+    /// <see cref="ProcessPendingSiblingAdoption"/>.
+    /// </summary>
+    private const int SiblingAdoptionWatchTicks = 40;
+
+    /// <summary>
+    /// Canonical shell verbs (<see cref="ShellContextMenuResult.Verb"/>) that never plausibly create a new
+    /// file next to the item they were invoked on (M-B, release-polish 1.0 final review) — starting the
+    /// <see cref="SiblingAdoptionWatchTicks"/>-tick <see cref="ProcessPendingSiblingAdoption"/> watch for one
+    /// of these would only ever cost a directory listing per tick for the rest of the watch window, for
+    /// nothing. "Create shortcut", "Send to &gt; Compressed folder", "Copy", "Cut", an archiver's "Add to
+    /// archive/Extract" etc. are deliberately NOT in this list — those (and any verb this list doesn't name)
+    /// still get the watch, same as before this fix.
+    /// </summary>
+    private static readonly HashSet<string> NonCreatingVerbs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "open", "opennew", "edit", "print", "printto", "properties", "explore", "runas", "openas",
+    };
+
+    /// <summary>
+    /// Debounce window for <see cref="UpdateRequestedIconPixelSize"/>'s re-fetch of every tracked item's
+    /// icon (M3, release-polish 1.0 review): the per-panel icon-size slider (16–128, step 8) can cross 8+
+    /// snapped size buckets while being dragged, and <c>ChildWindow.OnDpiChanged</c> pushes a new
+    /// <see cref="IconRenderScale"/> for every panel at once on a monitor DPI change — both used to
+    /// re-fetch every item's icon, synchronously, once per crossed bucket/panel. <see cref="BaseViewModel.RequestedIconPixelSize"/>
+    /// itself still updates synchronously on every call (new items added mid-drag use the current size —
+    /// see <see cref="UpdateRequestedIconPixelSize"/>'s remarks); only the expensive re-fetch of already-
+    /// tracked items is collapsed into a single call after this much silence.
+    /// </summary>
+    private static readonly TimeSpan IconResizeDebounceWindow = TimeSpan.FromMilliseconds(200);
 
     private readonly IFileLauncher _fileLauncher;
     private readonly IFolderWatcherFactory _folderWatcherFactory;
@@ -35,10 +75,38 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private readonly DataTemplate _gridTemplate;
     private readonly System.Threading.Timer _existenceTimer;
 
+    /// <summary>
+    /// Resolves the <see cref="IDebounceTimer"/> backing <see cref="UpdateRequestedIconPixelSize"/>'s
+    /// debounced icon re-fetch (M3, release-polish 1.0 review) — same lazily-resolved, degrade-to-
+    /// immediate-when-unavailable pattern as <c>ApplicationStateService.ResolveDebounceTimer</c>. Tests
+    /// supply a fake via the constructor to trigger the deferred re-fetch deterministically.
+    /// </summary>
+    private readonly Func<IDebounceTimer?> _iconResizeDebounceTimerProvider;
+
+    /// <summary>
+    /// MINOR 8 (release-polish 1.0 final review): <see langword="true"/> when no
+    /// <c>iconResizeDebounceTimerProvider</c> was supplied to the constructor — i.e. this instance uses
+    /// the lazily-CREATING production default (<see cref="ResolveDefaultIconResizeDebounceTimer"/>), so
+    /// <see cref="Dispose"/> knows to stop <see cref="_defaultIconResizeDebounceTimer"/> directly (a plain
+    /// field read, never creating) instead of invoking <see cref="_iconResizeDebounceTimerProvider"/> —
+    /// which, for this case only, would otherwise construct a brand-new <see cref="DispatcherDebounceTimer"/>
+    /// just to immediately stop it whenever no icon resize ever happened during this panel's lifetime.
+    /// </summary>
+    private readonly bool _usesDefaultIconResizeDebounceTimerProvider;
+
+    /// <summary>
+    /// Managed items <see cref="OnItemsVanished"/> saw go missing on some PRIOR liveness tick, still
+    /// awaiting a second consecutive tick's confirmation before <see cref="ProcessPendingVanishedManagedItems"/>
+    /// actually reconciles them (M-C, release-polish 1.0 final review) — see that method's remarks.
+    /// </summary>
+    private readonly HashSet<FileItem> _pendingVanishedManagedItems = [];
+
     private DataTemplate _currentViewTemplate;
     private ChildWindowModel _model = new();
+    private double _iconRenderScale = 1.0;
     private IFolderWatcher? _watcher;
     private string? _sourceFolderPath;
+    private DispatcherDebounceTimer? _defaultIconResizeDebounceTimer;
 
     /// <summary>
     /// The raw, non-blank <see cref="ChildWindowModel.SourceFolderPath"/> value this ViewModel last saw
@@ -52,10 +120,37 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// </summary>
     private string? _lastAssignedSourceFolderPath;
 
+    /// <summary>
+    /// The managed item the last shell command ran on, with its per-item directory snapshot from before the
+    /// command, while entries that command creates asynchronously are still being looked for (see
+    /// <see cref="ProcessPendingSiblingAdoption"/>). <see langword="null"/> when nothing is pending.
+    /// </summary>
+    private SiblingAdoptionWatch? _siblingWatch;
+
     private bool _disposed;
     private FileItem? _editingItem;
     private string _editingName = string.Empty;
     private RenameOutcome? _renameError;
+
+    /// <summary>
+    /// Re-entrancy guard for a shell operation on this panel: incremented for the duration of the one
+    /// actual blocking native call each of <see cref="ShowShellContextMenu"/> (the context menu's own modal
+    /// loop, <see cref="IFileLauncher.ShowContextMenu"/>) and <see cref="DeleteManagedItem"/> (its own,
+    /// separate <c>SHFileOperation</c> progress/confirmation modal loop,
+    /// <see cref="IPanelItemStorageService.RecycleManagedItem"/>) makes — never the rest of either method's
+    /// own, purely synchronous bookkeeping that runs strictly after the call returns. Both modal loops pump
+    /// window messages, including the dispatched operation <see cref="RefreshExistence"/>'s liveness timer
+    /// posts every <see cref="ExistenceCheckIntervalMs"/>. While non-zero, that dispatched liveness refresh,
+    /// <see cref="OnItemsVanished"/> and <see cref="ProcessPendingSiblingAdoption"/> all return early, and a
+    /// re-entrant <see cref="ShowShellContextMenu"/> call is dropped outright (M-A, release-polish 1.0 final
+    /// review). Without this, a liveness tick sneaking in through the nested message pump mid-
+    /// <c>SHFileOperation</c> could see the managed item's temporarily-vanished path (moved back to its
+    /// original location, about to be recycled FROM there) and reconcile/remove it out from under the
+    /// in-progress delete — and if the user then cancelled the shell's prompt, the item the storage service
+    /// moved back would be silently orphaned from the panel (<see cref="BaseViewModel.TryRenameItem"/> is a
+    /// no-op for an item no longer tracked).
+    /// </summary>
+    private int _shellOperationDepth;
 
     /// <summary>
     /// Single-flight guard for <see cref="RefreshExistence"/> (MAJOR M-1, P08 fix cycle 2): 0 when no
@@ -144,6 +239,31 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
+    /// DPI scale (1.0 at 96 DPI) of the surface this panel renders on, pushed by the owning
+    /// <c>ChildWindow</c> (before the first load, once its HWND exists, and on every <c>WM_DPICHANGED</c>).
+    /// Together with the displayed icon size (<see cref="ChildWindowModel.IconSize"/> in the grid view,
+    /// <see cref="ListIconSizeDip"/> in the list view) it decides the physical pixel size item icons are
+    /// requested at, so icons stay crisp at 125/150/200 % instead of being upscaled.
+    /// </summary>
+    /// <remarks>
+    /// Session state only — never persisted. A non-finite or non-positive value is ignored. A change only
+    /// costs a re-fetch when it moves the snapped pixel size to another bucket (see
+    /// <see cref="BaseViewModel.SetRequestedIconPixelSize"/>).
+    /// </remarks>
+    public double IconRenderScale
+    {
+        get => _iconRenderScale;
+        set
+        {
+            if (!double.IsFinite(value) || value <= 0) return;
+            if (value.Equals(_iconRenderScale)) return;
+
+            _iconRenderScale = value;
+            UpdateRequestedIconPixelSize(refreshExisting: true);
+        }
+    }
+
+    /// <summary>
     /// The item currently being inline-renamed, or <see langword="null"/> when no item is being
     /// edited. Lives on the ViewModel, not on <see cref="FileItem"/> (ADR-013 Decision 6): the model
     /// is shared by portals and filters, while "is this item being edited right now" is pure,
@@ -212,27 +332,6 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// Command to switch between different views.
     /// </summary>
     public ICommand SwitchViewCommand { get; }
-
-    /// <summary>
-    /// Opens the given file with its default shell action.
-    /// </summary>
-    public ICommand OpenFileCommand { get; }
-
-    /// <summary>
-    /// Opens the folder containing the given file, selecting it in Explorer.
-    /// </summary>
-    public ICommand OpenContainingFolderCommand { get; }
-
-    /// <summary>
-    /// Shows the Windows "Properties" dialog for the given file.
-    /// </summary>
-    public ICommand ShowPropertiesCommand { get; }
-
-    /// <summary>
-    /// Removes the given file from this panel.
-    /// Disabled when the panel is a Folder Portal (<see cref="IsPortal"/> is <see langword="true"/>).
-    /// </summary>
-    public ICommand RemoveFileCommand { get; }
 
     /// <summary>
     /// Sets the panel's content filter. Accepts a <see cref="PanelContentFilter"/> value as the command parameter.
@@ -331,6 +430,14 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// reused as a lightweight, already-privacy-audited sink rather than adding a second
     /// <see cref="DesktopOrganizer.Services.Abstractions.IDiagnosticsLog"/> dependency.
     /// </param>
+    /// <param name="iconResizeDebounceTimerProvider">
+    /// Resolves the <see cref="IDebounceTimer"/> backing the debounced icon re-fetch (M3, release-polish
+    /// 1.0 review — see <see cref="IconResizeDebounceWindow"/>). <see langword="null"/> (the production
+    /// default, via DI) resolves lazily against <see cref="System.Windows.Application.Current"/>'s
+    /// dispatcher, degrading to an immediate synchronous re-fetch when no dispatcher is available — same
+    /// pattern as <c>ApplicationStateService.ResolveDebounceTimer</c>. Tests supply a fake timer here
+    /// instead, to trigger the deferred re-fetch deterministically.
+    /// </param>
     public ChildWindowViewModel(
         IIconProvider iconProvider,
         IFileLauncher fileLauncher,
@@ -339,7 +446,8 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         IFileItemRenameService renameService,
         IAppSettings appSettings,
         IPanelSelectionCoordinator selectionCoordinator,
-        IGestureDiagnostics diagnostics)
+        IGestureDiagnostics diagnostics,
+        Func<IDebounceTimer?>? iconResizeDebounceTimerProvider = null)
         : base(iconProvider)
     {
         _fileLauncher = fileLauncher;
@@ -349,16 +457,19 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         _appSettings = appSettings;
         _selectionCoordinator = selectionCoordinator;
         _diagnostics = diagnostics;
+        _iconResizeDebounceTimerProvider = iconResizeDebounceTimerProvider ?? ResolveDefaultIconResizeDebounceTimer;
+
+        // MINOR 8 (release-polish 1.0 final review): remembered so Dispose() can stop the PRODUCTION
+        // default timer via the existing field directly (see the remarks there) instead of invoking the
+        // lazily-CREATING provider — a test-supplied provider never lazily creates (it always returns the
+        // same already-constructed fake), so Dispose keeps calling it as before for that case.
+        _usesDefaultIconResizeDebounceTimerProvider = iconResizeDebounceTimerProvider is null;
         _selectionCoordinator.SelectionClaimed += OnSelectionClaimed;
         _listTemplate = GetTemplate(ListViewTemplate);
         _gridTemplate = GetTemplate(GridViewTemplate);
         _currentViewTemplate = _listTemplate;
 
         SwitchViewCommand = new RelayCommand(SwitchView);
-        OpenFileCommand = new RelayCommand<FileItem>(OpenFile);
-        OpenContainingFolderCommand = new RelayCommand<FileItem>(OpenContainingFolder);
-        ShowPropertiesCommand = new RelayCommand<FileItem>(ShowProperties);
-        RemoveFileCommand = new RelayCommand<FileItem>(RemoveFileItem, _ => !IsPortal);
         SetContentFilterCommand = new RelayCommand<PanelContentFilter>(filter => Model.ContentFilter = filter);
         SetSortModeCommand = new RelayCommand<PanelSortMode>(mode => Model.SortMode = mode, _ => !IsPortal);
         SetIconLayoutPolicyCommand = new RelayCommand<IconLayoutPolicy>(policy => Model.IconLayoutPolicy = policy);
@@ -382,6 +493,86 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     public void OpenFile(FileItem? item)
     {
         if (item is not null) _fileLauncher.Open(item.Path);
+    }
+
+    /// <summary>
+    /// Right-click on a panel item: selects it, shows the native Windows shell context menu for its file
+    /// (the same menu Explorer shows — the panel has no menu of its own for items), and reacts to how the
+    /// menu ended. The shell's "Rename" command starts this panel's own inline rename (the same one
+    /// <c>F2</c> starts); any other invoked command is followed by <see cref="ReconcileAfterShellCommand()"/>,
+    /// since shell verbs (Delete, Cut, "Create shortcut", …) act directly on the file — for a moved-in item, on
+    /// the managed copy under <c>%LOCALAPPDATA%\DesktopOrganizer\PanelItems\{guid}\</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Must be called on the UI thread: blocks in the menu's modal loop. A Folder Portal item gets the same
+    /// menu (the shell operates on the real file; the portal watcher picks the change up).
+    /// </para>
+    /// <para>
+    /// For an app-managed item (M5, release-polish 1.0 review): (a) the shell's "Delete" is intercepted
+    /// (<see cref="ShellContextMenuOutcome.DeleteRequested"/>) and handled by
+    /// <see cref="IPanelItemStorageService.RecycleManagedItem"/> — the item goes back to its original location and
+    /// is recycled from THERE, so "Restore" in the Recycle Bin brings it back somewhere visible instead of into
+    /// the hidden storage folder; (c) the item's per-item directory is snapshotted before the menu, so entries a
+    /// command creates next to it ("Create shortcut", "Send to &gt; Compressed folder", an archiver) are adopted
+    /// as new panel items rather than mistaken for a rename.
+    /// </para>
+    /// </remarks>
+    /// <param name="item">The item that was right-clicked.</param>
+    /// <param name="ownerHwnd">This panel's window handle.</param>
+    /// <param name="screenX">Horizontal screen coordinate of the cursor, in physical pixels.</param>
+    /// <param name="screenY">Vertical screen coordinate of the cursor, in physical pixels.</param>
+    public void ShowShellContextMenu(FileItem item, IntPtr ownerHwnd, int screenX, int screenY)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+
+        // M-A guard (release-polish 1.0 final review): see _shellOperationDepth's remarks. A re-entrant
+        // call arriving while this panel already has a shell operation in progress (a queued dispatcher
+        // operation reaching back here through the modal loop's nested message pump) is dropped outright
+        // rather than starting a second, overlapping one.
+        if (_shellOperationDepth > 0) return;
+
+        SelectedFile = item;
+
+        // An app-managed (moved-in) item lives in its hidden per-item directory: its Delete is handled here, and
+        // that directory is snapshotted so entries the command creates can be told apart from pre-existing ones.
+        var managed = !IsPortal && _itemStorage.IsManaged(item.Path);
+        var entriesBefore = managed ? _itemStorage.GetItemDirectoryEntries(item.Path) : null;
+
+        // Only the actual blocking native call — the menu's own modal loop — is guarded; the switch below
+        // runs strictly after it returns (no message pump involved), so it deliberately runs with the
+        // guard already released, and its own trailing RefreshItemsLiveness() calls (via DeleteManagedItem/
+        // ReconcileAfterShellCommand) are never mistaken for re-entrancy.
+        ShellContextMenuResult result;
+        _shellOperationDepth++;
+        try
+        {
+            result = _fileLauncher.ShowContextMenu(item.Path, ownerHwnd, screenX, screenY, interceptDelete: managed);
+        }
+        finally
+        {
+            _shellOperationDepth--;
+        }
+
+        switch (result.Outcome)
+        {
+            case ShellContextMenuOutcome.RenameRequested:
+                BeginRename(item);
+                break;
+
+            case ShellContextMenuOutcome.DeleteRequested:
+                DeleteManagedItem(item);
+                break;
+
+            case ShellContextMenuOutcome.Invoked:
+                ReconcileAfterShellCommand(item, entriesBefore, result.Verb);
+                break;
+
+            case ShellContextMenuOutcome.NotShown:
+            case ShellContextMenuOutcome.Dismissed:
+            default:
+                break; // nothing on disk changed through the menu.
+        }
     }
 
     /// <summary>
@@ -453,7 +644,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
     /// <summary>
     /// Removes <paramref name="item"/> from this panel because a DIFFERENT panel just accepted it as an
-    /// in-app drag-out transfer (ADR-036 §E). Unlike <c>RemoveFileItem</c>, this never calls
+    /// in-app drag-out transfer (ADR-036 §E). Never calls
     /// <see cref="IPanelItemStorageService.Restore"/>/<see cref="IPanelItemStorageService.ReleaseToRecycleBin"/>:
     /// the underlying managed copy (if any) is shared storage that now belongs to the target panel's own
     /// reference — this panel only ever stops pointing at it.
@@ -471,9 +662,8 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// path (see <c>MovedOutVerifier</c>'s 0/500/2000&#160;ms existence-recheck — never trusts the raw
     /// OLE drop effect). Tells the storage service to forget the (now-gone) path via
     /// <see cref="IPanelItemStorageService.ForgetMovedOut"/> — a manifest/GUID-directory-only cleanup
-    /// that never deletes a file itself, mirroring how <c>RemoveFileItem</c> degrades to the Recycle Bin
-    /// for the in-app "Remove from panel" gesture, except here the file is already gone by the caller's
-    /// own hand (the shell's move), not this application's.
+    /// that never deletes a file itself: the file is already gone by the shell's own hand (its move), not
+    /// this application's.
     /// </summary>
     /// <param name="item">The item confirmed to have moved out of its original location.</param>
     public void RemoveMovedOutItem(FileItem item)
@@ -491,6 +681,10 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     public void LoadFromModel(ChildWindowModel model)
     {
         Model = model; // subscribes to Model.PropertyChanged; unsubscribes any previous model first
+
+        // Icon pixel size of the NEW model (view mode/IconSize) before ReplaceAll fetches every icon —
+        // without refreshing the outgoing items, which ReplaceAll is about to discard anyway.
+        UpdateRequestedIconPixelSize(refreshExisting: false);
 
         var sourceFiles = GetSourceFiles(model);
         var resolved = ResolveManagedReplacements(sourceFiles);
@@ -529,6 +723,96 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
             // Model.SortMode, so they need their own notification here too (CRITICAL-2).
             NotifySortModeChanged();
         }
+    }
+
+    /// <summary>
+    /// Re-aligns this panel with whatever a shell command just did to its files, synchronously, on the UI
+    /// thread, when the command's target is not known (see the three-argument overload for the details).
+    /// </summary>
+    internal void ReconcileAfterShellCommand() => ReconcileAfterShellCommand(null, null, null);
+
+    /// <summary>
+    /// Keeps looking — for a bounded number of liveness ticks after a shell command on a managed item — for entries
+    /// that command creates next to the item AFTER it returned (the zip folder and archivers write on a background
+    /// thread/process; an entry that is still open for writing, or a directory still changing, is not adopted until
+    /// it settles), and adopts them as new panel items. Called on every liveness tick on the UI thread; costs one
+    /// small directory listing per tick while a watch is pending, nothing otherwise.
+    /// </summary>
+    /// <remarks>
+    /// The watch ends when its tick budget is spent, when a new shell command starts one of its own, or when the
+    /// item left the panel or vanished (the vanished case is handled by <see cref="OnItemsVanished"/> WITHOUT the
+    /// snapshot — an entry created meanwhile must never be taken for the renamed item). Known limitation: an
+    /// entry that is still being written when the watch expires stays in the hidden per-item directory until the
+    /// next shell command on the same item picks it up.
+    /// </remarks>
+    internal void ProcessPendingSiblingAdoption()
+    {
+        // M-A guard (release-polish 1.0 final review): see _shellOperationDepth's remarks — never touch the
+        // watch state while a shell operation's own modal loop is mid-flight on this panel.
+        if (_shellOperationDepth > 0) return;
+        if (_siblingWatch is not { } watch) return;
+
+        watch.TicksRemaining--;
+        if (watch.TicksRemaining < 0 || IsPortal || !AllItems.Contains(watch.Item) || !PathExists(watch.Item.Path))
+        {
+            _siblingWatch = null;
+            return;
+        }
+
+        var result = _itemStorage.ReconcileExternalChange(watch.Item.Path, watch.EntriesBefore);
+        var change = ApplyReconcileResult(watch.Item, result);
+        if (result.AdoptedPaths.Count > 0)
+        {
+            AddFiles([.. result.AdoptedPaths]);
+            change |= ReconcileChange.Added;
+        }
+
+        // The item itself changed after all (it vanished between the existence check and the reconcile): stop.
+        if ((change & (ReconcileChange.Renamed | ReconcileChange.Removed)) != 0) _siblingWatch = null;
+
+        CompleteReconcile(change);
+    }
+
+    /// <summary>
+    /// M-C fix (release-polish 1.0 final review): confirms, before ever releasing a managed item's per-item
+    /// directory, that an item <see cref="OnItemsVanished"/> reported missing is STILL missing a full
+    /// liveness tick later — see that method's remarks for why. Must run BEFORE
+    /// <see cref="BaseViewModel.RefreshItemsLiveness"/> on every tick: an item <see cref="OnItemsVanished"/>
+    /// adds to <see cref="_pendingVanishedManagedItems"/> during THIS tick's own
+    /// <see cref="BaseViewModel.RefreshItemsLiveness"/> call is deliberately left untouched here — it is
+    /// only ever swept starting on the NEXT tick's call to this method, after a full tick has had the
+    /// chance to observe it reappear (or stay gone). The snapshot-based post-shell-command path
+    /// (<see cref="ReconcileAfterShellCommand(FileItem?, IReadOnlyList{string}?, string?)"/>'s own reconcile loop) is
+    /// entirely unaffected — it never touches this set.
+    /// </summary>
+    internal void ProcessPendingVanishedManagedItems()
+    {
+        if (_pendingVanishedManagedItems.Count == 0) return;
+
+        var change = ReconcileChange.None;
+        List<FileItem>? resolved = null;
+
+        foreach (var item in _pendingVanishedManagedItems)
+        {
+            if (!AllItems.Contains(item) || PathExists(item.Path))
+            {
+                // Reappeared (a fast external save-by-recreate landed within one tick) or already left the
+                // panel some other way — nothing to reconcile; just stop watching it.
+                (resolved ??= []).Add(item);
+                continue;
+            }
+
+            // Still missing a full tick later — confirmed, not a race with a recreate.
+            change |= ApplyReconcileResult(item, _itemStorage.ReconcileExternalChange(item.Path));
+            (resolved ??= []).Add(item);
+        }
+
+        if (resolved is not null)
+        {
+            foreach (var item in resolved) _pendingVanishedManagedItems.Remove(item);
+        }
+
+        CompleteReconcile(change);
     }
 
     /// <summary>
@@ -577,11 +861,24 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         {
             try
             {
-                if (_disposed) return;
+                // M-A guard (release-polish 1.0 final review): _shellOperationDepth > 0 means a shell
+                // operation's own modal loop (the context menu or RecycleManagedItem's SHFileOperation) is
+                // still pumping messages on this panel's UI thread RIGHT NOW — this dispatched tick reached
+                // us through that same nested pump. Skip the whole pass rather than just OnItemsVanished
+                // below: RefreshItemsLiveness would otherwise flip a temporarily-vanished item's Exists to
+                // false without ever reporting the transition (a transition is only ever reported once —
+                // the very next tick would see it as "already missing", not a new one), permanently losing
+                // the M5b reconcile for it. Deferred entirely to the first tick after the shell operation
+                // finishes instead.
+                if (_disposed || _shellOperationDepth > 0) return;
 
                 try
                 {
+                    // M-C fix: must run BEFORE RefreshItemsLiveness — see ProcessPendingVanishedManagedItems's
+                    // own remarks for why the ordering is load-bearing.
+                    ProcessPendingVanishedManagedItems();
                     RefreshItemsLiveness();
+                    ProcessPendingSiblingAdoption();
                 }
                 catch (Exception ex)
                 {
@@ -610,6 +907,20 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
+    /// <see langword="true"/> when a file or a directory exists at <paramref name="path"/>.
+    /// </summary>
+    private static bool PathExists(string path) => File.Exists(path) || Directory.Exists(path);
+
+    /// <summary>
+    /// M-B (release-polish 1.0 final review): <see langword="true"/> when <paramref name="verb"/> is a
+    /// known member of <see cref="NonCreatingVerbs"/>. An unreported verb (<see langword="null"/> — a shell
+    /// extension that doesn't implement <c>GCS_VERBW</c>) is NOT treated as non-creating: the watch still
+    /// starts, same as before this fix, since there's no way to tell it apart from a genuinely
+    /// file-creating verb.
+    /// </summary>
+    private static bool IsNonCreatingVerb(string? verb) => verb is not null && NonCreatingVerbs.Contains(verb);
+
+    /// <summary>
     /// Returns all file-system entries in <paramref name="folder"/>, or an empty array on error.
     /// </summary>
     private static string[] GetSafeEntries(string folder)
@@ -629,35 +940,193 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         }
     }
 
-    private void OpenContainingFolder(FileItem? item)
+    /// <summary>
+    /// Re-aligns this panel with whatever a shell command just did to its files, synchronously, on the UI thread.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The command's own <paramref name="target"/>, when it is a per-item managed item with a before-command
+    /// snapshot (<paramref name="targetEntriesBefore"/>), is reconciled against that snapshot
+    /// (<see cref="IPanelItemStorageService.ReconcileExternalChange(string, IReadOnlyCollection{string})"/>): entries
+    /// the command CREATED next to a still-existing item are adopted and shown as new panel items; a vanished item
+    /// with exactly one new entry next to it was renamed and is relocated in place (same
+    /// <see cref="BaseViewModel.TryRenameItem"/> + content-filter re-run the inline rename uses); a vanished item
+    /// with nothing new was deleted or moved away and leaves the panel. Entries still being written when the
+    /// command returns keep being looked for on the next liveness ticks (<see cref="ProcessPendingSiblingAdoption"/>).
+    /// </para>
+    /// <para>
+    /// Every OTHER item whose path no longer exists gets the snapshot-less reconcile
+    /// (<see cref="IPanelItemStorageService.ReconcileExternalChange(string)"/>): only "completely gone" is acted on.
+    /// Anything else (a referenced-in-place original, a legacy flat item, an ambiguous folder) is left as it is and
+    /// keeps showing as missing. Raises <see cref="FilesChanged"/> once when anything changed, then runs the regular
+    /// existence refresh (<see cref="BaseViewModel.RefreshItemsLiveness"/>) right away instead of waiting for the
+    /// next timer tick. A Folder Portal skips the reconcile (its watcher mirrors the real folder) but still gets
+    /// the refresh.
+    /// </para>
+    /// </remarks>
+    /// <param name="target">The item the command ran on, or <see langword="null"/> when unknown.</param>
+    /// <param name="targetEntriesBefore">
+    /// <paramref name="target"/>'s per-item directory before the command
+    /// (<see cref="IPanelItemStorageService.GetItemDirectoryEntries"/>), or <see langword="null"/>/empty when it is not a
+    /// per-item managed item.
+    /// </param>
+    /// <param name="verb">
+    /// The invoked command's canonical shell verb (<see cref="ShellContextMenuResult.Verb"/>), or
+    /// <see langword="null"/> when unknown/unreported. M-B (release-polish 1.0 final review): only a verb
+    /// that could plausibly create a new file next to the item starts the trailing
+    /// <see cref="ProcessPendingSiblingAdoption"/> watch below — a verb from <see cref="NonCreatingVerbs"/>
+    /// (Open, Properties, …) never does, so there is nothing further to look for after the immediate
+    /// snapshot diff above already ran. The immediate diff itself is unaffected by <paramref name="verb"/>:
+    /// it always runs for every invoked command, same as before this fix.
+    /// </param>
+    private void ReconcileAfterShellCommand(FileItem? target, IReadOnlyList<string>? targetEntriesBefore, string? verb)
     {
-        if (item is not null) _fileLauncher.OpenContainingFolder(item.Path);
-    }
+        var hasSnapshot = target is not null && targetEntriesBefore is { Count: > 0 };
+        _siblingWatch = null; // a new command supersedes whatever the previous one might still create.
 
-    private void ShowProperties(FileItem? item)
-    {
-        if (item is not null) _fileLauncher.ShowProperties(item.Path);
-    }
-
-    private void RemoveFileItem(FileItem? item)
-    {
-        if (item is null) return;
-
-        var outcome = _itemStorage.Restore(item.Path);
-        if (outcome == RestoreOutcome.OriginalPathUnknown)
+        if (!IsPortal)
         {
-            // Legacy managed copy with no manifest entry — there is nowhere to restore it to, so it goes
-            // to the Recycle Bin (ADR-035; never a permanent delete). If the Recycle Bin refuses it, the
-            // item stays in the panel: removing it from the UI would orphan the only copy in storage.
-            var recycle = _itemStorage.ReleaseToRecycleBin([item.Path]);
-            if (!recycle.IsComplete) return;
+            var change = ReconcileChange.None;
+            List<string>? adopted = null;
+
+            foreach (var item in AllItems.ToArray())
+            {
+                ManagedItemReconcileResult result;
+                if (hasSnapshot && ReferenceEquals(item, target))
+                {
+                    // Also for a target that still exists: that is exactly when created siblings are adopted.
+                    result = _itemStorage.ReconcileExternalChange(item.Path, targetEntriesBefore!);
+                }
+                else if (PathExists(item.Path))
+                {
+                    continue;
+                }
+                else
+                {
+                    result = _itemStorage.ReconcileExternalChange(item.Path);
+                }
+
+                change |= ApplyReconcileResult(item, result);
+                if (result.AdoptedPaths.Count > 0) (adopted ??= []).AddRange(result.AdoptedPaths);
+            }
+
+            if (adopted is not null)
+            {
+                AddFiles([.. adopted]);
+                change |= ReconcileChange.Added;
+            }
+
+            CompleteReconcile(change);
+
+            if (hasSnapshot && AllItems.Contains(target!) && PathExists(target!.Path) && !IsNonCreatingVerb(verb))
+            {
+                _siblingWatch = new SiblingAdoptionWatch(target, targetEntriesBefore!, SiblingAdoptionWatchTicks);
+            }
         }
 
-        RemoveFile(item);
+        RefreshItemsLiveness();
+    }
 
-        // NotManaged: Restore already no-op'd. Failed: logged inside the service; item stays removed from UI
-        // even though the managed copy is orphaned in storage — acceptable, documented in the plan (risk table).
-        FilesChanged?.Invoke(this, EventArgs.Empty);
+    /// <summary>
+    /// "Delete" chosen in a managed item's shell context menu (intercepted — see
+    /// <see cref="ShowShellContextMenu"/>): <see cref="IPanelItemStorageService.RecycleManagedItem"/> moves the item
+    /// back to its original location and recycles it from there. A recycled item leaves the panel; an item the
+    /// shell did not recycle (cancelled, declined) stays, following it if it now lives at a different path.
+    /// </summary>
+    /// <param name="item">The item to delete.</param>
+    private void DeleteManagedItem(FileItem item)
+    {
+        // M-A guard (release-polish 1.0 final review): RecycleManagedItem's own SHFileOperation call pumps
+        // window messages through its progress/confirmation dialogs — a separate modal loop from the shell
+        // context menu's own (already released by the time ShowShellContextMenu's switch calls this method).
+        // Only the actual blocking call is guarded — the switch below and its trailing RefreshItemsLiveness()
+        // run strictly after RecycleManagedItem returns, with the guard already released.
+        ManagedRecycleResult result;
+        _shellOperationDepth++;
+        try
+        {
+            result = _itemStorage.RecycleManagedItem(item.Path);
+        }
+        finally
+        {
+            _shellOperationDepth--;
+        }
+
+        switch (result.Kind)
+        {
+            case ManagedRecycleKind.Recycled:
+                if (ReferenceEquals(EditingItem, item)) EditingItem = null;
+                RemoveFile(item);
+                FilesChanged?.Invoke(this, EventArgs.Empty);
+                break;
+
+            case ManagedRecycleKind.Kept when result.Path is not null
+                                              && !string.Equals(result.Path, item.Path, StringComparison.OrdinalIgnoreCase):
+                if (AllItems.Contains(item))
+                {
+                    TryRenameItem(item, result.Path);
+                    OnSourceChanged();
+                }
+                else
+                {
+                    // M-A fix: a re-entrant liveness tick that snuck in through the nested message pump
+                    // while RecycleManagedItem's own SHFileOperation dialog was still showing (now blocked
+                    // by _shellOperationDepth, but defense in depth for any other path that could have
+                    // removed `item` mid-flight) already dropped `item` from the panel. TryRenameItem
+                    // no-ops for an item no longer tracked, which used to silently strand the file the
+                    // storage service just moved back to result.Path — add it back as a fresh item instead
+                    // of losing it from the panel.
+                    AddFiles([result.Path]);
+                }
+
+                FilesChanged?.Invoke(this, EventArgs.Empty);
+                break;
+
+            case ManagedRecycleKind.Kept:
+            case ManagedRecycleKind.NotManaged:
+            default:
+                break; // nothing changed for the panel.
+        }
+
+        RefreshItemsLiveness();
+    }
+
+    /// <summary>
+    /// Applies one reconcile verdict to <paramref name="item"/>: <see cref="ManagedItemReconcileKind.Renamed"/>
+    /// relocates it in place, <see cref="ManagedItemReconcileKind.Deleted"/> removes it (ending an inline rename
+    /// of it). Adopted paths are the caller's business.
+    /// </summary>
+    /// <param name="item">The reconciled item.</param>
+    /// <param name="result">The storage service's verdict.</param>
+    /// <returns>What changed.</returns>
+    private ReconcileChange ApplyReconcileResult(FileItem item, ManagedItemReconcileResult result)
+    {
+        switch (result.Kind)
+        {
+            case ManagedItemReconcileKind.Renamed when result.NewPath is not null:
+                TryRenameItem(item, result.NewPath);
+                return ReconcileChange.Renamed;
+
+            case ManagedItemReconcileKind.Deleted:
+                if (ReferenceEquals(EditingItem, item)) EditingItem = null;
+                RemoveFile(item);
+                return ReconcileChange.Removed;
+
+            case ManagedItemReconcileKind.Unchanged:
+            default:
+                return ReconcileChange.None;
+        }
+    }
+
+    /// <summary>
+    /// Finishes a reconcile pass: re-runs the content filter once after a rename (a rename can change the
+    /// extension — see <see cref="CommitRename"/>) and raises <see cref="FilesChanged"/> once when anything changed.
+    /// </summary>
+    /// <param name="change">What the pass changed.</param>
+    private void CompleteReconcile(ReconcileChange change)
+    {
+        if ((change & ReconcileChange.Renamed) != 0) OnSourceChanged();
+        if (change != ReconcileChange.None) FilesChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -959,6 +1428,26 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         // a panel that never became the owner.
         _selectionCoordinator.Release(this);
 
+        // Cancels a pending debounced icon re-fetch (see ScheduleIconRefetch) — a disposed panel's
+        // FileItems are about to become unreachable; a late timer tick re-fetching their icons anyway
+        // would just be wasted work, not a crash (RefreshAllItemIcons only touches AllItems), but there's
+        // no reason to let it run. Mirrors SaveScheduler.Flush's own `_timerProvider()?.Stop()`.
+        //
+        // MINOR 8 (release-polish 1.0 final review): the production default provider
+        // (ResolveDefaultIconResizeDebounceTimer) LAZILY CREATES a DispatcherDebounceTimer on first call —
+        // calling it here unconditionally used to construct one from scratch just to immediately stop it,
+        // for every panel that closes having never actually resized an icon. Read the existing field
+        // directly for that case instead; a test-supplied provider never lazily creates, so it's still
+        // safe (and necessary — there's no shared field to read for it) to just call it.
+        if (_usesDefaultIconResizeDebounceTimerProvider)
+        {
+            _defaultIconResizeDebounceTimer?.Stop();
+        }
+        else
+        {
+            _iconResizeDebounceTimerProvider()?.Stop();
+        }
+
         _existenceTimer.Dispose();
         DetachWatcher();
     }
@@ -1027,6 +1516,40 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
         if (moved || switchedToManual)
             FilesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Notes app-managed items the liveness check just saw go missing (M5b, release-polish 1.0 review): Cut
+    /// in an item's shell context menu followed by Paste elsewhere moves the managed copy away AFTER the
+    /// menu closed, which <see cref="ReconcileAfterShellCommand()"/> cannot see. Only the present → missing
+    /// transition is reported (see <see cref="BaseViewModel.OnItemsVanished"/>), so stable items cost
+    /// nothing; only managed paths are tracked.
+    /// </summary>
+    /// <remarks>
+    /// M-C fix (release-polish 1.0 final review): this used to reconcile (and, for a genuinely empty
+    /// per-item directory, release/delete it) immediately, on the very first tick an item was seen missing.
+    /// Some external editors save "by recreate" — write a temp file, delete the original, then rename the
+    /// temp back to the original name — which is a real, if brief, delete/recreate cycle a snapshot-less
+    /// liveness check cannot tell apart from an actual Cut+Paste-elsewhere. Reconciling on that very first
+    /// tick could delete the per-item GUID directory out from under the recreate landing a moment later.
+    /// This method now only ADDS the item to <see cref="_pendingVanishedManagedItems"/> — the actual
+    /// reconcile is deferred to <see cref="ProcessPendingVanishedManagedItems"/>, run on the NEXT tick, which
+    /// only acts once the item has been confirmed missing across two consecutive ticks.
+    /// </remarks>
+    /// <param name="items">The items that just went missing.</param>
+    protected override void OnItemsVanished(IReadOnlyList<FileItem> items)
+    {
+        // M-A guard (release-polish 1.0 final review): see _shellOperationDepth's remarks — defense in
+        // depth for any future caller of RefreshItemsLiveness while a shell operation's own modal loop is
+        // mid-flight on this panel; the current callers (RefreshExistence's dispatched tick,
+        // DeleteManagedItem/ReconcileAfterShellCommand's own trailing calls) already never reach here with
+        // the guard held.
+        if (IsPortal || _shellOperationDepth > 0) return;
+
+        foreach (var item in items)
+        {
+            if (_itemStorage.IsManaged(item.Path)) _pendingVanishedManagedItems.Add(item);
+        }
     }
 
     /// <inheritdoc />
@@ -1134,6 +1657,11 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         if (e.PropertyName == nameof(ChildWindowModel.ViewMode))
             ApplyViewMode();
 
+        // The displayed icon size changed (grid IconSize slider, or list <-> grid): icons are re-requested at
+        // the new pixel size — only when that crosses a size bucket (BaseViewModel.SetRequestedIconPixelSize).
+        if (e.PropertyName is nameof(ChildWindowModel.ViewMode) or nameof(ChildWindowModel.IconSize))
+            UpdateRequestedIconPixelSize(refreshExisting: true);
+
         if (e.PropertyName == nameof(ChildWindowModel.SourceFolderPath))
             HandleSourceFolderPathChanged();
 
@@ -1165,6 +1693,67 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
     private void ApplyViewMode()
         => CurrentViewTemplate = Model.ViewMode == PanelViewMode.Grid ? _gridTemplate : _listTemplate;
+
+    /// <summary>
+    /// Recomputes the physical pixel size item icons are requested at from the displayed icon size (grid:
+    /// <see cref="ChildWindowModel.IconSize"/>, list: <see cref="ListIconSizeDip"/>) and
+    /// <see cref="IconRenderScale"/>.
+    /// </summary>
+    /// <remarks>
+    /// M3 fix (release-polish 1.0 review): <see cref="BaseViewModel.SetRequestedIconPixelSize"/> is always
+    /// called with <c>refreshExisting: false</c> here — <see cref="BaseViewModel.RequestedIconPixelSize"/>
+    /// itself updates synchronously on every call, so a new item added mid-drag (<see cref="BaseViewModel.AddFiles"/>/
+    /// <see cref="AddDroppedFiles"/>) is fetched at the CURRENT size right away, never a stale
+    /// pre-debounce one. Only the actual re-fetch of every already-tracked item — the expensive part,
+    /// previously done synchronously once per crossed size bucket — is deferred through
+    /// <see cref="ScheduleIconRefetch"/> when <paramref name="refreshExisting"/> is <see langword="true"/>
+    /// and the snapped size actually changed. <see cref="LoadFromModel"/>'s own call
+    /// (<paramref name="refreshExisting"/>: <see langword="false"/>) needs neither branch — it runs right
+    /// before <see cref="BaseViewModel.ReplaceAll"/> discards whatever items are currently tracked anyway.
+    /// </remarks>
+    /// <param name="refreshExisting">Whether already-loaded items are (debounced-)re-fetched when the size changed.</param>
+    private void UpdateRequestedIconPixelSize(bool refreshExisting)
+    {
+        var sizeDip = Model.ViewMode == PanelViewMode.Grid ? Model.IconSize : ListIconSizeDip;
+        var pixelSize = IconPixelSize.FromDip(sizeDip, _iconRenderScale);
+        var changed = SetRequestedIconPixelSize(pixelSize, refreshExisting: false);
+
+        if (changed && refreshExisting) ScheduleIconRefetch();
+    }
+
+    /// <summary>
+    /// Defers <see cref="BaseViewModel.RefreshAllItemIcons"/> to <see cref="IconResizeDebounceWindow"/>
+    /// after the last call (M3, release-polish 1.0 review): a burst of calls — the icon-size slider
+    /// crossing several buckets while being dragged, or every panel reacting to the same monitor DPI
+    /// change — collapses into a single re-fetch, using whatever <see cref="BaseViewModel.RequestedIconPixelSize"/>
+    /// happens to be when the debounce window finally elapses. Degrades to an immediate synchronous
+    /// re-fetch when <see cref="_iconResizeDebounceTimerProvider"/> has no timer available (e.g. no
+    /// <see cref="System.Windows.Application.Current"/> — headless/test host without an injected fake).
+    /// </summary>
+    private void ScheduleIconRefetch()
+    {
+        var timer = _iconResizeDebounceTimerProvider();
+        if (timer is null)
+        {
+            RefreshAllItemIcons();
+            return;
+        }
+
+        timer.Start(IconResizeDebounceWindow, RefreshAllItemIcons);
+    }
+
+    /// <summary>
+    /// Default <c>iconResizeDebounceTimerProvider</c> (production, via DI): lazily creates — and reuses
+    /// for the rest of this ViewModel's lifetime — a single <see cref="DispatcherDebounceTimer"/> bound to
+    /// the current <see cref="System.Windows.Application.Current"/> dispatcher. Returns <see langword="null"/>
+    /// when no <see cref="System.Windows.Application"/> exists yet, matching
+    /// <c>ApplicationStateService.ResolveDebounceTimer</c>'s own degrade-to-immediate-refetch contract.
+    /// </summary>
+    private IDebounceTimer? ResolveDefaultIconResizeDebounceTimer()
+    {
+        if (Application.Current is not { } app) return null;
+        return _defaultIconResizeDebounceTimer ??= new DispatcherDebounceTimer(app.Dispatcher);
+    }
 
     /// <summary>
     /// Rebuilds <see cref="BaseViewModel.FileItems"/> from <see cref="BaseViewModel.AllItems"/>
@@ -1266,5 +1855,43 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         {
             _suppressCoordinatorEcho = false;
         }
+    }
+
+    /// <summary>
+    /// What one reconcile pass changed in the panel (see <see cref="CompleteReconcile"/>).
+    /// </summary>
+    [Flags]
+    private enum ReconcileChange
+    {
+        /// <summary>Nothing.</summary>
+        None = 0,
+
+        /// <summary>An item was relocated in place.</summary>
+        Renamed = 1,
+
+        /// <summary>An item was removed.</summary>
+        Removed = 2,
+
+        /// <summary>Adopted entries were added as new items.</summary>
+        Added = 4,
+    }
+
+    /// <summary>
+    /// A pending look-out for entries a shell command creates next to a managed item after it returned — see
+    /// <see cref="ProcessPendingSiblingAdoption"/>.
+    /// </summary>
+    /// <param name="item">The item the command ran on.</param>
+    /// <param name="entriesBefore">Its per-item directory before the command.</param>
+    /// <param name="ticksRemaining">Liveness ticks left before the watch expires.</param>
+    private sealed class SiblingAdoptionWatch(FileItem item, IReadOnlyList<string> entriesBefore, int ticksRemaining)
+    {
+        /// <summary>Gets the item the command ran on.</summary>
+        public FileItem Item { get; } = item;
+
+        /// <summary>Gets its per-item directory entries from before the command.</summary>
+        public IReadOnlyList<string> EntriesBefore { get; } = entriesBefore;
+
+        /// <summary>Gets or sets the number of liveness ticks left before the watch expires.</summary>
+        public int TicksRemaining { get; set; } = ticksRemaining;
     }
 }

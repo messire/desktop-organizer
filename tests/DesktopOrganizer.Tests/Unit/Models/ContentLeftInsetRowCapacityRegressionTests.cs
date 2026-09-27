@@ -55,6 +55,10 @@ public class ContentLeftInsetRowCapacityRegressionTests
     [InlineData(88d)]
     [InlineData(92d)]
     [InlineData(96d)]
+    [InlineData(104d)]
+    [InlineData(112d)]
+    [InlineData(120d)]
+    [InlineData(128d)]
     [InlineData(32.010182570303485d)] // real persisted DefaultIconSize, P00 finding F-11 — not on a tick
     [InlineData(31.512447285700045d)] // real persisted panel IconSize, P00 finding F-11 — not on a tick
     [InlineData(31.630540508481275d)] // real persisted panel IconSize, P00 finding F-11 — not on a tick
@@ -143,6 +147,10 @@ public class ContentLeftInsetRowCapacityRegressionTests
     [InlineData(32.010182570303485d)]
     [InlineData(48d)]
     [InlineData(96d)]
+    [InlineData(104d)]
+    [InlineData(112d)]
+    [InlineData(120d)]
+    [InlineData(128d)]
     public void F3_RowCapacity_HoldsWithSubPixelShortfallWithinM1Tolerance_AcrossIconSizes(double iconSize)
     {
         const double shortfallWithinTolerance = 0.49d; // < AdaptiveGridLayout.LayoutTolerance (0.5)

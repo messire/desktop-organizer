@@ -32,6 +32,26 @@ public static class PanelTheme
         typeof(PanelTheme),
         new FrameworkPropertyMetadata(CreateDefaultAccentBrush(), FrameworkPropertyMetadataOptions.Inherits));
 
+    /// <summary>
+    /// The panel's text colour brush (<c>Model.TextColor</c>) — MAJOR-2 fix (review round, orchestrator
+    /// decision "variant A", docs/PLANS/color-presets-and-size-step.md Q-1 variant B). <see cref="SurfaceComposer.ResolveNeutralBase"/>
+    /// now needs the (accent, text) PAIR, not the accent alone, to decide a panel's light/dark neutral
+    /// base — this property is the single source of truth every consumer of that decision
+    /// (<see cref="Converters.PanelSurfaceBrushConverter"/>, <see cref="Converters.HoverOverlayBrushConverter"/>,
+    /// <see cref="Converters.PanelChromeForegroundBrushConverter"/>) reads, exactly the same "inherited
+    /// attached property fed from <c>ChildWindow.xaml</c>'s <c>PanelRoot</c>" shape <see cref="AccentProperty"/>
+    /// already uses (same R-6 ContextMenu/Popup caveat applies). Inherited; defaults to a frozen brush for
+    /// <c>Color.Text.Primary</c> (<c>#DDDDDD</c>) — the app's own pre-existing default text colour, so a
+    /// window that never sets this (e.g. <c>SystemIconsPanelWindow</c>, which never sets
+    /// <see cref="AccentProperty"/> either) gets the same neutral pairing <see cref="AccentProperty"/>'s own
+    /// default already implies.
+    /// </summary>
+    public static readonly DependencyProperty TextProperty = DependencyProperty.RegisterAttached(
+        "Text",
+        typeof(Brush),
+        typeof(PanelTheme),
+        new FrameworkPropertyMetadata(CreateDefaultTextBrush(), FrameworkPropertyMetadataOptions.Inherits));
+
     /// <summary>The panel's surface composition style. Inherited; defaults to <see cref="PanelSurfaceStyle.Ambient"/>.</summary>
     public static readonly DependencyProperty SurfaceStyleProperty = DependencyProperty.RegisterAttached(
         "SurfaceStyle",
@@ -70,6 +90,15 @@ public static class PanelTheme
     /// <param name="value">The new value to store on <paramref name="d"/>.</param>
     public static void SetAccent(DependencyObject d, Brush value) => d.SetValue(AccentProperty, value);
 
+    /// <summary>Gets the value of the <see cref="TextProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is read.</param>
+    public static Brush GetText(DependencyObject d) => (Brush)d.GetValue(TextProperty);
+
+    /// <summary>Sets the value of the <see cref="TextProperty"/> attached property.</summary>
+    /// <param name="d">The element whose attached value is written.</param>
+    /// <param name="value">The new value to store on <paramref name="d"/>.</param>
+    public static void SetText(DependencyObject d, Brush value) => d.SetValue(TextProperty, value);
+
     /// <summary>Gets the value of the <see cref="SurfaceStyleProperty"/> attached property.</summary>
     /// <param name="d">The element whose attached value is read.</param>
     public static PanelSurfaceStyle GetSurfaceStyle(DependencyObject d) => (PanelSurfaceStyle)d.GetValue(SurfaceStyleProperty);
@@ -101,6 +130,16 @@ public static class PanelTheme
     {
         var color = (Color)ColorConverter.ConvertFromString(AccentPalette.Neutral)!;
         var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
+    private static Brush CreateDefaultTextBrush()
+    {
+        // Byte-identical to Colors.xaml's Color.Text.Primary (#DDDDDD) — this project's own
+        // pre-existing default text colour, kept in sync by comment the same way PanelSurfaceBrushConverter's
+        // NeutralSurfaceHex constant is kept in sync with Color.Surface.Base.
+        var brush = new SolidColorBrush(Color.FromRgb(0xDD, 0xDD, 0xDD));
         brush.Freeze();
         return brush;
     }

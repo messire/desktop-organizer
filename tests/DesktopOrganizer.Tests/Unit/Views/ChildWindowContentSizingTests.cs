@@ -916,7 +916,7 @@ public class ChildWindowContentSizingTests
             app.Resources["LayoutEditMode"] = layoutEditModeMock.Object;
 
             var iconProvider = new Mock<IIconProvider>();
-            iconProvider.Setup(p => p.GetIcon(It.IsAny<string>())).Returns((System.Windows.Media.ImageSource)null!);
+            iconProvider.Setup(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>())).Returns((System.Windows.Media.ImageSource)null!);
 
             var viewModel = new ChildWindowViewModel(
                 iconProvider.Object,

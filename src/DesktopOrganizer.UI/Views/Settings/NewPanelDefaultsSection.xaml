@@ -4,6 +4,9 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
+             xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
+             xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <StackPanel>
@@ -11,59 +14,92 @@
         <TextBlock Style="{StaticResource Settings.CardDescription}" Margin="0,-6,0,10"
                    Text="{loc:Loc Settings_NewPanelDefaults_Description}"/>
 
-        <!-- Accent color -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{loc:Loc Settings_NewPanelDefaults_AccentColor_Label}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
-                <TextBox Grid.Column="1" Width="90" VerticalAlignment="Center" Margin="0,0,8,0"
-                         AutomationProperties.Name="{loc:Loc Settings_NewPanelDefaults_AccentColor_Label}"
-                         Text="{Binding DefaultBackgroundColor, UpdateSourceTrigger=LostFocus}"/>
-                <Border Grid.Column="2" Width="24" Height="24" CornerRadius="3"
-                        BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
-                        Background="{Binding DefaultBackgroundColor, Converter={StaticResource HexBrush}}"/>
-            </Grid>
-        </Border>
+        <!-- Colors (ADR-042): Preview + Mode + Accent colour + Advanced — the SAME redesigned colour editor
+             PanelCustomizeWindow uses, via the shared PanelPreviewCard/PanelColorEditor controls. -->
+        <controls:PanelPreviewCard PreviewTitle="{loc:Loc Panel_NewTitle}"
+                                    AccentHex="{Binding DefaultColors.AccentColor}"
+                                    TextHex="{Binding DefaultColors.TextColor}"
+                                    SurfaceStyle="{Binding DefaultSurfaceStyle}"
+                                    SurfaceOpacity="{Binding DefaultOpacity}"
+                                    IconSize="{Binding DefaultIconSize}"/>
+        <controls:PanelColorEditor DataContext="{Binding DefaultColors}"/>
 
-        <!-- Text color -->
+        <!-- Surface (style + opacity) — release-polish-1.0 visual review item 5: the same segmented
+             Solid/Ambient/Glass control and single-card grouping PanelCustomizeWindow's own Surface card
+             uses, replacing the ComboBox this section had before. SetDefaultSurfaceStyleCommand writes
+             through the EXACT SAME DefaultSurfaceStyle property (and therefore the same
+             IAppSettings.DefaultSurfaceStyle setter) the ComboBox's SelectedItem binding did — no new
+             setting, only a different control.
+             UX#3: this card now comes BEFORE Icon size (below), matching PanelCustomizeWindow's own
+             Surface-then-Icons card order — this section used to have them reversed. -->
         <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{loc:Loc Settings_NewPanelDefaults_TextColor_Label}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
-                <TextBox Grid.Column="1" Width="90" VerticalAlignment="Center" Margin="0,0,8,0"
-                         AutomationProperties.Name="{loc:Loc Settings_NewPanelDefaults_TextColor_Label}"
-                         Text="{Binding DefaultTextColor, UpdateSourceTrigger=LostFocus}"/>
-                <Border Grid.Column="2" Width="24" Height="24" CornerRadius="3"
-                        BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
-                        Background="{Binding DefaultTextColor, Converter={StaticResource HexBrush}}"/>
-            </Grid>
-        </Border>
+            <StackPanel>
+                <TextBlock Text="{loc:Loc Common_Surface_Header}" Style="{StaticResource Settings.CardHeader}" Margin="0,0,0,10"/>
 
-        <!-- Opacity -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="140"/>
-                    <ColumnDefinition Width="40"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{loc:Loc Settings_NewPanelDefaults_Opacity_Label}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
-                <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="0" Maximum="1"
-                        AutomationProperties.Name="{loc:Loc Settings_NewPanelDefaults_Opacity_Label}"
-                        Value="{Binding DefaultOpacity, Mode=TwoWay}"/>
-                <!-- {0:P0} is left to WPF's own culture resolution via FrameworkElement.Language/CultureSync
-                     (docs/PLANS/localization.md §8 inventory note) — no LocBinding needed here. -->
-                <TextBlock Grid.Column="2" Text="{Binding DefaultOpacity, StringFormat={}{0:P0}}"
-                           VerticalAlignment="Center" TextAlignment="Right"/>
-            </Grid>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="SurfaceStyleLabel" Grid.Column="0" Text="{loc:Loc Common_SurfaceStyle_Header}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <!-- m2: AutomationProperties.LabeledBy lives on each RadioButton, not the grouping
+                         Border — see PanelColorEditor.xaml's Mode card for the same fix. -->
+                    <Border Grid.Column="1" Style="{StaticResource Settings.SegmentedGroup}">
+                        <UniformGrid Rows="1" Columns="3"
+                                     KeyboardNavigation.TabNavigation="Once"
+                                     KeyboardNavigation.DirectionalNavigation="Contained">
+                            <RadioButton GroupName="NewPanelDefaultsSurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
+                                         AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                         Command="{Binding SetDefaultSurfaceStyleCommand}" CommandParameter="{x:Static models:PanelSurfaceStyle.Solid}"
+                                         Content="{loc:LocBinding Source={x:Static models:PanelSurfaceStyle.Solid}, Converter={StaticResource EnumDisplayName}}">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="DefaultSurfaceStyle" Mode="OneWay"
+                                             Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static models:PanelSurfaceStyle.Solid}"/>
+                                </RadioButton.IsChecked>
+                            </RadioButton>
+                            <RadioButton GroupName="NewPanelDefaultsSurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
+                                         AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                         Command="{Binding SetDefaultSurfaceStyleCommand}" CommandParameter="{x:Static models:PanelSurfaceStyle.Ambient}"
+                                         Content="{loc:LocBinding Source={x:Static models:PanelSurfaceStyle.Ambient}, Converter={StaticResource EnumDisplayName}}">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="DefaultSurfaceStyle" Mode="OneWay"
+                                             Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static models:PanelSurfaceStyle.Ambient}"/>
+                                </RadioButton.IsChecked>
+                            </RadioButton>
+                            <RadioButton GroupName="NewPanelDefaultsSurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
+                                         AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                         Command="{Binding SetDefaultSurfaceStyleCommand}" CommandParameter="{x:Static models:PanelSurfaceStyle.Glass}"
+                                         Content="{loc:LocBinding Source={x:Static models:PanelSurfaceStyle.Glass}, Converter={StaticResource EnumDisplayName}}">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="DefaultSurfaceStyle" Mode="OneWay"
+                                             Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static models:PanelSurfaceStyle.Glass}"/>
+                                </RadioButton.IsChecked>
+                            </RadioButton>
+                        </UniformGrid>
+                    </Border>
+                </Grid>
+                <TextBlock Text="{loc:Loc Settings_NewPanelDefaults_SurfaceStyle_Description}"
+                           Style="{StaticResource Settings.CardDescription}" Margin="0,0,0,10"/>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="140"/>
+                        <ColumnDefinition Width="40"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="OpacityLabel" Grid.Column="0" Text="{loc:Loc Settings_NewPanelDefaults_Opacity_Label}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <!-- UX#2: Minimum bound to SurfaceComposer.MinSurfaceOpacity — see
+                         PanelCustomizeWindow.xaml's own Surface card remarks/OpacitySliderMinimumCoercionTests
+                         for why this is safe (WPF's coercion here never writes back through the binding). -->
+                    <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="{x:Static theming:SurfaceComposer.MinSurfaceOpacity}" Maximum="1"
+                            AutomationProperties.LabeledBy="{Binding ElementName=OpacityLabel}"
+                            Value="{Binding DefaultOpacity, Mode=TwoWay}"/>
+                    <!-- {0:P0} is left to WPF's own culture resolution via FrameworkElement.Language/CultureSync
+                         (docs/PLANS/localization.md §8 inventory note) — no LocBinding needed here. -->
+                    <TextBlock Grid.Column="2" Text="{Binding DefaultOpacity, StringFormat={}{0:P0}}"
+                               VerticalAlignment="Center" TextAlignment="Right"/>
+                </Grid>
+            </StackPanel>
         </Border>
 
         <!-- Icon size -->
@@ -71,36 +107,14 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="140"/>
-                    <ColumnDefinition Width="48"/>
+                    <ColumnDefinition Width="220"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{loc:Loc Common_IconSize_Header}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
-                <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="16" Maximum="96"
-                        TickFrequency="4" IsSnapToTickEnabled="True"
-                        AutomationProperties.Name="{loc:Loc Common_IconSize_Header}"
-                        Value="{Binding DefaultIconSize, Mode=TwoWay}"/>
-                <TextBlock Grid.Column="2" Text="{loc:LocBinding DefaultIconSize, FormatKey=Common_ValuePx_Format}"
-                           VerticalAlignment="Center" TextAlignment="Right"/>
-            </Grid>
-        </Border>
-
-        <!-- Surface style -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="150"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Common_SurfaceStyle_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="{loc:Loc Settings_NewPanelDefaults_SurfaceStyle_Description}"/>
-                </StackPanel>
-                <ComboBox Grid.Column="1" VerticalAlignment="Center"
-                          AutomationProperties.Name="{loc:Loc Common_SurfaceStyle_Header}"
-                          ItemsSource="{Binding SurfaceStyleOptions}"
-                          SelectedItem="{Binding DefaultSurfaceStyle, Mode=TwoWay}"
-                          ItemTemplate="{StaticResource Settings.EnumRadioLabel}"/>
+                <TextBlock Grid.Column="0" Text="{loc:Loc Common_IconSize_Header}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                <controls:SteppedValueEditor Grid.Column="1" VerticalAlignment="Center"
+                                              Minimum="{x:Static models:SizeStepPolicy.IconSizeMinimum}"
+                                              Maximum="{x:Static models:SizeStepPolicy.IconSizeMaximum}"
+                                              AutomationName="{loc:Loc Common_IconSize_Header}"
+                                              Value="{Binding DefaultIconSize, Mode=TwoWay}"/>
             </Grid>
         </Border>
 
@@ -109,13 +123,16 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="190"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Margin="0,0,16,0">
                     <TextBlock Text="{loc:Loc Settings_NewPanelDefaults_PanelGeometry_Header}" Style="{StaticResource Settings.CardHeader}"/>
                     <TextBlock Style="{StaticResource Settings.CardDescription}"
                                Text="{loc:Loc Settings_NewPanelDefaults_PanelGeometry_Description}"/>
                 </StackPanel>
+                <!-- UX#7: 150 -> 190 (RU overflow hardening) — the ru-RU enum labels this ComboBox shows
+                     (Settings.EnumRadioLabel, TextWrapping="Wrap") run noticeably longer than their en-US
+                     counterparts. -->
                 <ComboBox Grid.Column="1" VerticalAlignment="Center"
                           AutomationProperties.Name="{loc:Loc Settings_NewPanelDefaults_PanelGeometry_Header}"
                           ItemsSource="{Binding PanelGeometryModeOptions}"
@@ -129,7 +146,7 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="190"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Margin="0,0,16,0">
                     <TextBlock Text="{loc:Loc Common_IconLayout_Header}" Style="{StaticResource Settings.CardHeader}"/>

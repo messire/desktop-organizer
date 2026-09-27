@@ -520,6 +520,56 @@ public class PanelItemStorageServiceTests
     }
 
     /// <summary>
+    /// MINOR 3 (release-polish 1.0 final review): the MANAGED copy (the cross-volume restore's source)
+    /// being read-only must not turn an otherwise-successful copy into a reported failure — the read-only
+    /// attribute is cleared before the delete, mirroring <c>PanelItemsUninstallRestorer</c>'s identical fix
+    /// (<c>DeleteVerifiedSourceOrWarn</c>). Before the fix, <see cref="File.Delete(string)"/> threw, which
+    /// propagated out to <see cref="PanelItemStorageService.Restore(string, bool)"/>'s own catch and
+    /// reported <see cref="RestoreOutcome.Failed"/> even though the copy had already landed at the original
+    /// location — leaving the item duplicated at both places with the manifest entry never released.
+    /// </summary>
+    [Fact]
+    public void Restore_CrossVolumeFallback_File_ReadOnlyManagedSource_StillDeletesAndReturnsRestored()
+    {
+        var (service, root) = BuildService();
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgOrigDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "ReadOnly.lnk");
+        const string content = "read-only-cross-volume-restore";
+        File.WriteAllText(source, content);
+
+        string? managed = null;
+        try
+        {
+            managed = service.MoveIn(source);
+            Assert.NotNull(managed);
+            File.SetAttributes(managed!, File.GetAttributes(managed!) | FileAttributes.ReadOnly);
+
+            var outcome = service.Restore(managed!, forceCrossVolume: true);
+
+            Assert.Equal(RestoreOutcome.Restored, outcome);
+            Assert.True(File.Exists(source));
+            Assert.Equal(content, File.ReadAllText(source));
+            Assert.False(File.Exists(managed!), "the read-only managed source must still be deleted after a verified copy.");
+
+            // Manifest entry released: a second Restore attempt reports OriginalPathUnknown.
+            var secondOutcome = service.Restore(managed!, forceCrossVolume: true);
+            Assert.Equal(RestoreOutcome.OriginalPathUnknown, secondOutcome);
+        }
+        finally
+        {
+            // File.Copy preserves attributes, so the RESTORED copy at `source` also inherited ReadOnly from
+            // the managed copy — clear it (on both possible surviving locations) before cleanup, or the test
+            // host's own directory delete throws UnauthorizedAccessException (not caught by SafeDeleteDirectory,
+            // which only swallows IOException).
+            if (managed is not null && File.Exists(managed)) File.SetAttributes(managed, File.GetAttributes(managed) & ~FileAttributes.ReadOnly);
+            if (File.Exists(source)) File.SetAttributes(source, File.GetAttributes(source) & ~FileAttributes.ReadOnly);
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
     /// Verifies that a forced cross-volume <see cref="PanelItemStorageService.Restore(string, bool)"/>
     /// on a managed directory copies the whole folder back to its original location and deletes the
     /// managed copy (M2).

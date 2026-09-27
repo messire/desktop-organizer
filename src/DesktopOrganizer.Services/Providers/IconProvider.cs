@@ -4,6 +4,7 @@ using DesktopOrganizer.Services.Diagnostics;
 using static DesktopOrganizer.Services.Enums.FileAttribute;
 using static DesktopOrganizer.Services.Enums.FileFlag;
 using Directory = System.IO.Directory;
+using IoFileAttributes = System.IO.FileAttributes;
 
 namespace DesktopOrganizer.Services.Providers;
 
@@ -14,7 +15,8 @@ internal class IconProvider : IIconProvider
     // added/removed, panels opened/closed) cannot grow memory without limit. 1024 comfortably
     // covers several large panels while still capping worst-case growth. Kept internal (with the
     // explicit-capacity constructor below) so tests can exercise eviction without allocating
-    // thousands of icons.
+    // thousands of icons. Entries are keyed by (path, snapped pixel size), so the same file shown at
+    // two sizes counts twice.
 
     /// <summary>
     /// The default maximum number of icons kept in the cache before least-recently-used eviction
@@ -22,9 +24,24 @@ internal class IconProvider : IIconProvider
     /// </summary>
     internal const int DefaultMaxCachedIcons = 1024;
 
+    // Last-resort stage for an existing path, and the ONLY stage for a missing one (see GetIcon's
+    // remarks): resolve purely by extension/attribute, never touching the file system.
+    // SHGFI_SHELLICONSIZE caps this at the 32 px shell icon — which is why it is no longer the
+    // primary path for existing items.
     private const FileFlag IconFlags = FileFlag.Icon | ShellIconSize | UseFileAttributes;
     private const FileAttribute FileAttributes = Normal;
     private const FileAttribute DirectoryAttributes = FileAttribute.Directory;
+
+    // Values of the closed-set "stage" payload field of IconRetrievalFailed (privacy-safe tokens).
+    private const string ShellItemStage = "shellItem";
+    private const string ImageListStage = "imageList";
+    private const string FileAttributesStage = "fileAttributes";
+
+    // FILE_ATTRIBUTE_RECALL_ON_OPEN / FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS (cloud-files placeholders:
+    // OneDrive "online-only" and friends). Not members of System.IO.FileAttributes, hence the raw values.
+    private const IoFileAttributes RecallOnOpen = (IoFileAttributes)0x00040000;
+    private const IoFileAttributes RecallOnDataAccess = (IoFileAttributes)0x00400000;
+    private const IoFileAttributes RemoteContentAttributes = IoFileAttributes.Offline | RecallOnOpen | RecallOnDataAccess;
 
     // Only these carry an icon embedded in/derived from the file itself (rather than a shared
     // shell-type icon), so only they can actually go stale when the file's *content* changes.
@@ -44,7 +61,7 @@ internal class IconProvider : IIconProvider
     // entry, the tail is the eviction candidate. A plain lock (rather than ConcurrentDictionary)
     // is used because maintaining LRU order requires atomic "read + reorder", and calls are
     // predominantly from the UI thread anyway.
-    private readonly Dictionary<string, LinkedListNode<CacheEntry>> _cacheMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<CacheKey, LinkedListNode<CacheEntry>> _cacheMap = new(CacheKeyComparer.Instance);
     private readonly LinkedList<CacheEntry> _lruList = new();
 
     private ImageSource? _placeholderIcon;
@@ -99,45 +116,173 @@ internal class IconProvider : IIconProvider
     public bool IsPlaceholder(ImageSource? icon) => icon is not null && _placeholderIcon is not null && ReferenceEquals(icon, _placeholderIcon);
 
     /// <inheritdoc />
-    public ImageSource GetIcon(string filePath)
+    public ImageSource GetIcon(string filePath) => GetIcon(filePath, IconPixelSize.Default);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>Existing path — fallback chain (high-resolution icons, release-polish 1.0).</b> Each stage runs only
+    /// if the previous one produced nothing; every failure is logged (extension + error type/HRESULT, never
+    /// the path) and degrades to the next stage instead of surfacing:
+    /// <list type="number">
+    /// <item><c>IShellItemImageFactory::GetImage(SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)</c> at the snapped
+    /// pixel size — the file's own icon exactly as Explorer resolves it (shortcut target, embedded exe icon,
+    /// custom folder icon), rendered at the requested size. No shortcut-arrow overlay (Fences shows none
+    /// either).</item>
+    /// <item><c>SHGetFileInfo(SHGFI_SYSICONINDEX)</c> WITHOUT <c>SHGFI_USEFILEATTRIBUTES</c> + the system image
+    /// list closest to the size — still the item's own icon, but limited to the image lists' fixed sizes.</item>
+    /// <item>The pre-1.0 <c>SHGFI_USEFILEATTRIBUTES | SHGFI_SHELLICONSIZE</c> lookup — a generic 32 px type
+    /// icon, still better than the placeholder.</item>
+    /// </list>
+    /// Whichever stage succeeded is cached under (path, snapped size). Stages 1 and 2 are skipped for a UNC
+    /// path and for an offline/cloud-placeholder item (<see cref="ShouldSkipItemStages"/>) — opening those can
+    /// block the UI thread for seconds.
+    /// </para>
+    /// <para>
+    /// <b>Missing path.</b> UX P1 (P08 fix cycle 1, 2026-09-22): a permanently-missing item still deserves a
+    /// real, type-specific icon wherever the OS can produce one — IconFlags already includes
+    /// SHGFI_USEFILEATTRIBUTES, which asks the shell to resolve purely from the given attribute plus the
+    /// path's own extension, without ever touching the file system. This matches Explorer's own behavior for
+    /// a selected-but-vanished item (a missing "readme.txt" still shows a text-file icon) instead of the
+    /// uniform gray square, which is now strictly the last resort — only when even this shell lookup itself
+    /// fails (see TryRetrieveIcon). Directory-ness can't be checked on disk for a path that doesn't exist, so
+    /// the presence of an extension is used as the best-effort heuristic: extension-less looks like a folder.
+    /// The two high-resolution stages above are skipped for a missing path — both need the item to exist.
+    /// </para>
+    /// <para>
+    /// Routed through the SAME cache check as an existing file/directory (not a separate early-return) for a
+    /// single code path, but — MINOR-1 fix, P08 fix cycle 2, 2026-09-22 — its result is deliberately NOT
+    /// cached. A missing path always freshness-checks to `default` (NeedsFreshnessCheck is skipped whenever
+    /// `!exists`, regardless of extension), and MOST extensions are not freshness-sensitive to begin with (see
+    /// FreshnessSensitiveExtensions) — so once the file actually appears on disk, a non-freshness-sensitive
+    /// extension keeps computing the SAME `default` timestamp, which used to hit this now-stale cache entry
+    /// and serve the fallback forever, defeating RefreshItemsLiveness's missing->present re-fetch
+    /// (BaseViewModel). The trade-off is a fresh (no-disk-I/O, SHGFI_USEFILEATTRIBUTES) shell round-trip on
+    /// every call for a still-missing path rather than a wrong icon surviving the file's reappearance.
+    /// </para>
+    /// <para>
+    /// Threading: called on the UI (STA) thread by the panel view models. The native stages need COM
+    /// initialized on the calling thread (the WPF UI thread is STA) and some third-party icon handlers are
+    /// STA-only; a stage that fails for that reason just degrades to the next one. The cache itself is
+    /// lock-protected.
+    /// </para>
+    /// </remarks>
+    public ImageSource GetIcon(string filePath, int pixelSize)
     {
+        var size = IconPixelSize.Snap(pixelSize);
         var isFile = File.Exists(filePath);
         var exists = isFile || Directory.Exists(filePath);
-
-        // UX P1 (P08 fix cycle 1, 2026-09-22): a permanently-missing item still deserves a real,
-        // type-specific icon wherever the OS can produce one — IconFlags already includes
-        // SHGFI_USEFILEATTRIBUTES, which asks the shell to resolve purely from the given attribute
-        // plus the path's own extension, without ever touching the file system. This matches
-        // Explorer's own behavior for a selected-but-vanished item (a missing "readme.txt" still
-        // shows a text-file icon) instead of the uniform gray square, which is now strictly the last
-        // resort — only when even this shell lookup itself fails (see TryRetrieveIcon). Directory-ness
-        // can't be checked on disk for a path that doesn't exist, so the presence of an extension is
-        // used as the best-effort heuristic: extension-less looks like a folder.
-        //
-        // Routed through the SAME cache-check/TryRetrieveIcon path as an existing file/directory below
-        // (not a separate early-return) for a single code path, but — MINOR-1 fix, P08 fix cycle 2,
-        // 2026-09-22 — its result is deliberately NOT cached (see the `exists` argument threaded through
-        // to TryRetrieveIcon below). A missing path always freshness-checks to `default` (NeedsFreshnessCheck
-        // is skipped whenever `!exists`, regardless of extension), and MOST extensions are not
-        // freshness-sensitive to begin with (see FreshnessSensitiveExtensions) — so once the file
-        // actually appears on disk, a non-freshness-sensitive extension keeps computing the SAME
-        // `default` timestamp, which used to hit this now-stale cache entry and serve the fallback
-        // forever, defeating RefreshItemsLiveness's missing->present re-fetch (BaseViewModel). The
-        // trade-off is a fresh (no-disk-I/O, SHGFI_USEFILEATTRIBUTES) shell round-trip on every call for
-        // a still-missing path rather than a wrong icon surviving the file's reappearance.
         var effectiveIsFile = exists ? isFile : !string.IsNullOrEmpty(Path.GetExtension(filePath));
 
         var lastWriteTimeUtc = exists && NeedsFreshnessCheck(filePath, isFile)
             ? TryGetLastWriteTimeUtc(filePath, isFile)
             : default;
 
-        if (TryGetFreshCachedIcon(filePath, lastWriteTimeUtc, out var cachedIcon))
+        var key = new CacheKey(filePath, size);
+        if (TryGetFreshCachedIcon(key, lastWriteTimeUtc, out var cachedIcon))
         {
             return cachedIcon;
         }
 
-        return TryRetrieveIcon(filePath, effectiveIsFile, lastWriteTimeUtc, cacheable: exists) ?? PlaceholderIcon;
+        // M4: stages 1-2 open the item through its shell handler on the UI thread — for a UNC path or a
+        // cloud/offline placeholder that can block for seconds (unreachable share, content recall). Such an
+        // item goes straight to the file-system-free stage 3.
+        var icon = exists && !ShouldSkipItemStages(filePath, isFile)
+            ? TryShellItemImage(filePath, size)
+              ?? TrySystemImageList(filePath, size)
+              ?? TryRetrieveIcon(filePath, effectiveIsFile)
+            : TryRetrieveIcon(filePath, effectiveIsFile);
+
+        if (icon is null)
+        {
+            return PlaceholderIcon;
+        }
+
+        // Only a path that existed at retrieval time is cached — see the MINOR-1 remarks above.
+        if (exists)
+        {
+            StoreInCache(key, icon, lastWriteTimeUtc);
+        }
+
+        return icon;
     }
+
+    /// <summary>
+    /// Decides whether the two item-opening stages (<see cref="TryShellItemImage"/>, <see cref="TrySystemImageList"/>)
+    /// must be skipped for an EXISTING item because they could block the UI thread (M4, release-polish 1.0 review):
+    /// a UNC path (see <see cref="IsUncPath"/>) or an item whose attributes mark its content as remote
+    /// (see <see cref="HasRemoteContentAttributes"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately cheap: the UNC test is pure string work, and the attribute read is one local metadata call that
+    /// does not recall a placeholder's content. A UNC path is decided before any attribute read (that read would go
+    /// over the network too).
+    /// </para>
+    /// <para>
+    /// <b>Known limitation (follow-up).</b> Only the item's OWN path and attributes are checked: a local <c>.lnk</c>
+    /// whose target is an unreachable share, and a mapped network drive letter (<c>Z:\...</c>), still go through
+    /// stage 1 — resolving the target is exactly the costly part; and the existence check at the top of
+    /// <see cref="GetIcon(string, int)"/> itself still makes one metadata round-trip to a UNC share. The complete fix
+    /// is to fetch high-resolution icons on a dedicated background STA thread (generic icon first, swapped in when
+    /// ready); tracked as a follow-up. Until then this predicate removes the two most common multi-second stalls
+    /// (the shell handler opening the item / recalling its content).
+    /// </para>
+    /// </remarks>
+    /// <param name="filePath">Path of an existing file or folder.</param>
+    /// <param name="isFile">Whether the path is a file (as opposed to a directory).</param>
+    /// <returns><see langword="true"/> when only the attribute-based stage may run.</returns>
+    internal static bool ShouldSkipItemStages(string filePath, bool isFile)
+    {
+        if (IsUncPath(filePath)) return true;
+
+        try
+        {
+            var attributes = isFile ? File.GetAttributes(filePath) : new DirectoryInfo(filePath).Attributes;
+            return HasRemoteContentAttributes(attributes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            // Vanished in between, access denied, odd path: the item stages would fail the same way — skipping
+            // them only saves the attempt.
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="path"/> is a UNC path: <c>\\server\share\...</c> (or <c>//server/share/...</c>), and the
+    /// extended forms <c>\\?\UNC\...</c> / <c>\\.\UNC\...</c>. A local extended-length or device path
+    /// (<c>\\?\C:\...</c>, <c>\\.\C:\...</c>) is not UNC.
+    /// </summary>
+    /// <param name="path">The path to classify.</param>
+    /// <returns><see langword="true"/> for a UNC path.</returns>
+    internal static bool IsUncPath(string path)
+    {
+        if (string.IsNullOrEmpty(path) || path.Length < 2) return false;
+        if (!IsSeparator(path[0]) || !IsSeparator(path[1])) return false;
+
+        // "\\?\" or "\\.\" prefix: UNC only when followed by "UNC\".
+        if (path.Length >= 4 && (path[2] == '?' || path[2] == '.') && IsSeparator(path[3]))
+        {
+            return path.Length >= 8
+                   && path.AsSpan(4, 3).Equals("UNC", StringComparison.OrdinalIgnoreCase)
+                   && IsSeparator(path[7]);
+        }
+
+        return true;
+
+        static bool IsSeparator(char c) => c is '\\' or '/';
+    }
+
+    /// <summary>
+    /// Whether <paramref name="attributes"/> mark the item's content as not locally available:
+    /// <c>FILE_ATTRIBUTE_OFFLINE</c>, <c>FILE_ATTRIBUTE_RECALL_ON_OPEN</c> or <c>FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS</c>
+    /// (an online-only OneDrive/cloud-files placeholder, an HSM-migrated file).
+    /// </summary>
+    /// <param name="attributes">The item's attributes.</param>
+    /// <returns><see langword="true"/> when opening the item may recall content from a remote store.</returns>
+    internal static bool HasRemoteContentAttributes(IoFileAttributes attributes)
+        => (int)attributes != -1 && (attributes & RemoteContentAttributes) != 0;
 
     /// <summary>
     /// Determines whether <paramref name="filePath"/> needs a filesystem freshness check at all.
@@ -186,7 +331,67 @@ internal class IconProvider : IIconProvider
     }
 
     /// <summary>
-    /// Attempts to retrieve the icon for the specified file path.
+    /// Stage 1: the item's own icon through <c>IShellItemImageFactory</c>, at <paramref name="size"/> pixels.
+    /// The <c>HBITMAP</c> is always released (<see cref="IIconHandler.DestroyBitmapHandle"/>) — after its
+    /// pixels were copied into the frozen bitmap, or on any failure.
+    /// </summary>
+    /// <param name="filePath">Path of an existing file or folder.</param>
+    /// <param name="size">Snapped pixel size.</param>
+    /// <returns>A frozen bitmap, or <see langword="null"/> when this stage failed.</returns>
+    private ImageSource? TryShellItemImage(string filePath, int size)
+    {
+        var bitmapHandle = IntPtr.Zero;
+        try
+        {
+            bitmapHandle = _iconHandler.GetShellItemBitmap(filePath, size);
+            if (bitmapHandle == IntPtr.Zero) return null;
+
+            // The shell may hand back a bigger frame (SIIGBF_BIGGERSIZEOK); the factory shrinks it to exactly
+            // `size`, so the cache never holds a 256 px frame for a 72 px bucket (M2).
+            return _iconHandler.TryReadBitmapPixels(bitmapHandle, out var pixels)
+                ? _iconFactory.CreateBitmap(pixels, size)
+                : null;
+        }
+        catch (Exception ex)
+        {
+            WriteRetrievalFailure(filePath, ShellItemStage, ex);
+            return null;
+        }
+        finally
+        {
+            _iconHandler.DestroyBitmapHandle(bitmapHandle);
+        }
+    }
+
+    /// <summary>
+    /// Stage 2: the item's own system icon index, extracted from the system image list closest to
+    /// <paramref name="size"/>. The <c>HICON</c> is always destroyed after conversion (or on failure).
+    /// </summary>
+    /// <param name="filePath">Path of an existing file or folder.</param>
+    /// <param name="size">Snapped pixel size.</param>
+    /// <returns>A frozen bitmap, or <see langword="null"/> when this stage failed.</returns>
+    private ImageSource? TrySystemImageList(string filePath, int size)
+    {
+        var iconHandle = IntPtr.Zero;
+        try
+        {
+            iconHandle = _iconHandler.GetSystemImageListIconHandle(filePath, size);
+            return iconHandle == IntPtr.Zero ? null : _iconFactory.CreateBitmap(iconHandle);
+        }
+        catch (Exception ex)
+        {
+            WriteRetrievalFailure(filePath, ImageListStage, ex);
+            return null;
+        }
+        finally
+        {
+            _iconHandler.DestroyIconHandle(iconHandle);
+        }
+    }
+
+    /// <summary>
+    /// Stage 3 (and the only stage for a missing path): the generic type icon by extension/attribute via
+    /// <c>SHGFI_USEFILEATTRIBUTES</c>. The <c>HICON</c> is always destroyed after conversion.
     /// </summary>
     /// <param name="filePath">File path.</param>
     /// <param name="isFile">
@@ -196,60 +401,20 @@ internal class IconProvider : IIconProvider
     /// touching the file system), a directory passed as <see cref="FileAttribute.Normal"/> has no
     /// extension to key off and falls back to the generic "unknown file" icon instead of a folder icon.
     /// </param>
-    /// <param name="lastWriteTimeUtc">Freshness timestamp to store alongside the cached icon.</param>
-    /// <param name="cacheable">
-    /// Whether a successfully retrieved icon may be stored in the LRU cache (MINOR-1 fix, P08 fix
-    /// cycle 2, 2026-09-22) — <see langword="false"/> for a path that did not exist at retrieval time,
-    /// so a stale-but-freshness-check-exempt fallback icon is never served once the path later becomes
-    /// real. See <see cref="GetIcon"/>'s remarks.
-    /// </param>
     /// <returns>A <see cref="BitmapSource"/> representing the icon, or <see langword="null"/> if retrieval fails.</returns>
-    private ImageSource? TryRetrieveIcon(string filePath, bool isFile, DateTime lastWriteTimeUtc, bool cacheable)
+    private ImageSource? TryRetrieveIcon(string filePath, bool isFile)
     {
+        var fileInfo = default(ShellFileInfo);
         try
         {
-            var fileInfo = default(ShellFileInfo);
             var fileAttributes = isFile ? FileAttributes : DirectoryAttributes;
             var iconHandle = _iconHandler.GetIconHandle(filePath, ref fileInfo, fileAttributes, IconFlags);
-            return iconHandle == IntPtr.Zero ? null : TryCreateBitmapSource(filePath, lastWriteTimeUtc, cacheable, ref fileInfo);
+            return iconHandle == IntPtr.Zero ? null : _iconFactory.CreateBitmap(fileInfo.IconHandle);
         }
         catch (Exception ex)
         {
-            if (_diagnosticsLog.IsEnabled)
-            {
-                // Privacy invariant: extension + exception type name only — never the path or
-                // ex.Message (which frequently embeds the path itself).
-                _diagnosticsLog.Write(
-                    IconDiagnostics.Category,
-                    "IconRetrievalFailed",
-                    null,
-                    new KeyValuePair<string, object?>("extension", IconDiagnostics.SafeExtension(filePath)),
-                    new KeyValuePair<string, object?>("errorType", ex.GetType().Name));
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Attempts to create bitmap source from the specified file icon.
-    /// </summary>
-    /// <param name="filePath">File path.</param>
-    /// <param name="lastWriteTimeUtc">Freshness timestamp to store alongside the cached icon.</param>
-    /// <param name="cacheable">Whether the created icon may be stored in the LRU cache — see <see cref="TryRetrieveIcon"/>.</param>
-    /// <param name="fileInfo">The shell file information structure containing icon details.</param>
-    /// <returns>A <see cref="BitmapSource"/> representing the icon, or <see langword="null"/> if creation fails.</returns>
-    private ImageSource TryCreateBitmapSource(string filePath, DateTime lastWriteTimeUtc, bool cacheable, ref ShellFileInfo fileInfo)
-    {
-        try
-        {
-            var imageSource = _iconFactory.CreateBitmap(fileInfo.IconHandle);
-            if (cacheable)
-            {
-                StoreInCache(filePath, imageSource, lastWriteTimeUtc);
-            }
-
-            return imageSource;
+            WriteRetrievalFailure(filePath, FileAttributesStage, ex);
+            return null;
         }
         finally
         {
@@ -258,15 +423,36 @@ internal class IconProvider : IIconProvider
     }
 
     /// <summary>
+    /// Writes <c>IconRetrievalFailed</c> for an exception thrown by one fallback stage.
+    /// </summary>
+    /// <param name="filePath">The path — only its <see cref="IconDiagnostics.SafeExtension"/> is written.</param>
+    /// <param name="stage">Closed-set stage token.</param>
+    /// <param name="ex">The exception — only its type name is written.</param>
+    private void WriteRetrievalFailure(string filePath, string stage, Exception ex)
+    {
+        if (!_diagnosticsLog.IsEnabled) return;
+
+        // Privacy invariant: extension + exception type name + closed-set stage only — never the path
+        // or ex.Message (which frequently embeds the path itself).
+        _diagnosticsLog.Write(
+            IconDiagnostics.Category,
+            "IconRetrievalFailed",
+            null,
+            new KeyValuePair<string, object?>("extension", IconDiagnostics.SafeExtension(filePath)),
+            new KeyValuePair<string, object?>("errorType", ex.GetType().Name),
+            new KeyValuePair<string, object?>("stage", stage));
+    }
+
+    /// <summary>
     /// Looks up a cache entry and returns it only if the file has not changed since it was cached.
     /// A stale entry (different <c>LastWriteTimeUtc</c>) is evicted so the caller re-reads the icon.
     /// A fresh hit is moved to the front of the LRU list.
     /// </summary>
-    private bool TryGetFreshCachedIcon(string filePath, DateTime lastWriteTimeUtc, out ImageSource icon)
+    private bool TryGetFreshCachedIcon(CacheKey key, DateTime lastWriteTimeUtc, out ImageSource icon)
     {
         lock (_cacheLock)
         {
-            if (_cacheMap.TryGetValue(filePath, out var node))
+            if (_cacheMap.TryGetValue(key, out var node))
             {
                 if (node.Value.LastWriteTimeUtc == lastWriteTimeUtc)
                 {
@@ -277,7 +463,7 @@ internal class IconProvider : IIconProvider
                 }
 
                 _lruList.Remove(node);
-                _cacheMap.Remove(filePath);
+                _cacheMap.Remove(key);
             }
         }
 
@@ -291,26 +477,51 @@ internal class IconProvider : IIconProvider
     /// reference — an <see cref="ImageSource"/> still referenced by a live <c>FileItem</c> stays
     /// alive via that reference; this bounds the cache, not the icons already shown in the UI.
     /// </summary>
-    private void StoreInCache(string filePath, ImageSource icon, DateTime lastWriteTimeUtc)
+    private void StoreInCache(CacheKey key, ImageSource icon, DateTime lastWriteTimeUtc)
     {
         lock (_cacheLock)
         {
-            if (_cacheMap.TryGetValue(filePath, out var existing))
+            if (_cacheMap.TryGetValue(key, out var existing))
             {
                 _lruList.Remove(existing);
-                _cacheMap.Remove(filePath);
+                _cacheMap.Remove(key);
             }
 
-            var node = _lruList.AddFirst(new CacheEntry(filePath, icon, lastWriteTimeUtc));
-            _cacheMap[filePath] = node;
+            var node = _lruList.AddFirst(new CacheEntry(key, icon, lastWriteTimeUtc));
+            _cacheMap[key] = node;
 
             while (_cacheMap.Count > _maxCachedIcons && _lruList.Last is { } leastRecentlyUsed)
             {
                 _lruList.RemoveLast();
-                _cacheMap.Remove(leastRecentlyUsed.Value.FilePath);
+                _cacheMap.Remove(leastRecentlyUsed.Value.Key);
             }
         }
     }
 
-    private sealed record CacheEntry(string FilePath, ImageSource Icon, DateTime LastWriteTimeUtc);
+    /// <summary>
+    /// Cache key: the path (compared case-insensitively — Windows path semantics) plus the snapped pixel
+    /// size, since the same file shown by a 16 px list panel and a 96 px grid panel needs two bitmaps.
+    /// </summary>
+    /// <param name="FilePath">The item path as passed to <see cref="GetIcon(string, int)"/>.</param>
+    /// <param name="Size">The snapped pixel size (<see cref="IconPixelSize.Snap"/>).</param>
+    private readonly record struct CacheKey(string FilePath, int Size);
+
+    private sealed record CacheEntry(CacheKey Key, ImageSource Icon, DateTime LastWriteTimeUtc);
+
+    /// <summary>
+    /// Equality for <see cref="CacheKey"/>: ordinal-ignore-case path, exact size.
+    /// </summary>
+    private sealed class CacheKeyComparer : IEqualityComparer<CacheKey>
+    {
+        /// <summary>The shared instance.</summary>
+        public static readonly CacheKeyComparer Instance = new();
+
+        /// <inheritdoc />
+        public bool Equals(CacheKey x, CacheKey y)
+            => x.Size == y.Size && StringComparer.OrdinalIgnoreCase.Equals(x.FilePath, y.FilePath);
+
+        /// <inheritdoc />
+        public int GetHashCode(CacheKey obj)
+            => HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.FilePath), obj.Size);
+    }
 }

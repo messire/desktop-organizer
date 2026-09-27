@@ -13,6 +13,16 @@
           - Icon.Glyph.Overflow    <- new in C6 (U+E712, the standard Segoe MDL2 "More"/overflow glyph;
                                       no prior consumer to copy from — the header overflow button below
                                       is its first).
+          - Icon.Glyph.Checkmark   <- new in WP-B (docs/PLANS/color-presets-and-size-step.md §4.2, U+E73E,
+                                      the standard Segoe MDL2 "CheckMark" glyph) — PanelColorEditor's
+                                      selected-preset indicator; no prior consumer.
+          - Icon.Glyph.RollUp      <- release-polish-1.0 review round M4: PanelPreviewCard's own static
+                                      header row needs a fourth glyph alongside Sort/View/Overflow (the
+                                      real ChildWindow.xaml header has FOUR buttons — Sort, View, RollUp,
+                                      Overflow — the preview was missing the third). Byte-identical to
+                                      Icon.Glyph.ChevronUp (U+E70E) — the SAME codepoint
+                                      Converters/BoolToGlyphConverter.cs's RollUpGlyph renders for a panel
+                                      that is NOT currently rolled up (the default/preview state).
 
         The FontFamily string itself ("Segoe MDL2 Assets") stays a literal Setter in Controls.xaml /
         Templates.xaml, not here — this dictionary is <sys:String> codepoints only, per D-1.
@@ -23,4 +33,10 @@
     <sys:String x:Key="Icon.Glyph.ChevronDown">&#xE70D;</sys:String>
     <sys:String x:Key="Icon.Glyph.ChevronUp">&#xE70E;</sys:String>
     <sys:String x:Key="Icon.Glyph.Overflow">&#xE712;</sys:String>
+    <sys:String x:Key="Icon.Glyph.Checkmark">&#xE73E;</sys:String>
+    <sys:String x:Key="Icon.Glyph.RollUp">&#xE70E;</sys:String>
+
+    <!-- ADR-042: PanelColorEditor's swatch grid "Custom…" cell (a dashed ring + "+" glyph) — the standard
+         Segoe MDL2 "Add" glyph (U+E710), no prior consumer to copy from. -->
+    <sys:String x:Key="Icon.Glyph.Add">&#xE710;</sys:String>
 </ResourceDictionary>

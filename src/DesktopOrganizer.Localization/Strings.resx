@@ -104,16 +104,68 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <!-- ==== BEGIN SHARED (owner: WP-0S; docs/PLANS/localization.md §3.2/§3.3. Prefixes: Common_, Enum_,
-       Plural_, Language_, Page_, Panel_NewTitle, Snapshot_, SystemIcon_, Startup_, Restore_. Exception:
+  <!-- ==== BEGIN SHARED (owner: WP-0S; docs/PLANS/localization.md §3.2/§3.3. Prefixes: Common_, ColorPreset_,
+       Enum_, Plural_, Language_, Page_, Panel_NewTitle, Snapshot_, SystemIcon_, Startup_, Restore_. Exception:
        Settings_General_Language_Header/_Description are also seeded here — they are part of the C-5
        language-picker contract (§2.9) and must exist before WP-4a's Settings_ region (below) is ever
-       populated. WP-4a only *consumes* these two keys, it must not redefine them. ==== -->
+       populated. WP-4a only *consumes* these two keys, it must not redefine them. ColorPreset_ (ADR-042)
+       names the twelve PanelColorPresets, in spectrum order. ==== -->
+  <data name="ColorPreset_Red" xml:space="preserve">
+    <value>Red</value>
+  </data>
+  <data name="ColorPreset_Orange" xml:space="preserve">
+    <value>Orange</value>
+  </data>
+  <data name="ColorPreset_Amber" xml:space="preserve">
+    <value>Amber</value>
+  </data>
+  <data name="ColorPreset_Lime" xml:space="preserve">
+    <value>Lime</value>
+  </data>
+  <data name="ColorPreset_Green" xml:space="preserve">
+    <value>Green</value>
+  </data>
+  <data name="ColorPreset_Teal" xml:space="preserve">
+    <value>Teal</value>
+  </data>
+  <data name="ColorPreset_Cyan" xml:space="preserve">
+    <value>Cyan</value>
+  </data>
+  <data name="ColorPreset_Blue" xml:space="preserve">
+    <value>Blue</value>
+  </data>
+  <data name="ColorPreset_Violet" xml:space="preserve">
+    <value>Violet</value>
+  </data>
+  <data name="ColorPreset_Magenta" xml:space="preserve">
+    <value>Magenta</value>
+  </data>
+  <data name="ColorPreset_Graphite" xml:space="preserve">
+    <value>Graphite</value>
+  </data>
+  <data name="ColorPreset_Stone" xml:space="preserve">
+    <value>Stone</value>
+  </data>
+  <data name="Common_AccentColor_Label" xml:space="preserve">
+    <value>Accent color</value>
+  </data>
+  <data name="Common_Advanced_Description" xml:space="preserve">
+    <value>Hex values and reset</value>
+  </data>
+  <data name="Common_Advanced_Header" xml:space="preserve">
+    <value>Advanced</value>
+  </data>
   <data name="Common_Cancel_Button" xml:space="preserve">
     <value>Cancel</value>
   </data>
+  <data name="Common_CustomColor_Button" xml:space="preserve">
+    <value>Custom…</value>
+  </data>
   <data name="Common_EditLayout" xml:space="preserve">
     <value>Edit layout</value>
+  </data>
+  <data name="Common_HexColor_Hint" xml:space="preserve">
+    <value>Hex value, e.g. #3F7FD9</value>
   </data>
   <data name="Common_IconLayout_Header" xml:space="preserve">
     <value>Icon layout</value>
@@ -121,14 +173,35 @@
   <data name="Common_IconSize_Header" xml:space="preserve">
     <value>Icon size</value>
   </data>
+  <data name="Common_IntegerRange_Format" xml:space="preserve">
+    <value>Whole number from {0} to {1}</value>
+  </data>
   <data name="Common_LockLayout" xml:space="preserve">
     <value>Lock layout</value>
   </data>
   <data name="Common_LockedReason" xml:space="preserve">
     <value>Unavailable while the layout is locked.</value>
   </data>
+  <data name="Common_Mode_Description" xml:space="preserve">
+    <value>Switching the mode picks the matching text colour for this accent.</value>
+  </data>
+  <data name="Common_Mode_Header" xml:space="preserve">
+    <value>Mode</value>
+  </data>
   <data name="Common_Ok_Button" xml:space="preserve">
     <value>OK</value>
+  </data>
+  <data name="Common_PickAccentColor_A11y" xml:space="preserve">
+    <value>Choose a custom accent color</value>
+  </data>
+  <data name="Common_PickTextColor_A11y" xml:space="preserve">
+    <value>Choose a custom text color</value>
+  </data>
+  <data name="Common_PixelUnit_Label" xml:space="preserve">
+    <value>px</value>
+  </data>
+  <data name="Common_Preview_Header" xml:space="preserve">
+    <value>Preview</value>
   </data>
   <data name="Common_Remove_Button" xml:space="preserve">
     <value>Remove</value>
@@ -136,8 +209,20 @@
   <data name="Common_Rename" xml:space="preserve">
     <value>Rename</value>
   </data>
+  <data name="Common_ResetToDefaults_Button" xml:space="preserve">
+    <value>Reset to defaults</value>
+  </data>
+  <data name="Common_ResetToDefaults_Tooltip" xml:space="preserve">
+    <value>Reset to defaults</value>
+  </data>
+  <data name="Common_Surface_Header" xml:space="preserve">
+    <value>Surface</value>
+  </data>
   <data name="Common_SurfaceStyle_Header" xml:space="preserve">
-    <value>Surface style</value>
+    <value>Style</value>
+  </data>
+  <data name="Common_TextColor_Label" xml:space="preserve">
+    <value>Text color</value>
   </data>
   <data name="Common_ValuePx_Format" xml:space="preserve">
     <value>{0} px</value>
@@ -207,6 +292,12 @@
   </data>
   <data name="Enum_PanelSurfaceStyle_Solid" xml:space="preserve">
     <value>Solid</value>
+  </data>
+  <data name="Enum_PanelThemeMode_Dark" xml:space="preserve">
+    <value>Dark</value>
+  </data>
+  <data name="Enum_PanelThemeMode_Light" xml:space="preserve">
+    <value>Light</value>
   </data>
   <data name="Enum_PanelViewMode_Grid" xml:space="preserve">
     <value>Grid</value>
@@ -393,21 +484,6 @@
   </data>
   <data name="Panel_Confirm_ApplySizingMode_Title" xml:space="preserve">
     <value>Apply sizing mode to all panels</value>
-  </data>
-  <data name="Panel_FileMenu_Open" xml:space="preserve">
-    <value>Open</value>
-  </data>
-  <data name="Panel_FileMenu_OpenContainingFolder" xml:space="preserve">
-    <value>Open containing folder</value>
-  </data>
-  <data name="Panel_FileMenu_Properties" xml:space="preserve">
-    <value>Properties</value>
-  </data>
-  <data name="Panel_FileMenu_RemoveFromPanel" xml:space="preserve">
-    <value>Remove from panel</value>
-  </data>
-  <data name="Panel_FileMenu_RemoveFromPanel_Tooltip" xml:space="preserve">
-    <value>For files moved into the panel by dragging, the item is typically returned to its original location on disk. For others, it is simply removed from the panel.</value>
   </data>
   <data name="Panel_Header_More" xml:space="preserve">
     <value>More</value>
@@ -641,9 +717,6 @@
   <data name="Settings_Nav_SystemIcons" xml:space="preserve">
     <value>System icons</value>
   </data>
-  <data name="Settings_NewPanelDefaults_AccentColor_Label" xml:space="preserve">
-    <value>Accent color</value>
-  </data>
   <data name="Settings_NewPanelDefaults_Description" xml:space="preserve">
     <value>Seeds the appearance of every panel you create from here on. Existing panels are never affected.</value>
   </data>
@@ -659,6 +732,9 @@
   <data name="Settings_NewPanelDefaults_PanelGeometry_Header" xml:space="preserve">
     <value>Panel geometry</value>
   </data>
+  <data name="Settings_NewPanelDefaults_ResetColors_Description" xml:space="preserve">
+    <value>Restore the built-in colours.</value>
+  </data>
   <data name="Settings_NewPanelDefaults_SurfaceStyle_Description" xml:space="preserve">
     <value>Glass reads best on dark wallpapers; for light wallpapers, Solid or Ambient stay more readable.</value>
   </data>
@@ -670,9 +746,6 @@
   </data>
   <data name="Settings_NewPanelDefaults_Take_Button" xml:space="preserve">
     <value>Take</value>
-  </data>
-  <data name="Settings_NewPanelDefaults_TextColor_Label" xml:space="preserve">
-    <value>Text color</value>
   </data>
   <data name="Settings_Pages_AddPage_Button" xml:space="preserve">
     <value>Add page</value>
@@ -745,12 +818,6 @@
   </data>
   <!-- ==== END WP-4a ==== -->
   <!-- ==== BEGIN WP-4b Customize & dialogs (Customize_, Dialog_) ==== -->
-  <data name="Customize_AccentColor_Header" xml:space="preserve">
-    <value>Accent color (hex)</value>
-  </data>
-  <data name="Customize_Appearance_Header" xml:space="preserve">
-    <value>Appearance</value>
-  </data>
   <data name="Customize_AutoSizeToContentGridOnly_Description" xml:space="preserve">
     <value>Grid view only — unavailable in List view.</value>
   </data>
@@ -790,8 +857,20 @@
   <data name="Customize_IconLayout_Description" xml:space="preserve">
     <value>Fixed spacing keeps icons evenly gapped; Adaptive stretch spreads them to fill the panel (legacy).</value>
   </data>
+  <data name="Customize_PreviewItem1_Label" xml:space="preserve">
+    <value>Report.pdf</value>
+  </data>
+  <data name="Customize_PreviewItem2_Label" xml:space="preserve">
+    <value>Photo.png</value>
+  </data>
+  <data name="Customize_PreviewItem3_Label" xml:space="preserve">
+    <value>Notes.txt</value>
+  </data>
   <data name="Customize_Layout_Header" xml:space="preserve">
     <value>Layout</value>
+  </data>
+  <data name="Customize_ResetColors_Description" xml:space="preserve">
+    <value>Restore this panel to the new-panel defaults.</value>
   </data>
   <data name="Customize_SortMode_FolderPortal_Description" xml:space="preserve">
     <value>Folder Portal panels always sort by name.</value>
@@ -803,13 +882,10 @@
     <value>Manual keeps the order you arrange; By name sorts alphabetically.</value>
   </data>
   <data name="Customize_SurfaceOpacity_Header" xml:space="preserve">
-    <value>Surface opacity</value>
+    <value>Opacity</value>
   </data>
   <data name="Customize_SurfaceStyle_GlassHint_Description" xml:space="preserve">
     <value>Glass reads best on dark wallpapers; for light wallpapers, Solid or Ambient stay more readable.</value>
-  </data>
-  <data name="Customize_TextColor_Header" xml:space="preserve">
-    <value>Text color (hex)</value>
   </data>
   <data name="Customize_Title_Header" xml:space="preserve">
     <value>Title</value>

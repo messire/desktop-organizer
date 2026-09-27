@@ -191,4 +191,149 @@
     <DataTemplate x:Key="Settings.EnumRadioLabel">
         <TextBlock Text="{loc:LocBinding Converter={StaticResource EnumDisplayName}}" TextWrapping="Wrap"/>
     </DataTemplate>
+
+    <!--
+        ADR-042 "Segmented control" — a pill-shaped group of 2-3 mutually-exclusive RadioButtons (Mode
+        Light/Dark, Surface Style Solid/Ambient/Glass, View List/Grid, Sort Manual/Name), replacing a plain
+        RadioButton row/ComboBox wherever there are only 2-3 options. Container: a Settings.CardBorder-style
+        hairline Border around a UniformGrid of Settings.SegmentedItem RadioButtons, sharing one GroupName
+        per group (except the Mode group, which is VM-driven — see PanelColorEditor.xaml's own remarks).
+        Keyboard (release-polish-1.0 review round, corrected): WPF's <c>RadioButton</c> does NOT check the
+        newly-focused sibling on an arrow key by itself — arrow keys among same-<c>GroupName</c> siblings
+        only move KEYBOARD FOCUS; the focused segment is only actually SELECTED once Space/Enter (or a
+        click) fires it. Each segmented group's own <c>UniformGrid</c> sets
+        <c>KeyboardNavigation.TabNavigation="Once"</c> (one Tab stop for the whole group) and
+        <c>KeyboardNavigation.DirectionalNavigation="Contained"</c> (arrow keys cycle focus within the
+        group, never escaping it to a sibling control) — no custom KeyDown handling needed for either.
+    -->
+    <Style x:Key="Settings.SegmentedGroup" TargetType="Border">
+        <!-- A visible gray "track" (same translucent-black overlay token the sidebar/card hover states
+             already use) is required so the SELECTED segment's white fill (Brush.Settings.TabActiveBackground,
+             the same token the sidebar's own selected item uses) actually pops — without it, a white segment
+             on a white Settings.CardBorder card would be invisible. -->
+        <Setter Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Brush.Settings.CardBorder}"/>
+        <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
+        <Setter Property="CornerRadius" Value="{StaticResource Radius.Control}"/>
+        <Setter Property="Padding" Value="2"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <!--
+        Release-polish-1.0 visual review item 4: a Settings.CardBorder-styled Expander whose HEADER lives
+        INSIDE the card (chevron + title + description), replacing the old shape of a bare Expander.Header
+        floating above a separately-carded Content — that left the header with no card of its own and no
+        consistent bottom margin against the next card. Retemplates Expander entirely: the outer Border IS
+        the card (same Background/BorderBrush/BorderThickness/CornerRadius/Padding/Margin token values as
+        Settings.CardBorder, copied rather than reused via BasedOn since Border and Expander share no common
+        Style base), a borderless ToggleButton bound to IsExpanded hosts the header content (its own
+        ContentPresenter's ContentSource="Header", so callers set Expander.Header to any title/description
+        layout), and a chevron (Icon.Glyph.ChevronDown/Up, already declared in Icons.xaml) flips on
+        IsChecked. The body ContentPresenter defaults to ContentSource="Content" (WPF's own
+        HeaderedContentControl convention) and is only Visible while IsExpanded.
+    -->
+    <Style x:Key="Settings.CardExpander" TargetType="Expander">
+        <!-- m3 (release-polish-1.0 review round): the Expander itself is not a tab stop — only its own
+             HeaderToggle (below) is; this keeps Tab from landing on both the Expander AND its header
+             ToggleButton as two separate stops for what a user perceives as ONE clickable header. -->
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Expander">
+                    <Border Background="{StaticResource Brush.Settings.CardBackground}"
+                            BorderBrush="{StaticResource Brush.Settings.CardBorder}"
+                            BorderThickness="{StaticResource Thickness.Hairline}"
+                            CornerRadius="{StaticResource Radius.Control}"
+                            Padding="14,12"
+                            Margin="0,0,0,10">
+                        <StackPanel>
+                            <ToggleButton x:Name="HeaderToggle"
+                                          IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          AutomationProperties.Name="{Binding Path=(AutomationProperties.Name), RelativeSource={RelativeSource TemplatedParent}}"
+                                          Cursor="Hand"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          Padding="0"
+                                          HorizontalContentAlignment="Stretch">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="ToggleChrome" Background="Transparent" CornerRadius="{StaticResource Radius.Control}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="Chevron" Grid.Column="0" Margin="0,2,10,0"
+                                                           FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons" FontSize="10"
+                                                           VerticalAlignment="Top"
+                                                           Foreground="{StaticResource Brush.Settings.IconMuted}"
+                                                           Text="{StaticResource Icon.Glyph.ChevronDown}"/>
+                                                <ContentPresenter Grid.Column="1" ContentSource="Content" VerticalAlignment="Top"/>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Chevron" Property="Text" Value="{StaticResource Icon.Glyph.ChevronUp}"/>
+                                            </Trigger>
+                                            <!-- m3: a hover state — this header was previously entirely
+                                                 unresponsive to IsMouseOver, unlike every other clickable
+                                                 Settings-card affordance (SegmentedItem, sidebar items). -->
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="ToggleChrome" Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                                <ContentPresenter ContentSource="Header"/>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="ExpanderContent" Margin="0,10,0,0" Visibility="Collapsed"/>
+                        </StackPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsExpanded" Value="True">
+                            <Setter TargetName="ExpanderContent" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="Settings.SegmentedItem" TargetType="RadioButton">
+        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="Focusable" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Segment"
+                            Background="Transparent"
+                            CornerRadius="{StaticResource Radius.Control}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Segment" Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Segment" Property="Background" Value="{StaticResource Brush.Settings.TabActiveBackground}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Segment" Property="BorderBrush" Value="{StaticResource Brush.Border.Focus}"/>
+                            <Setter TargetName="Segment" Property="BorderThickness" Value="1"/>
+                        </Trigger>
+                        <!-- M6 (release-polish-1.0 review round): a disabled segment (e.g. the Sort group
+                             while the panel is a Folder Portal, PanelCustomizeWindow.xaml) previously had NO
+                             visual cue at all — this template never referenced IsEnabled, so a disabled
+                             RadioButton looked identical to an enabled one. -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 </ResourceDictionary>

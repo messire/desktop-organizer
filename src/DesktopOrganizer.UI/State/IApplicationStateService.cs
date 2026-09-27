@@ -45,6 +45,16 @@ public interface IApplicationStateService
     /// </summary>
     StateLoadStatus Load();
 
+    /// <summary>
+    /// The <see cref="StateLoadStatus"/> the most recent <see cref="Load"/> call returned — the same
+    /// value, retained for consumers that run after <c>Program.Main</c> already consumed <see cref="Load"/>'s
+    /// return value (e.g. <c>WindowManager.LoadWindowsState</c> deciding whether this is a genuine first
+    /// run, see <see cref="StateLoadStatus.FirstRun"/>'s own remarks). Not itself persisted — a
+    /// process-lifetime signal only, never written to the JSON document. <see cref="StateLoadStatus.Loaded"/>
+    /// (the enum's default) before <see cref="Load"/> has ever run.
+    /// </summary>
+    StateLoadStatus LastLoadStatus { get; }
+
     /// <summary>Every panel from the just-loaded document, already mapped to <see cref="ChildWindowModel"/>.</summary>
     IReadOnlyList<ChildWindowModel> Panels { get; }
 

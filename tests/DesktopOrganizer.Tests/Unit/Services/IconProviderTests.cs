@@ -64,7 +64,7 @@ public class IconProviderTests
     /// <summary>
     /// Ensures that GetIcon behaves correctly for various file paths.
     /// </summary>
-    /// <param name="filePath">The file path passed to <see cref="IconProvider.GetIcon"/>.</param>
+    /// <param name="filePath">The file path passed to <see cref="IconProvider.GetIcon(string, int)"/>.</param>
     /// <param name="iconHandle">The icon handle the mocked icon handler is set up to return for that path.</param>
     [Theory]
     [MemberData(nameof(GetIconTestData))]
@@ -446,7 +446,7 @@ public class IconProviderTests
 
     /// <summary>
     /// Verifies that when the shell lookup for a missing path with an unrecognized extension also fails,
-    /// <see cref="IconProvider.GetIcon"/> falls back to its own placeholder bitmap.
+    /// <see cref="IconProvider.GetIcon(string, int)"/> falls back to its own placeholder bitmap.
     /// </summary>
     [Fact]
     public void GetIcon_MissingPath_ShellLookupAlsoFails_FallsBackToOwnPlaceholder()
@@ -541,7 +541,7 @@ public class IconProviderTests
 
     /// <summary>
     /// Verifies that <see cref="IconProvider.IsPlaceholder"/> returns <see langword="true"/> for the icon
-    /// instance <see cref="IconProvider.GetIcon"/> itself hands back as its own placeholder.
+    /// instance <see cref="IconProvider.GetIcon(string, int)"/> itself hands back as its own placeholder.
     /// </summary>
     [Fact]
     public void IsPlaceholder_PlaceholderInstance_ReturnsTrue()
@@ -595,6 +595,375 @@ public class IconProviderTests
         _iconFactoryMock.Verify(f => f.CreateBitmap(), Times.Never);
     }
 
+    // ── release-polish 1.0: high-resolution fallback chain + size-aware cache ─────────────────────────
+
+    /// <summary>
+    /// Verifies that an existing path is resolved through the <c>IShellItemImageFactory</c> stage first, at the
+    /// snapped pixel size, without touching the two fallback stages, and that the bitmap handle is released.
+    /// </summary>
+    [Fact]
+    public void GetIcon_ExistingPath_UsesShellItemStageFirst_AtSnappedSize_AndReleasesBitmap()
+    {
+        var path = CreateTempFile("stage1");
+        try
+        {
+            var expected = new DrawingImage();
+            var bitmapHandle = SetupShellItemStage(path, 72, expected);
+
+            var result = _iconProvider.GetIcon(path, 70); // 70 px snaps up to the 72 px bucket
+
+            Assert.Same(expected, result);
+            _iconHandlerMock.Verify(h => h.GetShellItemBitmap(path, 72), Times.Once);
+            _iconHandlerMock.Verify(h => h.DestroyBitmapHandle(bitmapHandle), Times.Once);
+            _iconHandlerMock.Verify(h => h.GetSystemImageListIconHandle(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+            _iconHandlerMock.Verify(
+                h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, It.IsAny<FileAttribute>(), It.IsAny<FileFlag>()),
+                Times.Never);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that when the shell-item stage produces nothing, the system image list stage is used at the same
+    /// size and its <c>HICON</c> is destroyed after conversion; the generic by-extension lookup is not reached.
+    /// </summary>
+    [Fact]
+    public void GetIcon_ShellItemStageFails_FallsBackToSystemImageList_AndDestroysIcon()
+    {
+        var path = CreateTempFile("stage2");
+        try
+        {
+            var expected = new DrawingImage();
+            var iconHandle = new IntPtr(4242);
+            _iconHandlerMock.Setup(h => h.GetSystemImageListIconHandle(path, 48)).Returns(iconHandle);
+            _iconFactoryMock.Setup(f => f.CreateBitmap(iconHandle)).Returns(expected);
+
+            var result = _iconProvider.GetIcon(path, 48);
+
+            Assert.Same(expected, result);
+            _iconHandlerMock.Verify(h => h.GetShellItemBitmap(path, 48), Times.Once);
+            _iconHandlerMock.Verify(h => h.DestroyIconHandle(iconHandle), Times.Once);
+            _iconHandlerMock.Verify(
+                h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, It.IsAny<FileAttribute>(), It.IsAny<FileFlag>()),
+                Times.Never);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that a bitmap whose pixels cannot be read is still released, and the chain moves on.
+    /// </summary>
+    [Fact]
+    public void GetIcon_ShellItemPixelsUnreadable_ReleasesBitmap_AndFallsBack()
+    {
+        var path = CreateTempFile("unreadable");
+        try
+        {
+            var bitmapHandle = new IntPtr(777);
+            _iconHandlerMock.Setup(h => h.GetShellItemBitmap(path, 48)).Returns(bitmapHandle);
+            _iconHandlerMock.Setup(h => h.TryReadBitmapPixels(bitmapHandle, out It.Ref<NativeBitmapPixels>.IsAny)).Returns(false);
+
+            _iconProvider.GetIcon(path, 48);
+
+            _iconHandlerMock.Verify(h => h.DestroyBitmapHandle(bitmapHandle), Times.Once);
+            _iconHandlerMock.Verify(h => h.GetSystemImageListIconHandle(path, 48), Times.Once);
+            _iconFactoryMock.Verify(f => f.CreateBitmap(It.IsAny<NativeBitmapPixels>(), It.IsAny<int>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that an exception inside the shell-item stage is logged privacy-safely with its stage token,
+    /// the bitmap is still released, and the icon is served by the next stage instead of surfacing the error.
+    /// </summary>
+    [Fact]
+    public void GetIcon_ShellItemStageThrows_LogsStage_ReleasesBitmap_AndFallsBack()
+    {
+        var path = CreateTempFile("throws", ".exe");
+        try
+        {
+            var bitmapHandle = SetupShellItemStage(path, 48, new DrawingImage());
+            _iconFactoryMock
+                .Setup(f => f.CreateBitmap(It.IsAny<NativeBitmapPixels>(), It.IsAny<int>()))
+                .Throws(new InvalidOperationException($"boom {path}"));
+            var fallbackIcon = new DrawingImage();
+            var iconHandle = new IntPtr(99);
+            _iconHandlerMock.Setup(h => h.GetSystemImageListIconHandle(path, 48)).Returns(iconHandle);
+            _iconFactoryMock.Setup(f => f.CreateBitmap(iconHandle)).Returns(fallbackIcon);
+
+            var result = _iconProvider.GetIcon(path, 48);
+
+            Assert.Same(fallbackIcon, result);
+            _iconHandlerMock.Verify(h => h.DestroyBitmapHandle(bitmapHandle), Times.Once);
+
+            var write = Assert.Single(_diagnosticsWrites, w => w.Name == "IconRetrievalFailed");
+            Assert.Equal("shellItem", GetPayloadValue<string>(write.Payload, "stage"));
+            Assert.Equal(".exe", GetPayloadValue<string>(write.Payload, "extension"));
+            Assert.Equal(nameof(InvalidOperationException), GetPayloadValue<string>(write.Payload, "errorType"));
+            Assert.DoesNotContain(write.Payload, kv => kv.Value is string s && s.Contains(path, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Verifies the full fallback order for an existing path: shell item → system image list → by-extension
+    /// lookup, each attempted exactly once when every earlier stage fails.
+    /// </summary>
+    [Fact]
+    public void GetIcon_AllHighResolutionStagesFail_TriesStagesInOrder_ThenByExtensionLookup()
+    {
+        var path = CreateTempFile("order");
+        try
+        {
+            var calls = new List<string>();
+            _iconHandlerMock
+                .Setup(h => h.GetShellItemBitmap(path, It.IsAny<int>()))
+                .Callback(() => calls.Add("shellItem"))
+                .Returns(IntPtr.Zero);
+            _iconHandlerMock
+                .Setup(h => h.GetSystemImageListIconHandle(path, It.IsAny<int>()))
+                .Callback(() => calls.Add("imageList"))
+                .Returns(IntPtr.Zero);
+            _iconHandlerMock
+                .Setup(h => h.GetIconHandle(path, ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags))
+                .Callback(() => calls.Add("fileAttributes"))
+                .Returns(ValidIconHandle);
+            var expected = new DrawingImage();
+            _iconFactoryMock.Setup(f => f.CreateBitmap(It.IsAny<IntPtr>())).Returns(expected);
+
+            var result = _iconProvider.GetIcon(path, 96);
+
+            Assert.Same(expected, result);
+            Assert.Equal(new[] { "shellItem", "imageList", "fileAttributes" }, calls);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that a missing path keeps the pre-1.0 behavior: only the by-extension lookup, never the two
+    /// high-resolution stages (both need the item to exist), regardless of the requested size.
+    /// </summary>
+    [Fact]
+    public void GetIcon_MissingPath_NeverTriesHighResolutionStages()
+    {
+        const string missingPath = @"C:\fake\missing-high-res.lnk";
+        SetupIconHandlerForPath(missingPath, ValidIconHandle);
+        _iconFactoryMock.Setup(f => f.CreateBitmap(It.IsAny<IntPtr>())).Returns(new DrawingImage());
+
+        _iconProvider.GetIcon(missingPath, 256);
+
+        _iconHandlerMock.Verify(h => h.GetShellItemBitmap(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        _iconHandlerMock.Verify(h => h.GetSystemImageListIconHandle(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        _iconHandlerMock.Verify(
+            h => h.GetIconHandle(missingPath, ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that the cache key includes the (snapped) size: the same path at two sizes is fetched and cached
+    /// twice, and each size is served from its own entry afterwards.
+    /// </summary>
+    [Fact]
+    public void GetIcon_SamePathAtDifferentSizes_IsCachedPerSize()
+    {
+        var path = CreateTempFile("per-size");
+        try
+        {
+            var small = new DrawingImage();
+            var large = new DrawingImage();
+            SetupShellItemStage(path, 16, small);
+            SetupShellItemStage(path, 96, large);
+
+            var first16 = _iconProvider.GetIcon(path, 16);
+            var first96 = _iconProvider.GetIcon(path, 96);
+            var second16 = _iconProvider.GetIcon(path, 16);
+            var second96 = _iconProvider.GetIcon(path, 96);
+
+            Assert.Same(small, first16);
+            Assert.Same(large, first96);
+            Assert.Same(first16, second16);
+            Assert.Same(first96, second96);
+            _iconHandlerMock.Verify(h => h.GetShellItemBitmap(path, 16), Times.Once);
+            _iconHandlerMock.Verify(h => h.GetShellItemBitmap(path, 96), Times.Once);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that two requested sizes inside the same bucket share one cache entry (one shell round-trip).
+    /// </summary>
+    [Fact]
+    public void GetIcon_SizesInTheSameBucket_ShareOneCacheEntry()
+    {
+        var path = CreateTempFile("bucket");
+        try
+        {
+            SetupShellItemStage(path, 48, new DrawingImage());
+
+            var first = _iconProvider.GetIcon(path, 41);
+            var second = _iconProvider.GetIcon(path, 48);
+
+            Assert.Same(first, second);
+            _iconHandlerMock.Verify(h => h.GetShellItemBitmap(path, It.IsAny<int>()), Times.Once);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that the size-less overload requests <see cref="IconPixelSize.Default"/> pixels.
+    /// </summary>
+    [Fact]
+    public void GetIcon_WithoutSize_RequestsDefaultPixelSize()
+    {
+        var path = CreateTempFile("default-size");
+        try
+        {
+            var expected = new DrawingImage();
+            SetupShellItemStage(path, IconPixelSize.Default, expected);
+
+            var result = _iconProvider.GetIcon(path);
+
+            Assert.Same(expected, result);
+            _iconHandlerMock.Verify(h => h.GetShellItemBitmap(path, IconPixelSize.Default), Times.Once);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that the shell-item stage result for a freshness-sensitive file is re-read after the file's
+    /// last-write time changes (freshness applies per size entry too).
+    /// </summary>
+    [Fact]
+    public void GetIcon_ShellItemStage_RereadsFreshnessSensitiveFileAfterChange()
+    {
+        var path = CreateTempFile("fresh-hires", ".lnk");
+        try
+        {
+            SetupShellItemStage(path, 64, new DrawingImage());
+
+            _iconProvider.GetIcon(path, 64);
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(5));
+            _iconProvider.GetIcon(path, 64);
+
+            _iconHandlerMock.Verify(h => h.GetShellItemBitmap(path, 64), Times.Exactly(2));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// M4: UNC classification — plain and extended UNC forms skip the item-opening stages; local, extended-length
+    /// local and device paths do not.
+    /// </summary>
+    /// <param name="path">The path to classify.</param>
+    /// <param name="expected">Whether it is UNC.</param>
+    [Theory]
+    [InlineData(@"\\server\share\file.lnk", true)]
+    [InlineData(@"//server/share/file.lnk", true)]
+    [InlineData(@"\\?\UNC\server\share\file.lnk", true)]
+    [InlineData(@"\\.\UNC\server\share\file.lnk", true)]
+    [InlineData(@"\\?\C:\Users\me\file.lnk", false)]
+    [InlineData(@"\\.\C:\Users\me\file.lnk", false)]
+    [InlineData(@"C:\Users\me\file.lnk", false)]
+    [InlineData(@"relative\file.lnk", false)]
+    [InlineData("", false)]
+    [InlineData(@"\", false)]
+    public void IsUncPath_ClassifiesPaths(string path, bool expected)
+        => Assert.Equal(expected, IconProvider.IsUncPath(path));
+
+    /// <summary>
+    /// M4: offline and cloud-placeholder ("recall") attributes skip the item-opening stages; ordinary attributes and
+    /// the "invalid" value (-1) do not.
+    /// </summary>
+    /// <param name="attributes">Raw attribute bits.</param>
+    /// <param name="expected">Whether the content counts as remote.</param>
+    [Theory]
+    [InlineData(0x00001000, true)] // FILE_ATTRIBUTE_OFFLINE
+    [InlineData(0x00040000, true)] // FILE_ATTRIBUTE_RECALL_ON_OPEN
+    [InlineData(0x00400000, true)] // FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+    [InlineData(0x00400020, true)] // archive + recall on data access (a typical OneDrive online-only file)
+    [InlineData(0x00000020, false)] // archive
+    [InlineData(0x00000010, false)] // directory
+    [InlineData(0x00080000, false)] // FILE_ATTRIBUTE_PINNED (always keep on this device)
+    [InlineData(-1, false)]
+    public void HasRemoteContentAttributes_ClassifiesAttributes(int attributes, bool expected)
+        => Assert.Equal(expected, IconProvider.HasRemoteContentAttributes((System.IO.FileAttributes)attributes));
+
+    /// <summary>
+    /// M4: an ordinary local file keeps the high-resolution stages.
+    /// </summary>
+    [Fact]
+    public void ShouldSkipItemStages_LocalFile_IsFalse()
+    {
+        var path = CreateTempFile("local");
+        try
+        {
+            Assert.False(IconProvider.ShouldSkipItemStages(path, isFile: true));
+            Assert.False(IconProvider.ShouldSkipItemStages(Path.GetTempPath(), isFile: false));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// M4 end to end: an existing item marked OFFLINE never reaches the item-opening stages (shell item image /
+    /// system image list) — it goes straight to the attribute-based stage — so the UI thread cannot block on a
+    /// content recall.
+    /// </summary>
+    [Fact]
+    public void GetIcon_OfflineItem_SkipsItemStages_UsesAttributeStage()
+    {
+        var path = CreateTempFile("offline");
+        try
+        {
+            File.SetAttributes(path, File.GetAttributes(path) | System.IO.FileAttributes.Offline);
+            Assert.True(IconProvider.ShouldSkipItemStages(path, isFile: true));
+            var iconHandle = new IntPtr(4242);
+            SetupIconHandlerForPath(path, iconHandle);
+            var expected = new DrawingImage();
+            _iconFactoryMock.Setup(f => f.CreateBitmap(It.IsAny<IntPtr>())).Returns(expected);
+
+            var result = _iconProvider.GetIcon(path, 96);
+
+            Assert.Same(expected, result);
+            _iconHandlerMock.Verify(h => h.GetShellItemBitmap(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+            _iconHandlerMock.Verify(h => h.GetSystemImageListIconHandle(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+        }
+        finally
+        {
+            File.SetAttributes(path, System.IO.FileAttributes.Normal);
+            File.Delete(path);
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
     private static T GetPayloadValue<T>(KeyValuePair<string, object?>[] payload, string key)
         => (T)payload.Single(kv => kv.Key == key).Value!;
@@ -620,6 +989,23 @@ public class IconProviderTests
         => _iconHandlerMock
             .Setup(handler => handler.GetIconHandle(filePath, ref It.Ref<ShellFileInfo>.IsAny, fileAttributes, IconFlags))
             .Returns(iconHandle);
+
+    /// <summary>
+    /// Configures the shell-item stage (stage 1) to succeed for <paramref name="filePath"/> at exactly
+    /// <paramref name="size"/> pixels, producing <paramref name="icon"/>. Each size gets its own fake bitmap
+    /// handle and its own pixel buffer (identified by its width), so per-size behavior is observable.
+    /// </summary>
+    /// <returns>The fake <c>HBITMAP</c> handed out for this size.</returns>
+    private IntPtr SetupShellItemStage(string filePath, int size, ImageSource icon)
+    {
+        var bitmapHandle = new IntPtr(100_000 + size);
+        var pixels = new NativeBitmapPixels(size, size, new byte[size * size * 4]);
+
+        _iconHandlerMock.Setup(h => h.GetShellItemBitmap(filePath, size)).Returns(bitmapHandle);
+        _iconHandlerMock.Setup(h => h.TryReadBitmapPixels(bitmapHandle, out pixels)).Returns(true);
+        _iconFactoryMock.Setup(f => f.CreateBitmap(It.Is<NativeBitmapPixels>(p => p.Width == size), size)).Returns(icon);
+        return bitmapHandle;
+    }
 
     private ShellFileInfo SetupMocks(string filePath, IntPtr iconHandle, DrawingImage expectedIcon)
     {

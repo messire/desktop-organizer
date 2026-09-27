@@ -412,3 +412,19 @@ ViewModel-типов.
 пункт R1 выше (реальный ввод текста в `TextBox` под `WS_EX_NOACTIVATE`) и подсветка выделения на разных
 `BackgroundColor`/`BackgroundOpacity`, поскольку оба поведения принципиально не воспроизводимы без
 живого Windows-десктопа.
+
+---
+
+## Amendment (2026-09-27, release polish 1.0 — ADR-040)
+
+Решение 6 выше говорит: «Контекстное меню `FileContextMenu` получило пункт «Переименовать» по
+существующему паттерну `PlacementTarget.Tag.BeginRenameCommand»`. [ADR-040](ADR-040-native-shell-context-menu.md)
+удалил `FileContextMenu` целиком, заменив собственное WPF-меню файла нативным shell-меню
+(`IFileLauncher.ShowContextMenu`). Пункт «Переименовать» никуда не делся с точки зрения пользователя —
+нативное shell-меню тоже показывает «Переименовать» (стандартный shell-verb `rename`) — но теперь эта
+команда **перехватывается** в `ChildWindowViewModel.ShowShellContextMenu` (проверка канонического verb'а
+`rename`) и вызывает тот же `BeginRename`/`EditingItem`-механизм этого Решения напрямую, минуя
+`PlacementTarget.Tag.BeginRenameCommand`-биндинг (у нативного меню нет `PlacementTarget`). `F2` не
+изменился. Сам механизм inline-редактора (`EditingItem`/`EditingName`/`RenameEditBehavior`,
+`RenameResult`/`RenameOutcome`, двухфазная запись manifest Решения 5) не затронут этим изменением —
+изменился только вызывающий путь для варианта «через контекстное меню».

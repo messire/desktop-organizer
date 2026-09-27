@@ -1,3 +1,4 @@
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
@@ -242,7 +243,9 @@ public class PanelCustomizeServiceTests
             new Mock<IWindowManager>().Object,
             BuildAlwaysUnlockedLayoutEditMode(),
             new Mock<IFolderPickerService>().Object,
-            TestLocalization.English);
+            TestLocalization.English,
+            new Mock<IColorPickerService>().Object,
+            new Mock<IAppSettings>().Object);
 
         public event EventHandler? Closed;
 

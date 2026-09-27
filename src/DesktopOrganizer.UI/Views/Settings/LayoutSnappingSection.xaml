@@ -5,6 +5,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
              xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <StackPanel>
@@ -29,24 +30,29 @@
                               IsChecked="{Binding SnapToGridEnabled, Mode=TwoWay}"/>
                 </Grid>
 
-                <!-- M-6 fix (docs/prompts/settings-window-redesign.md fix-cycle): Minimum is 2 (not 4) so a
-                     legacy GridSize of 2 or 3 — persisted before this window existed — is shown unchanged
-                     instead of the Slider silently coercing it up to 4 and writing that back on open (see
-                     GlobalDefaultsViewModelTests.LegacyGridSizeTwoOrThree_IsShownUnchanged). Delay=300 on
-                     the binding means dragging only commits (and saves) once the drag settles, not once
-                     per pixel of travel. -->
+                <!-- M-6 fix (docs/prompts/settings-window-redesign.md fix-cycle): Minimum is
+                     SizeStepPolicy.GridStepMinimum (2, not a multiple of Step) so a legacy GridSize of 2
+                     or 3 — persisted before this window existed — is shown unchanged instead of being
+                     coerced up and written back on open (see
+                     GlobalDefaultsViewModelTests.LegacyGridSizeTwoOrThree_IsShownUnchanged;
+                     SteppedValueEditor never writes back on load — docs/PLANS/color-presets-and-size-step.md
+                     §5.3). Delay=300 on the binding means dragging only commits (and saves) once the drag
+                     settles, not once per crossed step. -->
+                <!-- M-1 fix (review round): the grid-step editor previously had no visible caption of its
+                     own (only an AutomationName) — add a TextBlock using the same existing
+                     Settings_Layout_GridStep_Label key, matching the icon-size row's own
+                     "label | editor" column layout (NewPanelDefaultsSection.xaml). -->
                 <Grid Margin="0,10,0,0" IsEnabled="{Binding SnapToGridEnabled}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="50"/>
+                        <ColumnDefinition Width="220"/>
                     </Grid.ColumnDefinitions>
-                    <Slider Grid.Column="0" Minimum="2" Maximum="128" TickFrequency="4"
-                            SmallChange="1" LargeChange="4"
-                            AutomationProperties.Name="{loc:Loc Settings_Layout_GridStep_Label}"
-                            Value="{Binding GridStep, Mode=TwoWay, Delay=300}" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                    <TextBlock Grid.Column="1"
-                               Text="{loc:LocBinding GridStep, FormatKey=Common_ValuePx_Format}"
-                               VerticalAlignment="Center" TextAlignment="Right"/>
+                    <TextBlock Grid.Column="0" Text="{loc:Loc Settings_Layout_GridStep_Label}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
+                    <controls:SteppedValueEditor Grid.Column="1" VerticalAlignment="Center"
+                                                  Minimum="{x:Static models:SizeStepPolicy.GridStepMinimum}"
+                                                  Maximum="{x:Static models:SizeStepPolicy.GridStepMaximum}"
+                                                  AutomationName="{loc:Loc Settings_Layout_GridStep_Label}"
+                                                  Value="{Binding GridStep, Mode=TwoWay, Delay=300}"/>
                 </Grid>
             </StackPanel>
         </Border>

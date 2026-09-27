@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State;
@@ -182,6 +183,86 @@ public class WindowManagerTests
         Assert.Equal([@"C:\ManagedRoot\a.lnk"], blocked.Remaining);
 
         Assert.True(PanelRemovalResult.Blocked([]).IsRemoved);
+    }
+
+    // ── ShouldCreateFirstRunPanel (first-run empty-panel seeding) ──────────────────
+
+    /// <summary>
+    /// Verifies that a genuine first run — no panels restored AND the load that produced that empty
+    /// list is <see cref="StateLoadStatus.FirstRun"/> (no JSON store existed yet, legacy
+    /// <c>user.config</c> was empty/default) — is the one case that seeds the welcome panel.
+    /// </summary>
+    [Fact]
+    public void ShouldCreateFirstRunPanel_FreshInstall_ReturnsTrue()
+    {
+        Assert.True(WindowManager.ShouldCreateFirstRunPanel(existingPanelCount: 0, StateLoadStatus.FirstRun));
+    }
+
+    /// <summary>
+    /// Verifies that an empty-but-EXISTING document — the user deliberately deleted every panel —
+    /// never re-seeds one. That document loaded as <see cref="StateLoadStatus.Loaded"/>, not
+    /// <see cref="StateLoadStatus.FirstRun"/>, even though <c>Panels.Count</c> is also zero.
+    /// </summary>
+    [Fact]
+    public void ShouldCreateFirstRunPanel_EmptyButExistingDocument_ReturnsFalse()
+    {
+        Assert.False(WindowManager.ShouldCreateFirstRunPanel(existingPanelCount: 0, StateLoadStatus.Loaded));
+    }
+
+    /// <summary>
+    /// Verifies that a non-empty panel list never seeds an extra panel, even if (hypothetically) the
+    /// load status were <see cref="StateLoadStatus.FirstRun"/> — the count gate is checked independently
+    /// of the status.
+    /// </summary>
+    [Fact]
+    public void ShouldCreateFirstRunPanel_PanelsAlreadyExist_ReturnsFalse()
+    {
+        Assert.False(WindowManager.ShouldCreateFirstRunPanel(existingPanelCount: 1, StateLoadStatus.FirstRun));
+    }
+
+    /// <summary>
+    /// Verifies that the read-only "newer schema" rung (ADR-024 D-7 step 7 — this build is older than
+    /// whatever last wrote the file, and <see cref="IApplicationStateStore.IsWritable"/> is
+    /// permanently <see langword="false"/> for the session) never seeds a panel: the empty payload it
+    /// reports is a build-can't-read-this signal, not "nothing configured yet", and any write here
+    /// would be silently dropped anyway.
+    /// </summary>
+    [Fact]
+    public void ShouldCreateFirstRunPanel_NewerSchemaReadOnlySession_ReturnsFalse()
+    {
+        Assert.False(WindowManager.ShouldCreateFirstRunPanel(existingPanelCount: 0, StateLoadStatus.NewerSchema));
+    }
+
+    /// <summary>
+    /// Verifies that a quarantined document (both primary and <c>.bak</c> were unusable) never seeds a
+    /// panel — the real panels may still be recoverable from the quarantined file, so inventing a new
+    /// one would be misleading, not helpful.
+    /// </summary>
+    [Fact]
+    public void ShouldCreateFirstRunPanel_Quarantined_ReturnsFalse()
+    {
+        Assert.False(WindowManager.ShouldCreateFirstRunPanel(existingPanelCount: 0, StateLoadStatus.Quarantined));
+    }
+
+    /// <summary>
+    /// Verifies that a backup-recovered document never seeds a panel — <c>.bak</c> was successfully
+    /// loaded and migrated, so this is a recovered EXISTING install, not a fresh one, even if that
+    /// backup itself happened to contain zero panels.
+    /// </summary>
+    [Fact]
+    public void ShouldCreateFirstRunPanel_RecoveredFromBackup_ReturnsFalse()
+    {
+        Assert.False(WindowManager.ShouldCreateFirstRunPanel(existingPanelCount: 0, StateLoadStatus.RecoveredFromBackup));
+    }
+
+    /// <summary>
+    /// Verifies that a legacy <c>user.config</c> import never seeds an extra panel — that import path
+    /// already produced whatever structural state the legacy install actually had.
+    /// </summary>
+    [Fact]
+    public void ShouldCreateFirstRunPanel_ImportedFromLegacy_ReturnsFalse()
+    {
+        Assert.False(WindowManager.ShouldCreateFirstRunPanel(existingPanelCount: 0, StateLoadStatus.ImportedFromLegacy));
     }
 
     // ── ClampIntoMonitor ─────────────────────────────────────────────────────────

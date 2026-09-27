@@ -31,8 +31,9 @@ original file back where it came from.
    [Releases](https://github.com/messire/DesktopOrganizer) page.
 2. Run it. No administrator rights are requested — the app only ever touches your own user profile
    (`HKCU` and your desktop), so it installs per-user under `%LocalAppData%\Programs\DesktopOrganizer`.
-3. On first run it creates one panel with icons found on your desktop. Drag things in and out, right-click
-   a panel's title bar for options, and right-click the tray icon for global settings.
+3. On first run it creates one empty panel so you have something to start with. Drag desktop icons into
+   it (and out again any time), right-click a panel's title bar for options, and right-click the tray
+   icon for global settings.
 4. Windows SmartScreen may warn "Unknown publisher" the first time you run an unsigned build — this is
    expected for an installer without a purchased code-signing certificate; click "More info" → "Run
    anyway" if you trust the source you downloaded it from.
@@ -97,13 +98,17 @@ bug report.
 |---|---|
 | `--diag` | Enables verbose diagnostics logging for this run (see above). |
 | `--restore-state-backup` | Restores your layout from the most recent automatic backup instead of the live state file — use this if a previous run's state file was corrupted (the app already keeps rolling `.bak` copies made on every successful save). Prints what it did to the console and to the log, then exits; start the app normally afterwards. |
+| `--restore-panel-items` | Returns every file/folder currently moved into the app's managed `PanelItems` storage to its original location (or the desktop, if that location is gone) — run automatically by the uninstaller, not meant to be typed by hand. |
 
 ## Uninstall
 
-Uninstalling through "Apps & features" removes the installed program files only. Your pages, panels,
-layout, moved-in files (`PanelItems`), settings, and logs under `%LocalAppData%\DesktopOrganizer` are
-**left in place** — reinstalling the same version later picks up right where you left off. Delete that
-folder yourself if you want a truly clean removal.
+Uninstalling through "Apps & features" removes the installed program files. Before that, it also
+automatically returns every file/folder you had dragged into a panel (moved into the app's managed
+`PanelItems` storage under `%LocalAppData%\DesktopOrganizer`) back to its original location — or to your
+desktop, if that original location is gone, on a different drive, or already occupied by something else
+— so nothing is stranded in a hidden folder. Your layout/settings under `State\` and the diagnostics log
+files under `Logs\` are **left in place** — reinstalling the same version later picks up right where you
+left off. Delete `%LocalAppData%\DesktopOrganizer` yourself if you want a truly clean removal.
 
 ## Known limitations
 
@@ -126,7 +131,7 @@ folder yourself if you want a truly clean removal.
 
 ## License
 
-[MIT](LICENSE) — Copyright (c) 2024-2026 messire. Support/source: <https://github.com/messire>.
+[MIT](LICENSE) — Copyright (c) 2024-2026 khagen. Support/source: <https://github.com/messire>.
 
 ---
 
@@ -153,9 +158,9 @@ DesktopOrganizer тихо работает из трея и позволяет �
    [Releases](https://github.com/messire/DesktopOrganizer).
 2. Запусти. Права администратора не требуются — приложение работает только с твоим профилем (`HKCU` и
    рабочим столом), поэтому ставится по пользователю в `%LocalAppData%\Programs\DesktopOrganizer`.
-3. При первом запуске создаётся одна панель со значками, найденными на рабочем столе. Перетаскивай файлы
-   туда и обратно, правый клик по заголовку панели — опции панели, правый клик по значку в трее — общие
-   настройки.
+3. При первом запуске создаётся одна пустая панель — чтобы было с чего начать. Перетащи в неё значки
+   с рабочего стола (и обратно — в любой момент), правый клик по заголовку панели — опции панели, правый
+   клик по значку в трее — общие настройки.
 4. Windows SmartScreen может показать предупреждение «Неизвестный издатель» при первом запуске
    неподписанной сборки — это ожидаемо для инсталлятора без купленного сертификата подписи кода; нажми
    «Дополнительно» → «Выполнить в любом случае», если доверяешь источнику, откуда скачал.
@@ -220,13 +225,17 @@ JSON Lines, до 10 файлов по 10 МБ) в `%LOCALAPPDATA%\DesktopOrganiz
 |---|---|
 | `--diag` | Включает подробное диагностическое логирование для этого запуска (см. выше). |
 | `--restore-state-backup` | Восстанавливает раскладку из последнего автоматического бэкапа вместо текущего файла состояния — используй, если файл состояния из прошлого запуска повреждён (приложение уже хранит цепочку `.bak`-копий, создаваемых при каждом успешном сохранении). Печатает результат в консоль и в лог, затем завершается; после этого запусти приложение как обычно. |
+| `--restore-panel-items` | Возвращает все файлы/папки, перемещённые в управляемое хранилище `PanelItems`, обратно на исходное место (или на рабочий стол, если исходное место исчезло) — запускается автоматически деинсталлятором, вручную вводить не нужно. |
 
 ## Удаление
 
-Удаление через «Программы и компоненты» убирает только файлы самой программы. Страницы, панели,
-раскладка, перемещённые файлы (`PanelItems`), настройки и логи под `%LocalAppData%\DesktopOrganizer`
-**остаются на месте** — переустановка той же версии позже продолжит с того же места. Удали эту папку
-вручную, если нужна полностью чистая деинсталляция.
+Удаление через «Программы и компоненты» убирает файлы самой программы. Перед этим оно также
+автоматически возвращает все файлы/папки, перетащенные в панели (перемещённые в управляемое хранилище
+`PanelItems` под `%LocalAppData%\DesktopOrganizer`), обратно на исходное место — или на рабочий стол,
+если исходное место исчезло, находится на другом диске, или уже занято чем-то другим — так что ничего не
+остаётся забытым в скрытой папке. Раскладка/настройки под `State\` и файлы диагностического лога под
+`Logs\` **остаются на месте** — переустановка той же версии позже продолжит с того же места. Удали
+`%LocalAppData%\DesktopOrganizer` вручную, если нужна полностью чистая деинсталляция.
 
 ## Известные ограничения
 
@@ -250,4 +259,4 @@ JSON Lines, до 10 файлов по 10 МБ) в `%LOCALAPPDATA%\DesktopOrganiz
 
 ## Лицензия
 
-[MIT](LICENSE) — Copyright (c) 2024-2026 messire. Поддержка/исходники: <https://github.com/messire>.
+[MIT](LICENSE) — Copyright (c) 2024-2026 khagen. Поддержка/исходники: <https://github.com/messire>.

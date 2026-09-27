@@ -3,6 +3,7 @@
                     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                     xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
                     xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
+                    xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
                     mc:Ignorable="po">
     <!--
         Ambient Accent Visual System — brush tokens over Colors.xaml (D-1). Every brush below is
@@ -12,6 +13,17 @@
         thread-safe and immutable, and every consumer of these tokens shares the exact same instance
         instead of paying for a per-element clone.
     -->
+
+    <!-- docs/PLANS/color-presets-and-size-step.md WP-B "ADDITIONAL": Q-1 variant B (SurfaceComposer's
+         light neutral base for a light accent) made every fixed, light-on-dark chrome token this app
+         ships (header icon buttons' Brush.Text.Secondary Foreground, the overlay scrollbar's
+         Brush.ScrollBar.* fills, PanelItemContainerStyle's own Foreground fallback) read at ~1.4:1
+         against a light-accent panel's now-light surface. This converter picks a dark-on-light token set
+         instead, from the SAME accent-luminance rule SurfaceComposer.ResolveNeutralBase already applies
+         — see PanelChromeForegroundPolicy's own remarks. Registered here (earlier than Controls.xaml,
+         where its consumers mostly live) so Typography.xaml — merged BEFORE Controls.xaml, per this
+         file's own top-of-file merge-order note — can also resolve it for Typography.Caption. -->
+    <conv:PanelChromeForegroundBrushConverter x:Key="PanelChromeForegroundBrush"/>
     <SolidColorBrush x:Key="Brush.Surface.Base" Color="{StaticResource Color.Surface.Base}" po:Freeze="True"/>
     <SolidColorBrush x:Key="Brush.Surface.Elevated" Color="{StaticResource Color.Surface.Elevated}" po:Freeze="True"/>
 

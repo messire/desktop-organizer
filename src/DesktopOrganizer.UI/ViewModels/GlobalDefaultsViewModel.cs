@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Windows.Input;
+using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 
@@ -16,6 +18,7 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
 {
     private readonly IAppSettings _appSettings;
     private readonly IWindowManager _windowManager;
+    private readonly IColorPickerService _colorPicker;
 
     // Settings-window redesign (docs/prompts/settings-window-redesign.md, "Layout & snapping"): the last
     // non-1 GridSize the user had before toggling snapping off, so re-enabling the "Snap panel position
@@ -36,14 +39,34 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
     /// <see cref="IAppSettings.GridSize"/> lattice right after it changes — see the
     /// <see cref="GridSize"/> setter.
     /// </param>
-    public GlobalDefaultsViewModel(IAppSettings appSettings, IWindowManager windowManager)
+    /// <param name="colorPicker">Backs <see cref="DefaultColors"/>' "Custom…" commands (docs/PLANS/color-presets-and-size-step.md §3.7).</param>
+    public GlobalDefaultsViewModel(IAppSettings appSettings, IWindowManager windowManager, IColorPickerService colorPicker)
     {
         _appSettings = appSettings;
         _windowManager = windowManager;
+        _colorPicker = colorPicker;
+
+        DefaultColors = new PanelColorEditorViewModel(
+            _colorPicker,
+            () => DefaultBackgroundColor,
+            v => DefaultBackgroundColor = v,
+            () => DefaultTextColor,
+            v => DefaultTextColor = v,
+            SetDefaultColors,
+            resetDescriptionKey: "Settings_NewPanelDefaults_ResetColors_Description");
+
+        SetDefaultSurfaceStyleCommand = new RelayCommand<PanelSurfaceStyle>(style => DefaultSurfaceStyle = style);
     }
 
     /// <summary>
-    /// Snap-to-grid cell size in pixels. 1 = no snapping, 4–128 = snap.
+    /// The "New panel defaults" section's accent/text colour editor (docs/PLANS/color-presets-and-size-step.md
+    /// §3.7) — presets, "Custom…", and the advanced hex boxes, all proxying <see cref="DefaultBackgroundColor"/>/
+    /// <see cref="DefaultTextColor"/>.
+    /// </summary>
+    public PanelColorEditorViewModel DefaultColors { get; }
+
+    /// <summary>
+    /// Snap-to-grid cell size in pixels. 1 = no snapping, 2–128 = snap.
     /// </summary>
     /// <remarks>
     /// ADR-011 Amendment (2026-09-24): changing this setting re-aligns every currently open panel onto the
@@ -153,18 +176,30 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Default background colour (hex) for new panels.</summary>
+    /// <summary>
+    /// Default background colour (hex) for new panels. Setting it directly (bypassing
+    /// <see cref="DefaultColors"/>'s own accent proxy — e.g. via <c>MainWindowViewModel</c>'s legacy
+    /// forwarding property) still refreshes <see cref="DefaultColors"/>' selected-preset highlight.
+    /// </summary>
     public string DefaultBackgroundColor
     {
         get => _appSettings.DefaultBackgroundColor;
-        set => SetGlobal(v => _appSettings.DefaultBackgroundColor = v, value, _appSettings.DefaultBackgroundColor, nameof(DefaultBackgroundColor));
+        set
+        {
+            if (SetGlobal(v => _appSettings.DefaultBackgroundColor = v, value, _appSettings.DefaultBackgroundColor, nameof(DefaultBackgroundColor)))
+                DefaultColors.Refresh();
+        }
     }
 
-    /// <summary>Default text colour (hex) for new panels.</summary>
+    /// <summary>Default text colour (hex) for new panels. Same direct-set refresh note as <see cref="DefaultBackgroundColor"/>.</summary>
     public string DefaultTextColor
     {
         get => _appSettings.DefaultTextColor;
-        set => SetGlobal(v => _appSettings.DefaultTextColor = v, value, _appSettings.DefaultTextColor, nameof(DefaultTextColor));
+        set
+        {
+            if (SetGlobal(v => _appSettings.DefaultTextColor = v, value, _appSettings.DefaultTextColor, nameof(DefaultTextColor)))
+                DefaultColors.Refresh();
+        }
     }
 
     /// <summary>Default opacity (0–1) for new panels.</summary>
@@ -200,8 +235,15 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
             nameof(DefaultSurfaceStyle));
     }
 
-    /// <summary>Available options for the default-surface-style selector (settings window).</summary>
-    public IReadOnlyList<PanelSurfaceStyle> SurfaceStyleOptions { get; } = Enum.GetValues<PanelSurfaceStyle>();
+    /// <summary>
+    /// Sets <see cref="DefaultSurfaceStyle"/> from a <see cref="PanelSurfaceStyle"/> command parameter —
+    /// backs the "New panel defaults" section's Surface style segmented control (release-polish-1.0 visual
+    /// review item 5, replacing its previous enum-options-bound ComboBox — that options list is now dead
+    /// code, removed per m8), mirroring
+    /// <see cref="SelectedPanelSettingsViewModel.SetSurfaceStyleCommand"/>'s exact Command+CommandParameter
+    /// shape and the SAME <see cref="DefaultSurfaceStyle"/> read/write path the ComboBox it replaces used.
+    /// </summary>
+    public ICommand SetDefaultSurfaceStyleCommand { get; }
 
     /// <summary>
     /// Which panel move/resize gestures remain available while <see cref="ILayoutEditModeService.Mode"/>
@@ -291,6 +333,24 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
         changed |= SetGlobalNoSave(v => _appSettings.DefaultIconLayoutPolicy = v.ToString(), panel.IconLayoutPolicy, DefaultIconLayoutPolicy, nameof(DefaultIconLayoutPolicy));
 
         if (changed) _appSettings.Save();
+        if (changed) DefaultColors.Refresh();
+    }
+
+    /// <summary>
+    /// Applies a colour-preset pair to the new-panel defaults atomically (docs/PLANS/color-presets-and-size-step.md
+    /// §3.7) — the <see cref="DefaultColors"/> equivalent of <see cref="ApplyFromPanel"/>'s own batching:
+    /// both <see cref="DefaultBackgroundColor"/> and <see cref="DefaultTextColor"/> are written via
+    /// <see cref="SetGlobalNoSave{T}"/> and persisted with exactly one <see cref="IAppSettings.Save"/>.
+    /// </summary>
+    /// <param name="accent">The preset's accent colour, canonical uppercase <c>#RRGGBB</c>.</param>
+    /// <param name="text">The preset's text colour, canonical uppercase <c>#RRGGBB</c>.</param>
+    private void SetDefaultColors(string accent, string text)
+    {
+        var changed = false;
+        changed |= SetGlobalNoSave(v => _appSettings.DefaultBackgroundColor = v, accent, DefaultBackgroundColor, nameof(DefaultBackgroundColor));
+        changed |= SetGlobalNoSave(v => _appSettings.DefaultTextColor = v, text, DefaultTextColor, nameof(DefaultTextColor));
+
+        if (changed) _appSettings.Save();
     }
 
     /// <summary>
@@ -309,10 +369,13 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
         return true;
     }
 
-    private void SetGlobal<T>(Action<T> apply, T newValue, T current, string propertyName)
+    /// <returns><see langword="true"/> iff the value actually changed (and was therefore applied and saved).</returns>
+    private bool SetGlobal<T>(Action<T> apply, T newValue, T current, string propertyName)
     {
-        if (SetGlobalNoSave(apply, newValue, current, propertyName))
-            _appSettings.Save();
+        if (!SetGlobalNoSave(apply, newValue, current, propertyName)) return false;
+
+        _appSettings.Save();
+        return true;
     }
 
     private void OnPropertyChanged(string propertyName)

@@ -81,6 +81,7 @@ public static class DiConfig
         services.AddSingleton<IIconFactory, IconFactory>();
         services.AddSingleton<INativeApi, NativeApi>();
         services.AddSingleton<INotifyIconAdapter, NotifyIconAdapter>();
+        services.AddSingleton<IColorPickerService, ColorPickerService>();
 
         // Shared always-eventually-real sink (ADR-033 part 1): owns the single JsonLinesDiagnosticsLog
         // instance both IDiagnosticsLog (Verbose level only, below) and IAppLog (always, regardless of
@@ -124,6 +125,12 @@ public static class DiConfig
         services.AddSingleton<ISystemShellService, SystemShellService>();
         services.AddSingleton<IPanelItemStorageService, PanelItemStorageService>();
         services.AddSingleton<IFileItemRenameService, FileItemRenameService>();
+
+        // Manual uninstall-time recovery switch (--restore-panel-items). Standalone — never resolved
+        // as part of the normal Program.Main startup ordering, only when that command-line switch is
+        // present (wired into the installer's [UninstallRun], see Program.cs).
+        services.AddSingleton<IPanelItemsUninstallRestorer>(sp =>
+            new PanelItemsUninstallRestorer(sp.GetRequiredService<IAppLog>()));
 
         // Manual "check for updates" (release-hardening-1.0.md §G2) — owns its own HttpClient, disposed with the root ServiceProvider.
         services.AddSingleton<IUpdateCheckService, DesktopOrganizer.Services.Updates.GitHubReleaseUpdateChecker>();

@@ -108,7 +108,7 @@ fences-feature-planner (мастер-план всей фазы)
   `Services` (реализации, нативный interop в `Tools/`) → `UI` (Views/ViewModels/Models/Converters/Commands).
 - **Инварианты:** P/Invoke только за `INativeApi`; колбэк хука `WH_MOUSE_LL` — минимум работы + try/catch;
   единый источник правды вида панели — `ChildWindowModel` (INPC); битые пути не валят загрузку.
-- **Готовность:** ROADMAP Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» (ADR-033–038) закрыта, ждёт manual verify (Win10/Win11); открыты сквозные задачи.
+- **Готовность:** ROADMAP Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» (ADR-033–038) закрыта; manual verify выполнена на Windows 11 (2026-09-27); открыты сквозные задачи.
 
 ## 🔒 Настройки и persistence — ЗАМОРОЖЕНЫ (не трогать без явного разрешения пользователя)
 
@@ -117,6 +117,10 @@ ADR-024: `application-state.json` (`StateEnvelope`, **schemaVersion = 5**), ле
 (`Migrations/V*To*`), `JsonApplicationStateStore` (атомарная запись, бэкапы, карантин, advisory lock,
 rung «newer schema → read-only»), `PanelStateMapper`/DTO, `ApplicationStateService`, `IAppSettings`/
 `AppSettings`/`Settings.settings`/`user.config`, `LayoutSnapshotService`, путей в `%LOCALAPPDATA%\DesktopOrganizer`.
+С 2026-09-28 (явное разрешение пользователя, ADR-038 amendment) `user.config`-папка — `%LOCALAPPDATA%\
+khagendev\...`, а не `%LOCALAPPDATA%\DesktopOrganizer.UI\...`; старая папка мигрируется один раз при
+старте (`UserConfigFolderMigration`) — не «чините» это обратно и не переносите снова без такого же явного
+разрешения.
 
 Запрещено без отдельного, явного «да» от пользователя в самой задаче:
 - поднимать `schemaVersion`, добавлять миграции, менять формат/ключи/DTO (даже «аддитивно»);
@@ -148,5 +152,6 @@ nullable-анализ, .NET-анализаторы (CAxxxx), StyleCop (SAxxxx) �
 ## ⚠️ Ограничения среды
 
 - Нативный/WPF-код **не выполняется** вне Windows — проверка ограничена `dotnet build`/`dotnet test`;
-  поведение помечай как «manual verify (Win10/Win11)».
+  пользователь проверяет сам на Windows 11; не выноси manual verify как открытый пункт/блокер в
+  отчётах и ROADMAP.
 - Запись в `.claude/**` файловыми инструментами заблокирована — правки агентов делай через shell.

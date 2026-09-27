@@ -1,4 +1,5 @@
 using System.IO;
+using System.IO.Enumeration;
 using System.Text.Json;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Diagnostics;
@@ -9,6 +10,13 @@ namespace DesktopOrganizer.Services.Tools;
 /// <inheritdoc />
 internal sealed class PanelItemStorageService : IPanelItemStorageService
 {
+    /// <summary>
+    /// Name of the manifest file at the root of managed storage. Internal (not private) so
+    /// <see cref="PanelItemsUninstallRestorer"/> — the <c>--restore-panel-items</c> uninstall command,
+    /// same assembly — reads/removes the exact same file without duplicating the literal.
+    /// </summary>
+    internal const string ManifestFileName = ".manifest.json";
+
     // Safety cap for cross-volume MoveInDirectory — recursively copying an arbitrarily large folder
     // (someone's entire "Downloads") on a single drag&drop would be slow and double disk usage for no
     // benefit. Past this, the folder is left as a live reference instead (see MoveInDirectory remarks).
@@ -16,19 +24,48 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     private const long MaxDirectoryImportBytes = 2L * 1024 * 1024 * 1024; // 2 GiB
     private const int MaxDirectoryImportFileCount = 20_000;
 
-    private const string ManifestFileName = ".manifest.json";
-
     // Soft cap on the full destination path length. Windows' legacy MAX_PATH (260) is the hard
     // constraint; 240 leaves headroom for Restore's own path composition (parent directory,
     // Explorer-style " (2)" collision suffix) without itself running the guid-directory scheme's
     // hard limits. See ADR-013 Decision 2, trade-off.
     private const int MaxDestinationPathLength = 240;
 
+    // A directory a shell command created next to a managed item is adopted only once it has not changed for this
+    // long (see IsSettled) — "Extract to folder" keeps adding children to it for a while.
+    private static readonly TimeSpan CreatedDirectoryQuietPeriod = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// M-B (release-polish 1.0 final review): DOS wildcard name patterns (<see cref="IsExcludedFromAdoption"/>)
+    /// of files common desktop apps and the shell write next to a document while it's open, or as their own
+    /// bookkeeping — never something the user asked for through a shell command. <c>"~$*"</c> is Microsoft
+    /// Office's lock file convention (<c>~$Document.docx</c>); <c>".~lock.*#"</c> is LibreOffice/OpenOffice's
+    /// (<c>.~lock.Document.docx#</c>); <c>"*.tmp"</c> covers the generic save-as-temp-then-rename pattern many
+    /// editors use; <c>desktop.ini</c>/<c>Thumbs.db</c> are shell/Explorer bookkeeping.
+    /// </summary>
+    private static readonly string[] ExcludedAdoptionNamePatterns =
+    [
+        "~$*",
+        ".~lock.*#",
+        "*.tmp",
+        "desktop.ini",
+        "Thumbs.db",
+    ];
+
     private readonly string _storageRoot;
     private readonly string _manifestPath;
     private readonly object _manifestLock = new();
     private readonly INativeApi _nativeApi;
     private readonly IAppLog? _appLog;
+
+    /// <summary>
+    /// MINOR 10 (release-polish 1.0 final review): paths <see cref="TryAdoptCreatedEntry"/> has already
+    /// logged a deferral warning for, so a still-open entry retried across every liveness tick for up to
+    /// ~2 minutes (<c>ChildWindowViewModel.SiblingAdoptionWatchTicks</c>) logs only ONCE instead of once
+    /// per tick. Cleared once an entry actually adopts; a permanently-stuck entry (never adopted, watch
+    /// eventually expires) leaves one small stray key behind — bounded by how many such entries a session
+    /// ever sees, accepted as negligible. Used only from the UI thread, same as the rest of this service.
+    /// </summary>
+    private readonly HashSet<string> _deferredAdoptionWarned = new(StringComparer.OrdinalIgnoreCase);
 
     // Authoritative in-memory copy of the manifest, lazily loaded from disk on first access and
     // kept in sync via write-through on every mutation (see the "Manifest" region below). This
@@ -444,6 +481,101 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         TryCleanupEmptyItemDirectory(full);
     }
 
+    /// <inheritdoc />
+    public ManagedItemReconcileResult ReconcileExternalChange(string storedPath) => Reconcile(storedPath, entriesBefore: null);
+
+    /// <inheritdoc />
+    public ManagedItemReconcileResult ReconcileExternalChange(string storedPath, IReadOnlyCollection<string> entriesBefore)
+    {
+        ArgumentNullException.ThrowIfNull(entriesBefore);
+        return Reconcile(storedPath, entriesBefore);
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> GetItemDirectoryEntries(string storedPath)
+    {
+        try
+        {
+            if (!TryGetPerItemLayout(storedPath, out _, out var itemDir)) return [];
+            return Directory.Exists(itemDir) ? NormalizeEntries(Directory.GetFileSystemEntries(itemDir)) : [];
+        }
+        catch (Exception ex)
+        {
+            Log.Error(
+                "PanelItemStorageService",
+                "ItemDirectorySnapshotFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", storedPath));
+            return [];
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The Recycle Bin call is the same one <see cref="ReleaseToRecycleBin"/> makes (<see cref="INativeApi.RecycleItems"/>
+    /// with no owner window, ADR-035): <c>FOF_ALLOWUNDO</c>, no confirmation, <c>FOF_WANTNUKEWARNING</c>. Holding
+    /// Shift in the shell menu (Explorer's "delete permanently") does not bypass the Recycle Bin here — a managed
+    /// item is never destroyed for good by this application.
+    /// </remarks>
+    public ManagedRecycleResult RecycleManagedItem(string storedPath)
+    {
+        var notManaged = new ManagedRecycleResult(ManagedRecycleKind.NotManaged, null);
+        if (!IsManaged(storedPath)) return notManaged;
+
+        string full;
+        try
+        {
+            full = Path.GetFullPath(storedPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception)
+        {
+            return notManaged; // malformed — IsManaged already rejects most of these.
+        }
+
+        // Same M8 guard as ReleaseToRecycleBin: never the storage root or a bare per-item GUID directory.
+        if (!IsStrictlyManagedItem(full)) return notManaged;
+
+        if (!PathExists(full))
+        {
+            // Nothing left to recycle — just release the bookkeeping.
+            RemoveManifestEntry(full);
+            TryCleanupEmptyItemDirectory(full);
+            return new ManagedRecycleResult(ManagedRecycleKind.Recycled, null);
+        }
+
+        // MINOR 4 (release-polish 1.0 final review): never restore-then-recycle onto a removable/network
+        // original location — its Recycle Bin (if it even has one on this machine) isn't guaranteed to
+        // exist, so the shell's own recycle call could permanently delete the file instead. Peek at the
+        // recorded origin BEFORE attempting the restore at all — an untrusted manifest or no recorded
+        // origin (a legacy item) skips the restore attempt exactly like "restore impossible" already did.
+        var (recycleOriginal, recycleOriginalTrusted) = ReadManifestEntry(full);
+        var restore = RestoreOutcome.OriginalPathUnknown;
+        string? restoredPath = null;
+        if (recycleOriginalTrusted && recycleOriginal is not null && ManagedStorageFileOps.IsFixedLocalDrive(recycleOriginal))
+        {
+            restore = Restore(full, forceCrossVolume: false, out restoredPath);
+        }
+
+        if (restore == RestoreOutcome.Restored && restoredPath is not null)
+        {
+            return RecycleRestoredItem(restoredPath);
+        }
+
+        // Restore impossible or skipped (legacy item without an original path, an untrusted manifest, a
+        // non-fixed-local original drive, the original location cannot be recreated, the
+        // move failed — the managed copy is untouched in every such case): recycle it where it is, exactly what the
+        // shell's own Delete would have done. A later "Restore" from the Recycle Bin then lands in managed storage
+        // (reconciled away by the panel) — accepted for this rare path, logged.
+        Log.Warn(
+            "PanelItemStorageService",
+            "RecycleManagedFromStorage",
+            new KeyValuePair<string, object?>("restoreOutcome", restore.ToString()));
+        var outcome = ReleaseToRecycleBin([storedPath]);
+        return outcome.IsComplete
+            ? new ManagedRecycleResult(ManagedRecycleKind.Recycled, null)
+            : new ManagedRecycleResult(ManagedRecycleKind.Kept, storedPath);
+    }
+
     /// <summary>
     /// Same as <see cref="MoveIn(string)"/>, but with an internal-only escape hatch for tests: when
     /// <paramref name="forceCrossVolume"/> is <see langword="true"/>, the same-volume fast path is
@@ -490,7 +622,7 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 return null;
             }
 
-            if (!forceCrossVolume && SameVolume(fullSource, _storageRoot))
+            if (!forceCrossVolume && ManagedStorageFileOps.SameVolume(fullSource, _storageRoot))
             {
                 // destPath now lives under a per-item GUID directory (root\{guid}\{originalName}) —
                 // that directory doesn't exist yet, and File.Move requires its parent to. Nothing is
@@ -501,9 +633,9 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             }
             else
             {
-                if (!TryCopyFileVerified(fullSource, destPath))
+                if (!ManagedStorageFileOps.TryCopyFileVerified(fullSource, destPath))
                 {
-                    TryDeletePartialFile(destPath);
+                    ManagedStorageFileOps.TryDeletePartialFile(destPath);
                     RemoveManifestEntry(destPath);
                     TryCleanupEmptyItemDirectory(destPath);
                     return null;
@@ -550,7 +682,7 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             destRoot = BuildDestinationDirectoryPath(fullSource);
 
-            if (!forceCrossVolume && SameVolume(fullSource, _storageRoot))
+            if (!forceCrossVolume && ManagedStorageFileOps.SameVolume(fullSource, _storageRoot))
             {
                 // Atomic rename — no safety cap: nothing is copied, so there's no disk-bloat or
                 // slowness concern regardless of folder size.
@@ -639,15 +771,15 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                         var destFile = Path.Combine(destRoot, relative);
 
                         // Per-file verify (size check against source) before any deletion is allowed —
-                        // same discipline as MoveIn/Restore, see TryCopyFileVerified remarks.
-                        if (!TryCopyFileVerified(file, destFile))
+                        // same discipline as MoveIn/Restore, see ManagedStorageFileOps.TryCopyFileVerified remarks.
+                        if (!ManagedStorageFileOps.TryCopyFileVerified(file, destFile))
                         {
                             Log.Warn(
                                 "PanelItemStorageService",
                                 "MoveInDirectoryVerifiedCopyFailed",
                                 new KeyValuePair<string, object?>("file", file),
                                 new KeyValuePair<string, object?>("path", sourcePath));
-                            TryDeletePartialDirectory(destRoot);
+                            ManagedStorageFileOps.TryDeletePartialDirectory(destRoot);
                             RemoveManifestEntry(destRoot);
                             TryCleanupEmptyItemDirectory(destRoot);
                             return null;
@@ -661,7 +793,7 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                         "MoveInDirectoryCopyFailed",
                         ex,
                         new KeyValuePair<string, object?>("path", sourcePath));
-                    TryDeletePartialDirectory(destRoot);
+                    ManagedStorageFileOps.TryDeletePartialDirectory(destRoot);
                     RemoveManifestEntry(destRoot);
                     TryCleanupEmptyItemDirectory(destRoot);
                     return null;
@@ -700,103 +832,7 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     /// </summary>
     /// <param name="storedPath">Full path of the managed item to restore, inside managed storage.</param>
     /// <param name="forceCrossVolume">When <see langword="true"/>, forces the copy-then-delete path even if the original location and storage root are on the same volume.</param>
-    internal RestoreOutcome Restore(string storedPath, bool forceCrossVolume)
-    {
-        if (!IsManaged(storedPath)) return RestoreOutcome.NotManaged;
-
-        var fullStored = Path.GetFullPath(storedPath)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        var original = ReadManifestEntry(fullStored);
-        if (original is null) return RestoreOutcome.OriginalPathUnknown;
-
-        try
-        {
-            var targetDir = Path.GetDirectoryName(original);
-            if (!string.IsNullOrEmpty(targetDir)) Directory.CreateDirectory(targetDir);
-
-            var finalTarget = ResolveCollisionFreeName(original);
-            var isDirectory = Directory.Exists(fullStored);
-
-            // Cross-volume Move isn't supported by the OS — fall back to the same
-            // copy-then-delete-after-verified-success discipline used by MoveInDirectory/MoveIn.
-            // Shared by both the real cross-volume path (IOException from Move) and the
-            // forceCrossVolume test hook, so the fallback logic itself is never duplicated.
-            bool CopyThenDeleteDirectory()
-            {
-                if (!TryCopyDirectoryVerified(fullStored, finalTarget))
-                {
-                    TryDeletePartialDirectory(finalTarget);
-                    return false;
-                }
-
-                Directory.Delete(fullStored, recursive: true);
-                return true;
-            }
-
-            bool CopyThenDeleteFile()
-            {
-                if (!TryCopyFileVerified(fullStored, finalTarget))
-                {
-                    TryDeletePartialFile(finalTarget);
-                    return false;
-                }
-
-                File.Delete(fullStored);
-                return true;
-            }
-
-            if (isDirectory)
-            {
-                if (forceCrossVolume)
-                {
-                    if (!CopyThenDeleteDirectory()) return RestoreOutcome.Failed;
-                }
-                else
-                {
-                    try
-                    {
-                        Directory.Move(fullStored, finalTarget);
-                    }
-                    catch (IOException)
-                    {
-                        if (!CopyThenDeleteDirectory()) return RestoreOutcome.Failed;
-                    }
-                }
-            }
-            else
-            {
-                if (forceCrossVolume)
-                {
-                    if (!CopyThenDeleteFile()) return RestoreOutcome.Failed;
-                }
-                else
-                {
-                    try
-                    {
-                        File.Move(fullStored, finalTarget);
-                    }
-                    catch (IOException)
-                    {
-                        if (!CopyThenDeleteFile()) return RestoreOutcome.Failed;
-                    }
-                }
-            }
-
-            RemoveManifestEntry(fullStored);
-            TryCleanupEmptyItemDirectory(fullStored);
-            return RestoreOutcome.Restored;
-        }
-        catch (Exception ex)
-        {
-            Log.Error(
-                "PanelItemStorageService",
-                "RestoreFailed",
-                ex,
-                new KeyValuePair<string, object?>("path", storedPath));
-            return RestoreOutcome.Failed;
-        }
-    }
+    internal RestoreOutcome Restore(string storedPath, bool forceCrossVolume) => Restore(storedPath, forceCrossVolume, out _);
 
     // ── Destination naming (static helpers) ─────────────────────────────────
 
@@ -851,175 +887,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         return Path.Combine(parentDir, truncated + ext);
     }
 
-    /// <summary>
-    /// Finds the first free Explorer-style name at <paramref name="desiredPath"/>: the path itself
-    /// if nothing occupies it, otherwise <c>name (2).ext</c>, <c>name (3).ext</c>, … for files, or
-    /// <c>name (2)</c>, <c>name (3)</c>, … for directories.
-    /// </summary>
-    private static string ResolveCollisionFreeName(string desiredPath)
-    {
-        if (!File.Exists(desiredPath) && !Directory.Exists(desiredPath)) return desiredPath;
-
-        var dir = Path.GetDirectoryName(desiredPath) ?? string.Empty;
-        var nameNoExt = Path.GetFileNameWithoutExtension(desiredPath);
-        var ext = Path.GetExtension(desiredPath);
-
-        for (var i = 2; ; i++)
-        {
-            var candidate = Path.Combine(dir, $"{nameNoExt} ({i}){ext}");
-            if (!File.Exists(candidate) && !Directory.Exists(candidate)) return candidate;
-        }
-    }
-
-    // ── Volume detection ────────────────────────────────────────────────────
-    private static bool SameVolume(string fullSourcePath, string storageRoot)
-    {
-        try
-        {
-            var sourceRoot = Path.GetPathRoot(fullSourcePath);
-            var targetRoot = Path.GetPathRoot(Path.GetFullPath(storageRoot));
-            return !string.IsNullOrEmpty(sourceRoot)
-                && !string.IsNullOrEmpty(targetRoot)
-                && string.Equals(sourceRoot, targetRoot, StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception)
-        {
-            // If we can't tell, be conservative and treat it as cross-volume so the
-            // verify-before-delete path is used.
-            return false;
-        }
-    }
-
-    // ── Copy-then-verify helpers (cross-volume path) ────────────────────────
-
-    /// <summary>
-    /// Copies a single file and verifies the destination matches before the caller is allowed to
-    /// delete the source. Returns <see langword="false"/> (leaving the source untouched) on any
-    /// failure or verification mismatch. Verification compares actual content, not just file length
-    /// — a length-only check would let a silently truncated-then-padded or bit-flipped copy through,
-    /// after which the (only) source copy would be deleted.
-    /// </summary>
-    private static bool TryCopyFileVerified(string sourcePath, string destPath)
-    {
-        try
-        {
-            var destDir = Path.GetDirectoryName(destPath);
-            if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
-
-            File.Copy(sourcePath, destPath, overwrite: false);
-
-            if (!File.Exists(destPath)) return false;
-
-            // Cheap fast-fail before paying for a full-content comparison of both files.
-            if (new FileInfo(sourcePath).Length != new FileInfo(destPath).Length) return false;
-
-            return FilesHaveIdenticalContent(sourcePath, destPath);
-        }
-        catch (Exception ex)
-        {
-            AppLog.Current.Error(
-                "PanelItemStorageService",
-                "VerifiedCopyFailed",
-                ex,
-                new KeyValuePair<string, object?>("source", sourcePath),
-                new KeyValuePair<string, object?>("dest", destPath));
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Byte-for-byte comparison, not a hash: bails on the first differing byte instead of always
-    /// reading both files to completion. This is a corruption check on a same-machine copy, not an
-    /// adversarial integrity check, so a cryptographic hash buys nothing here.
-    /// </summary>
-    private static bool FilesHaveIdenticalContent(string sourcePath, string destPath)
-    {
-        const int BufferSize = 81920; // matches Stream.CopyTo's own default buffer size
-
-        using var sourceStream = File.OpenRead(sourcePath);
-        using var destStream = File.OpenRead(destPath);
-
-        var sourceBuffer = new byte[BufferSize];
-        var destBuffer = new byte[BufferSize];
-
-        while (true)
-        {
-            var sourceRead = sourceStream.Read(sourceBuffer, 0, BufferSize);
-            var destRead = destStream.Read(destBuffer, 0, BufferSize);
-
-            if (sourceRead != destRead) return false;
-            if (sourceRead == 0) return true; // both streams exhausted at the same length
-
-            if (!sourceBuffer.AsSpan(0, sourceRead).SequenceEqual(destBuffer.AsSpan(0, destRead)))
-                return false;
-        }
-    }
-
-    /// <summary>
-    /// Recursively copies a directory tree and verifies every file arrived intact before the
-    /// caller is allowed to delete the source. Returns <see langword="false"/> (leaving the source
-    /// untouched) on any failure.
-    /// </summary>
-    private static bool TryCopyDirectoryVerified(string sourceRoot, string destRoot)
-    {
-        try
-        {
-            var files = Directory.GetFiles(sourceRoot, "*", SearchOption.AllDirectories);
-
-            Directory.CreateDirectory(destRoot);
-
-            foreach (var file in files)
-            {
-                var relative = Path.GetRelativePath(sourceRoot, file);
-                var destFile = Path.Combine(destRoot, relative);
-                if (!TryCopyFileVerified(file, destFile)) return false;
-            }
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            AppLog.Current.Error(
-                "PanelItemStorageService",
-                "VerifiedDirectoryCopyFailed",
-                ex,
-                new KeyValuePair<string, object?>("source", sourceRoot),
-                new KeyValuePair<string, object?>("dest", destRoot));
-            return false;
-        }
-    }
-
-    private static void TryDeletePartialFile(string destPath)
-    {
-        try
-        {
-            if (File.Exists(destPath)) File.Delete(destPath);
-        }
-        catch (Exception ex)
-        {
-            AppLog.Current.Error(
-                "PanelItemStorageService",
-                "PartialCopyCleanupFailed",
-                ex,
-                new KeyValuePair<string, object?>("path", destPath));
-        }
-    }
-
-    private static void TryDeletePartialDirectory(string destRoot)
-    {
-        try
-        {
-            if (Directory.Exists(destRoot)) Directory.Delete(destRoot, recursive: true);
-        }
-        catch (Exception ex)
-        {
-            AppLog.Current.Error(
-                "PanelItemStorageService",
-                "PartialCopyCleanupFailed",
-                ex,
-                new KeyValuePair<string, object?>("path", destRoot));
-        }
-    }
+    // Volume detection, ResolveCollisionFreeName, and the copy-then-verify cross-volume helpers
+    // (TryCopyFileVerified/TryCopyDirectoryVerified/TryDeletePartialFile/TryDeletePartialDirectory)
+    // used to live here as private statics; extracted to ManagedStorageFileOps so
+    // PanelItemsUninstallRestorer (--restore-panel-items) shares the exact same verify-before-delete
+    // discipline instead of a second, drift-prone copy.
 
     // ── Manifest (managed path -> original path): static helper ─────────────
     private static Dictionary<string, string> CreateEmptyManifest() =>
@@ -1030,6 +902,555 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     /// <see cref="ReleaseToRecycleBin"/> to decide per item what the shell actually recycled.
     /// </summary>
     private static bool PathExists(string fullPath) => File.Exists(fullPath) || Directory.Exists(fullPath);
+
+    /// <summary>
+    /// Normalizes directory entries (full path, no trailing separator) for case-insensitive set comparison; an
+    /// entry that cannot be normalized is dropped.
+    /// </summary>
+    private static List<string> NormalizeEntries(IEnumerable<string> entries)
+    {
+        var normalized = new List<string>();
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry)) continue;
+
+            try
+            {
+                normalized.Add(Path.GetFullPath(entry).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // Malformed — cannot be one of ours.
+            }
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Whether an entry a shell command created looks finished, so moving it cannot break whoever is writing it:
+    /// a FILE must be openable exclusively (nobody holds it open — an archiver or the zip folder writing on a
+    /// background thread does); a DIRECTORY (e.g. "Extract to folder") must not have changed for
+    /// <see cref="CreatedDirectoryQuietPeriod"/> — a moved half-extracted folder would split the extraction.
+    /// </summary>
+    /// <param name="entry">Full path of the entry.</param>
+    /// <param name="isDirectory">Whether it is a directory.</param>
+    /// <returns><see langword="true"/> when it is safe to adopt now.</returns>
+    private static bool IsSettled(string entry, bool isDirectory)
+    {
+        if (isDirectory)
+        {
+            return DateTime.UtcNow - GetMaxLastWriteTimeUtc(entry) >= CreatedDirectoryQuietPeriod;
+        }
+
+        try
+        {
+            using var probe = new FileStream(entry, FileMode.Open, FileAccess.Read, FileShare.None);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// MINOR 1 (release-polish 1.0 final review): the latest <c>LastWriteTimeUtc</c> anywhere in
+    /// <paramref name="directory"/>'s tree, not just the top-level folder's own timestamp. "Extract to
+    /// folder" and similar bulk operations keep touching FILES deep inside the tree without necessarily
+    /// bumping the top folder's own write time again after its first child is created — checking only the
+    /// top level could therefore report "settled" (quiet for 2s) while a background thread is still
+    /// actively writing a file several levels down. Best-effort: a child that vanishes/becomes
+    /// inaccessible mid-scan (the same background writer moving on) is skipped rather than aborting the
+    /// whole check, falling back to whatever timestamp was already found.
+    /// </summary>
+    /// <param name="directory">The directory tree to scan.</param>
+    private static DateTime GetMaxLastWriteTimeUtc(string directory)
+    {
+        var max = Directory.GetLastWriteTimeUtc(directory);
+
+        try
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var entryTime = File.GetLastWriteTimeUtc(entry); // valid for both files and directories.
+                    if (entryTime > max) max = entryTime;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Vanished/inaccessible between the enumeration and here — skip it, keep scanning.
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Enumeration itself failed partway (a child directory disappearing mid-walk) — the timestamp
+            // found so far is still a safe, if incomplete, answer.
+        }
+
+        return max;
+    }
+
+    /// <summary>
+    /// M-B (release-polish 1.0 final review): whether <paramref name="entry"/> looks like something a
+    /// third-party app or the shell wrote next to a managed item on its own — never something the user
+    /// asked for via the invoked shell command — and must therefore never be silently adopted as a new
+    /// panel item.
+    /// </summary>
+    /// <param name="entry">Full path of the created entry.</param>
+    /// <param name="isDirectory">Whether <paramref name="entry"/> is a directory.</param>
+    /// <returns><see langword="true"/> when the entry must never be adopted.</returns>
+    private static bool IsExcludedFromAdoption(string entry, bool isDirectory)
+    {
+        if (!isDirectory)
+        {
+            try
+            {
+                var attributes = File.GetAttributes(entry);
+                if ((attributes & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.Temporary)) != 0)
+                    return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Vanished/became inaccessible between the caller's own existence check and here — not
+                // excluded by attributes; the normal flow (which already re-checks existence right after)
+                // handles it.
+            }
+        }
+
+        var name = Path.GetFileName(entry);
+        foreach (var pattern in ExcludedAdoptionNamePatterns)
+        {
+            if (FileSystemName.MatchesSimpleExpression(pattern, name, ignoreCase: true)) return true;
+        }
+
+        return false;
+    }
+
+    // ── Shell-command reconcile, sibling adoption and "Delete" from the shell menu (private) ──────
+
+    /// <summary>
+    /// Shared core of both <see cref="ReconcileExternalChange(string)"/> overloads — see the interface for the
+    /// full decision table. <paramref name="entriesBefore"/> is <see langword="null"/> for the snapshot-less
+    /// (liveness-tick) variant, which never infers a rename and never adopts anything.
+    /// </summary>
+    /// <param name="storedPath">The managed path a panel references.</param>
+    /// <param name="entriesBefore">The per-item directory's entries before the shell command, or <see langword="null"/>.</param>
+    /// <returns>What was concluded.</returns>
+    private ManagedItemReconcileResult Reconcile(string storedPath, IReadOnlyCollection<string>? entriesBefore)
+    {
+        var unchanged = new ManagedItemReconcileResult(ManagedItemReconcileKind.Unchanged, null);
+
+        try
+        {
+            // Only a per-item GUID directory ({root}\{guid}\{name}) speaks for this one item. A legacy flat-layout
+            // item's "directory" is the shared storage root, and anything deeper is content inside a managed folder,
+            // not a panel item — in both cases the siblings belong to something else and must never be read as
+            // "the renamed item" (or adopted).
+            if (!TryGetPerItemLayout(storedPath, out var full, out var itemDir)) return unchanged;
+
+            var itemExists = PathExists(full);
+
+            // Still there and nothing to diff against: whatever the shell command did (Copy, Open, Properties, a
+            // cancelled Delete), the item itself is intact — never touch the manifest for it.
+            if (itemExists && entriesBefore is null) return unchanged;
+
+            var entries = Directory.Exists(itemDir) ? NormalizeEntries(Directory.GetFileSystemEntries(itemDir)) : [];
+
+            if (entriesBefore is null)
+            {
+                // No snapshot: only "completely gone" is certain. Any leftover entry may be the renamed item OR
+                // something a shell command created next to it — never guess.
+                return entries.Count == 0 ? ReleaseVanishedItem(full) : unchanged;
+            }
+
+            var before = new HashSet<string>(NormalizeEntries(entriesBefore), StringComparer.OrdinalIgnoreCase);
+            var created = entries
+                .Where(entry => !before.Contains(entry) && !string.Equals(entry, full, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (itemExists)
+            {
+                // The command created entries NEXT TO the item ("Create shortcut", "Send to > Compressed folder",
+                // an archiver): show them in the panel as items of their own instead of letting them sit invisibly in
+                // the hidden per-item directory, where a later rename inference could mistake one for the item.
+                return created.Count == 0
+                    ? unchanged
+                    : unchanged with { AdoptedPaths = AdoptCreatedEntries(full, created) };
+            }
+
+            switch (created.Count)
+            {
+                case 0:
+                    // Deleted (Recycle Bin, Shift+Delete) or moved away (Cut + Paste).
+                    return ReleaseVanishedItem(full);
+
+                case 1:
+                    var newPath = created[0];
+                    if (!TryReKeyManifestEntry(full, newPath))
+                    {
+                        // The item on disk is already renamed — the panel must follow it regardless. Only the origin
+                        // mapping is at risk: a later Restore reports OriginalPathUnknown and degrades to the Recycle Bin.
+                        Log.Warn(
+                            "PanelItemStorageService",
+                            "ReconcileManifestWriteFailed",
+                            new KeyValuePair<string, object?>("path", storedPath));
+                    }
+
+                    return new ManagedItemReconcileResult(ManagedItemReconcileKind.Renamed, newPath);
+
+                default:
+                    // Vanished, and two or more new entries: cannot be attributed to a single rename — leave the item
+                    // as it is (it keeps showing as missing) rather than guess.
+                    return unchanged;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error(
+                "PanelItemStorageService",
+                "ReconcileExternalChangeFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", storedPath));
+            return unchanged;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the per-item layout of <paramref name="storedPath"/>: succeeds only for a single managed item
+    /// directly inside its own per-item GUID directory (<c>{root}\{guid}\{name}</c>).
+    /// </summary>
+    /// <param name="storedPath">The path to resolve.</param>
+    /// <param name="full">Receives the normalized full item path.</param>
+    /// <param name="itemDir">Receives the normalized per-item directory.</param>
+    /// <returns><see langword="true"/> for a per-item managed item.</returns>
+    private bool TryGetPerItemLayout(string storedPath, out string full, out string itemDir)
+    {
+        full = string.Empty;
+        itemDir = string.Empty;
+        if (!IsManaged(storedPath)) return false;
+
+        var candidate = Path.GetFullPath(storedPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!IsStrictlyManagedItem(candidate)) return false;
+
+        var directory = Path.GetDirectoryName(candidate);
+        var root = Path.GetFullPath(_storageRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.IsNullOrEmpty(directory)
+            || !string.Equals(Path.GetDirectoryName(directory), root, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        full = candidate;
+        itemDir = directory;
+        return true;
+    }
+
+    /// <summary>
+    /// Releases the bookkeeping of a vanished item — same cleanup as <see cref="ForgetMovedOut"/>: its manifest
+    /// entry, and its per-item directory when that is empty.
+    /// </summary>
+    private ManagedItemReconcileResult ReleaseVanishedItem(string full)
+    {
+        RemoveManifestEntry(full);
+        TryCleanupEmptyItemDirectory(full);
+        return new ManagedItemReconcileResult(ManagedItemReconcileKind.Deleted, null);
+    }
+
+    /// <summary>
+    /// Adopts every entry of <paramref name="created"/> that is ready (see <see cref="IsSettled"/>) as a new managed
+    /// item — see <see cref="TryAdoptCreatedEntry"/>.
+    /// </summary>
+    /// <param name="fullStored">The (still existing) item the entries were created next to.</param>
+    /// <param name="created">Full paths of the created entries.</param>
+    /// <returns>The new managed paths of the adopted entries.</returns>
+    private List<string> AdoptCreatedEntries(string fullStored, List<string> created)
+    {
+        // The created entries "come from" wherever the item itself came from: that is where a later
+        // Restore puts them back (MINOR 7 fix — this used to say "Remove from panel", a method that
+        // doesn't exist). A legacy item with no recorded origin still gives them none and is adopted
+        // anyway (moved out of the item's directory and shown), behaving like any legacy item — Restore
+        // reports OriginalPathUnknown for it, same as it always has.
+        //
+        // MINOR 2 (release-polish 1.0 final review): an UNTRUSTED manifest (a transient disk read
+        // failure) is handled differently from "no entry" — defer adoption entirely rather than adopting
+        // permanently with no recorded origin. The caller (ProcessPendingSiblingAdoption) simply retries
+        // on the next liveness tick once the manifest becomes readable again, same as an entry that is
+        // still being written (see IsSettled).
+        var (original, trusted) = ReadManifestEntry(fullStored);
+        if (!trusted) return [];
+
+        var originalDir = original is null ? null : Path.GetDirectoryName(original);
+
+        var adopted = new List<string>(created.Count);
+        foreach (var entry in created)
+        {
+            if (TryAdoptCreatedEntry(entry, originalDir) is { } managedPath) adopted.Add(managedPath);
+        }
+
+        return adopted;
+    }
+
+    /// <summary>
+    /// Moves one created entry into a fresh per-item directory of its own (same volume — both live under the
+    /// storage root, so this is an atomic rename), recording <c>{originalDir}\{name}</c> as its original path.
+    /// The manifest entry is written BEFORE the move and rolled back if the move fails — the same "manifest before
+    /// the destructive step" discipline as <see cref="MoveIn(string)"/>.
+    /// </summary>
+    /// <param name="entry">Full path of the created entry.</param>
+    /// <param name="originalDir">Directory recorded as the entry's origin, or <see langword="null"/> when unknown.</param>
+    /// <returns>The new managed path, or <see langword="null"/> when the entry is not ready, excluded, or could not be moved.</returns>
+    private string? TryAdoptCreatedEntry(string entry, string? originalDir)
+    {
+        string? destination = null;
+        try
+        {
+            var isDirectory = Directory.Exists(entry);
+            if (!isDirectory && !File.Exists(entry)) return null;
+            if (!IsSettled(entry, isDirectory)) return null; // still being written — the caller retries later.
+
+            // M-B (release-polish 1.0 final review): never adopt something the user did not knowingly
+            // create through the shell command they picked — a third-party app's lock/backup file written
+            // directly next to the managed item while it's open (LibreOffice's ".~lock.<name>#", Office's
+            // "~$<name>"), a generic editor's ".tmp" save-as-temp-then-rename artifact, or a shell-written
+            // desktop.ini/Thumbs.db. Left in place, untouched, forever (from this method's point of view —
+            // the caller's bounded watch simply keeps not adopting it until the watch expires).
+            if (IsExcludedFromAdoption(entry, isDirectory)) return null;
+
+            destination = isDirectory ? BuildDestinationDirectoryPath(entry) : BuildDestinationPath(entry);
+
+            if (originalDir is not null
+                && !WriteManifestEntry(destination, Path.Combine(originalDir, Path.GetFileName(entry))))
+            {
+                RemoveManifestEntry(destination);
+                Log.Warn(
+                    "PanelItemStorageService",
+                    "AdoptManifestWriteFailed",
+                    new KeyValuePair<string, object?>("path", entry));
+                return null;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            if (isDirectory)
+            {
+                Directory.Move(entry, destination);
+            }
+            else
+            {
+                File.Move(entry, destination);
+            }
+
+            // MINOR 10: an entry that previously deferred and is now adopted no longer needs its
+            // one-warning-per-entry bookkeeping.
+            _deferredAdoptionWarned.Remove(entry);
+            return destination;
+        }
+        catch (Exception ex)
+        {
+            if (destination is not null)
+            {
+                RemoveManifestEntry(destination);
+                TryCleanupEmptyItemDirectory(destination);
+            }
+
+            // MINOR 10 (release-polish 1.0 final review): typically a sharing violation — the entry is
+            // still open somewhere and the caller (ProcessPendingSiblingAdoption) retries automatically on
+            // every liveness tick for up to ~2 minutes. Logging every single retry would spam the
+            // diagnostics log for something that resolves itself; only the FIRST deferral for a given
+            // entry is logged.
+            if (_deferredAdoptionWarned.Add(entry))
+            {
+                Log.Warn(
+                    "PanelItemStorageService",
+                    "AdoptCreatedEntryDeferred",
+                    new KeyValuePair<string, object?>("path", entry),
+                    new KeyValuePair<string, object?>("exception", ex.GetType().Name));
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Recycles an item <see cref="Restore(string)"/> just moved back to <paramref name="restoredPath"/>. When the
+    /// shell did not recycle it, the item is moved back into managed storage so the panel keeps it.
+    /// </summary>
+    /// <param name="restoredPath">The item's path at its original location.</param>
+    /// <returns>The outcome.</returns>
+    private ManagedRecycleResult RecycleRestoredItem(string restoredPath)
+    {
+        try
+        {
+            _nativeApi.RecycleItems([restoredPath], IntPtr.Zero);
+        }
+        catch (Exception ex)
+        {
+            // Documented never to throw; a test double or future implementation that does must still not take the
+            // UI thread down. What still exists afterwards is the authoritative answer either way.
+            Log.Error("PanelItemStorageService", "RecycleItemsThrew", ex, new KeyValuePair<string, object?>("count", 1));
+        }
+
+        if (!PathExists(restoredPath)) return new ManagedRecycleResult(ManagedRecycleKind.Recycled, null);
+
+        // Cancelled / declined / failed: the user did not get a deletion, so the panel must not lose the item.
+        var readopted = Directory.Exists(restoredPath) ? MoveInDirectory(restoredPath) : MoveIn(restoredPath);
+        Log.Warn(
+            "PanelItemStorageService",
+            "RecycleManagedDeclined",
+            new KeyValuePair<string, object?>("readopted", readopted is not null));
+        return new ManagedRecycleResult(ManagedRecycleKind.Kept, readopted ?? restoredPath);
+    }
+
+    /// <summary>
+    /// Core of <see cref="Restore(string, bool)"/> that also reports WHERE the item landed — the original path, or
+    /// its Explorer-style collision-free variant (<c>name (2).ext</c>). Used by <see cref="RecycleManagedItem"/>,
+    /// which recycles the item from exactly there.
+    /// </summary>
+    /// <param name="storedPath">Full path of the managed item to restore, inside managed storage.</param>
+    /// <param name="forceCrossVolume">See <see cref="Restore(string, bool)"/>.</param>
+    /// <param name="restoredPath">Receives the item's new path when <see cref="RestoreOutcome.Restored"/> is returned; otherwise <see langword="null"/>.</param>
+    /// <returns>The outcome.</returns>
+    private RestoreOutcome Restore(string storedPath, bool forceCrossVolume, out string? restoredPath)
+    {
+        restoredPath = null;
+        if (!IsManaged(storedPath)) return RestoreOutcome.NotManaged;
+
+        var fullStored = Path.GetFullPath(storedPath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        // An untrusted manifest read is folded into the same OriginalPathUnknown outcome as "no entry" —
+        // Restore has always degraded that way for a legacy item and callers already treat both the same
+        // (fall back to ReleaseToRecycleBin).
+        var (original, _) = ReadManifestEntry(fullStored);
+        if (original is null) return RestoreOutcome.OriginalPathUnknown;
+
+        try
+        {
+            var targetDir = Path.GetDirectoryName(original);
+            if (!string.IsNullOrEmpty(targetDir)) Directory.CreateDirectory(targetDir);
+
+            var finalTarget = ManagedStorageFileOps.ResolveCollisionFreeName(original);
+            var isDirectory = Directory.Exists(fullStored);
+
+            // Cross-volume Move isn't supported by the OS — fall back to the same
+            // copy-then-delete-after-verified-success discipline used by MoveInDirectory/MoveIn.
+            // Shared by both the real cross-volume path (IOException from Move) and the
+            // forceCrossVolume test hook, so the fallback logic itself is never duplicated.
+            bool CopyThenDeleteDirectory()
+            {
+                if (!ManagedStorageFileOps.TryCopyDirectoryVerified(fullStored, finalTarget))
+                {
+                    ManagedStorageFileOps.TryDeletePartialDirectory(finalTarget);
+                    return false;
+                }
+
+                DeleteVerifiedCrossVolumeSourceOrWarn(fullStored, finalTarget, isDirectory: true);
+                return true;
+            }
+
+            bool CopyThenDeleteFile()
+            {
+                if (!ManagedStorageFileOps.TryCopyFileVerified(fullStored, finalTarget))
+                {
+                    ManagedStorageFileOps.TryDeletePartialFile(finalTarget);
+                    return false;
+                }
+
+                DeleteVerifiedCrossVolumeSourceOrWarn(fullStored, finalTarget, isDirectory: false);
+                return true;
+            }
+
+            if (isDirectory)
+            {
+                if (forceCrossVolume)
+                {
+                    if (!CopyThenDeleteDirectory()) return RestoreOutcome.Failed;
+                }
+                else
+                {
+                    try
+                    {
+                        Directory.Move(fullStored, finalTarget);
+                    }
+                    catch (IOException)
+                    {
+                        if (!CopyThenDeleteDirectory()) return RestoreOutcome.Failed;
+                    }
+                }
+            }
+            else
+            {
+                if (forceCrossVolume)
+                {
+                    if (!CopyThenDeleteFile()) return RestoreOutcome.Failed;
+                }
+                else
+                {
+                    try
+                    {
+                        File.Move(fullStored, finalTarget);
+                    }
+                    catch (IOException)
+                    {
+                        if (!CopyThenDeleteFile()) return RestoreOutcome.Failed;
+                    }
+                }
+            }
+
+            RemoveManifestEntry(fullStored);
+            TryCleanupEmptyItemDirectory(fullStored);
+            restoredPath = finalTarget;
+            return RestoreOutcome.Restored;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(
+                "PanelItemStorageService",
+                "RestoreFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", storedPath));
+            return RestoreOutcome.Failed;
+        }
+    }
+
+    /// <summary>
+    /// MINOR 3 (release-polish 1.0 final review): deletes a cross-volume <see cref="Restore(string, bool, out string?)"/>
+    /// source whose copy at <paramref name="targetPath"/> has already been verified byte-for-byte — mirrors
+    /// <c>PanelItemsUninstallRestorer.DeleteVerifiedSourceOrWarn</c>'s exact discipline. Clears any read-only
+    /// attribute first (recursively, for a directory) — a read-only source used to make
+    /// <see cref="Directory.Delete(string, bool)"/>/<see cref="File.Delete(string)"/> throw here, which
+    /// propagated out to <see cref="Restore(string, bool, out string?)"/>'s own <see langword="catch"/> and
+    /// reported <see cref="RestoreOutcome.Failed"/> even though the copy had already succeeded — leaving the
+    /// item duplicated at both the original location and managed storage, with the manifest entry never
+    /// removed. If the delete still fails after clearing read-only (e.g. the source is open elsewhere), the
+    /// copy at <paramref name="targetPath"/> is nonetheless complete and correct: this logs a warning
+    /// instead of throwing, so the caller still reports <see cref="RestoreOutcome.Restored"/> — the source
+    /// item is left in place under managed storage, but is never counted as lost or duplicated.
+    /// </summary>
+    /// <param name="sourcePath">The already-copied managed-storage source.</param>
+    /// <param name="targetPath">The verified copy destination.</param>
+    /// <param name="isDirectory">Whether <paramref name="sourcePath"/> is a directory.</param>
+    private void DeleteVerifiedCrossVolumeSourceOrWarn(string sourcePath, string targetPath, bool isDirectory)
+    {
+        try
+        {
+            ManagedStorageFileOps.ClearReadOnlyRecursive(sourcePath, isDirectory);
+
+            if (isDirectory) Directory.Delete(sourcePath, recursive: true);
+            else File.Delete(sourcePath);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(
+                "PanelItemStorageService",
+                "VerifiedCopySourceDeleteFailed",
+                new KeyValuePair<string, object?>("source", sourcePath),
+                new KeyValuePair<string, object?>("target", targetPath),
+                new KeyValuePair<string, object?>("exception", ex.Message));
+        }
+    }
 
     /// <summary>
     /// M8 (release-hardening review): true when <paramref name="fullPath"/> — already normalized the
@@ -1169,13 +1590,23 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         }
     }
 
-    private string? ReadManifestEntry(string managedPath)
+    /// <summary>
+    /// MINOR 2 (release-polish 1.0 final review): reads a manifest entry, distinguishing "no entry
+    /// recorded" (<c>Trusted: true</c>, <c>Original: null</c> — a legacy item, or an entry that genuinely
+    /// doesn't exist) from "the manifest cache is currently untrusted" (<c>Trusted: false</c> — a transient
+    /// disk read failure). The two used to collapse into the same <see langword="null"/> return, which let
+    /// <see cref="AdoptCreatedEntries"/> permanently adopt a sibling with no recorded origin during a
+    /// transient failure, instead of deferring until the manifest becomes readable again.
+    /// </summary>
+    /// <param name="managedPath">The manifest key to look up.</param>
+    /// <returns>The recorded original path (or <see langword="null"/> for no entry) and whether the read is trustworthy.</returns>
+    private (string? Original, bool Trusted) ReadManifestEntry(string managedPath)
     {
         lock (_manifestLock)
         {
             var (manifest, trusted) = EnsureManifestCacheUnlocked();
-            if (!trusted) return null;
-            return manifest.TryGetValue(managedPath, out var original) ? original : null;
+            if (!trusted) return (null, false);
+            return (manifest.TryGetValue(managedPath, out var original) ? original : null, true);
         }
     }
 
@@ -1282,6 +1713,43 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             // The old entry was never touched, so there's nothing to restore for it.
             manifest.Remove(newManagedPath);
             hadOldEntry = false;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Re-keys the manifest entry of an item that was ALREADY renamed on disk by someone else (a shell
+    /// command — see <see cref="ReconcileExternalChange(string, IReadOnlyCollection{string})"/>): <paramref name="oldManagedPath"/>'s entry moves to
+    /// <paramref name="newManagedPath"/>, and the recorded original path gets the new file name, exactly as
+    /// <see cref="RenameManaged"/> records it. Unlike <see cref="TryRenameManifestEntry"/> this is a single
+    /// atomic write — there is no physical move left to fail, so no "add first, remove later" sequencing is
+    /// needed.
+    /// </summary>
+    /// <param name="oldManagedPath">The item's previous managed path (its current manifest key, if any).</param>
+    /// <param name="newManagedPath">The item's managed path on disk now.</param>
+    /// <returns>
+    /// <see langword="true"/> when the manifest now describes <paramref name="newManagedPath"/> (or there was no
+    /// entry to move — a legacy item). <see langword="false"/> when the cache is untrusted or the write failed;
+    /// the in-memory cache is rolled back to match disk.
+    /// </returns>
+    private bool TryReKeyManifestEntry(string oldManagedPath, string newManagedPath)
+    {
+        lock (_manifestLock)
+        {
+            var (manifest, trusted) = EnsureManifestCacheUnlocked();
+            if (!trusted) return false;
+            if (!manifest.TryGetValue(oldManagedPath, out var original)) return true;
+
+            var originalDir = Path.GetDirectoryName(original);
+            var newName = Path.GetFileName(newManagedPath);
+            var newOriginal = string.IsNullOrEmpty(originalDir) ? newName : Path.Combine(originalDir, newName);
+
+            manifest.Remove(oldManagedPath);
+            manifest[newManagedPath] = newOriginal;
+            if (WriteManifestUnlocked(manifest)) return true;
+
+            manifest.Remove(newManagedPath);
+            manifest[oldManagedPath] = original;
             return false;
         }
     }

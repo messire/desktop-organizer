@@ -206,13 +206,18 @@ enum-имён/строковых токенов) и `bytes`/`attempts`/`migratio
 заведено, поскольку существующие ассерты уже покрывают privacy-инвариант точечно там, где событие
 пишется.
 
-### `icon` (scope = null) — P08, docs/DIAGNOSTICS/icon-loading-findings.md
+### `icon` (scope = null) — P08, docs/DIAGNOSTICS/icon-loading-findings.md; extended release polish 1.0 (ADR-039)
 
 | Событие | Источник | Payload |
 |---|---|---|
 | `IconHandleFailed` | `IconHandler.GetIconHandle` — `SHGetFileInfoW` returned a null handle | `extension` (string, lower-cased, ≤16 chars — see privacy note below), `attributes` (`Services.Enums.FileAttribute.ToString()`, closed set: `Normal`/`Directory` in practice) |
 | `IconDestroyFailed` | `IconHandler.DestroyIconHandle` — `DestroyIcon` returned `false` | — (no path available at this call site to begin with) |
-| `IconRetrievalFailed` | `IconProvider.TryRetrieveIcon` — any exception during shell lookup/bitmap creation | `extension`, `errorType` (`Exception.GetType().Name`) |
+| `ShellItemImageFailed` (**release polish 1.0**, ADR-039 stage 1) | `IconHandler.GetShellItemBitmap` — `IShellItemImageFactory::GetImage` returned a failure HRESULT or a null bitmap handle | `extension`, `hresult` (string, `"0x{hr:X8}"` — a closed, numeric failure code, never a message) |
+| `IconBitmapReadFailed` (**release polish 1.0**, ADR-039 stage 1) | `IconHandler.TryReadBitmapPixels` — copying the shell-returned `HBITMAP`'s pixels failed | — (no path available at this call site) |
+| `IconBitmapDestroyFailed` (**release polish 1.0**, ADR-039 stage 1) | `IconHandler.DestroyBitmapHandle` — `DeleteObject`/the bitmap-delete call returned `false` | — |
+| `SystemIconIndexFailed` (**release polish 1.0**, ADR-039 stage 2) | `IconHandler.GetSystemImageListIconHandle` — `SHGetFileInfo(SHGFI_SYSICONINDEX)` returned a null image-list handle | `extension` |
+| `ImageListIconFailed` (**release polish 1.0**, ADR-039 stage 2) | `IconHandler.GetSystemImageListIconHandle` — `IImageList::GetIcon` returned a null icon handle for a resolved image-list handle | `extension`, `imageList` (int — the `SHIL_*` constant actually used, e.g. `IconHandler.ShilExtraLarge`) |
+| `IconRetrievalFailed` | `IconProvider`'s per-stage `catch` (`TryShellItemImage`/`TrySystemImageList`/`TryRetrieveIcon`) — any exception during shell lookup/bitmap creation for the corresponding fallback stage | `extension`, `errorType` (`Exception.GetType().Name`), `stage` (**release polish 1.0**, ADR-039 — closed set: `"shellItem"` / `"imageList"` / `"fileAttributes"`, one of `IconProvider`'s private stage-name constants) |
 | `IconFreshnessCheckFailed` | `IconProvider.TryGetLastWriteTimeUtc` — `File`/`Directory.GetLastWriteTimeUtc` threw | `extension`, `errorType` |
 
 Replaces four `Console.Error.WriteLine` call sites the P00 baseline audit found silently discarded by
@@ -307,6 +312,29 @@ helper, что и остальные события категорий `gesture`
 - Последующие — не чаще раза в 50 мс (`GestureDiagnostics.DefaultDeltaSampleIntervalMs`).
 - Последняя дельта (даже подавленная троттлингом) сохраняется и попадает в `ResizeCompleted`/`DragCompleted`
   как `lastRaw*`/`lastApplied*` — финальная геометрия перед зависанием/отменой никогда не теряется.
+
+## `IAppLog` events added by release polish 1.0 (a DIFFERENT sink — `app-*.jsonl`, ADR-033)
+
+Everything above this section is `IDiagnosticsLog` (ADR-027) — the gesture-lifecycle JSONL log described by
+this whole document. The events below are written through `IAppLog`/`AppLog.Current` (`Services/Diagnostics`,
+ADR-033) instead: the always-on, Release-default structured application log at
+`%LOCALAPPDATA%\DesktopOrganizer\Logs\app-*.jsonl`, a separate file/sink with its own schema
+(`source`/`name`/`level`/exception fields, not `category`/`scope`/`payload`). They are listed here, not in a
+duplicate document, because they were added by the same release-polish 1.0 round as the `icon` events above
+and share the exact same privacy discipline (extension/error-type/closed-set tokens, never a path or
+`Exception.Message`) — but they do **not** appear in `%LOCALAPPDATA%\DesktopOrganizer\Logs\app-*.jsonl`'s
+gesture-diagnostics sibling file, and the throttling/scope conventions described elsewhere in this document
+do not apply to them.
+
+| Событие | Источник | Payload (`IAppLog` fields) |
+|---|---|---|
+| `ShellContextMenuFailed` (`NativeApi`) | `NativeApi.LogShellMenuFailure`, called from every stage of `ShowShellContextMenuCore` (`BindToParent`/`GetUIObjectOf`/`CreatePopupMenu`/`QueryContextMenu`/`TrackPopupMenu`/`GetCommandString`/`InvokeCommand`) | `stage` (string, one of the stage names above), `extension` (string, or the literal `"<virtual>"` for a `SystemIconsPanel` item with no file extension), `hresult` (`"0x{hr:X8}"`) |
+| `ShellContextMenuFailed` (`FileLauncher`) | `FileLauncher.ShowContextMenu`'s own `catch` — belt-and-suspenders around `INativeApi.ShowShellContextMenuForPath`, which already degrades silently on its own | `exception` (`Exception.GetType().Name`), `extension` (`Path.GetExtension(path)`) — note: no `stage` field on this second call site, distinguishable by `source: "FileLauncher"` vs. `source: "NativeApi"` |
+| `RecycleManagedFromStorage` | `PanelItemStorageService.RecycleManagedItem` — the item could not first be restored to a visible location (legacy item with no recorded original path, the original directory could not be recreated, or the restore move itself failed), so it is recycled directly from inside managed storage instead (the pre-ADR-040 behavior, kept as this method's own fallback) | `restoreOutcome` (`RestoreOutcome.ToString()`) |
+| `RecycleManagedDeclined` | `PanelItemStorageService.RecycleManagedItem` — the shell did not actually recycle the item (the user declined the oversized-item warning, the file is locked) after it had already been restored to its original/desktop location; the item is re-adopted back into managed storage so the panel does not lose it | `readopted` (bool — whether re-adoption into managed storage succeeded) |
+| `MoveItemFailed` | `PanelItemsUninstallRestorer.TryMoveItem` — an exception while moving a single item to its resolved target during `--restore-panel-items` | `source` (path), `target` (path) — **exception**: unlike every other event in this document, these two carry the actual file paths, not just an extension; accepted because this event only ever reaches the local diagnostics log of the same machine the uninstall is running on, at the exact moment those paths are being reported as *not yet successfully moved* — the operator reading the log needs the real paths to find and move the file by hand |
+| `VerifiedCopySourceDeleteFailed` | `PanelItemsUninstallRestorer.DeleteVerifiedSourceOrWarn` — a cross-volume source could not be deleted after its copy was already verified byte-for-byte (still counted as restored, not failed) | `source` (path), `target` (path), `exception` (`ex.Message`, not just the type name — same accepted exception as `MoveItemFailed` above) |
+| `EnumerateStorageRootFailed` / `EnumerateItemDirectoryFailed` / `ManifestReadFailed` / `ManifestTempLeftoverDeleteFailed` / `GuidDirectoryCleanupFailed` / `StorageRootCleanupFailed` | `PanelItemsUninstallRestorer` — best-effort enumeration/cleanup steps during `--restore-panel-items`, logged via `Log.Error(source, name, ex, ...)` | `path` (the folder/file involved — same accepted-path exception as above); the underlying `Exception` is passed to `IAppLog.Error` itself, which is responsible for its own message/type formatting |
 
 ## Использование при диагностике зависания
 

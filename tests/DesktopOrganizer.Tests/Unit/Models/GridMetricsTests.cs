@@ -215,6 +215,10 @@ public class GridMetricsTests
     [InlineData(88d)]
     [InlineData(92d)]
     [InlineData(96d)]
+    [InlineData(104d)]
+    [InlineData(112d)]
+    [InlineData(120d)]
+    [InlineData(128d)]
     public void MinPanelWidth_NeverBelowMinPanelSize(double iconSize)
     {
         Assert.True(GridMetrics.MinPanelWidth(iconSize) >= GridMetrics.MinPanelSize);
@@ -233,6 +237,10 @@ public class GridMetricsTests
     [Theory]
     [InlineData(64d)]
     [InlineData(96d)]
+    [InlineData(104d)]
+    [InlineData(112d)]
+    [InlineData(120d)]
+    [InlineData(128d)]
     public void MinPanelWidth_AboveFloor_ReturnsUnclampedIconGridValue(double iconSize)
     {
         var cell = GridMetrics.CellSize(iconSize);
@@ -313,6 +321,10 @@ public class GridMetricsTests
     [InlineData(16d)]
     [InlineData(48d)]
     [InlineData(96d)]
+    [InlineData(104d)]
+    [InlineData(112d)]
+    [InlineData(120d)]
+    [InlineData(128d)]
     public void MinPanelWidth_OneArgOverload_EqualsThreeArgOverload_LegacyStretchZeroScrollBar(double iconSize)
     {
         Assert.Equal(
@@ -344,6 +356,7 @@ public class GridMetricsTests
     [Theory]
     [InlineData(64d, 17d)]
     [InlineData(96d, 23.5d)]
+    [InlineData(128d, 17d)]
     public void MinPanelWidth_FixedGap_AboveFloor_IsWiderThanLegacyStretchByReservedScrollBarWidth(double iconSize, double scrollBarWidth)
     {
         var legacyStretch = GridMetrics.MinPanelWidth(iconSize, IconLayoutPolicy.LegacyStretch, scrollBarWidth);

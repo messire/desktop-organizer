@@ -22,6 +22,8 @@ public class PanelCustomizeViewModelTests
     private readonly Mock<IWindowManager> _windowManagerMock = new();
     private readonly Mock<ILayoutEditModeService> _layoutEditModeMock = new();
     private readonly Mock<IFolderPickerService> _folderPickerMock = new();
+    private readonly Mock<IColorPickerService> _colorPickerMock = new();
+    private readonly Mock<IAppSettings> _appSettingsMock = new();
 
     // docs/PLANS/localization.md R-5: a real LocalizationService fixed to English, independent of the
     // test-runner machine's own culture — every pre-existing assertion below expects English text.
@@ -703,5 +705,5 @@ public class PanelCustomizeViewModelTests
     }
 
     private PanelCustomizeViewModel BuildSut() =>
-        new(_windowManagerMock.Object, _layoutEditModeMock.Object, _folderPickerMock.Object, _localization);
+        new(_windowManagerMock.Object, _layoutEditModeMock.Object, _folderPickerMock.Object, _localization, _colorPickerMock.Object, _appSettingsMock.Object);
 }

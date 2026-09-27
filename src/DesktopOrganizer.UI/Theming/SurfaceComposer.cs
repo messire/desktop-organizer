@@ -25,6 +25,59 @@ public static class SurfaceComposer
     public const double GlassOpacityFactor = 0.60;
 
     /// <summary>
+    /// The neutral panel surface base for <see cref="PanelThemeMode.Dark"/> panels — byte-identical to the
+    /// single neutral base this app shipped before ADR-042
+    /// (<c>PanelSurfaceBrushConverter.NeutralSurfaceHex</c>/<c>Color.Surface.Base</c>, both <c>#1E1E1E</c>).
+    /// </summary>
+    public static readonly Color DarkNeutralBase = Color.FromRgb(0x1E, 0x1E, 0x1E);
+
+    /// <summary>
+    /// The neutral panel surface base for <see cref="PanelThemeMode.Light"/> panels (ADR-042) — a light,
+    /// slightly cool-neutral grey (close to Fluent/Explorer's own light chrome background), chosen so
+    /// every <see cref="PanelColorPreset.LightModeTextHex"/> value stays readable against it: measured
+    /// contrast (WCAG, via <see cref="ContrastCalculator"/>) for every one of the twelve presets' dark
+    /// text is <c>&gt;= 7.6:1</c> for <see cref="PanelSurfaceStyle.Solid"/> and
+    /// <see cref="PanelSurfaceStyle.Ambient"/> at the default 0.8 opacity (both a light <c>#F0F0F0</c> and a
+    /// dark <c>#101010</c> representative wallpaper — comfortably above <see cref="ContrastCalculator.MinimumTextContrast"/>
+    /// (4.5:1)), and <c>&gt;= 11.5:1</c> for <see cref="PanelSurfaceStyle.Glass"/> at
+    /// <see cref="MinSurfaceOpacity"/> composited over the light wallpaper (above
+    /// <see cref="ContrastCalculator.MinimumIconContrast"/>'s 3:1). Composited over the DARK wallpaper at
+    /// <see cref="MinSurfaceOpacity"/>, Glass drops to <c>~2.0:1</c> — a known, accepted gap mirroring the
+    /// pre-existing <c>KnownGap_MinSurfaceOpacityFloor_OnLightWallpaper_FailsTextContrast</c> gap the DARK
+    /// base already has (a translucent floor-opacity surface always leans toward whatever wallpaper shows
+    /// through; that gap is symmetric, not new — see <c>AmbientAccentContrastAuditTests</c>). Pinned by
+    /// <c>SurfaceComposerTests</c>/<c>AmbientAccentContrastAuditTests</c>.
+    /// </summary>
+    public static readonly Color LightNeutralBase = Color.FromRgb(0xF3, 0xF5, 0xF8);
+
+    /// <summary>
+    /// Resolves which neutral panel surface base <see cref="ComposeSurface"/> should mix
+    /// <paramref name="accent"/> into. ADR-042: this is now purely a function of
+    /// <paramref name="text"/>'s <see cref="PanelThemeMode"/> (<see cref="PanelThemeRules.IsLightSurface"/>)
+    /// — <see cref="PanelThemeMode.Light"/> resolves to <see cref="LightNeutralBase"/>,
+    /// <see cref="PanelThemeMode.Dark"/> to <see cref="DarkNeutralBase"/>. <paramref name="accent"/> is not
+    /// read by this method at all (kept as a parameter only for call-site/signature stability — every
+    /// caller already has both colours to hand from <c>PanelTheme.Accent</c>/<c>PanelTheme.Text</c>); it is
+    /// still what <see cref="ComposeSurface"/> mixes into whichever base is returned. This replaces the
+    /// pre-ADR-042 "(accent, text) pair" rule (a light accent resolved light only when its own text also
+    /// read better on a light base than a dark one) with ADR-042's simpler explicit rule: every LEGACY
+    /// panel's light text (<c>#DDDDDD</c>/<c>#FFFFFF</c>, which contrasts better against the dark base than
+    /// the light one — <see cref="PanelThemeRules.FromTextColor(System.Windows.Media.Color)"/>) still
+    /// resolves <see cref="DarkNeutralBase"/>, byte-identical, regardless of its accent — including a legacy panel
+    /// with a custom light accent (e.g. <c>#FFD700</c>) and the app's own default light text. Callers that
+    /// must preserve the OLD, non-adaptive behaviour regardless of accent/text (<see cref="ComposeSurface"/>'s
+    /// own <c>highContrast:true</c> path) should keep passing <see cref="DarkNeutralBase"/> directly rather
+    /// than calling this method.
+    /// </summary>
+    /// <param name="accent">The panel's accent colour — not read by this method (see remarks); kept for signature/call-site stability.</param>
+    /// <param name="text">The panel's own text colour — the sole input to the <see cref="PanelThemeMode"/> derivation that decides the base.</param>
+    public static Color ResolveNeutralBase(Color accent, Color text)
+    {
+        _ = accent;
+        return PanelThemeRules.IsLightSurface(text) ? LightNeutralBase : DarkNeutralBase;
+    }
+
+    /// <summary>
     /// Clamps <paramref name="value"/> to <c>[MinSurfaceOpacity, MaxSurfaceOpacity]</c>. Non-finite
     /// input (<see cref="double.NaN"/>, <see cref="double.PositiveInfinity"/>,
     /// <see cref="double.NegativeInfinity"/>) is untrusted by construction and floors to

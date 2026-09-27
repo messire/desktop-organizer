@@ -160,4 +160,20 @@ public class SelectedPanelSettingsViewModelTests
         model.SourceFolderPath = @"C:\fake\portal";
         Assert.False(sut.SetSortModeCommand.CanExecute(PanelSortMode.Manual));
     }
+
+    /// <summary>
+    /// Verifies that <see cref="SelectedPanelSettingsViewModel.SetSurfaceStyleCommand"/> (ADR-042) sets
+    /// <see cref="SelectedPanelSettingsViewModel.SelectedPanelSurfaceStyle"/> — backs the "Customize
+    /// panel…" dialog's Surface Style segmented control.
+    /// </summary>
+    [Fact]
+    public void SetSurfaceStyleCommand_Execute_SetsSelectedPanelSurfaceStyle()
+    {
+        var sut = new SelectedPanelSettingsViewModel(_windowManagerMock.Object);
+        sut.SetPanel(new ChildWindowModel { SurfaceStyle = PanelSurfaceStyle.Ambient });
+
+        sut.SetSurfaceStyleCommand.Execute(PanelSurfaceStyle.Glass);
+
+        Assert.Equal(PanelSurfaceStyle.Glass, sut.SelectedPanelSurfaceStyle);
+    }
 }

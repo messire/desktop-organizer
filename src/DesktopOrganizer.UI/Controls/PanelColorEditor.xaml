@@ -1,0 +1,277 @@
+<UserControl x:Class="DesktopOrganizer.UI.Controls.PanelColorEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             xmlns:vm="clr-namespace:DesktopOrganizer.UI.ViewModels"
+             xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
+             xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+             mc:Ignorable="d"
+             x:Name="Root"
+             d:DataContext="{d:DesignInstance Type=vm:PanelColorEditorViewModel, IsDesignTimeCreatable=False}"
+             d:DesignWidth="380">
+    <!--
+        ADR-042 redesign, polished per docs/prompts (release-polish-1.0 visual review) — three Settings-style
+        cards: Mode (Light/Dark segmented control, Light first per the Windows 11 convention — the default
+        for a NEW panel stays Dark, only the visual order changed), Accent colour (12 circular preset
+        swatches + a 13th "Custom…" cell, all in ONE WrapPanel flow so it wraps 7+6 instead of leaving the
+        custom cell stranded on its own row), and Advanced (a proper Settings.CardExpander card, collapsed
+        by default: raw accent/text hex boxes + "Reset to defaults"). The "Preview" card is a SEPARATE
+        control (Controls/PanelPreviewCard.xaml) that each host (PanelCustomizeWindow/NewPanelDefaultsSection)
+        places directly above this one — it needs opacity/surface-style/icon-size inputs this editor's own
+        ViewModel does not own.
+
+        Swatch grid: the ItemsControl's ItemsSource is PanelColorEditorViewModel.SwatchItems — the VM's own
+        Presets PLUS a single trailing CustomSwatchSlotMarker sentinel, computed once in the VM rather than
+        via a XAML CompositeCollection/CollectionContainer (that binds unreliably to an inherited
+        DataContext outside the visual tree — a first attempt at this feature left the whole preset grid
+        empty). Rendered through two DataTemplates keyed by DataType in ItemsControl.Resources (no
+        ItemTemplate property, so WPF resolves each item's template by its own runtime type). This keeps the
+        "Custom…" cell inside the SAME WrapPanel layout pass as the 12 presets (true 13th cell, same Tab stop
+        and arrow-key cycle — KeyboardNavigation.TabNavigation/DirectionalNavigation below apply to the whole
+        ItemsControl regardless of item type). CustomSwatchSlotMarker carries no data of its own; its
+        DataTemplate reaches PickCustomAccentCommand via ElementName=Root (this UserControl's own
+        DataContext), the same cross-boundary binding shape PanelPreviewCard.xaml already uses for its own
+        ElementName="Root".
+        WrapPanel Width="280" = 7 cells x 40px (32px swatch + 4px margin each side) — fits comfortably inside
+        this window's ~340px card interior (420px window - 32px ScrollViewer padding - 28px card padding),
+        giving the requested 7-then-6 wrap instead of 6+6+1.
+
+        Local converter/resource note: this control is hosted inside PanelCustomizeWindow, whose OWN
+        closing-behavior test fixture (PanelCustomizeWindowClosingTests) now merges Settings.xaml too (see
+        that file's own remarks), so Settings.CardBorder/CardHeader/CardExpander/SegmentedGroup/SegmentedItem
+        and the app-wide EnumDisplayName/EnumEquals/HexBrush/LocKey resources all resolve there exactly as
+        they do in the real app — only AccentContrastForeground/PreviewIconSize (this control's own,
+        narrowly-scoped converters) are declared locally.
+    -->
+    <UserControl.Resources>
+        <loc:LocKeyConverter x:Key="LocKey"/>
+        <conv:AccentContrastForegroundConverter x:Key="AccentContrastForeground"/>
+    </UserControl.Resources>
+    <StackPanel>
+        <!-- ── Mode ───────────────────────────────────────────────────────────────────────────────── -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ModeLabel" Grid.Column="0" Text="{loc:Loc Common_Mode_Header}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
+                    <!-- m2 (release-polish-1.0 review round): AutomationProperties live on each RadioButton
+                         (LabeledBy the card header), not on the grouping Border — a screen reader announces
+                         "Light, radio button, Mode" per option instead of only ever reading the group's own
+                         name once. m5: no GroupName — this group's exclusivity is entirely VM-driven
+                         (SetModeCommand + the OneWay IsChecked binding below), the same pattern the swatch
+                         grid's preset RadioButtons already use, so WPF's own GroupName-syncing behaviour
+                         never fights the VM for which segment is checked. -->
+                    <Border Grid.Column="1" Style="{StaticResource Settings.SegmentedGroup}">
+                        <UniformGrid Rows="1" Columns="2"
+                                     KeyboardNavigation.TabNavigation="Once"
+                                     KeyboardNavigation.DirectionalNavigation="Contained">
+                            <!-- Light first, then Dark — Windows 11 segmented-control convention. The default
+                                 Mode for a newly-created panel is still Dark (PanelColorPresets.Default/
+                                 GlobalDefaultsViewModel) — only this visual ORDER changed. -->
+                            <RadioButton Style="{StaticResource Settings.SegmentedItem}"
+                                         AutomationProperties.LabeledBy="{Binding ElementName=ModeLabel}"
+                                         Command="{Binding SetModeCommand}" CommandParameter="{x:Static theming:PanelThemeMode.Light}"
+                                         Content="{loc:LocBinding Source={x:Static theming:PanelThemeMode.Light}, Converter={StaticResource EnumDisplayName}}">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="Mode" Mode="OneWay" Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static theming:PanelThemeMode.Light}"/>
+                                </RadioButton.IsChecked>
+                            </RadioButton>
+                            <RadioButton Style="{StaticResource Settings.SegmentedItem}"
+                                         AutomationProperties.LabeledBy="{Binding ElementName=ModeLabel}"
+                                         Command="{Binding SetModeCommand}" CommandParameter="{x:Static theming:PanelThemeMode.Dark}"
+                                         Content="{loc:LocBinding Source={x:Static theming:PanelThemeMode.Dark}, Converter={StaticResource EnumDisplayName}}">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="Mode" Mode="OneWay" Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static theming:PanelThemeMode.Dark}"/>
+                                </RadioButton.IsChecked>
+                            </RadioButton>
+                        </UniformGrid>
+                    </Border>
+                </Grid>
+                <!-- UX#5: microcopy explaining what switching the mode actually does (it re-derives the
+                     text colour for the current accent — it does not change the accent itself). -->
+                <TextBlock Text="{loc:Loc Common_Mode_Description}" Style="{StaticResource Settings.CardDescription}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ── Accent colour ──────────────────────────────────────────────────────────────────────── -->
+        <Border Style="{StaticResource Settings.CardBorder}">
+            <StackPanel>
+                <TextBlock Text="{loc:Loc Common_AccentColor_Label}" Style="{StaticResource Settings.CardHeader}" Margin="0,0,0,10"/>
+
+                <!--
+                    13 cells total (12 presets + the "Custom…" sentinel), ONE WrapPanel flow (see this
+                    file's own remarks above for why a CompositeCollection + per-type DataTemplate, rather
+                    than a UniformGrid + a separate sibling Button). One Tab stop for the whole group
+                    (KeyboardNavigation.TabNavigation="Once"); arrow keys move focus within it
+                    (DirectionalNavigation="Cycle"); Space/Enter/click applies the focused preset or opens
+                    the custom-colour dialog — no "live" application while merely moving focus with arrow keys.
+                -->
+                <ItemsControl ItemsSource="{Binding SwatchItems}"
+                              Focusable="False"
+                              KeyboardNavigation.TabNavigation="Once"
+                              KeyboardNavigation.DirectionalNavigation="Cycle"
+                              Margin="0,0,0,10">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Width="280"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.Resources>
+                        <DataTemplate DataType="{x:Type vm:ColorPresetOption}">
+                            <!-- No GroupName: exclusivity is driven entirely by the VM (IsSelected, bound
+                                 OneWay below, re-published whenever ApplyCommand fires on ANY option) — same
+                                 pattern this swatch grid has always used. -->
+                            <RadioButton Command="{Binding ApplyCommand}"
+                                         ToolTip="{loc:LocBinding NameKey, Converter={StaticResource LocKey}}"
+                                         AutomationProperties.Name="{loc:LocBinding NameKey, Converter={StaticResource LocKey}}"
+                                         Margin="4" Padding="0" BorderThickness="0" Background="Transparent"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="IsSelected" Mode="OneWay"/>
+                                </RadioButton.IsChecked>
+                                <RadioButton.Template>
+                                    <ControlTemplate TargetType="RadioButton">
+                                        <Grid Width="32" Height="32">
+                                            <Ellipse Fill="{Binding AccentHex, Converter={StaticResource HexBrush}}"
+                                                     Stroke="{StaticResource Brush.Settings.SwatchBorder}" StrokeThickness="1"/>
+                                            <!-- Selected-state ring (offset 2px in the accent colour itself) + a
+                                                 contrasting checkmark glyph — visible in High Contrast too (the
+                                                 1px hairline border above never disappears). -->
+                                            <Ellipse x:Name="SelectionRing" Margin="-3"
+                                                     Stroke="{Binding AccentHex, Converter={StaticResource HexBrush}}" StrokeThickness="2"
+                                                     Visibility="Collapsed"/>
+                                            <TextBlock x:Name="CheckGlyph" Text="{StaticResource Icon.Glyph.Checkmark}"
+                                                       FontFamily="Segoe MDL2 Assets" FontSize="13"
+                                                       Foreground="{Binding AccentHex, Converter={StaticResource AccentContrastForeground}}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="Collapsed"/>
+                                        </Grid>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="SelectionRing" Property="Visibility" Value="Visible"/>
+                                                <Setter TargetName="CheckGlyph" Property="Visibility" Value="Visible"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </RadioButton.Template>
+                            </RadioButton>
+                        </DataTemplate>
+
+                        <!-- The 13th "Custom…" cell — same 32x32/4px-margin footprint as a preset swatch;
+                             opens the system colour dialog and applies the result exactly like a preset
+                             click (PanelColorEditorViewModel.ApplyAccent). Its DataContext is the (dataless)
+                             CustomSwatchSlotMarker item, so both the command AND the VM's own
+                             IsCustomSelected/AccentColor (UX#1) reach back to this UserControl's own
+                             DataContext via ElementName=Root. UX#1 (release-polish-1.0 visual review): when
+                             the current accent matches no preset, this cell shows the SAME selected-state
+                             visuals a preset swatch shows (filled circle in the custom accent, selection
+                             ring, contrast-chosen checkmark) instead of the dashed "+" placeholder — so the
+                             swatch grid always has exactly one visibly-selected cell. -->
+                        <DataTemplate DataType="{x:Type vm:CustomSwatchSlotMarker}">
+                            <Button Command="{Binding DataContext.PickCustomAccentCommand, ElementName=Root}"
+                                    ToolTip="{loc:Loc Common_CustomColor_Button}"
+                                    AutomationProperties.Name="{loc:Loc Common_PickAccentColor_A11y}"
+                                    Padding="0" Background="Transparent" BorderThickness="0"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="Hand">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Grid Width="32" Height="32" Margin="4">
+                                            <Ellipse x:Name="DashedRing" Stroke="{StaticResource Brush.Settings.TextMuted}" StrokeThickness="1.5" StrokeDashArray="2,2"/>
+                                            <TextBlock x:Name="AddGlyph" Text="{StaticResource Icon.Glyph.Add}" FontFamily="Segoe MDL2 Assets"
+                                                       FontSize="12" Foreground="{StaticResource Brush.Settings.TextMuted}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <Ellipse x:Name="CustomFill" Visibility="Collapsed"
+                                                     Fill="{Binding DataContext.AccentColor, ElementName=Root, Converter={StaticResource HexBrush}}"
+                                                     Stroke="{StaticResource Brush.Settings.SwatchBorder}" StrokeThickness="1"/>
+                                            <Ellipse x:Name="CustomSelectionRing" Margin="-3" Visibility="Collapsed"
+                                                     Stroke="{Binding DataContext.AccentColor, ElementName=Root, Converter={StaticResource HexBrush}}" StrokeThickness="2"/>
+                                            <TextBlock x:Name="CustomCheckGlyph" Text="{StaticResource Icon.Glyph.Checkmark}"
+                                                       FontFamily="Segoe MDL2 Assets" FontSize="13" Visibility="Collapsed"
+                                                       Foreground="{Binding DataContext.AccentColor, ElementName=Root, Converter={StaticResource AccentContrastForeground}}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Grid>
+                                        <ControlTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding DataContext.IsCustomSelected, ElementName=Root}" Value="True">
+                                                <Setter TargetName="DashedRing" Property="Visibility" Value="Collapsed"/>
+                                                <Setter TargetName="AddGlyph" Property="Visibility" Value="Collapsed"/>
+                                                <Setter TargetName="CustomFill" Property="Visibility" Value="Visible"/>
+                                                <Setter TargetName="CustomSelectionRing" Property="Visibility" Value="Visible"/>
+                                                <Setter TargetName="CustomCheckGlyph" Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.Resources>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <!-- ── Advanced ───────────────────────────────────────────────────────────────────────────── -->
+        <Expander Style="{StaticResource Settings.CardExpander}" IsExpanded="False"
+                  AutomationProperties.Name="{loc:Loc Common_Advanced_Header}">
+            <Expander.Header>
+                <StackPanel>
+                    <TextBlock Text="{loc:Loc Common_Advanced_Header}" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Text="{loc:Loc Common_Advanced_Description}" Style="{StaticResource Settings.CardDescription}"/>
+                </StackPanel>
+            </Expander.Header>
+            <StackPanel>
+                <!-- Accent colour row: raw hex box (mode-independent, see PanelColorEditorViewModel's
+                     own remarks) + preview chip. -->
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="90"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="AccentColorLabel" Grid.Column="0" Text="{loc:Loc Common_AccentColor_Label}" VerticalAlignment="Center"/>
+                    <TextBox x:Name="AccentHexBox" Grid.Column="1" Margin="0,0,8,0" VerticalAlignment="Center"
+                             AutomationProperties.LabeledBy="{Binding ElementName=AccentColorLabel}"
+                             ToolTip="{loc:Loc Common_HexColor_Hint}"
+                             Text="{Binding AccentColor, UpdateSourceTrigger=LostFocus}"/>
+                    <Border Grid.Column="2" Width="24" Height="24" CornerRadius="3"
+                            BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
+                            Background="{Binding AccentColor, Converter={StaticResource HexBrush}}"/>
+                </Grid>
+
+                <!-- Text colour row: raw hex box + "Custom…" picker (mode-independent) + preview chip. -->
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="90"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="TextColorLabel" Grid.Column="0" Text="{loc:Loc Common_TextColor_Label}" VerticalAlignment="Center"/>
+                    <TextBox x:Name="TextHexBox" Grid.Column="1" Margin="0,0,8,0" VerticalAlignment="Center"
+                             AutomationProperties.LabeledBy="{Binding ElementName=TextColorLabel}"
+                             ToolTip="{loc:Loc Common_HexColor_Hint}"
+                             Text="{Binding TextColor, UpdateSourceTrigger=LostFocus}"/>
+                    <Border Grid.Column="2" Width="24" Height="24" Margin="0,0,8,0" CornerRadius="3"
+                            BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
+                            Background="{Binding TextColor, Converter={StaticResource HexBrush}}"/>
+                    <Button Grid.Column="3" Content="{loc:Loc Common_CustomColor_Button}" Padding="8,4"
+                            AutomationProperties.Name="{loc:Loc Common_PickTextColor_A11y}"
+                            Command="{Binding PickCustomTextCommand}"/>
+                </Grid>
+
+                <Button Content="{loc:Loc Common_ResetToDefaults_Button}" Padding="10,4" HorizontalAlignment="Left"
+                        ToolTip="{loc:Loc Common_ResetToDefaults_Tooltip}"
+                        Command="{Binding ResetCommand}"/>
+                <!-- M7: per-host description — the Customize window's Reset restores THIS panel to the
+                     new-panel defaults, while the New panel defaults section's own Reset restores the
+                     built-in colours; ResetDescriptionKey (set by whichever host constructed this editor's
+                     ViewModel) picks the right RESX key. -->
+                <TextBlock Text="{loc:LocBinding ResetDescriptionKey, Converter={StaticResource LocKey}}"
+                           Style="{StaticResource Settings.CardDescription}" Margin="0,6,0,0"/>
+            </StackPanel>
+        </Expander>
+    </StackPanel>
+</UserControl>

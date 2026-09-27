@@ -1,7 +1,7 @@
 <Project>
 
     <PropertyGroup>
-        <Version>0.6.1</Version>
+        <Version>0.7.0</Version>
         <!-- DesktopOrganizer.UI's user settings (ChildWindowsState, panel layout, etc. — see
              Properties\Settings.settings) are System.Configuration "User"-scoped, which .NET keys by
              AssemblyVersion: %LocalAppData%\...\<AssemblyVersion>\user.config. If AssemblyVersion moved
@@ -28,6 +28,16 @@
              closes CA1824 on DesktopOrganizer.Localization. -->
         <SatelliteResourceLanguages>en;ru</SatelliteResourceLanguages>
         <NeutralLanguage>en</NeutralLanguage>
+        <!-- Product metadata (release-polish 1.0): shared across every project's assembly attributes.
+             Product feeds the Win32 VS_FIXEDFILEINFO "ProductName" field; Task Manager's own "Name"
+             column actually reads AssemblyTitle (set per-project — see DesktopOrganizer.UI.csproj for
+             why the UI exe overrides it), not Product. Company/Authors/Copyright are otherwise identical
+             across all projects, so they belong here rather than being repeated per csproj. -->
+        <Product>DesktopOrganizer</Product>
+        <Company>khagendev</Company>
+        <Authors>khagen</Authors>
+        <Copyright>Copyright (c) 2024-2026 khagen</Copyright>
+        <Description>A free, open-source Windows desktop organizer that groups your desktop icons into movable, resizable panels.</Description>
     </PropertyGroup>
 
     <ItemGroup>

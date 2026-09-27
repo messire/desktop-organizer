@@ -68,8 +68,15 @@ public class OverlayScrollBarStyleTests
     /// RepeatButtons carry no content (no arrow glyphs), and the Thumb is EXACTLY
     /// <c>ScrollBar.ThumbMinLength</c> tall by the Track's OWN arrange math (the two RepeatButtons plus the
     /// Thumb tile the full track length) — not merely a taller pill rendered over a shorter slot.
-    /// The visible pill is <c>ScrollBar.ThumbThickness</c> wide, capsule-rounded, filled with the shared
-    /// frozen <c>Brush.ScrollBar.Thumb</c> instance, and nothing in the tree has a render <see cref="UIElement.Effect"/>.
+    /// The visible pill is <c>ScrollBar.ThumbThickness</c> wide, capsule-rounded, filled with a frozen
+    /// brush colour-identical to <c>Brush.ScrollBar.Thumb</c> — docs/PLANS/color-presets-and-size-step.md
+    /// WP-B "ADDITIONAL" made the Thumb's actual fill luminance-adaptive
+    /// (<c>PanelChromeForegroundBrushConverter</c>, keyed off the inherited <c>PanelTheme.Accent</c>); a
+    /// bare <see cref="ScrollBar"/> with no panel ancestor setting that attached property inherits
+    /// <c>PanelTheme.Accent</c>'s own DARK default (<c>AccentPalette.Neutral</c>), which resolves to the
+    /// exact same colour <c>Brush.ScrollBar.Thumb</c> always had — so this is no longer the SAME shared
+    /// instance, but is still frozen and still byte-identical. Nothing in the tree has a render
+    /// <see cref="UIElement.Effect"/>.
     /// </summary>
     [Fact]
     public void VerticalScrollBar_MaterializesTrackWithCapsuleThumbAtMinimumLength()
@@ -81,7 +88,7 @@ public class OverlayScrollBarStyleTests
             var thickness = (double)app.Resources["ScrollBar.ThumbThickness"];
             var minLength = (double)app.Resources["ScrollBar.ThumbMinLength"];
             var radius = (CornerRadius)app.Resources["Radius.ScrollBarThumb"];
-            var thumbBrush = (Brush)app.Resources["Brush.ScrollBar.Thumb"];
+            var thumbColor = ((SolidColorBrush)app.Resources["Brush.ScrollBar.Thumb"]).Color;
 
             const double trackLength = 300d;
             var scrollBar = CreateStyledScrollBar(app, Orientation.Vertical);
@@ -113,8 +120,9 @@ public class OverlayScrollBarStyleTests
             Assert.Equal(thickness, pill.ActualWidth);
             Assert.Equal(minLength, pill.ActualHeight);
             Assert.Equal(radius, pill.CornerRadius);
-            Assert.Same(thumbBrush, pill.Background);
-            Assert.True(thumbBrush.IsFrozen, "Brush.ScrollBar.Thumb must stay a shared frozen instance.");
+            var pillBrush = Assert.IsType<SolidColorBrush>(pill.Background);
+            Assert.Equal(thumbColor, pillBrush.Color);
+            Assert.True(pillBrush.IsFrozen, "The Thumb's resolved fill must be a frozen brush.");
 
             Assert.Empty(ElementsWithEffect(scrollBar));
         });

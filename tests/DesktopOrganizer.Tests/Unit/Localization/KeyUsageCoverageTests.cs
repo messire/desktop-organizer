@@ -5,6 +5,7 @@ using DesktopOrganizer.Core;
 using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Converters;
 using DesktopOrganizer.UI.Models;
+using DesktopOrganizer.UI.Theming;
 
 namespace DesktopOrganizer.Tests.Unit.Localization;
 
@@ -13,10 +14,12 @@ namespace DesktopOrganizer.Tests.Unit.Localization;
 /// every key defined in <c>Strings.resx</c> must be reachable from at least one real call site — a
 /// literal <c>{loc:Loc Key}</c>/<c>FormatKey=Key</c> in XAML, a literal RESX-key-shaped string anywhere
 /// in C# source (<c>GetString("Key")</c>, a ternary feeding <c>GetString</c>, an indexer, …), or one of
-/// the three dynamically-built key families this codebase actually uses: <c>Enum_{Type}_{Member}</c> via
+/// the four dynamically-built key families this codebase actually uses: <c>Enum_{Type}_{Member}</c> via
 /// <see cref="EnumDisplayNameConverter"/> (directly, or through the shared
 /// <c>Settings.EnumRadioLabel</c> <see cref="System.Windows.DataTemplate"/>), <c>SystemIcon_{Kind}</c> via
-/// <c>SystemIconsPanelManager</c>, and <c>Plural_{Base}_{Category}</c> via <c>FormatPlural</c>.
+/// <c>SystemIconsPanelManager</c>, <c>Plural_{Base}_{Category}</c> via <c>FormatPlural</c>, and
+/// <c>ColorPreset_{Id}</c> (<see cref="PanelColorPreset.NameKey"/>) via <c>PanelColorEditor</c>'s preset
+/// swatch grid (docs/PLANS/color-presets-and-size-step.md §3.4/§4.2).
 /// <see cref="XamlKeyCoverageTests"/>/<see cref="CodeKeyCoverageTests"/> already guarantee the REVERSE
 /// direction (every reference resolves to a real key); this is the other half — a key nothing references
 /// is dead and silently rots out of sync with whatever it once backed. This replaces the old
@@ -67,6 +70,12 @@ public class KeyUsageCoverageTests
         typeof(PanelSurfaceStyle),
         typeof(PanelViewMode),
         typeof(SystemIconSize),
+
+        // ADR-042: PanelColorEditor's Mode segmented control reuses the same
+        // {loc:LocBinding Source={x:Static ...}, Converter={StaticResource EnumDisplayName}} idiom every
+        // other 2/3-option radio/segmented group in this codebase already uses — Enum_PanelThemeMode_Light/
+        // Enum_PanelThemeMode_Dark, not a pair of bespoke Common_Mode_Light/Dark keys.
+        typeof(PanelThemeMode),
     };
 
     /// <summary>
@@ -122,6 +131,13 @@ public class KeyUsageCoverageTests
 
         foreach (var kind in Enum.GetNames(typeof(SystemIconKind)))
             used.Add($"SystemIcon_{kind}");
+
+        // ColorPreset_{Id} (docs/PLANS/color-presets-and-size-step.md §3.4/§4.2): PanelColorEditor.xaml
+        // binds each preset's name via {loc:LocBinding NameKey, Converter={StaticResource LocKey}} — a
+        // data-driven RESX key built at runtime from PanelColorPreset.NameKey, never a literal
+        // {loc:Loc ColorPreset_X} token the plain XAML scan above could find on its own.
+        foreach (var preset in PanelColorPresets.All)
+            used.Add(preset.NameKey);
 
         var unused = resxKeys.Except(used, StringComparer.Ordinal)
             .OrderBy(key => key, StringComparer.Ordinal)

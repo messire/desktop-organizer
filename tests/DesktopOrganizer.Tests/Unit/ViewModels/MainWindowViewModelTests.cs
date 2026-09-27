@@ -35,6 +35,7 @@ public class MainWindowViewModelTests
     private readonly Mock<IPanelCustomizeService> _panelCustomizeServiceMock = new();
     private readonly Mock<IUpdateCheckService> _updateCheckServiceMock = new();
     private readonly Mock<IExternalLinkLauncher> _linkLauncherMock = new();
+    private readonly Mock<IColorPickerService> _colorPickerMock = new();
 
     // A real LocalizationService (English) rather than a mock: several tests below assert actual
     // confirmation-dialog text (e.g. "moved to the Recycle Bin", plural panel counts) — the same pattern the
@@ -1486,6 +1487,20 @@ public class MainWindowViewModelTests
         Assert.Contains("2 панели", capturedMessage); // ru "Few" category for n=2.
     }
 
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel.DefaultColors"/> is exactly
+    /// <see cref="MainWindowViewModel.GlobalDefaults"/>' own <see cref="GlobalDefaultsViewModel.DefaultColors"/>
+    /// instance (docs/PLANS/color-presets-and-size-step.md §3.7) — a plain forwarding property, not a
+    /// second, independently-constructed <c>PanelColorEditorViewModel</c>.
+    /// </summary>
+    [Fact]
+    public void DefaultColors_IsTheSameInstanceAsGlobalDefaultsDefaultColors()
+    {
+        var sut = BuildSut();
+
+        Assert.Same(sut.GlobalDefaults.DefaultColors, sut.DefaultColors);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <param name="systemUiCulture">
@@ -1539,6 +1554,7 @@ public class MainWindowViewModelTests
             _panelCustomizeServiceMock.Object,
             localization ?? _localization,
             systemUiCulture ?? CultureInfo.GetCultureInfo("en"),
-            about);
+            about,
+            _colorPickerMock.Object);
     }
 }

@@ -13,7 +13,7 @@
         TargetType style, keyed by the type itself) is found without a Themes/Generic.xaml.
 
         The four Ambient-Accent converters below are registered HERE, not in Templates.xaml (which — per
-        D-2 — keeps registering the converters ITS OWN remaining content, FileContextMenu/ListViewTemplate/
+        D-2 — keeps registering the converters ITS OWN remaining content, ListViewTemplate/
         GridViewTemplate/FileNameTextStyle/FileNameEditBoxStyle, needs): Templates.xaml is merged AFTER
         this dictionary (Colors -> [Colors.HighContrast] -> Spacing -> Brushes -> Typography -> Icons ->
         Controls -> Panels -> Templates, built in App.xaml.cs's LoadResourceDictionaries()), so a
@@ -292,9 +292,17 @@
                                                    Text="{TemplateBinding SemanticIcon}"
                                                    FontFamily="Segoe MDL2 Assets"
                                                    FontSize="12"
-                                                   Foreground="{StaticResource Brush.Text.Secondary}"
                                                    VerticalAlignment="Center"
-                                                   Margin="8,0,0,0"/>
+                                                   Margin="8,0,0,0">
+                                            <TextBlock.Foreground>
+                                                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Secondary">
+                                                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                                                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                                                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                                    <Binding Source="{StaticResource Brush.Text.Secondary}"/>
+                                                </MultiBinding>
+                                            </TextBlock.Foreground>
+                                        </TextBlock>
 
                                         <ContentPresenter Grid.Column="1"
                                                            Content="{TemplateBinding TitleEditor}"
@@ -367,10 +375,22 @@
                             -->
                             <Border x:Name="PART_NeutralStroke"
                                     SnapsToDevicePixels="True"
-                                    BorderBrush="{StaticResource Brush.Border.Default}"
                                     BorderThickness="{StaticResource Thickness.Hairline}"
                                     CornerRadius="{StaticResource Radius.Panel}"
                                     IsHitTestVisible="False">
+                                <!-- MINOR-4 fix (review round, docs/PLANS/color-presets-and-size-step.md):
+                                     was a fixed Brush.Border.Default (#33FFFFFF — near-invisible on a
+                                     light-accent panel's now-light surface, Q-1 variant B); routed through
+                                     PanelChromeForegroundBrush's new "Border" kind instead, same
+                                     luminance-adaptive rule every other fixed chrome token here uses. -->
+                                <Border.BorderBrush>
+                                    <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Border">
+                                        <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                        <Binding Source="{StaticResource Brush.Border.Default}"/>
+                                    </MultiBinding>
+                                </Border.BorderBrush>
                                 <Border.Opacity>
                                     <MultiBinding Converter="{StaticResource EditAwareVisualStateToDouble}" ConverterParameter="neutralStroke">
                                         <Binding Path="VisualState" RelativeSource="{RelativeSource TemplatedParent}"/>
@@ -467,9 +487,18 @@
                             <Border x:Name="PART_InteractionOverlay"
                                     SnapsToDevicePixels="True"
                                     IsHitTestVisible="False"
-                                    BorderBrush="{StaticResource Brush.Border.Default}"
                                     BorderThickness="{StaticResource Thickness.Hairline}"
                                     CornerRadius="{StaticResource Radius.Panel}">
+                                <!-- MINOR-4 fix — see PART_NeutralStroke's own remarks above (same fixed
+                                     Brush.Border.Default -> PanelChromeForegroundBrush "Border" kind swap). -->
+                                <Border.BorderBrush>
+                                    <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Border">
+                                        <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                        <Binding Source="{StaticResource Brush.Border.Default}"/>
+                                    </MultiBinding>
+                                </Border.BorderBrush>
                                 <!-- D-6: MultiBinding over [VisualState, IsLayoutEditing] — see
                                      EditAwareVisualStateToDoubleConverter's remarks above; "border" applies
                                      LayoutEditVisuals' EditBorderFloor (0.60) while editing. -->
@@ -625,7 +654,20 @@
         accent-only look for that combination.
     -->
     <Style x:Key="PanelItemContainerStyle" TargetType="ListBoxItem">
-        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Primary}"/>
+        <!-- WP-B "ADDITIONAL" (docs/PLANS/color-presets-and-size-step.md): luminance-adaptive fallback —
+             see PanelChromeForegroundPolicy's own remarks. Most item labels override this with their own
+             explicit Model.TextColor binding (Templates.xaml); this is only the container-level default
+             for anything that doesn't. -->
+        <Setter Property="Foreground">
+            <Setter.Value>
+                <MultiBinding Converter="{StaticResource PanelChromeForegroundBrush}" ConverterParameter="Primary">
+                    <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                    <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                    <Binding Source="{StaticResource Brush.Text.Primary}"/>
+                </MultiBinding>
+            </Setter.Value>
+        </Setter>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -654,8 +696,30 @@
                              are active for the properties they BOTH touch; where they touch DIFFERENT
                              properties (this is exactly that case), the MultiTrigger further below
                              reconciles the combination explicitly. -->
+                        <!-- MAJOR-3 fix (review round, docs/PLANS/color-presets-and-size-step.md): was a
+                             fixed Brush.Overlay.Hover (#1AFFFFFF — invisible on a light-accent panel's now-
+                             light surface, Q-1 variant B); switched to the SAME direction-aware
+                             HoverOverlayBrush MultiBinding the header icon buttons use (Controls.xaml).
+                             PanelTheme.Accent/SurfaceStyle/Text (not a Model.* DataContext binding) — this
+                             Style is shared by SystemIconsPanelWindow too (see this Style's own remarks).
+                             NEW-1 fix (docs/PLANS/release-polish-1.0.md): that MAJOR-3 switch made every
+                             DARK panel's item-tile hover DarkenWash (#1A000000 over #1E1E1E) instead of the
+                             original, clearly-visible LightenWash (#1AFFFFFF) — ConverterParameter="ItemTile"
+                             routes this MultiBinding through HoverOverlayPolicy.ForItemTile instead of
+                             HoverOverlayPolicy.For, restoring that original dark-surface wash while keeping
+                             the header buttons' own (unparameterized) MultiBinding on HoverOverlayPolicy.For. -->
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="SelectionBorder" Property="Background" Value="{StaticResource Brush.Overlay.Hover}"/>
+                            <Setter TargetName="SelectionBorder" Property="Background">
+                                <Setter.Value>
+                                    <MultiBinding Converter="{StaticResource HoverOverlayBrush}" ConverterParameter="ItemTile">
+                                        <Binding Path="(theming:PanelTheme.Accent)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.SurfaceStyle)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Path="(theming:PanelTheme.Text)" RelativeSource="{RelativeSource Self}"/>
+                                        <Binding Source="{x:Static theming:HighContrastState.IsActive}"/>
+                                        <Binding Source="{StaticResource Brush.Overlay.Hover}"/>
+                                    </MultiBinding>
+                                </Setter.Value>
+                            </Setter>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="SelectionFill" Property="Opacity" Value="{x:Static conv:AccentBrushConverter.SelectionAlpha}"/>

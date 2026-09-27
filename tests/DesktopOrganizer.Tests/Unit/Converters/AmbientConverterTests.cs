@@ -148,6 +148,134 @@ public class PanelSurfaceBrushConverterTests
         Assert.Throws<NotSupportedException>(
             () => Converter.ConvertBack(new SolidColorBrush(Colors.Red), new[] { typeof(string), typeof(double), typeof(PanelSurfaceStyle) }, null, AnyCulture));
     }
+
+    // --- Q-1 variant B: adaptive neutral base (docs/PLANS/color-presets-and-size-step.md) ----------------
+
+    /// <summary>
+    /// Verifies that every accent this app shipped before Q-1 variant B (<see cref="AccentPalette.Neutral"/>
+    /// plus its six <see cref="AccentPalette.Presets"/>) still produces a BYTE-IDENTICAL composed colour to
+    /// calling <see cref="SurfaceComposer.ComposeSurface"/> directly with the old, single
+    /// <see cref="SurfaceComposer.DarkNeutralBase"/> — across every <see cref="PanelSurfaceStyle"/> and a
+    /// spread of opacities, proving the new adaptive-base logic changes zero pixels for any existing panel.
+    /// </summary>
+    /// <param name="opacity">The surface opacity under test.</param>
+    [Theory]
+    [InlineData(0.35)]
+    [InlineData(0.5)]
+    [InlineData(0.8)]
+    [InlineData(1.0)]
+    public void Convert_LegacyAccents_AreByteIdenticalToDarkNeutralBaseAcrossStylesAndOpacities(double opacity)
+    {
+        var accents = new List<string> { AccentPalette.Neutral };
+        accents.AddRange(AccentPalette.Presets);
+
+        foreach (var accentHex in accents)
+        {
+            foreach (var style in new[] { PanelSurfaceStyle.Solid, PanelSurfaceStyle.Ambient, PanelSurfaceStyle.Glass })
+            {
+                var result = Converter.Convert(new object?[] { accentHex, opacity, style }, typeof(Brush), null, AnyCulture);
+                var brush = Assert.IsType<SolidColorBrush>(result);
+
+                var accentColor = (Color)ColorConverter.ConvertFromString(accentHex)!;
+                var expected = SurfaceComposer.ComposeSurface(SurfaceComposer.DarkNeutralBase, accentColor, style, opacity);
+
+                Assert.Equal(expected, brush.Color);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Verifies that a light accent PAIRED WITH ITS OWN DARK TEXT (docs/PLANS/color-presets-and-size-step.md
+    /// §0.5's Sky preset, <c>#B9DCFF</c>/<c>#17324D</c>) resolves through <see cref="SurfaceComposer.LightNeutralBase"/>,
+    /// not the dark base — i.e. the converter is actually wired to <see cref="SurfaceComposer.ResolveNeutralBase"/>,
+    /// not just the pure function existing in isolation. MAJOR-2 fix: the 5th (text) value is now required
+    /// for a light accent to actually resolve light — see <see cref="Convert_LightAccentPairedWithLightText_StaysOnDarkNeutralBase"/>.
+    /// </summary>
+    [Fact]
+    public void Convert_LightAccent_ResolvesThroughLightNeutralBase()
+    {
+        const string lightAccentHex = "#B9DCFF"; // Sky
+        const string darkTextHex = "#17324D"; // Sky's own paired text
+        var accentColor = (Color)ColorConverter.ConvertFromString(lightAccentHex)!;
+
+        var result = Converter.Convert(new object?[] { lightAccentHex, 0.8, PanelSurfaceStyle.Ambient, false, darkTextHex }, typeof(Brush), null, AnyCulture);
+        var brush = Assert.IsType<SolidColorBrush>(result);
+
+        var expected = SurfaceComposer.ComposeSurface(SurfaceComposer.LightNeutralBase, accentColor, PanelSurfaceStyle.Ambient, 0.8);
+        var wrongExpectedIfNotAdaptive = SurfaceComposer.ComposeSurface(SurfaceComposer.DarkNeutralBase, accentColor, PanelSurfaceStyle.Ambient, 0.8);
+
+        Assert.Equal(expected, brush.Color);
+        Assert.NotEqual(wrongExpectedIfNotAdaptive, brush.Color);
+    }
+
+    /// <summary>
+    /// MAJOR-2 fix (review round, orchestrator decision "variant A"): verifies that the SAME light accent,
+    /// paired with the app's own LIGHT default text (<c>#DDDDDD</c>) instead of its own dark text, stays on
+    /// <see cref="SurfaceComposer.DarkNeutralBase"/> — a legacy panel with a custom light accent and the
+    /// default light text must not flip to an unreadable light-on-light surface.
+    /// </summary>
+    [Fact]
+    public void Convert_LightAccentPairedWithLightText_StaysOnDarkNeutralBase()
+    {
+        var result = Converter.Convert(new object?[] { "#B9DCFF", 0.8, PanelSurfaceStyle.Ambient, false, "#DDDDDD" }, typeof(Brush), null, AnyCulture);
+        var brush = Assert.IsType<SolidColorBrush>(result);
+
+        var accentColor = (Color)ColorConverter.ConvertFromString("#B9DCFF")!;
+        var expected = SurfaceComposer.ComposeSurface(SurfaceComposer.DarkNeutralBase, accentColor, PanelSurfaceStyle.Ambient, 0.8);
+
+        Assert.Equal(expected, brush.Color);
+    }
+
+    /// <summary>
+    /// Verifies that omitting the 5th (text) value entirely falls back to the app's own default text
+    /// colour (<c>#DDDDDD</c>) — every pre-MAJOR-2 caller/test that only supplies 3-4 values must keep
+    /// resolving exactly as before (dark, for every legacy accent).
+    /// </summary>
+    [Fact]
+    public void Convert_MissingTextValue_FallsBackToDefaultTextColor_StaysDarkForLegacyAccent()
+    {
+        var result = Converter.Convert(new object?[] { AccentPalette.Neutral, 0.8, PanelSurfaceStyle.Ambient }, typeof(Brush), null, AnyCulture);
+        var brush = Assert.IsType<SolidColorBrush>(result);
+
+        var accentColor = (Color)ColorConverter.ConvertFromString(AccentPalette.Neutral)!;
+        var expected = SurfaceComposer.ComposeSurface(SurfaceComposer.DarkNeutralBase, accentColor, PanelSurfaceStyle.Ambient, 0.8);
+
+        Assert.Equal(expected, brush.Color);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="PanelSurfaceStyle.Solid"/> for a light accent (paired with its own dark
+    /// text) still ignores the accent itself (DoD "accent is not a full-panel fill" holds for the light
+    /// base too), while still switching bases relative to a dark accent's own Solid output.
+    /// </summary>
+    [Fact]
+    public void Convert_SolidStyle_LightAccent_StillIgnoresAccent_ButUsesLightBase()
+    {
+        var withSky = Converter.Convert(new object?[] { "#B9DCFF", 0.8, PanelSurfaceStyle.Solid, false, "#17324D" }, typeof(Brush), null, AnyCulture);
+        var withLavender = Converter.Convert(new object?[] { "#D9C7FF", 0.8, PanelSurfaceStyle.Solid, false, "#392C57" }, typeof(Brush), null, AnyCulture);
+        var withBlue = Converter.Convert(new object?[] { "#3B82F6", 0.8, PanelSurfaceStyle.Solid, false, "#DDDDDD" }, typeof(Brush), null, AnyCulture);
+
+        var skyBrush = Assert.IsType<SolidColorBrush>(withSky);
+        var lavenderBrush = Assert.IsType<SolidColorBrush>(withLavender);
+        var blueBrush = Assert.IsType<SolidColorBrush>(withBlue);
+
+        Assert.Equal(skyBrush.Color, lavenderBrush.Color); // both light accents -> same (light) base, Solid ignores accent
+        Assert.NotEqual(skyBrush.Color, blueBrush.Color); // light vs dark accent -> different base
+    }
+
+    /// <summary>
+    /// Verifies that <c>highContrast:true</c> keeps forcing the OLD, non-adaptive dark neutral base even for
+    /// a light accent (paired with its own dark text) — Q-1 variant B deliberately leaves High Contrast
+    /// mode's own opaque-base behaviour unchanged (docs/PLANS/color-presets-and-size-step.md's own brief).
+    /// </summary>
+    [Fact]
+    public void Convert_HighContrastTrue_LightAccent_StillUsesDarkNeutralBase()
+    {
+        var result = Converter.Convert(new object?[] { "#B9DCFF", 0.8, PanelSurfaceStyle.Ambient, true, "#17324D" }, typeof(Brush), null, AnyCulture);
+
+        var brush = Assert.IsType<SolidColorBrush>(result);
+        Assert.Equal(SurfaceComposer.WithAlpha(SurfaceComposer.DarkNeutralBase, 255), brush.Color);
+    }
 }
 
 // Cheap fix (review round 3): AccentIndicatorWidthConverter (MAJOR-B) had no dedicated unit test —

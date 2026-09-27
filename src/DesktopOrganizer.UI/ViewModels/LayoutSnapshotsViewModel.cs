@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using DesktopOrganizer.Core;
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Services;
 
@@ -16,6 +17,7 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
     private readonly ILayoutSnapshotService _service;
     private readonly IConfirmationService _confirmation;
     private readonly IInputDialogService _inputDialog;
+    private readonly ILocalizationService _localization;
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -48,11 +50,17 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
     /// <param name="service">Persists and restores layout snapshots.</param>
     /// <param name="confirmation">Gates the restore/delete commands behind a user confirmation prompt.</param>
     /// <param name="inputDialog">Prompts for the snapshot name when capturing.</param>
-    public LayoutSnapshotsViewModel(ILayoutSnapshotService service, IConfirmationService confirmation, IInputDialogService inputDialog)
+    /// <param name="localization">Localizes the auto-generated snapshot name and this ViewModel's dialogs.</param>
+    public LayoutSnapshotsViewModel(
+        ILayoutSnapshotService service,
+        IConfirmationService confirmation,
+        IInputDialogService inputDialog,
+        ILocalizationService localization)
     {
         _service = service;
         _confirmation = confirmation;
         _inputDialog = inputDialog;
+        _localization = localization;
 
         CaptureSnapshotCommand = new RelayCommand(CaptureSnapshot);
         RestoreSnapshotCommand = new RelayCommand<string>(RestoreSnapshot);
@@ -64,8 +72,14 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
 
     private void CaptureSnapshot()
     {
-        var defaultName = $"Layout {DateTime.Now:dd.MM HH:mm}";
-        var name = _inputDialog.PromptText("Save snapshot", "Snapshot name:", defaultName);
+        // D-5 (docs/PLANS/localization.md): the default name is resolved for the CURRENT language at
+        // creation time only — like every other piece of user data, it is never re-translated on a later
+        // language switch.
+        var defaultName = _localization.Format("Snapshot_DefaultName_Format", DateTime.Now);
+        var name = _inputDialog.PromptText(
+            _localization.GetString("Snapshot_Capture_Title"),
+            _localization.GetString("Snapshot_Capture_Label"),
+            defaultName);
 
         // Cancel returns null by contract; a blank/whitespace-only name is treated the same way as a
         // defense-in-depth guard (matching RestoreSnapshot/DeleteSnapshot's own IsNullOrWhiteSpace
@@ -81,8 +95,8 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
         if (string.IsNullOrWhiteSpace(snapshotId)) return;
 
         if (!_confirmation.Confirm(
-                "The current layout will be replaced by this snapshot. Continue?",
-                "Restore Layout")) return;
+                _localization.GetString("Snapshot_Restore_Message"),
+                _localization.GetString("Snapshot_Restore_Title"))) return;
 
         _service.Restore(snapshotId);
     }
@@ -92,10 +106,10 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
         if (string.IsNullOrWhiteSpace(snapshotId)) return;
 
         var snapshot = _service.Snapshots.FirstOrDefault(s => s.Id == snapshotId);
-        var name = snapshot?.Name ?? "this snapshot";
+        var name = snapshot?.Name ?? _localization.GetString("Snapshot_Delete_UnnamedFallback");
         if (!_confirmation.Confirm(
-                $"Delete snapshot “{name}”? This cannot be undone.",
-                "Delete snapshot",
+                _localization.Format("Snapshot_Delete_Message_Format", name),
+                _localization.GetString("Snapshot_Delete_Title"),
                 MessageBoxImage.Warning)) return;
 
         _service.Delete(snapshotId);

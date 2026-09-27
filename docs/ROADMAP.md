@@ -1226,10 +1226,22 @@ MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§1
       вставки в `AddDroppedFiles`/`AddFilesCore` (сейчас всегда `append`); инфраструктура для этого
       (`BaseViewModel.MoveItem` + вычисление индекса вставки, `ChildWindow.ComputeInsertionGap`) уже
       готова из Фазы 9 и ляжет сверху без слома.
-- [ ] **Бэклог-тикет, осознанно вне объёма Фазы 9 (план §4 Блок B, ADR-014):** общий
-      `EnumDisplayConverter` для пользовательских enum-`ComboBox` (`PanelViewMode`, `PanelSortMode`) —
-      сейчас оба отображаются как сырые имена членов enum (`List`/`Wrap`, `Manual`/`Name`), без
-      локализуемого/дружественного текста.
+- [x] **Бэклог-тикет закрыт 2026-09-27** (план §4 Блок B, ADR-014; реализация —
+      [ADR-032](../adr/ADR-032-ui-localization.md)): общий `EnumDisplayNameConverter` резолвит текст по
+      конвенции `Enum_{Type}_{Member}` вместо `switch`, устраняя сырые имена членов enum
+      (`PanelViewMode`/`PanelSortMode` и все остальные пользовательские enum §3.2 плана локализации) —
+      попутный эффект инфраструктуры локализации ru/en, не отдельная фича.
+- [x] **Локализация UI (ru/en) с горячей сменой языка — закрыто 2026-09-27** (бриф
+      `docs/prompts/localization.md`, план `docs/PLANS/localization.md`,
+      [ADR-032](../adr/ADR-032-ui-localization.md)): отдельный проект ресурсов
+      `DesktopOrganizer.Localization`, `ILocalizationService` + `{loc:Loc}`/`{loc:LocBinding}` дают смену
+      языка без перезапуска для всех окон/панелей/трея/панели системных значков; единственное расширение
+      замороженного контура persistence — аддитивный скаляр `IAppSettings.Language` с явного разрешения
+      пользователя; закрывает попутно бэклог-тикет `EnumDisplayConverter` выше; отменяет «только
+      английский» из ADR-023/ADR-031 (amendments). Follow-up (не блокирует): второй язык, дубль
+      `EnumDisplayName x:Key`, точечная правка копии `Settings_Panels_Subtitle_View_Format` (ru) — см.
+      ADR-032 «Реализация»/follow-up-кандидаты. Manual verify (Win10/Win11) — MV-L1..MV-L15
+      (`docs/PLANS/localization.md` §7.3), обязательные MV-L2/L4/L6/L7/L12, не выполнена (среда без GUI).
 
 ---
 

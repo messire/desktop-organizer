@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
         mc:Ignorable="d"
         Width="380" SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
@@ -31,13 +32,13 @@
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="OkButton"
-                    Content="OK"
+                    Content="{loc:Loc Common_Ok_Button}"
                     IsDefault="True"
                     Width="80"
                     Padding="0,4"
                     Margin="0,0,8,0"
                     Click="OkButton_Click"/>
-            <Button Content="Cancel"
+            <Button Content="{loc:Loc Common_Cancel_Button}"
                     IsCancel="True"
                     Width="80"
                     Padding="0,4"

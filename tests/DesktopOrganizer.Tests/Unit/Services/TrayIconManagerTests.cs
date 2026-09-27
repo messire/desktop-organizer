@@ -1,30 +1,33 @@
-﻿using System.IO;
+﻿using System.Globalization;
+using System.IO;
 using System.Windows.Forms;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Interfaces;
+using DesktopOrganizer.Services.Localization;
 using Moq;
 
 namespace DesktopOrganizer.Tests.Unit.Services;
 
 /// <summary>
 /// Unit tests for <see cref="TrayIconManager"/> — in particular the P6-3 "Edit layout"/"Lock layout"
-/// checkable tray menu items (docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #1). This layer has no
-/// visibility into <c>ILayoutEditModeService</c> (it lives in DesktopOrganizer.UI, above this project in
-/// the layering) — everything checkable-state related is a caller-supplied snapshot passed into
-/// <see cref="ITrayIconManager.UpdateContextMenu"/>, and every user click is surfaced as an event for the
-/// caller (DesktopOrganizer.UI's App.xaml.cs) to translate. <see cref="INotifyIconAdapter"/> is mocked
-/// throughout — the real <c>NotifyIconAdapter</c>/<see cref="NotifyIcon"/> wrapper is a thin,
-/// headless-untestable shell around the actual Win32 tray icon (manual verify only, see this task's
-/// report).
+/// checkable tray menu items (docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #1) and the hot language switch
+/// (docs/PLANS/localization.md L-7/§2.7). This layer has no visibility into <c>ILayoutEditModeService</c>
+/// (it lives in DesktopOrganizer.UI, above this project in the layering) — everything checkable-state
+/// related is a caller-supplied snapshot passed into <see cref="ITrayIconManager.UpdateContextMenu"/>,
+/// and every user click is surfaced as an event for the caller (DesktopOrganizer.UI's App.xaml.cs) to
+/// translate. <see cref="INotifyIconAdapter"/> is mocked throughout — the real
+/// <c>NotifyIconAdapter</c>/<see cref="NotifyIcon"/> wrapper is a thin, headless-untestable shell around
+/// the actual Win32 tray icon (manual verify only, see this task's report).
+///
+/// Items are located by their stable <see cref="ToolStripItem.Name"/> (<see cref="TrayIconManager.SettingsItemName"/>
+/// and friends), never by <see cref="ToolStripItem.Text"/> — L-7's whole point is that Text changes on
+/// every language switch while the strip itself, and each item's identity, never does.
 /// </summary>
 [Trait(UnitTests, nameof(DesktopOrganizer.Services))]
 public class TrayIconManagerTests
 {
-    private const string EditLayoutHeader = "Edit layout";
-    private const string LockLayoutHeader = "Lock layout";
-    private const string ShowDesktopIconsHeader = "Show desktop icons";
-
     private readonly Mock<INotifyIconAdapter> _notifyIconAdapterMock = new();
+    private readonly LocalizationService _localization = new(CultureInfo.GetCultureInfo("en"));
     private readonly TrayIconManager _sut;
 
     // MINOR-6 fix (fix-cycle round 2): the SetContextMenu callback is wired ONCE here, in the
@@ -48,7 +51,7 @@ public class TrayIconManagerTests
             .Setup(a => a.SetContextMenu(It.IsAny<ContextMenuStrip>()))
             .Callback<ContextMenuStrip>(menu => _capturedMenu = menu);
 
-        _sut = new TrayIconManager(_notifyIconAdapterMock.Object);
+        _sut = new TrayIconManager(_notifyIconAdapterMock.Object, _localization);
     }
 
     /// <summary>
@@ -71,8 +74,8 @@ public class TrayIconManagerTests
         Assert.StartsWith(AppContext.BaseDirectory, TrayIconManager.TrayIconPath, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith(Path.Combine("Resources", "app.ico"), TrayIconManager.TrayIconPath, StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(built);
-        var editLayout = FindItem(built!, EditLayoutHeader);
-        var lockLayout = FindItem(built!, LockLayoutHeader);
+        var editLayout = FindItem(built!, TrayIconManager.EditLayoutItemName);
+        var lockLayout = FindItem(built!, TrayIconManager.LockLayoutItemName);
         Assert.False(editLayout.Checked);
         Assert.True(editLayout.Enabled);
         Assert.False(lockLayout.Checked);
@@ -95,8 +98,8 @@ public class TrayIconManagerTests
     {
         var menu = CaptureMenuFromUpdate(isEditLayoutChecked, canEnterEditLayout, isLockLayoutChecked);
 
-        var editLayout = FindItem(menu, EditLayoutHeader);
-        var lockLayout = FindItem(menu, LockLayoutHeader);
+        var editLayout = FindItem(menu, TrayIconManager.EditLayoutItemName);
+        var lockLayout = FindItem(menu, TrayIconManager.LockLayoutItemName);
 
         Assert.Equal(isEditLayoutChecked, editLayout.Checked);
         Assert.Equal(canEnterEditLayout, editLayout.Enabled);
@@ -114,7 +117,7 @@ public class TrayIconManagerTests
         var menuWhenDisabledEditLayout = CaptureMenuFromUpdate(
             isEditLayoutChecked: false, canEnterEditLayout: false, isLockLayoutChecked: true);
 
-        var lockLayout = FindItem(menuWhenDisabledEditLayout, LockLayoutHeader);
+        var lockLayout = FindItem(menuWhenDisabledEditLayout, TrayIconManager.LockLayoutItemName);
 
         Assert.True(lockLayout.Enabled);
     }
@@ -128,8 +131,8 @@ public class TrayIconManagerTests
     {
         var menu = CaptureMenuFromUpdate(isEditLayoutChecked: false, canEnterEditLayout: true, isLockLayoutChecked: false);
 
-        Assert.Contains(menu.Items.Cast<ToolStripItem>(), i => i.Text == "Settings");
-        Assert.Contains(menu.Items.Cast<ToolStripItem>(), i => i.Text == "Exit");
+        Assert.Contains(menu.Items.Cast<ToolStripItem>(), i => i.Name == TrayIconManager.SettingsItemName);
+        Assert.Contains(menu.Items.Cast<ToolStripItem>(), i => i.Name == TrayIconManager.ExitItemName);
     }
 
     /// <summary>
@@ -142,9 +145,9 @@ public class TrayIconManagerTests
         _sut.Initialize();
         var items = _capturedMenu!.Items.Cast<ToolStripItem>().ToList();
 
-        var lockLayoutIndex = items.FindIndex(i => i.Text == LockLayoutHeader);
-        var showDesktopIconsIndex = items.FindIndex(i => i.Text == ShowDesktopIconsHeader);
-        var exitIndex = items.FindIndex(i => i.Text == "Exit");
+        var lockLayoutIndex = items.FindIndex(i => i.Name == TrayIconManager.LockLayoutItemName);
+        var showDesktopIconsIndex = items.FindIndex(i => i.Name == TrayIconManager.ShowDesktopIconsItemName);
+        var exitIndex = items.FindIndex(i => i.Name == TrayIconManager.ExitItemName);
 
         Assert.True(lockLayoutIndex >= 0 && showDesktopIconsIndex >= 0 && exitIndex >= 0);
         Assert.True(showDesktopIconsIndex > lockLayoutIndex);
@@ -163,7 +166,7 @@ public class TrayIconManagerTests
         var raised = false;
         _sut.ToggleDesktopIconsRequested += (_, _) => raised = true;
 
-        FindItem(_capturedMenu!, ShowDesktopIconsHeader).PerformClick();
+        FindItem(_capturedMenu!, TrayIconManager.ShowDesktopIconsItemName).PerformClick();
 
         Assert.True(raised);
     }
@@ -183,7 +186,7 @@ public class TrayIconManagerTests
 
         _sut.SetDesktopIconsVisible(visible);
 
-        var item = FindItem(_capturedMenu!, ShowDesktopIconsHeader);
+        var item = FindItem(_capturedMenu!, TrayIconManager.ShowDesktopIconsItemName);
         Assert.Equal(visible, item.Checked);
     }
 
@@ -198,7 +201,7 @@ public class TrayIconManagerTests
         _sut.SetDesktopIconsVisible(true);
 
         Assert.NotNull(_capturedMenu);
-        Assert.True(FindItem(_capturedMenu!, ShowDesktopIconsHeader).Checked);
+        Assert.True(FindItem(_capturedMenu!, TrayIconManager.ShowDesktopIconsItemName).Checked);
     }
 
     /// <summary>
@@ -212,7 +215,7 @@ public class TrayIconManagerTests
         var raised = false;
         _sut.OnEditLayoutToggleRequested += (_, _) => raised = true;
 
-        FindItem(menu, EditLayoutHeader).PerformClick();
+        FindItem(menu, TrayIconManager.EditLayoutItemName).PerformClick();
 
         Assert.True(raised);
     }
@@ -228,7 +231,7 @@ public class TrayIconManagerTests
         var raised = false;
         _sut.OnLockLayoutToggleRequested += (_, _) => raised = true;
 
-        FindItem(menu, LockLayoutHeader).PerformClick();
+        FindItem(menu, TrayIconManager.LockLayoutItemName).PerformClick();
 
         Assert.True(raised);
     }
@@ -244,7 +247,7 @@ public class TrayIconManagerTests
         var raised = false;
         _sut.OnShowMainWindowRequested += (_, _) => raised = true;
 
-        FindItem(menu, "Settings").PerformClick();
+        FindItem(menu, TrayIconManager.SettingsItemName).PerformClick();
 
         Assert.True(raised);
     }
@@ -260,7 +263,7 @@ public class TrayIconManagerTests
         var raised = false;
         _sut.OnExitRequested += (_, _) => raised = true;
 
-        FindItem(menu, "Exit").PerformClick();
+        FindItem(menu, TrayIconManager.ExitItemName).PerformClick();
 
         Assert.True(raised);
     }
@@ -320,8 +323,8 @@ public class TrayIconManagerTests
         // reach the SAME instance's items — proves this isn't merely "SetContextMenu called once" while
         // some other, never-mutated strip silently sits in the tray (i.e. UpdateContextMenu still works
         // end-to-end on the reused instance).
-        var editLayout = FindItem(afterSecondCall!, EditLayoutHeader);
-        var lockLayout = FindItem(afterSecondCall!, LockLayoutHeader);
+        var editLayout = FindItem(afterSecondCall!, TrayIconManager.EditLayoutItemName);
+        var lockLayout = FindItem(afterSecondCall!, TrayIconManager.LockLayoutItemName);
         Assert.False(editLayout.Enabled);
         Assert.True(lockLayout.Checked);
     }
@@ -360,8 +363,94 @@ public class TrayIconManagerTests
         Assert.Null(exception);
     }
 
-    private static ToolStripMenuItem FindItem(ContextMenuStrip menu, string header) =>
-        Assert.IsType<ToolStripMenuItem>(Assert.Single(menu.Items.Cast<ToolStripItem>(), i => i.Text == header));
+    /// <summary>
+    /// docs/PLANS/localization.md L-7: verifies that switching the active language re-labels all five
+    /// tray menu items in place, on the exact same <see cref="ToolStripMenuItem"/> instances — never by
+    /// rebuilding the strip (see the sibling MAJOR-1 regression pins above for why that matters).
+    /// </summary>
+    [Fact]
+    public void CultureChanged_RelabelsItemsInPlace_SameInstances()
+    {
+        var menu = CaptureMenuFromUpdate(isEditLayoutChecked: false, canEnterEditLayout: true, isLockLayoutChecked: false);
+        var settingsBefore = FindItem(menu, TrayIconManager.SettingsItemName);
+        var editLayoutBefore = FindItem(menu, TrayIconManager.EditLayoutItemName);
+        var lockLayoutBefore = FindItem(menu, TrayIconManager.LockLayoutItemName);
+        var showDesktopIconsBefore = FindItem(menu, TrayIconManager.ShowDesktopIconsItemName);
+        var exitBefore = FindItem(menu, TrayIconManager.ExitItemName);
+        Assert.Equal("Settings", settingsBefore.Text);
+        Assert.Equal("Edit layout", editLayoutBefore.Text);
+        Assert.Equal("Exit", exitBefore.Text);
+
+        _localization.ApplyLanguage("ru");
+
+        Assert.Same(_capturedMenu, menu);
+        Assert.Same(settingsBefore, FindItem(menu, TrayIconManager.SettingsItemName));
+        Assert.Same(editLayoutBefore, FindItem(menu, TrayIconManager.EditLayoutItemName));
+        Assert.Same(lockLayoutBefore, FindItem(menu, TrayIconManager.LockLayoutItemName));
+        Assert.Same(showDesktopIconsBefore, FindItem(menu, TrayIconManager.ShowDesktopIconsItemName));
+        Assert.Same(exitBefore, FindItem(menu, TrayIconManager.ExitItemName));
+        Assert.Equal("Параметры", settingsBefore.Text);
+        Assert.Equal("Изменить расположение", editLayoutBefore.Text);
+        Assert.Equal("Закрепить расположение", lockLayoutBefore.Text);
+        Assert.Equal("Показывать значки рабочего стола", showDesktopIconsBefore.Text);
+        Assert.Equal("Выход", exitBefore.Text);
+    }
+
+    /// <summary>
+    /// docs/PLANS/localization.md L-7: verifies that a language switch never calls
+    /// <see cref="INotifyIconAdapter.SetContextMenu"/> again — the whole point of relabeling in place is
+    /// that the strip handed to the tray is never replaced (MAJOR-1: replacing it leaks native
+    /// HWND/GDI resources and races with an in-flight <c>Click</c>).
+    /// </summary>
+    [Fact]
+    public void CultureChanged_DoesNotCallSetContextMenuAgain()
+    {
+        CaptureMenuFromUpdate(isEditLayoutChecked: false, canEnterEditLayout: true, isLockLayoutChecked: false);
+        _notifyIconAdapterMock.Verify(a => a.SetContextMenu(It.IsAny<ContextMenuStrip>()), Times.Once);
+
+        _localization.ApplyLanguage("ru");
+        _localization.ApplyLanguage("en");
+
+        _notifyIconAdapterMock.Verify(a => a.SetContextMenu(It.IsAny<ContextMenuStrip>()), Times.Once);
+    }
+
+    /// <summary>
+    /// docs/PLANS/localization.md §2.7: verifies that the disabled "Edit layout" item's localized
+    /// tooltip both appears while disabled and is re-rendered in the new language on a culture switch,
+    /// and disappears again (empty) once re-enabled.
+    /// </summary>
+    [Fact]
+    public void LockedTooltip_Localized()
+    {
+        var menu = CaptureMenuFromUpdate(isEditLayoutChecked: false, canEnterEditLayout: false, isLockLayoutChecked: true);
+        var editLayout = FindItem(menu, TrayIconManager.EditLayoutItemName);
+        Assert.Equal("Layout is locked", editLayout.ToolTipText);
+
+        _localization.ApplyLanguage("ru");
+        Assert.Equal("Расположение закреплено", editLayout.ToolTipText);
+
+        _sut.UpdateContextMenu(isMainWindowVisible: false, isEditLayoutChecked: false, canEnterEditLayout: true, isLockLayoutChecked: true);
+        Assert.Equal(string.Empty, editLayout.ToolTipText);
+    }
+
+    /// <summary>
+    /// docs/PLANS/localization.md R-11: verifies that <see cref="TrayIconManager.Dispose"/> unsubscribes
+    /// from <see cref="ILocalizationService.CultureChanged"/> — a subsequent language switch must not
+    /// touch (or throw from) the now-disposed <see cref="ContextMenuStrip"/>.
+    /// </summary>
+    [Fact]
+    public void Dispose_UnsubscribesFromCultureChanged()
+    {
+        CaptureMenuFromUpdate(isEditLayoutChecked: false, canEnterEditLayout: true, isLockLayoutChecked: false);
+
+        _sut.Dispose();
+        var exception = Record.Exception(() => _localization.ApplyLanguage("ru"));
+
+        Assert.Null(exception);
+    }
+
+    private static ToolStripMenuItem FindItem(ContextMenuStrip menu, string name) =>
+        Assert.IsType<ToolStripMenuItem>(Assert.Single(menu.Items.Cast<ToolStripItem>(), i => i.Name == name));
 
     private ContextMenuStrip CaptureMenuFromUpdate(bool isEditLayoutChecked, bool canEnterEditLayout, bool isLockLayoutChecked)
     {

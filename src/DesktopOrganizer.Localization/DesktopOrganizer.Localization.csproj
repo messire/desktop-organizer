@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- L-1 (docs/PLANS/localization.md §1/§2.1): no ProjectReference at all. This project holds only the
+         RESX string tables and the culture/plural helpers around them, so DesktopOrganizer.Services and
+         DesktopOrganizer.UI can both reference it without either one pulling the other in. UseWPF is
+         inherited from Directory.Build.props — harmless here (no XAML lives in this project), so it is
+         not overridden. -->
+
+</Project>

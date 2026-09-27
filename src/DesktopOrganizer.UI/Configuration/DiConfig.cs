@@ -1,4 +1,5 @@
-﻿using DesktopOrganizer.Services.Abstractions;
+﻿using DesktopOrganizer.Localization;
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Configuration;
 using DesktopOrganizer.UI.Diagnostics;
@@ -56,7 +57,24 @@ public static class DiConfig
         services.RegisterServices(diagnosticsLogDirectory, storageRoot);
 
         // ViewModels
-        services.AddSingleton<MainWindowViewModel>();        // Settings VM — no file state
+
+        // Settings VM — no file state. Takes an explicit CultureInfo (fix cycle 1 MINOR-2), not
+        // auto-resolved by DI reflection — a factory lambda resolving every other dependency is used
+        // instead of the parameterless AddSingleton<T>() this registration used before, mirroring the
+        // sp.GetRequiredService(...) pattern already used for ISystemIconsPanelManager below.
+        services.AddSingleton(sp => new MainWindowViewModel(
+            sp.GetRequiredService<IWindowManager>(),
+            sp.GetRequiredService<IAppSettings>(),
+            sp.GetRequiredService<IAutostartService>(),
+            sp.GetRequiredService<IPageManager>(),
+            sp.GetRequiredService<LayoutSnapshotsViewModel>(),
+            sp.GetRequiredService<ISystemIconsPanelManager>(),
+            sp.GetRequiredService<IConfirmationService>(),
+            sp.GetRequiredService<IPanelItemStorageService>(),
+            sp.GetRequiredService<ILayoutEditModeService>(),
+            sp.GetRequiredService<IPanelCustomizeService>(),
+            sp.GetRequiredService<ILocalizationService>(),
+            SystemCulture.OriginalUiCulture));
         services.AddTransient<ChildWindowViewModel>();       // Per-panel VM — has file state
         services.AddSingleton<LayoutSnapshotsViewModel>();  // Snapshots section VM
 
@@ -107,6 +125,7 @@ public static class DiConfig
                 sp.GetRequiredService<IDesktopIntegrationService>(),
                 sp.GetRequiredService<IMonitorService>(),
                 sp.GetRequiredService<IVirtualDesktopService>(),
+                sp.GetRequiredService<ILocalizationService>(),
                 () => sp.GetRequiredService<SystemIconsPanelWindow>()));
         services.AddTransient<SystemIconsPanelViewModel>(sp =>
             new SystemIconsPanelViewModel(

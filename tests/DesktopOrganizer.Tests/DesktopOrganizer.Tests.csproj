@@ -36,6 +36,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\DesktopOrganizer.Core\DesktopOrganizer.Core.csproj" />
+        <ProjectReference Include="..\..\src\DesktopOrganizer.Localization\DesktopOrganizer.Localization.csproj"/>
         <ProjectReference Include="..\..\src\DesktopOrganizer.Services\DesktopOrganizer.Services.csproj"/>
         <ProjectReference Include="..\..\src\DesktopOrganizer.Services.Abstractions\DesktopOrganizer.Services.Abstractions.csproj"/>
         <ProjectReference Include="..\..\src\DesktopOrganizer.UI\DesktopOrganizer.UI.csproj"/>

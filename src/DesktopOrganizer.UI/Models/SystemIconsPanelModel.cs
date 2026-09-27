@@ -106,6 +106,21 @@ public sealed class SystemIconsPanelModel : INotifyPropertyChanged
         return items;
     }
 
+    /// <summary>
+    /// Re-resolves every item's <see cref="SystemIconItemModel.Label"/> via <paramref name="resolveLabel"/>
+    /// (docs/PLANS/localization.md §2.9) — called once after <c>SystemIconsPanelManager.Load()</c> and
+    /// again on every <c>ILocalizationService.CultureChanged</c>, since <see cref="SystemIconItemModel.Label"/>
+    /// is never persisted to JSON (it is always derived, so a language switch never needs to touch state).
+    /// </summary>
+    /// <param name="resolveLabel">Resolves a <see cref="SystemIconItemModel.Kind"/> to its current-culture display label.</param>
+    public void RefreshLabels(Func<SystemIconKind, string> resolveLabel)
+    {
+        ArgumentNullException.ThrowIfNull(resolveLabel);
+
+        foreach (var item in Items)
+            item.Label = resolveLabel(item.Kind);
+    }
+
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value)) return;

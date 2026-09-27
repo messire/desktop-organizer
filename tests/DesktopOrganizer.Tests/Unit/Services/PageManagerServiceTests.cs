@@ -1,5 +1,6 @@
 using System.Windows;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State;
@@ -18,6 +19,7 @@ public class PageManagerServiceTests
     private readonly Mock<IApplicationStateService> _applicationStateServiceMock = new();
     private readonly Mock<IConfirmationService> _confirmationMock = new();
     private readonly Mock<IPanelItemStorageService> _itemStorageMock = new();
+    private readonly ILocalizationService _localization = TestLocalization.English;
 
     // ── AddPage ──────────────────────────────────────────────────────────────────
 
@@ -464,6 +466,7 @@ public class PageManagerServiceTests
             _windowManagerMock.Object,
             _applicationStateServiceMock.Object,
             _confirmationMock.Object,
-            _itemStorageMock.Object);
+            _itemStorageMock.Object,
+            _localization);
     }
 }

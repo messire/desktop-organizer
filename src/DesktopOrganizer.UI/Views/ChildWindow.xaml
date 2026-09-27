@@ -20,6 +20,7 @@
         xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
         xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
         xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+        xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
         mc:Ignorable="d"
         Title="{Binding Model.Title}"
         AutomationProperties.Name="{Binding Model.Title}"
@@ -136,7 +137,7 @@
                                      "…AND NOT IsRolledUp" rule needs — see NotBooleanConverter. -->
                                 <conv:NotBooleanConverter x:Key="Not"/>
                             </ContextMenu.Resources>
-                            <MenuItem Header="Rename" Click="RenameMenu_Click"/>
+                            <MenuItem Header="{loc:Loc Common_Rename}" Click="RenameMenu_Click"/>
                             <!--
                                 docs/prompts/settings-window-redesign.md D-3/WP-B: opens the modeless
                                 "Customize panel…" dialog for THIS panel's Model — always enabled (unlike
@@ -144,8 +145,8 @@
                                 CanEnterEditLayout/IsLayoutLocked; every field it edits already applies
                                 live regardless of Edit Layout mode, same as Rename above).
                             -->
-                            <MenuItem Header="Customize panel…" Click="CustomizePanelMenu_Click"/>
-                            <MenuItem Header="Roll up / down" Click="RollUpMenu_Click"/>
+                            <MenuItem Header="{loc:Loc Panel_Menu_Customize}" Click="CustomizePanelMenu_Click"/>
+                            <MenuItem Header="{loc:Loc Panel_Menu_RollUpDown}" Click="RollUpMenu_Click"/>
                             <!--
                                 Stage S (docs/PLANS/workspace-grid-03-04-integration.md §1.4) created both
                                 items below as placeholders; both are implemented now — "Size" by P04
@@ -165,8 +166,8 @@
                                 (ADR-029 Решение 7) — which the ToolTip states so the interaction between
                                 the two menu items is discoverable.
                             -->
-                            <MenuItem Header="Size" x:Name="SizePresetMenu"
-                                      ToolTip="Resizes the panel to a named size. Turns off &quot;Auto-size to content&quot;. Unavailable while the panel is rolled up. Hold Alt while dragging an edge to resize off-grid; the panel snaps back to the workspace grid when you release.">
+                            <MenuItem Header="{loc:Loc Panel_Menu_Size}" x:Name="SizePresetMenu"
+                                      ToolTip="{loc:Loc Panel_Menu_Size_Tooltip}">
                                 <MenuItem.IsEnabled>
                                     <MultiBinding Converter="{StaticResource AllTrue}">
                                         <Binding Path="CanEnterEditLayout" Source="{StaticResource LayoutEditMode}" Mode="OneWay"/>
@@ -176,11 +177,11 @@
                                                  Mode="OneWay"/>
                                     </MultiBinding>
                                 </MenuItem.IsEnabled>
-                                <MenuItem Header="Small"       Tag="Small"      Click="SizePresetMenu_Click"
-                                          ToolTip="Compact 20 x 20 units (152 x 152 DIP) — fits about 2 x 1 icons at 32 px."/>
-                                <MenuItem Header="Medium"      Tag="Medium"     Click="SizePresetMenu_Click"/>
-                                <MenuItem Header="Large"       Tag="Large"      Click="SizePresetMenu_Click"/>
-                                <MenuItem Header="Extra large" Tag="ExtraLarge" Click="SizePresetMenu_Click"/>
+                                <MenuItem Header="{loc:Loc Enum_PanelSizePreset_Small}"      Tag="Small"      Click="SizePresetMenu_Click"
+                                          ToolTip="{loc:Loc Panel_Menu_SizeSmall_Tooltip}"/>
+                                <MenuItem Header="{loc:Loc Enum_PanelSizePreset_Medium}"     Tag="Medium"     Click="SizePresetMenu_Click"/>
+                                <MenuItem Header="{loc:Loc Enum_PanelSizePreset_Large}"      Tag="Large"      Click="SizePresetMenu_Click"/>
+                                <MenuItem Header="{loc:Loc Enum_PanelSizePreset_ExtraLarge}" Tag="ExtraLarge" Click="SizePresetMenu_Click"/>
                             </MenuItem>
                             <!--
                                 OQ-3 = B (docs/PLANS/workspace-grid-03-04-integration.md §8): IsCheckable,
@@ -189,9 +190,9 @@
                                 it ON aligns the panel, turning it OFF clears spans back to LegacyFreeform,
                                 keeping the current Position/Size as-is).
                             -->
-                            <MenuItem Header="Align to workspace grid" x:Name="AlignToGridMenu"
+                            <MenuItem Header="{loc:Loc Panel_Menu_AlignToGrid}" x:Name="AlignToGridMenu"
                                       IsCheckable="True" Click="AlignToGridMenu_Click"
-                                      ToolTip="Hold Alt while dragging to move freely"
+                                      ToolTip="{loc:Loc Panel_Menu_AlignToGrid_Tooltip}"
                                       IsChecked="{Binding PlacementTarget.DataContext.Model.GeometryMode,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
                                                           Converter={StaticResource EnumEquals},
@@ -213,9 +214,9 @@
                                 content"/"Fit panel to content" below, IconLayoutPolicy is harmless (simply
                                 inert) while List mode is active, same as the "Size" submenu above.
                             -->
-                            <MenuItem Header="Icon layout" x:Name="IconLayoutMenu"
+                            <MenuItem Header="{loc:Loc Common_IconLayout_Header}" x:Name="IconLayoutMenu"
                                       IsEnabled="{Binding CanEnterEditLayout, Source={StaticResource LayoutEditMode}, Mode=OneWay}">
-                                <MenuItem Header="Adaptive stretch (legacy)"
+                                <MenuItem Header="{loc:Loc Enum_IconLayoutPolicy_LegacyStretch}"
                                           IsCheckable="True"
                                           IsChecked="{Binding PlacementTarget.DataContext.Model.IconLayoutPolicy,
                                                               RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -225,7 +226,7 @@
                                           Command="{Binding PlacementTarget.DataContext.SetIconLayoutPolicyCommand,
                                                             RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                           CommandParameter="{x:Static uimodels:IconLayoutPolicy.LegacyStretch}"/>
-                                <MenuItem Header="Fixed spacing"
+                                <MenuItem Header="{loc:Loc Enum_IconLayoutPolicy_FixedGap}"
                                           IsCheckable="True"
                                           IsChecked="{Binding PlacementTarget.DataContext.Model.IconLayoutPolicy,
                                                               RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -236,7 +237,7 @@
                                                             RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                           CommandParameter="{x:Static uimodels:IconLayoutPolicy.FixedGap}"/>
                                 <Separator/>
-                                <MenuItem Header="Apply to all panels…" Click="ApplyIconLayoutPolicyToAllMenu_Click"
+                                <MenuItem Header="{loc:Loc Panel_Menu_ApplyToAllPanels}" Click="ApplyIconLayoutPolicyToAllMenu_Click"
                                           IsEnabled="{Binding CanEnterEditLayout, Source={StaticResource LayoutEditMode}, Mode=OneWay}"/>
                             </MenuItem>
 
@@ -256,8 +257,8 @@
                                 disabled here (not merely a silent no-op) so the user gets a discoverable
                                 reason via the ToolTip rather than a dead click.
                             -->
-                            <MenuItem Header="Panel sizing" x:Name="PanelSizingMenu"
-                                      ToolTip="Fit-to-content actions apply to Grid view only.">
+                            <MenuItem Header="{loc:Loc Panel_Menu_PanelSizing}" x:Name="PanelSizingMenu"
+                                      ToolTip="{loc:Loc Panel_Menu_PanelSizing_Tooltip}">
                                 <MenuItem.IsEnabled>
                                     <MultiBinding Converter="{StaticResource AllTrue}">
                                         <Binding Path="CanEnterEditLayout" Source="{StaticResource LayoutEditMode}" Mode="OneWay"/>
@@ -268,20 +269,20 @@
                                                  Mode="OneWay"/>
                                     </MultiBinding>
                                 </MenuItem.IsEnabled>
-                                <MenuItem Header="Fit panel to content" x:Name="FitPanelToContentMenu"
+                                <MenuItem Header="{loc:Loc Panel_Menu_FitToContent}" x:Name="FitPanelToContentMenu"
                                           Click="FitPanelToContentMenu_Click"
-                                          ToolTip="Resizes the panel's height to fit its current icons (Grid view only)."/>
-                                <MenuItem Header="Auto-size to content" x:Name="AutoSizeToContentMenu"
+                                          ToolTip="{loc:Loc Panel_Menu_FitToContent_Tooltip}"/>
+                                <MenuItem Header="{loc:Loc Enum_PanelSizingMode_AutoContent}" x:Name="AutoSizeToContentMenu"
                                           IsCheckable="True"
                                           Click="AutoSizeToContentMenu_Click"
-                                          ToolTip="Keeps the panel's height matched to its icons automatically (Grid view only — unavailable in List view)."
+                                          ToolTip="{loc:Loc Panel_Menu_AutoSizeToContent_Tooltip}"
                                           IsChecked="{Binding PlacementTarget.DataContext.Model.SizingMode,
                                                               RelativeSource={RelativeSource AncestorType=ContextMenu},
                                                               Converter={StaticResource EnumEquals},
                                                               ConverterParameter={x:Static uimodels:PanelSizingMode.AutoContent},
                                                               Mode=OneWay}"/>
                                 <Separator/>
-                                <MenuItem Header="Apply to all panels…" Click="ApplySizingModeToAllMenu_Click">
+                                <MenuItem Header="{loc:Loc Panel_Menu_ApplyToAllPanels}" Click="ApplySizingModeToAllMenu_Click">
                                     <MenuItem.IsEnabled>
                                         <MultiBinding Converter="{StaticResource AllTrue}">
                                             <Binding Path="CanEnterEditLayout" Source="{StaticResource LayoutEditMode}" Mode="OneWay"/>
@@ -303,14 +304,14 @@
                                 in its own visual tree and does not inherit attached DPs (R-4), and
                                 ChildWindowViewModel must stay at zero changed lines (DO-002, §0).
                             -->
-                            <MenuItem Header="Edit layout" IsCheckable="True" Click="EditLayoutMenu_Click"
+                            <MenuItem Header="{loc:Loc Common_EditLayout}" IsCheckable="True" Click="EditLayoutMenu_Click"
                                       IsChecked="{Binding IsEditing, Source={StaticResource LayoutEditMode}, Mode=OneWay}"
                                       IsEnabled="{Binding CanEnterEditLayout, Source={StaticResource LayoutEditMode}, Mode=OneWay}"/>
-                            <MenuItem Header="Lock layout" IsCheckable="True" Click="LockLayoutMenu_Click"
+                            <MenuItem Header="{loc:Loc Common_LockLayout}" IsCheckable="True" Click="LockLayoutMenu_Click"
                                       IsChecked="{Binding IsLayoutLocked, Source={StaticResource LayoutEditMode}, Mode=OneWay}"/>
                             <Separator/>
-                            <MenuItem Header="Content" IsEnabled="False" FontWeight="SemiBold"/>
-                            <MenuItem Header="Show all"
+                            <MenuItem Header="{loc:Loc Panel_Menu_ContentHeader}" IsEnabled="False" FontWeight="SemiBold"/>
+                            <MenuItem Header="{loc:Loc Enum_PanelContentFilter_ShowAll}"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -320,7 +321,7 @@
                                       Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelContentFilter.ShowAll}"/>
-                            <MenuItem Header="Hide content"
+                            <MenuItem Header="{loc:Loc Enum_PanelContentFilter_HideAll}"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -330,7 +331,7 @@
                                       Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelContentFilter.HideAll}"/>
-                            <MenuItem Header="Hide shortcuts"
+                            <MenuItem Header="{loc:Loc Enum_PanelContentFilter_HideShortcuts}"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -340,7 +341,7 @@
                                       Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelContentFilter.HideShortcuts}"/>
-                            <MenuItem Header="Folders only"
+                            <MenuItem Header="{loc:Loc Enum_PanelContentFilter_FoldersOnly}"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -351,8 +352,8 @@
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelContentFilter.FoldersOnly}"/>
                             <Separator/>
-                            <MenuItem Header="Arrange icons" IsEnabled="False" FontWeight="SemiBold"/>
-                            <MenuItem Header="Manual"
+                            <MenuItem Header="{loc:Loc Panel_Menu_ArrangeIconsHeader}" IsEnabled="False" FontWeight="SemiBold"/>
+                            <MenuItem Header="{loc:Loc Enum_PanelSortMode_Manual}"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.EffectiveSortMode,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -362,7 +363,7 @@
                                       Command="{Binding PlacementTarget.DataContext.SetSortModeCommand,
                                                         RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                       CommandParameter="{x:Static uimodels:PanelSortMode.Manual}"/>
-                            <MenuItem Header="By name"
+                            <MenuItem Header="{loc:Loc Enum_PanelSortMode_Name}"
                                       IsCheckable="True"
                                       IsChecked="{Binding PlacementTarget.DataContext.EffectiveSortMode,
                                                           RelativeSource={RelativeSource AncestorType=ContextMenu},
@@ -433,22 +434,22 @@
                     <Button x:Name="SortModeToggleButton"
                             Style="{StaticResource PanelHeaderToggleButtonStyle}"
                             Content="&#xE8CB;"
-                            ToolTip="{Binding EffectiveSortMode, Converter={StaticResource SortModeTooltip}}"
-                            AutomationProperties.Name="{Binding EffectiveSortMode, Converter={StaticResource SortModeTooltip}}"
+                            ToolTip="{loc:LocBinding EffectiveSortMode, Converter={StaticResource SortModeTooltip}}"
+                            AutomationProperties.Name="{loc:LocBinding EffectiveSortMode, Converter={StaticResource SortModeTooltip}}"
                             Command="{Binding ToggleSortModeCommand}"/>
                     <!-- View: the glyph shows the TARGET mode — what a click switches TO, not
                          the mode currently active (ui-polishing-1 §4.2), matching the ToolTip. -->
                     <Button x:Name="ViewModeToggleButton"
                             Style="{StaticResource PanelHeaderButtonStyle}"
                             Content="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}}"
-                            ToolTip="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}, ConverterParameter=tooltip}"
-                            AutomationProperties.Name="{Binding Model.ViewMode, Converter={StaticResource ViewModeGlyph}, ConverterParameter=tooltip}"
+                            ToolTip="{loc:LocBinding Model.ViewMode, Converter={StaticResource ViewModeGlyph}, ConverterParameter=tooltip}"
+                            AutomationProperties.Name="{loc:LocBinding Model.ViewMode, Converter={StaticResource ViewModeGlyph}, ConverterParameter=tooltip}"
                             Command="{Binding SwitchViewCommand}"/>
                     <Button x:Name="RollUpToggleButton"
                             Style="{StaticResource PanelHeaderButtonStyle}"
                             Content="{Binding Model.IsRolledUp, Converter={StaticResource RollUpGlyph}}"
-                            ToolTip="{Binding Model.IsRolledUp, Converter={StaticResource RollUpTooltip}, ConverterParameter=tooltip}"
-                            AutomationProperties.Name="{Binding Model.IsRolledUp, Converter={StaticResource RollUpTooltip}, ConverterParameter=tooltip}"
+                            ToolTip="{loc:LocBinding Model.IsRolledUp, Converter={StaticResource RollUpTooltip}, ConverterParameter=tooltip}"
+                            AutomationProperties.Name="{loc:LocBinding Model.IsRolledUp, Converter={StaticResource RollUpTooltip}, ConverterParameter=tooltip}"
                             Click="RollUpMenu_Click"/>
                     <!-- Overflow (§5.4 "overflow menu"): opens HeaderContextMenu — the SAME instance
                          the title bar's right-click already opens (see its declaration above) — anchored
@@ -457,8 +458,8 @@
                     <Button x:Name="OverflowButton"
                             Style="{StaticResource Control.Button.Icon}"
                             Content="{StaticResource Icon.Glyph.Overflow}"
-                            ToolTip="More"
-                            AutomationProperties.Name="More"
+                            ToolTip="{loc:Loc Panel_Header_More}"
+                            AutomationProperties.Name="{loc:Loc Panel_Header_More}"
                             Click="OverflowButton_Click"/>
                 </StackPanel>
             </controls:PanelChrome.HeaderActions>
@@ -602,7 +603,7 @@
                 <TextBlock TextWrapping="Wrap"
                            Foreground="{StaticResource Brush.Text.Primary}"
                            FontSize="11"
-                           Text="The file was moved into the panel — the original was removed from the desktop."/>
+                           Text="{loc:Loc Hint_Move_Message}"/>
             </Border>
         </Popup>
 

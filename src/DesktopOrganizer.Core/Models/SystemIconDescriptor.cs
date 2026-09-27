@@ -8,7 +8,13 @@ namespace DesktopOrganizer.Core;
 /// The Windows KNOWNFOLDERID GUID used by <c>SHGetKnownFolderIDList</c> to obtain a PIDL.
 /// Note: these differ from the virtual-folder CLSIDs used in <c>::{CLSID}</c> shell paths.
 /// </param>
-/// <param name="DefaultCaption">The default display caption.</param>
+/// <param name="DefaultCaption">
+/// The English fallback caption. <c>Core</c> has no localization dependency (docs/PLANS/localization.md
+/// §2.9/§3.2), so this is normally not the caption shown to the user — the displayed caption is looked
+/// up by <c>DesktopOrganizer.UI.Services.SystemIconsPanelManager.ResolveIconLabel</c> from the RESX key
+/// <c>SystemIcon_{Kind}</c>, falling back to this value only when that key is missing from the current
+/// culture's RESX (i.e. a <see cref="Kind"/> the RESX files have not caught up with yet).
+/// </param>
 public sealed record SystemIconDescriptor(SystemIconKind Kind, Guid KnownFolderId, string DefaultCaption)
 {
     /// <summary>

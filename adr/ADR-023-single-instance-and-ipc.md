@@ -279,6 +279,7 @@ panel load, desktop gestures) is unchanged.
 - `DesktopOrganizer.Native` (Phase 8) is untouched — all new P/Invoke goes through the existing
   `INativeApi`.
 - The two new user-facing messages are English-only; localization is a separate cross-cutting task.
+  **Superseded by [ADR-032](ADR-032-ui-localization.md)** (2026-09-27) — see the amendment below.
 
 ## Amendment (2026-09-22, P08 fix cycle 2): activation wiring's UI marshal is fire-and-forget
 
@@ -386,3 +387,13 @@ a real compile failure hit during this change).
 
 **Status:** Accepted. No change to ADR-024's persistence contour — `App.Shutdown()` runs the exact
 existing `OnExit` sequence; no new state, schema, or settings key was added.
+
+## Amendment (2026-09-27): line 281 "English-only" superseded by ADR-032
+
+[ADR-032](ADR-032-ui-localization.md) introduces a hot-switchable ru/en localization infrastructure and
+explicitly revisits the "The two new user-facing messages are English-only; localization is a separate
+cross-cutting task" note above (line 281). Both messages
+(`Startup_OtherSession_Message`/`Startup_ActivationFailed_Message` — see ADR-032's implementation section
+and `docs/PLANS/localization.md` §2.8) are now localized RESX keys resolved against
+`CultureInfo.CurrentUICulture` in `Program.cs`, before DI/`ApplicationStateService.Load()` run. No other
+decision in this ADR (D-1..D-10) is revisited.

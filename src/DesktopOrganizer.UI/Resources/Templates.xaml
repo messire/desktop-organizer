@@ -4,6 +4,7 @@
                     xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
                     xmlns:behaviors="clr-namespace:DesktopOrganizer.UI.Behaviors"
                     xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
+                    xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
                     xmlns:models="clr-namespace:DesktopOrganizer.Core;assembly=DesktopOrganizer.Core">
 
     <conv:HexBrushConverter x:Key="HexBrush"/>
@@ -33,24 +34,24 @@
           .DataContext → the FileItem the menu was opened on
     -->
     <ContextMenu x:Key="FileContextMenu">
-        <MenuItem Header="Open"
+        <MenuItem Header="{loc:Loc Panel_FileMenu_Open}"
                   Command="{Binding PlacementTarget.Tag.OpenFileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                   CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-        <MenuItem Header="Open containing folder"
+        <MenuItem Header="{loc:Loc Panel_FileMenu_OpenContainingFolder}"
                   Command="{Binding PlacementTarget.Tag.OpenContainingFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                   CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
         <Separator/>
-        <MenuItem Header="Rename"
+        <MenuItem Header="{loc:Loc Common_Rename}"
                   InputGestureText="F2"
                   Command="{Binding PlacementTarget.Tag.BeginRenameCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                   CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
         <Separator/>
-        <MenuItem Header="Properties"
+        <MenuItem Header="{loc:Loc Panel_FileMenu_Properties}"
                   Command="{Binding PlacementTarget.Tag.ShowPropertiesCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                   CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
         <Separator/>
-        <MenuItem Header="Remove from panel"
-                  ToolTip="For files moved into the panel by dragging, the item is typically returned to its original location on disk. For others, it is simply removed from the panel."
+        <MenuItem Header="{loc:Loc Panel_FileMenu_RemoveFromPanel}"
+                  ToolTip="{loc:Loc Panel_FileMenu_RemoveFromPanel_Tooltip}"
                   Command="{Binding PlacementTarget.Tag.RemoveFileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                   CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
     </ContextMenu>

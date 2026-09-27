@@ -7,6 +7,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\DesktopOrganizer.Attributes\DesktopOrganizer.Attributes.csproj"/>
+        <ProjectReference Include="..\DesktopOrganizer.Localization\DesktopOrganizer.Localization.csproj"/>
         <ProjectReference Include="..\DesktopOrganizer.Services.Abstractions\DesktopOrganizer.Services.Abstractions.csproj"/>
     </ItemGroup>
 

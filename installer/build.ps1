@@ -35,6 +35,7 @@ dotnet publish $project `
     -p:PublishSingleFile=false `
     -p:IncludeNativeLibrariesForSelfExtract=true `
     -p:PublishReadyToRun=false `
+    -p:SatelliteResourceLanguages=en%3Bru `
     -o $outDir
 
 if ($LASTEXITCODE -ne 0) {
@@ -42,6 +43,28 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Публикация готова: $outDir"
+
+# docs/PLANS/localization.md §4.2/§6 (G-8): без -p:SatelliteResourceLanguages (и без Directory.Build.props'ного
+# аналога — эта строка дублирует его явно, на случай если publish когда-нибудь запустят с другими props)
+# WPF/.NET тащат сателлитные сборки для ~13 культур фреймворка. Явно перепроверяем сам publish-выход, а не
+# просто верим свойству: если сателлит для не-ru культуры всё-таки просочился (например, из-за более
+# приоритетного .user.props или системной переменной среды), инсталлятор не должен молча унести чужие языки.
+Write-Host "Проверяю состав publish: культуры сателлитных сборок..."
+$satelliteDlls = Get-ChildItem -Path $outDir -Recurse -Filter "*.resources.dll" -File
+$cultureFolders = $satelliteDlls | ForEach-Object { $_.Directory.Name } | Sort-Object -Unique
+$unexpectedCultures = $cultureFolders | Where-Object { $_ -ne "ru" }
+
+if ($unexpectedCultures.Count -gt 0) {
+    throw "publish\$Runtime содержит папки культур сверх 'ru': $($unexpectedCultures -join ', '). " +
+        "Проверь -p:SatelliteResourceLanguages здесь и <SatelliteResourceLanguages> в Directory.Build.props."
+}
+
+$localizationSatellite = Join-Path $outDir "ru\DesktopOrganizer.Localization.resources.dll"
+if (-not (Test-Path $localizationSatellite)) {
+    throw "Не найден $localizationSatellite — русская сателлитная сборка ресурсов локализации отсутствует в publish."
+}
+
+Write-Host "Состав культур в порядке: только 'ru', $localizationSatellite на месте."
 
 if ($SkipInstaller) {
     Write-Host "SkipInstaller указан — инсталлятор не собираю. Не забудь собрать его вручную перед раздачей!"

@@ -1,3 +1,4 @@
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.State;
 
 namespace DesktopOrganizer.UI.Services;
@@ -13,6 +14,7 @@ public class PageManagerService : IPageManager
     private readonly IApplicationStateService _applicationStateService;
     private readonly IConfirmationService _confirmation;
     private readonly IPanelItemStorageService _itemStorage;
+    private readonly ILocalizationService _localization;
     private readonly List<string> _pages;
     private string _currentPage;
 
@@ -45,16 +47,19 @@ public class PageManagerService : IPageManager
     /// Used to decide whether any panel on the page being removed actually has something to lose (see
     /// <paramref name="confirmation"/>).
     /// </param>
+    /// <param name="localization">Localizes <see cref="RemovePage"/>'s confirmation dialog text.</param>
     public PageManagerService(
         IWindowManager windowManager,
         IApplicationStateService applicationStateService,
         IConfirmationService confirmation,
-        IPanelItemStorageService itemStorage)
+        IPanelItemStorageService itemStorage,
+        ILocalizationService localization)
     {
         _windowManager = windowManager;
         _applicationStateService = applicationStateService;
         _confirmation = confirmation;
         _itemStorage = itemStorage;
+        _localization = localization;
 
         _pages = [.. applicationStateService.PageIds];
         _currentPage = string.IsNullOrWhiteSpace(applicationStateService.CurrentPageId)
@@ -140,17 +145,16 @@ public class PageManagerService : IPageManager
             .ToList();
 
         var hasManagedFiles = pagePanels.Any(m => m.FilePaths.Any(_itemStorage.IsManaged));
+        var title = _localization.GetString("Page_Confirm_Remove_Title");
 
         var confirmed = hasManagedFiles
             ? _confirmation.Confirm(
-                "The page will be permanently removed, along with every panel on it. Files moved into " +
-                "those panels will be deleted from disk without the ability to restore them via the " +
-                "Recycle Bin. Continue?",
-                "Remove Page",
+                _localization.GetString("Page_Confirm_Remove_ManagedFiles_Message"),
+                title,
                 MessageBoxImage.Warning)
             : _confirmation.Confirm(
-                "The page and every panel on it will be removed. Continue?",
-                "Remove Page");
+                _localization.GetString("Page_Confirm_Remove_Message"),
+                title);
 
         if (!confirmed) return false;
 

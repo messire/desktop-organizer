@@ -1,7 +1,7 @@
 <Project>
 
     <PropertyGroup>
-        <Version>0.5.1</Version>
+        <Version>0.6.1</Version>
         <!-- DesktopOrganizer.UI's user settings (ChildWindowsState, panel layout, etc. — see
              Properties\Settings.settings) are System.Configuration "User"-scoped, which .NET keys by
              AssemblyVersion: %LocalAppData%\...\<AssemblyVersion>\user.config. If AssemblyVersion moved
@@ -21,6 +21,13 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <CodeAnalysisRuleSet>$(MSBuildThisFileDirectory)linters\linter.ruleset</CodeAnalysisRuleSet>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <!-- Localization (docs/PLANS/localization.md D-2/D-4, ADR-032): only English (neutral) and
+             Russian satellite resources are ever produced/published — every other .NET-provided culture
+             resource (13+ languages the SDK would otherwise localize framework strings into) is skipped.
+             NeutralLanguage also emits [assembly: NeutralResourcesLanguageAttribute("en")], which is what
+             closes CA1824 on DesktopOrganizer.Localization. -->
+        <SatelliteResourceLanguages>en;ru</SatelliteResourceLanguages>
+        <NeutralLanguage>en</NeutralLanguage>
     </PropertyGroup>
 
     <ItemGroup>

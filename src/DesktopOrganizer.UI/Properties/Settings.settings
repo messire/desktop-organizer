@@ -74,5 +74,14 @@
         <Setting Name="DefaultIconLayoutPolicy" Type="System.String" Scope="User">
             <Value Profile="(Default)">FixedGap</Value>
         </Setting>
+        <!-- docs/PLANS/localization.md D-1/ADR-032: the ONE new user.config scalar this feature adds,
+             by the user's explicit, one-time permission to extend CLAUDE.md's frozen persistence
+             contour. "" (default) = follow the Windows UI language; "en"/"ru" pin the app to that
+             language regardless of Windows. Never validated on read — SupportedLanguages.Resolve
+             treats any other/garbage value the same as "" (D-4), so an old build reading a value a
+             newer build wrote back never throws. -->
+        <Setting Name="Language" Type="System.String" Scope="User">
+            <Value Profile="(Default)"/>
+        </Setting>
     </Settings>
 </SettingsFile>

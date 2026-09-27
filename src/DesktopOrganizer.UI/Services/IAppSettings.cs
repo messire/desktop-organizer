@@ -112,6 +112,18 @@ public interface IAppSettings
     string DefaultIconLayoutPolicy { get; set; }
 
     /// <summary>
+    /// The user's raw UI language preference (docs/PLANS/localization.md D-1, ADR-032). One of
+    /// <c>""</c> (default — follow the Windows UI language), <c>"en"</c>, or <c>"ru"</c>. Any other
+    /// value (an unrecognised tag, or a value written by a newer build) is treated exactly like
+    /// <c>""</c> by <see cref="DesktopOrganizer.Localization.SupportedLanguages.Resolve"/> — reading
+    /// this property never throws and never requires validation by the caller. This is the single
+    /// scalar CLAUDE.md's frozen persistence contour was extended to allow (D-1) — no other
+    /// <c>user.config</c> key, and nothing in the versioned JSON application-state document, changed
+    /// alongside it.
+    /// </summary>
+    string Language { get; set; }
+
+    /// <summary>
     /// <see langword="true"/> when the user has fixed the current panel geometry ("Lock layout",
     /// Fences-parity, docs/PLANS/phase-6-edit-layout-ux.md §1 D-3). Blocks panel move/resize and entry
     /// into <see cref="DesktopOrganizer.UI.Services.ILayoutEditModeService.Mode"/>'s

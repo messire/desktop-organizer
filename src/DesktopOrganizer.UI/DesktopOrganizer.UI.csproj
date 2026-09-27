@@ -48,6 +48,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\DesktopOrganizer.Core\DesktopOrganizer.Core.csproj"/>
+        <ProjectReference Include="..\DesktopOrganizer.Localization\DesktopOrganizer.Localization.csproj"/>
         <ProjectReference Include="..\DesktopOrganizer.Services\DesktopOrganizer.Services.csproj"/>
     </ItemGroup>
 

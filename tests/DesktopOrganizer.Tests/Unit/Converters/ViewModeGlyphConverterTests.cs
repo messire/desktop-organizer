@@ -8,13 +8,15 @@ namespace DesktopOrganizer.Tests.Unit.Converters;
 /// Unit tests for <see cref="ViewModeGlyphConverter"/> (ui-polishing-1 §4.2). The glyph/tooltip
 /// convention is "target mode" — what the button switches TO on click, not the mode currently
 /// active — so a <see cref="PanelViewMode.Grid"/> input must describe switching to List, and vice
-/// versa.
+/// versa. The glyph itself is culture-invariant (a Segoe MDL2 Assets code point); the tooltip text is
+/// localized (docs/PLANS/localization.md §4.3, WP-2), so its assertions fix an explicit culture (L-3/R-5).
 /// </summary>
 [Trait(UnitTests, "UI")]
 public class ViewModeGlyphConverterTests
 {
     private static readonly ViewModeGlyphConverter Converter = new();
-    private static readonly CultureInfo AnyCulture = CultureInfo.InvariantCulture;
+    private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en");
+    private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru");
 
     /// <summary>
     /// Verifies that when the current mode is <see cref="PanelViewMode.Grid"/>, the glyph describes the
@@ -23,19 +25,19 @@ public class ViewModeGlyphConverterTests
     [Fact]
     public void Convert_CurrentlyGrid_GlyphDescribesListTarget()
     {
-        var glyph = Converter.Convert(PanelViewMode.Grid, typeof(string), null!, AnyCulture);
+        var glyph = Converter.Convert(PanelViewMode.Grid, typeof(string), null!, English);
 
-        Assert.Equal("\uE8FD", glyph); // List
+        Assert.Equal("", glyph); // List
     }
 
     /// <summary>
     /// Verifies that when the current mode is <see cref="PanelViewMode.Grid"/>, the "tooltip" parameter
-    /// describes switching to list view.
+    /// describes switching to list view, in English.
     /// </summary>
     [Fact]
-    public void Convert_CurrentlyGrid_TooltipDescribesListTarget()
+    public void Convert_CurrentlyGrid_English_TooltipDescribesListTarget()
     {
-        var tooltip = Converter.Convert(PanelViewMode.Grid, typeof(string), "tooltip", AnyCulture);
+        var tooltip = Converter.Convert(PanelViewMode.Grid, typeof(string), "tooltip", English);
 
         Assert.Equal("Switch to list view", tooltip);
     }
@@ -47,21 +49,43 @@ public class ViewModeGlyphConverterTests
     [Fact]
     public void Convert_CurrentlyList_GlyphDescribesGridTarget()
     {
-        var glyph = Converter.Convert(PanelViewMode.List, typeof(string), null!, AnyCulture);
+        var glyph = Converter.Convert(PanelViewMode.List, typeof(string), null!, English);
 
-        Assert.Equal("\uE8A9", glyph); // ViewAll
+        Assert.Equal("", glyph); // ViewAll
     }
 
     /// <summary>
     /// Verifies that when the current mode is <see cref="PanelViewMode.List"/>, the "tooltip" parameter
-    /// describes switching to grid view.
+    /// describes switching to grid view, in English.
     /// </summary>
     [Fact]
-    public void Convert_CurrentlyList_TooltipDescribesGridTarget()
+    public void Convert_CurrentlyList_English_TooltipDescribesGridTarget()
     {
-        var tooltip = Converter.Convert(PanelViewMode.List, typeof(string), "tooltip", AnyCulture);
+        var tooltip = Converter.Convert(PanelViewMode.List, typeof(string), "tooltip", English);
 
         Assert.Equal("Switch to grid view", tooltip);
+    }
+
+    /// <summary>
+    /// Verifies the Russian tooltip text for switching to list view.
+    /// </summary>
+    [Fact]
+    public void Convert_CurrentlyGrid_Russian_TooltipDescribesListTarget()
+    {
+        var tooltip = Converter.Convert(PanelViewMode.Grid, typeof(string), "tooltip", Russian);
+
+        Assert.Equal("Переключить на список", tooltip);
+    }
+
+    /// <summary>
+    /// Verifies the Russian tooltip text for switching to grid view.
+    /// </summary>
+    [Fact]
+    public void Convert_CurrentlyList_Russian_TooltipDescribesGridTarget()
+    {
+        var tooltip = Converter.Convert(PanelViewMode.List, typeof(string), "tooltip", Russian);
+
+        Assert.Equal("Переключить на сетку", tooltip);
     }
 
     /// <summary>
@@ -70,7 +94,7 @@ public class ViewModeGlyphConverterTests
     [Fact]
     public void Convert_TooltipParameterIsCaseInsensitive()
     {
-        var tooltip = Converter.Convert(PanelViewMode.Grid, typeof(string), "TOOLTIP", AnyCulture);
+        var tooltip = Converter.Convert(PanelViewMode.Grid, typeof(string), "TOOLTIP", English);
 
         Assert.Equal("Switch to list view", tooltip);
     }
@@ -84,9 +108,9 @@ public class ViewModeGlyphConverterTests
     {
         // Defensive default: anything that isn't literally PanelViewMode.Grid falls back to the
         // same branch as List, matching the pattern-match `value is PanelViewMode.Grid` check.
-        var glyph = Converter.Convert(null!, typeof(string), null!, AnyCulture);
+        var glyph = Converter.Convert(null!, typeof(string), null!, English);
 
-        Assert.Equal("\uE8A9", glyph);
+        Assert.Equal("", glyph);
     }
 
     /// <summary>
@@ -97,6 +121,6 @@ public class ViewModeGlyphConverterTests
     public void ConvertBack_Always_ThrowsNotSupportedException()
     {
         Assert.Throws<NotSupportedException>(
-            () => Converter.ConvertBack("x", typeof(PanelViewMode), null!, AnyCulture));
+            () => Converter.ConvertBack("x", typeof(PanelViewMode), null!, English));
     }
 }

@@ -3,10 +3,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <StackPanel>
-        <TextBlock Text="System icons" Style="{StaticResource Settings.PageHeader}"/>
+        <TextBlock Text="{loc:Loc Settings_Nav_SystemIcons}" Style="{StaticResource Settings.PageHeader}"/>
 
         <!-- Show system icons panel -->
         <Border Style="{StaticResource Settings.CardBorder}">
@@ -16,13 +17,13 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="Show system icons panel" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Text="{loc:Loc Settings_SystemIcons_ShowPanel_Header}" Style="{StaticResource Settings.CardHeader}"/>
                     <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="A dedicated desktop panel for This PC, Recycle Bin, and other system shell icons."/>
+                               Text="{loc:Loc Settings_SystemIcons_ShowPanel_Description}"/>
                 </StackPanel>
                 <CheckBox Grid.Column="1" VerticalAlignment="Center"
                           Style="{StaticResource Settings.ToggleCheckBox}"
-                          AutomationProperties.Name="Show system icons panel"
+                          AutomationProperties.Name="{loc:Loc Settings_SystemIcons_ShowPanel_Header}"
                           IsChecked="{Binding SystemIconsPanelEnabled, Mode=TwoWay}"/>
             </Grid>
         </Border>
@@ -36,10 +37,10 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                        <TextBlock Text="Show on all virtual desktops" Style="{StaticResource Settings.CardHeader}"/>
+                        <TextBlock Text="{loc:Loc Settings_SystemIcons_AllVirtualDesktops_Header}" Style="{StaticResource Settings.CardHeader}"/>
                         <TextBlock Style="{StaticResource Settings.CardDescription}"
-                                   Text="Keep the panel visible when you switch Windows virtual desktops (Task View). When off, the panel stays on your first virtual desktop."/>
-                        <TextBlock Text="Turn on &quot;Show system icons panel&quot; to change this." Margin="0,4,0,0">
+                                   Text="{loc:Loc Settings_SystemIcons_AllVirtualDesktops_Description}"/>
+                        <TextBlock Text="{loc:Loc Settings_SystemIcons_EnablePanelFirst_Message}" Margin="0,4,0,0">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
                                     <Setter Property="Visibility" Value="Collapsed"/>
@@ -54,7 +55,7 @@
                     </StackPanel>
                     <CheckBox Grid.Column="1" VerticalAlignment="Center"
                               Style="{StaticResource Settings.ToggleCheckBox}"
-                              AutomationProperties.Name="Show on all virtual desktops"
+                              AutomationProperties.Name="{loc:Loc Settings_SystemIcons_AllVirtualDesktops_Header}"
                               IsChecked="{Binding SystemIconsPanelOnAllVirtualDesktops, Mode=TwoWay}"/>
                 </Grid>
 
@@ -63,7 +64,7 @@
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
                             Visibility="{Binding SystemIconsVirtualDesktopFeatureIneffective, Converter={StaticResource BooleanToVisibility}}">
                     <TextBlock Text="⚠" Foreground="{StaticResource Brush.Settings.Warning}" FontWeight="Bold" Margin="0,0,4,0"/>
-                    <TextBlock Text="This feature isn't working on this system and has been disabled."
+                    <TextBlock Text="{loc:Loc Settings_SystemIcons_FeatureIneffective_Message}"
                                Foreground="{StaticResource Brush.Settings.Warning}" FontSize="11" TextWrapping="Wrap"/>
                 </StackPanel>
             </StackPanel>
@@ -72,8 +73,8 @@
         <!-- Visible icons -->
         <Border Style="{StaticResource Settings.CardBorder}" IsEnabled="{Binding SystemIconsPanelEnabled}">
             <StackPanel>
-                <TextBlock Text="Visible icons" Style="{StaticResource Settings.CardHeader}"/>
-                <TextBlock Text="Turn on &quot;Show system icons panel&quot; to change this." Margin="0,2,0,0">
+                <TextBlock Text="{loc:Loc Settings_SystemIcons_VisibleIcons_Header}" Style="{StaticResource Settings.CardHeader}"/>
+                <TextBlock Text="{loc:Loc Settings_SystemIcons_EnablePanelFirst_Message}" Margin="0,2,0,0">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
                             <Setter Property="Visibility" Value="Collapsed"/>
@@ -85,8 +86,11 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
+                <!-- SystemIconsItems[i].Label is refreshed in place by SystemIconsPanelManager on
+                     CultureChanged (docs/PLANS/localization.md §2.9, WP-3) — an ordinary data binding is
+                     enough here since the source VALUE itself changes on language switch. -->
                 <ItemsControl ItemsSource="{Binding SystemIconsItems}" Margin="0,6,0,0"
-                              AutomationProperties.Name="Visible icons">
+                              AutomationProperties.Name="{loc:Loc Settings_SystemIcons_VisibleIcons_Header}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <CheckBox Content="{Binding Label}" IsChecked="{Binding IsVisible, Mode=TwoWay}" Margin="0,3"
@@ -105,13 +109,14 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="150"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="Icon size" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="0" Text="{loc:Loc Common_IconSize_Header}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
                     <ComboBox Grid.Column="1" VerticalAlignment="Center"
-                              AutomationProperties.Name="Icon size"
+                              AutomationProperties.Name="{loc:Loc Common_IconSize_Header}"
                               ItemsSource="{Binding SystemIconSizeOptions}"
-                              SelectedItem="{Binding SystemIconsSize, Mode=TwoWay}"/>
+                              SelectedItem="{Binding SystemIconsSize, Mode=TwoWay}"
+                              ItemTemplate="{StaticResource Settings.EnumRadioLabel}"/>
                 </Grid>
-                <TextBlock Text="Turn on &quot;Show system icons panel&quot; to change this." Margin="0,4,0,0">
+                <TextBlock Text="{loc:Loc Settings_SystemIcons_EnablePanelFirst_Message}" Margin="0,4,0,0">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
                             <Setter Property="Visibility" Value="Collapsed"/>

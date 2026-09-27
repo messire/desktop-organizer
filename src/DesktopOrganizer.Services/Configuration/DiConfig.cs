@@ -1,9 +1,11 @@
 ﻿using System.Diagnostics;
 using System.IO;
 using System.Security.Principal;
+using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Diagnostics;
+using DesktopOrganizer.Services.Localization;
 using DesktopOrganizer.Services.Providers;
 using DesktopOrganizer.Services.SingleInstance;
 using DesktopOrganizer.Services.Storage;
@@ -55,6 +57,25 @@ public static class DiConfig
     /// </param>
     internal static void RegisterServices(this IServiceCollection services, string? diagnosticsLogDirectory, string? storageRoot)
     {
+        // Localization (docs/PLANS/localization.md §2.2/§4.0). SystemCulture.OriginalUiCulture is what
+        // "follow Windows" (IAppSettings.Language == "") resolves against — it must already have been
+        // captured (Program.Main touches it as its very first line, before this container is even built)
+        // so the snapshot predates any CurrentUICulture override. The initial language preference itself
+        // is NOT applied here: DesktopOrganizer.Services has no reference to IAppSettings (a UI-layer
+        // type) — App.StartApp calls ApplyLanguage(AppSettings.Language) once, before LoadResourceDictionaries.
+        //
+        // IDiagnosticsLog is resolved eagerly here (not the lazy Func<IDiagnosticsLog> pattern used for
+        // ISingleInstanceCoordinator/IApplicationStateStore below) because this ILocalizationService
+        // singleton itself is only ever resolved in a process that is already Primary: App.StartApp's
+        // sp.GetRequiredService<ILocalizationService>() call (App.xaml.cs:282) is the only caller, and
+        // App is only ever constructed after a RunAsPrimary decision. A Secondary process's own
+        // MessageBox calls (Program.cs) go through the static LocalizationResources helper instead,
+        // never through this DI registration, so there is no ADR-023 R-12 concern about a burst of
+        // Secondary launches materializing the JSONL writer — the same footing as
+        // InstallerShutdownRequestListener's own eager resolve further down (:203-205).
+        services.AddSingleton<ILocalizationService>(sp =>
+            new LocalizationService(SystemCulture.OriginalUiCulture, diagnosticsLog: sp.GetRequiredService<IDiagnosticsLog>()));
+
         // Utils
         services.AddSingleton<IIconHandler, IconHandler>();
         services.AddSingleton<IIconFactory, IconFactory>();

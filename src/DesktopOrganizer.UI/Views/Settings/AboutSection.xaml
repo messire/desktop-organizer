@@ -3,17 +3,19 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <StackPanel>
-        <TextBlock Text="About" Style="{StaticResource Settings.PageHeader}"/>
+        <TextBlock Text="{loc:Loc Settings_Nav_About}" Style="{StaticResource Settings.PageHeader}"/>
 
         <Border Style="{StaticResource Settings.CardBorder}">
             <StackPanel>
+                <!-- "DesktopOrganizer" is the product name — never translated (docs/PLANS/localization.md
+                     §0.2). -->
                 <TextBlock Text="DesktopOrganizer" Style="{StaticResource Settings.CardHeader}"/>
                 <TextBlock Style="{StaticResource Settings.CardDescription}">
-                    <Run Text="Version "/>
-                    <Run Text="{Binding AppVersion, Mode=OneWay}"/>
+                    <Run Text="{loc:LocBinding AppVersion, FormatKey=Settings_About_Version_Format}"/>
                 </TextBlock>
             </StackPanel>
         </Border>
@@ -25,14 +27,14 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="Storage folder" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Text="{loc:Loc Settings_About_StorageFolder_Header}" Style="{StaticResource Settings.CardHeader}"/>
                     <TextBlock Text="{Binding StorageFolderPath}" Style="{StaticResource Settings.CardDescription}" TextWrapping="Wrap"/>
                 </StackPanel>
-                <Button Grid.Column="1" Content="Open folder" Padding="12,6" VerticalAlignment="Center"
+                <Button Grid.Column="1" Content="{loc:Loc Settings_About_OpenFolder_Button}" Padding="12,6" VerticalAlignment="Center"
                         Command="{Binding OpenStorageFolderCommand}"/>
             </Grid>
         </Border>
 
-        <TextBlock Text="Diagnostics: run with --diag" Style="{StaticResource Settings.CardDescription}" Margin="0,4,0,0"/>
+        <TextBlock Text="{loc:Loc Settings_About_Diagnostics_Message}" Style="{StaticResource Settings.CardDescription}" Margin="0,4,0,0"/>
     </StackPanel>
 </UserControl>

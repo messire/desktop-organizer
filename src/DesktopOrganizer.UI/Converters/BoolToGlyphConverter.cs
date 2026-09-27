@@ -1,12 +1,15 @@
 using System.Globalization;
 using System.Windows.Data;
+using DesktopOrganizer.Localization;
 
 namespace DesktopOrganizer.UI.Converters;
 
 /// <summary>
 /// Converts a boolean <c>IsRolledUp</c> value to a glyph character or tooltip string.
 /// Use <c>ConverterParameter="glyph"</c> (default) for the button content,
-/// or <c>ConverterParameter="tooltip"</c> for the ToolTip text.
+/// or <c>ConverterParameter="tooltip"</c> for the ToolTip text. The tooltip comes from
+/// <c>Panel_RollUp_Expand_Tooltip</c>/<c>Panel_RollUp_Collapse_Tooltip</c>
+/// (docs/PLANS/localization.md §4.3, WP-2); the glyph itself is not localizable text.
 /// </summary>
 [ValueConversion(typeof(bool), typeof(string))]
 public sealed class BoolToGlyphConverter : IValueConverter
@@ -25,9 +28,9 @@ public sealed class BoolToGlyphConverter : IValueConverter
         // panel's roll-up state directly — it is also reused, unchanged, by that same context-menu
         // MenuItem, which is the only reason "Menu" appears in its name; it does not itself open a menu.
         return isTooltip
-            ? isRolledUp
-                ? "Expand panel"
-                : "Collapse panel"
+            ? LocalizationResources.GetString(
+                isRolledUp ? "Panel_RollUp_Expand_Tooltip" : "Panel_RollUp_Collapse_Tooltip",
+                culture)
             : isRolledUp
                 ? ""
                 : "";

@@ -210,6 +210,8 @@ Customize "{Title}"
 UI-строки нового кода (боковая навигация, диалог, карточки) — только английский, как во всём проекте
 (см. `docs/PLANS/ui-polishing-1.md`). Не вводится инфраструктура локализации ради этой фичи.
 
+**Superseded by [ADR-032](ADR-032-ui-localization.md)** (2026-09-27) — см. amendment в конце документа.
+
 ### D-9. Стиль карточек — SettingsCard-паттерн поверх существующих токенов
 
 Каждая настройка — карточка «заголовок + пояснение + контрол справа» (SettingsCard/SettingsExpander
@@ -384,3 +386,10 @@ per-panel scope в отдельное окно-компаньон — то, чт
 - Nielsen Norman Group — [Progressive Disclosure](https://www.nngroup.com/articles/progressive-disclosure/)
   — обоснование `Advanced`-expander в разделе General (D-2) для редко используемых переключателей
   (native resize experimental, reset one-time hints).
+
+## Amendment (2026-09-27): D-8 «только английский» отменено ADR-032
+
+[ADR-032](ADR-032-ui-localization.md) вводит горячепереключаемую ru/en локализацию и явно пересматривает
+D-8 выше. Вся поверхность, добавленная этим ADR (боковая навигация `MainWindow`, `PanelCustomizeWindow`,
+карточки `Settings.*`), локализована пакетами WP-4a/WP-4b фичи локализации. Остальные решения этого ADR
+(D-1..D-7, D-9, D-10) не пересматриваются.

@@ -1,0 +1,812 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    Microsoft ResX Schema
+
+    Version 2.0
+
+    The primary goals of this format is to allow a simple XML format
+    that is mostly human readable. The generation and parsing of the
+    various data types are done through the TypeConverter classes
+    associated with the data types.
+
+    Example:
+
+    ... ado.net/XML headers & schema ...
+    <resheader name="resmimetype">text/microsoft-resx</resheader>
+    <resheader name="version">2.0</resheader>
+    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
+    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
+    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
+    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
+    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
+        <value>[base64 mime encoded serialized .NET Framework object]</value>
+    </data>
+    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
+        <comment>This is a comment</comment>
+    </data>
+
+    There are any number of "resheader" rows that contain simple
+    name/value pairs.
+
+    Each data row contains a name, and value. The row also contains a
+    type or mimetype. Type corresponds to a .NET class that support
+    text/value conversion through the TypeConverter architecture.
+    Classes that don't support this are serialized and stored with the
+    mimetype set.
+
+    The mimetype is used for the serialized objects, and tells the
+    ResXResourceReader how to depersist the object. This is currently only
+    used for scalar types, but should be extensible for use with
+    other data types not directly supported by the parser and
+    TypeConverter classes.
+
+    Note that binary serialization is discouraged for security reasons.
+    Instead, we recommend using the "type" attribute with the actual TypeConverter type name, and
+    storing the data as a string using the InvariantCulture, if applicable.
+    -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <!-- ==== BEGIN SHARED (owner: WP-0S; docs/PLANS/localization.md §3.2/§3.3. Prefixes: Common_, Enum_,
+       Plural_, Language_, Page_, Panel_NewTitle, Snapshot_, SystemIcon_, Startup_, Restore_. Exception:
+       Settings_General_Language_Header/_Description are also seeded here — they are part of the C-5
+       language-picker contract (§2.9) and must exist before WP-4a's Settings_ region (below) is ever
+       populated. WP-4a only *consumes* these two keys, it must not redefine them. ==== -->
+  <data name="Common_Cancel_Button" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Common_EditLayout" xml:space="preserve">
+    <value>Edit layout</value>
+  </data>
+  <data name="Common_IconLayout_Header" xml:space="preserve">
+    <value>Icon layout</value>
+  </data>
+  <data name="Common_IconSize_Header" xml:space="preserve">
+    <value>Icon size</value>
+  </data>
+  <data name="Common_LockLayout" xml:space="preserve">
+    <value>Lock layout</value>
+  </data>
+  <data name="Common_LockedReason" xml:space="preserve">
+    <value>Unavailable while the layout is locked.</value>
+  </data>
+  <data name="Common_Ok_Button" xml:space="preserve">
+    <value>OK</value>
+  </data>
+  <data name="Common_Remove_Button" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="Common_Rename" xml:space="preserve">
+    <value>Rename</value>
+  </data>
+  <data name="Common_SurfaceStyle_Header" xml:space="preserve">
+    <value>Surface style</value>
+  </data>
+  <data name="Common_ValuePx_Format" xml:space="preserve">
+    <value>{0} px</value>
+  </data>
+  <data name="Enum_IconLayoutPolicy_FixedGap" xml:space="preserve">
+    <value>Fixed spacing</value>
+  </data>
+  <data name="Enum_IconLayoutPolicy_LegacyStretch" xml:space="preserve">
+    <value>Adaptive stretch (legacy)</value>
+  </data>
+  <data name="Enum_NormalModeLayoutGestures_MoveAndResize" xml:space="preserve">
+    <value>Move and resize</value>
+  </data>
+  <data name="Enum_NormalModeLayoutGestures_MoveOnly" xml:space="preserve">
+    <value>Move only</value>
+  </data>
+  <data name="Enum_NormalModeLayoutGestures_None" xml:space="preserve">
+    <value>None (Edit layout mode only)</value>
+  </data>
+  <data name="Enum_PanelContentFilter_FoldersOnly" xml:space="preserve">
+    <value>Folders only</value>
+  </data>
+  <data name="Enum_PanelContentFilter_HideAll" xml:space="preserve">
+    <value>Hide content</value>
+  </data>
+  <data name="Enum_PanelContentFilter_HideShortcuts" xml:space="preserve">
+    <value>Hide shortcuts</value>
+  </data>
+  <data name="Enum_PanelContentFilter_ShowAll" xml:space="preserve">
+    <value>Show all</value>
+  </data>
+  <data name="Enum_PanelGeometryMode_GridAligned" xml:space="preserve">
+    <value>Grid aligned</value>
+  </data>
+  <data name="Enum_PanelGeometryMode_LegacyFreeform" xml:space="preserve">
+    <value>Free-form (legacy)</value>
+  </data>
+  <data name="Enum_PanelSizePreset_ExtraLarge" xml:space="preserve">
+    <value>Extra large</value>
+  </data>
+  <data name="Enum_PanelSizePreset_Large" xml:space="preserve">
+    <value>Large</value>
+  </data>
+  <data name="Enum_PanelSizePreset_Medium" xml:space="preserve">
+    <value>Medium</value>
+  </data>
+  <data name="Enum_PanelSizePreset_Small" xml:space="preserve">
+    <value>Small</value>
+  </data>
+  <data name="Enum_PanelSizingMode_AutoContent" xml:space="preserve">
+    <value>Auto-size to content</value>
+  </data>
+  <data name="Enum_PanelSizingMode_Manual" xml:space="preserve">
+    <value>Manual</value>
+  </data>
+  <data name="Enum_PanelSortMode_Manual" xml:space="preserve">
+    <value>Manual</value>
+  </data>
+  <data name="Enum_PanelSortMode_Name" xml:space="preserve">
+    <value>By name</value>
+  </data>
+  <data name="Enum_PanelSurfaceStyle_Ambient" xml:space="preserve">
+    <value>Ambient</value>
+  </data>
+  <data name="Enum_PanelSurfaceStyle_Glass" xml:space="preserve">
+    <value>Glass</value>
+  </data>
+  <data name="Enum_PanelSurfaceStyle_Solid" xml:space="preserve">
+    <value>Solid</value>
+  </data>
+  <data name="Enum_PanelViewMode_Grid" xml:space="preserve">
+    <value>Grid</value>
+  </data>
+  <data name="Enum_PanelViewMode_List" xml:space="preserve">
+    <value>List</value>
+  </data>
+  <data name="Enum_SystemIconSize_Large" xml:space="preserve">
+    <value>Large (64 px)</value>
+  </data>
+  <data name="Enum_SystemIconSize_Medium" xml:space="preserve">
+    <value>Medium (48 px)</value>
+  </data>
+  <data name="Enum_SystemIconSize_Small" xml:space="preserve">
+    <value>Small (32 px)</value>
+  </data>
+  <data name="Language_FollowWindows_Format" xml:space="preserve">
+    <value>Windows default ({0})</value>
+  </data>
+  <data name="Language_Name_En" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="Language_Name_Ru" xml:space="preserve">
+    <value>Русский</value>
+  </data>
+  <data name="Page_Default_DisplayName" xml:space="preserve">
+    <value>Default</value>
+  </data>
+  <data name="Panel_NewTitle" xml:space="preserve">
+    <value>New Panel</value>
+  </data>
+  <data name="Plural_Items_Few" xml:space="preserve">
+    <value>{0} items</value>
+  </data>
+  <data name="Plural_Items_Many" xml:space="preserve">
+    <value>{0} items</value>
+  </data>
+  <data name="Plural_Items_One" xml:space="preserve">
+    <value>{0} item</value>
+  </data>
+  <data name="Plural_Items_Other" xml:space="preserve">
+    <value>{0} items</value>
+  </data>
+  <data name="Plural_Panels_Few" xml:space="preserve">
+    <value>{0} panels</value>
+  </data>
+  <data name="Plural_Panels_Many" xml:space="preserve">
+    <value>{0} panels</value>
+  </data>
+  <data name="Plural_Panels_One" xml:space="preserve">
+    <value>{0} panel</value>
+  </data>
+  <data name="Plural_Panels_Other" xml:space="preserve">
+    <value>{0} panels</value>
+  </data>
+  <data name="Restore_CandidateInvalid_Format" xml:space="preserve">
+    <value>Candidate '{0}' failed validation. Details: {1}</value>
+  </data>
+  <data name="Restore_Failed_Format" xml:space="preserve">
+    <value>Restoring from '{0}' failed. Details: {1}</value>
+  </data>
+  <data name="Restore_LockUnavailable_Message" xml:space="preserve">
+    <value>DesktopOrganizer could not restore application state: another running instance holds the storage lock. Close DesktopOrganizer and try again.</value>
+  </data>
+  <data name="Restore_NoCandidate_Message" xml:space="preserve">
+    <value>No backup file and no quarantine file were found — nothing to restore from.</value>
+  </data>
+  <data name="Restore_Restored_Format" xml:space="preserve">
+    <value>Restored from '{0}'. No previous primary file existed.</value>
+  </data>
+  <data name="Restore_RestoredQuarantined_Format" xml:space="preserve">
+    <value>Restored from '{0}'. The previous primary file was quarantined as '{1}'.</value>
+  </data>
+  <data name="Restore_Unknown_Format" xml:space="preserve">
+    <value>Unexpected restore outcome: {0}. Details: {1}</value>
+  </data>
+  <data name="Settings_General_Language_Description" xml:space="preserve">
+    <value>Changes the language of DesktopOrganizer right away.</value>
+  </data>
+  <data name="Settings_General_Language_Header" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="Snapshot_DefaultName_Format" xml:space="preserve">
+    <value>Layout {0:dd.MM HH:mm}</value>
+  </data>
+  <data name="Startup_ActivationFailed_Message" xml:space="preserve">
+    <value>DesktopOrganizer is already running but is not responding. Close it via Task Manager and try again.</value>
+  </data>
+  <data name="Startup_Failed_Format" xml:space="preserve">
+    <value>DesktopOrganizer failed to start: {0}</value>
+  </data>
+  <data name="Startup_OtherSession_Message" xml:space="preserve">
+    <value>DesktopOrganizer is already running in another Windows session. Switch to that session to use it.</value>
+  </data>
+  <data name="SystemIcon_ControlPanel" xml:space="preserve">
+    <value>Control Panel</value>
+  </data>
+  <data name="SystemIcon_Network" xml:space="preserve">
+    <value>Network</value>
+  </data>
+  <data name="SystemIcon_RecycleBin" xml:space="preserve">
+    <value>Recycle Bin</value>
+  </data>
+  <data name="SystemIcon_ThisPc" xml:space="preserve">
+    <value>This PC</value>
+  </data>
+  <data name="SystemIcon_UserFolder" xml:space="preserve">
+    <value>User</value>
+  </data>
+  <!-- ==== END SHARED ==== -->
+  <!-- ==== BEGIN WP-1 Tray (Tray_) ==== -->
+  <data name="Tray_Exit" xml:space="preserve">
+    <value>Exit</value>
+  </data>
+  <data name="Tray_LayoutLockedTooltip" xml:space="preserve">
+    <value>Layout is locked</value>
+  </data>
+  <data name="Tray_Settings" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="Tray_ShowDesktopIcons" xml:space="preserve">
+    <value>Show desktop icons</value>
+  </data>
+  <!-- ==== END WP-1 ==== -->
+  <!-- ==== BEGIN WP-2 Converters (Panel_ViewToggle_, Panel_SortToggle_, Panel_RollUp_, Settings_Panels_Subtitle_) ==== -->
+  <data name="Panel_RollUp_Collapse_Tooltip" xml:space="preserve">
+    <value>Collapse panel</value>
+  </data>
+  <data name="Panel_RollUp_Expand_Tooltip" xml:space="preserve">
+    <value>Expand panel</value>
+  </data>
+  <data name="Panel_SortToggle_Manual_Tooltip" xml:space="preserve">
+    <value>Manual order — click to sort by name</value>
+  </data>
+  <data name="Panel_SortToggle_SortedByName_Tooltip" xml:space="preserve">
+    <value>Sorted by name — click to arrange manually</value>
+  </data>
+  <data name="Panel_ViewToggle_SwitchToGrid_Tooltip" xml:space="preserve">
+    <value>Switch to grid view</value>
+  </data>
+  <data name="Panel_ViewToggle_SwitchToList_Tooltip" xml:space="preserve">
+    <value>Switch to list view</value>
+  </data>
+  <data name="Settings_Panels_Subtitle_Format" xml:space="preserve">
+    <value>{0} · {1}</value>
+  </data>
+  <data name="Settings_Panels_Subtitle_Portal" xml:space="preserve">
+    <value>Folder Portal</value>
+  </data>
+  <data name="Settings_Panels_Subtitle_View_Format" xml:space="preserve">
+    <value>{0} view</value>
+  </data>
+  <!-- ==== END WP-2 ==== -->
+  <!-- ==== BEGIN WP-3 Panel surfaces (Panel_, Hint_) ==== -->
+  <data name="Hint_Move_Message" xml:space="preserve">
+    <value>The file was moved into the panel — the original was removed from the desktop.</value>
+  </data>
+  <data name="Hint_Rename_Failed" xml:space="preserve">
+    <value>Failed to rename the file.</value>
+  </data>
+  <data name="Hint_Rename_InvalidName" xml:space="preserve">
+    <value>Invalid file name.</value>
+  </data>
+  <data name="Hint_Rename_NameTaken" xml:space="preserve">
+    <value>A file or folder with that name already exists.</value>
+  </data>
+  <data name="Hint_Rename_NotFound" xml:space="preserve">
+    <value>File not found — it may have been deleted or moved.</value>
+  </data>
+  <data name="Panel_Confirm_ApplyIconLayout_Format" xml:space="preserve">
+    <value>Apply the "{0}" icon layout to all panels on all pages ({1})? This cannot be undone automatically.</value>
+  </data>
+  <data name="Panel_Confirm_ApplyIconLayout_Title" xml:space="preserve">
+    <value>Apply icon layout to all panels</value>
+  </data>
+  <data name="Panel_Confirm_ApplySizingMode_Format" xml:space="preserve">
+    <value>Apply the "{0}" sizing mode to all panels on all pages ({1})? This cannot be undone automatically.</value>
+  </data>
+  <data name="Panel_Confirm_ApplySizingMode_Title" xml:space="preserve">
+    <value>Apply sizing mode to all panels</value>
+  </data>
+  <data name="Panel_FileMenu_Open" xml:space="preserve">
+    <value>Open</value>
+  </data>
+  <data name="Panel_FileMenu_OpenContainingFolder" xml:space="preserve">
+    <value>Open containing folder</value>
+  </data>
+  <data name="Panel_FileMenu_Properties" xml:space="preserve">
+    <value>Properties</value>
+  </data>
+  <data name="Panel_FileMenu_RemoveFromPanel" xml:space="preserve">
+    <value>Remove from panel</value>
+  </data>
+  <data name="Panel_FileMenu_RemoveFromPanel_Tooltip" xml:space="preserve">
+    <value>For files moved into the panel by dragging, the item is typically returned to its original location on disk. For others, it is simply removed from the panel.</value>
+  </data>
+  <data name="Panel_Header_More" xml:space="preserve">
+    <value>More</value>
+  </data>
+  <data name="Panel_Menu_AlignToGrid" xml:space="preserve">
+    <value>Align to workspace grid</value>
+  </data>
+  <data name="Panel_Menu_AlignToGrid_Tooltip" xml:space="preserve">
+    <value>Hold Alt while dragging to move freely</value>
+  </data>
+  <data name="Panel_Menu_ApplyToAllPanels" xml:space="preserve">
+    <value>Apply to all panels…</value>
+  </data>
+  <data name="Panel_Menu_ArrangeIconsHeader" xml:space="preserve">
+    <value>Arrange icons</value>
+  </data>
+  <data name="Panel_Menu_AutoSizeToContent_Tooltip" xml:space="preserve">
+    <value>Keeps the panel's height matched to its icons automatically (Grid view only — unavailable in List view).</value>
+  </data>
+  <data name="Panel_Menu_ContentHeader" xml:space="preserve">
+    <value>Content</value>
+  </data>
+  <data name="Panel_Menu_Customize" xml:space="preserve">
+    <value>Customize panel…</value>
+  </data>
+  <data name="Panel_Menu_FitToContent" xml:space="preserve">
+    <value>Fit panel to content</value>
+  </data>
+  <data name="Panel_Menu_FitToContent_Tooltip" xml:space="preserve">
+    <value>Resizes the panel's height to fit its current icons (Grid view only).</value>
+  </data>
+  <data name="Panel_Menu_PanelSizing" xml:space="preserve">
+    <value>Panel sizing</value>
+  </data>
+  <data name="Panel_Menu_PanelSizing_Tooltip" xml:space="preserve">
+    <value>Fit-to-content actions apply to Grid view only.</value>
+  </data>
+  <data name="Panel_Menu_RollUpDown" xml:space="preserve">
+    <value>Roll up / down</value>
+  </data>
+  <data name="Panel_Menu_Size" xml:space="preserve">
+    <value>Size</value>
+  </data>
+  <data name="Panel_Menu_SizeSmall_Tooltip" xml:space="preserve">
+    <value>Compact 20 x 20 units (152 x 152 DIP) — fits about 2 x 1 icons at 32 px.</value>
+  </data>
+  <data name="Panel_Menu_Size_Tooltip" xml:space="preserve">
+    <value>Resizes the panel to a named size. Turns off "Auto-size to content". Unavailable while the panel is rolled up. Hold Alt while dragging an edge to resize off-grid; the panel snaps back to the workspace grid when you release.</value>
+  </data>
+  <data name="Panel_SystemIcons_Title" xml:space="preserve">
+    <value>System icons panel</value>
+  </data>
+  <!-- ==== END WP-3 ==== -->
+  <!-- ==== BEGIN WP-4a Settings window (Settings_) ==== -->
+  <data name="Settings_About_Diagnostics_Message" xml:space="preserve">
+    <value>Diagnostics: run with --diag</value>
+  </data>
+  <data name="Settings_About_OpenFolder_Button" xml:space="preserve">
+    <value>Open folder</value>
+  </data>
+  <data name="Settings_About_StorageFolder_Header" xml:space="preserve">
+    <value>Storage folder</value>
+  </data>
+  <data name="Settings_About_Version_Format" xml:space="preserve">
+    <value>Version {0}</value>
+  </data>
+  <data name="Settings_Backup_CreatedAt_Format" xml:space="preserve">
+    <value>{0:g}</value>
+  </data>
+  <data name="Settings_Backup_DateColumn_Header" xml:space="preserve">
+    <value>Date</value>
+  </data>
+  <data name="Settings_Backup_Delete_Button" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="Settings_Backup_Delete_Format" xml:space="preserve">
+    <value>Delete {0}</value>
+  </data>
+  <data name="Settings_Backup_LayoutSnapshots_Description" xml:space="preserve">
+    <value>Captures every panel's position, size, and appearance so you can restore this exact layout later.</value>
+  </data>
+  <data name="Settings_Backup_LayoutSnapshots_Header" xml:space="preserve">
+    <value>Layout snapshots</value>
+  </data>
+  <data name="Settings_Backup_NameColumn_Header" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Settings_Backup_Restore_Button" xml:space="preserve">
+    <value>Restore</value>
+  </data>
+  <data name="Settings_Backup_Restore_Format" xml:space="preserve">
+    <value>Restore {0}</value>
+  </data>
+  <data name="Settings_Backup_SaveSnapshot_Button" xml:space="preserve">
+    <value>Save snapshot…</value>
+  </data>
+  <data name="Settings_General_Advanced_Header" xml:space="preserve">
+    <value>Advanced</value>
+  </data>
+  <data name="Settings_General_Autostart_Description" xml:space="preserve">
+    <value>Launches DesktopOrganizer automatically when you sign in.</value>
+  </data>
+  <data name="Settings_General_Autostart_Header" xml:space="preserve">
+    <value>Start with Windows</value>
+  </data>
+  <data name="Settings_General_NativeResize_Description" xml:space="preserve">
+    <value>Resizes panels via the OS native sizing loop instead of the built-in resize handles. Applies only to panels created after the app restarts.</value>
+  </data>
+  <data name="Settings_General_NativeResize_Header" xml:space="preserve">
+    <value>Native resize (experimental)</value>
+  </data>
+  <data name="Settings_General_ResetHints_Button" xml:space="preserve">
+    <value>Reset</value>
+  </data>
+  <data name="Settings_General_ResetHints_Description" xml:space="preserve">
+    <value>Shows the one-time Move-semantics hint again the next time a drag-drop moves a file into a panel.</value>
+  </data>
+  <data name="Settings_General_ResetHints_Header" xml:space="preserve">
+    <value>Reset one-time hints</value>
+  </data>
+  <data name="Settings_General_ResetHints_NoneMessage" xml:space="preserve">
+    <value>There are no hints to reset.</value>
+  </data>
+  <data name="Settings_Layout_GridStep_Label" xml:space="preserve">
+    <value>Grid step</value>
+  </data>
+  <data name="Settings_Layout_LockLayout_Description" xml:space="preserve">
+    <value>Prevents panels from being moved or resized until unlocked. Roll up/down, renaming, and file operations are unaffected. Also available from the tray icon.</value>
+  </data>
+  <data name="Settings_Layout_MagnetDistance_Description" xml:space="preserve">
+    <value>Distance at which a dragged panel snaps to the grid, in pixels. 0 disables the live magnet; snapping still applies on drop.</value>
+  </data>
+  <data name="Settings_Layout_MagnetDistance_Header" xml:space="preserve">
+    <value>Magnet distance while dragging</value>
+  </data>
+  <data name="Settings_Layout_MagnetDistance_RequiresSnap_Message" xml:space="preserve">
+    <value>Requires “Snap panel position to grid” to be on.</value>
+  </data>
+  <data name="Settings_Layout_NormalModeGestures_Description" xml:space="preserve">
+    <value>Which panel move/resize gestures stay available while Edit layout mode is off.</value>
+  </data>
+  <data name="Settings_Layout_NormalModeGestures_Header" xml:space="preserve">
+    <value>Move/resize outside Edit layout mode</value>
+  </data>
+  <data name="Settings_Layout_SnapResizeToIconGrid_Description" xml:space="preserve">
+    <value>Resizing a panel snaps its dimensions to the icon-grid cell size in real time.</value>
+  </data>
+  <data name="Settings_Layout_SnapResizeToIconGrid_Header" xml:space="preserve">
+    <value>Snap panel size to icon grid</value>
+  </data>
+  <data name="Settings_Layout_SnapToGrid_Description" xml:space="preserve">
+    <value>Quantizes a dragged panel's position to a fixed step. Turning this off does not affect icon spacing inside a panel.</value>
+  </data>
+  <data name="Settings_Layout_SnapToGrid_Header" xml:space="preserve">
+    <value>Snap panel position to grid</value>
+  </data>
+  <data name="Settings_Nav_About" xml:space="preserve">
+    <value>About</value>
+  </data>
+  <data name="Settings_Nav_Backup" xml:space="preserve">
+    <value>Backup</value>
+  </data>
+  <data name="Settings_Nav_General" xml:space="preserve">
+    <value>General</value>
+  </data>
+  <data name="Settings_Nav_LayoutSnapping" xml:space="preserve">
+    <value>Layout &amp; snapping</value>
+  </data>
+  <data name="Settings_Nav_NewPanelDefaults" xml:space="preserve">
+    <value>New panel defaults</value>
+  </data>
+  <data name="Settings_Nav_Pages" xml:space="preserve">
+    <value>Pages</value>
+  </data>
+  <data name="Settings_Nav_Panels" xml:space="preserve">
+    <value>Panels</value>
+  </data>
+  <data name="Settings_Nav_SystemIcons" xml:space="preserve">
+    <value>System icons</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_AccentColor_Label" xml:space="preserve">
+    <value>Accent color</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_Description" xml:space="preserve">
+    <value>Seeds the appearance of every panel you create from here on. Existing panels are never affected.</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_IconLayout_Description" xml:space="preserve">
+    <value>Whether new panels use a fixed gap between icons or stretch a full row to fill the panel's width.</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_Opacity_Label" xml:space="preserve">
+    <value>Opacity</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_PanelGeometry_Description" xml:space="preserve">
+    <value>Whether new panels snap to the workspace grid (Grid aligned) or resize/move freely (Free-form).</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_PanelGeometry_Header" xml:space="preserve">
+    <value>Panel geometry</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_SurfaceStyle_Description" xml:space="preserve">
+    <value>Glass reads best on dark wallpapers; for light wallpapers, Solid or Ambient stay more readable.</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_TakeFromSelected_Description" xml:space="preserve">
+    <value>Copies the panel selected in the Panels section into every default above. Select a panel there first.</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_TakeFromSelected_Header" xml:space="preserve">
+    <value>Take from selected panel</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_Take_Button" xml:space="preserve">
+    <value>Take</value>
+  </data>
+  <data name="Settings_NewPanelDefaults_TextColor_Label" xml:space="preserve">
+    <value>Text color</value>
+  </data>
+  <data name="Settings_Pages_AddPage_Button" xml:space="preserve">
+    <value>Add page</value>
+  </data>
+  <data name="Settings_Pages_CurrentBadge" xml:space="preserve">
+    <value>(current)</value>
+  </data>
+  <data name="Settings_Pages_MakeCurrent_Button" xml:space="preserve">
+    <value>Make current</value>
+  </data>
+  <data name="Settings_Pages_MakeCurrent_Format" xml:space="preserve">
+    <value>Make {0} current</value>
+  </data>
+  <data name="Settings_Pages_Remove_Format" xml:space="preserve">
+    <value>Remove {0}</value>
+  </data>
+  <data name="Settings_Panels_AddPanel_Button" xml:space="preserve">
+    <value>Add panel</value>
+  </data>
+  <data name="Settings_Panels_AlignAll_Button" xml:space="preserve">
+    <value>Align…</value>
+  </data>
+  <data name="Settings_Panels_AlignAll_Description" xml:space="preserve">
+    <value>Moves every panel on the current page onto the workspace grid and resizes it to whole grid units. There's no single-step undo.</value>
+  </data>
+  <data name="Settings_Panels_AlignAll_Header" xml:space="preserve">
+    <value>Align all panels to grid</value>
+  </data>
+  <data name="Settings_Panels_Customize_Button" xml:space="preserve">
+    <value>Customize…</value>
+  </data>
+  <data name="Settings_Panels_EmptyState_Message" xml:space="preserve">
+    <value>No panels on this page yet. Click Add panel, or drag on the desktop with the right mouse button to draw one.</value>
+  </data>
+  <data name="Settings_Panels_MoveToPage_Button" xml:space="preserve">
+    <value>Move to page ▾</value>
+  </data>
+  <data name="Settings_Panels_OnThisPage_Header" xml:space="preserve">
+    <value>Panels on this page</value>
+  </data>
+  <data name="Settings_Panels_PageSelector_Description" xml:space="preserve">
+    <value>The panels below belong to this page. Ctrl+PgUp/PgDn also switches pages.</value>
+  </data>
+  <data name="Settings_Panels_Page_Label" xml:space="preserve">
+    <value>Page</value>
+  </data>
+  <data name="Settings_SystemIcons_AllVirtualDesktops_Description" xml:space="preserve">
+    <value>Keep the panel visible when you switch Windows virtual desktops (Task View). When off, the panel stays on your first virtual desktop.</value>
+  </data>
+  <data name="Settings_SystemIcons_AllVirtualDesktops_Header" xml:space="preserve">
+    <value>Show on all virtual desktops</value>
+  </data>
+  <data name="Settings_SystemIcons_EnablePanelFirst_Message" xml:space="preserve">
+    <value>Turn on “Show system icons panel” to change this.</value>
+  </data>
+  <data name="Settings_SystemIcons_FeatureIneffective_Message" xml:space="preserve">
+    <value>This feature isn't working on this system and has been disabled.</value>
+  </data>
+  <data name="Settings_SystemIcons_ShowPanel_Description" xml:space="preserve">
+    <value>A dedicated desktop panel for This PC, Recycle Bin, and other system shell icons.</value>
+  </data>
+  <data name="Settings_SystemIcons_ShowPanel_Header" xml:space="preserve">
+    <value>Show system icons panel</value>
+  </data>
+  <data name="Settings_SystemIcons_VisibleIcons_Header" xml:space="preserve">
+    <value>Visible icons</value>
+  </data>
+  <data name="Settings_Window_Title" xml:space="preserve">
+    <value>DesktopOrganizer — Settings</value>
+  </data>
+  <!-- ==== END WP-4a ==== -->
+  <!-- ==== BEGIN WP-4b Customize & dialogs (Customize_, Dialog_) ==== -->
+  <data name="Customize_AccentColor_Header" xml:space="preserve">
+    <value>Accent color (hex)</value>
+  </data>
+  <data name="Customize_Appearance_Header" xml:space="preserve">
+    <value>Appearance</value>
+  </data>
+  <data name="Customize_AutoSizeToContentGridOnly_Description" xml:space="preserve">
+    <value>Grid view only — unavailable in List view.</value>
+  </data>
+  <data name="Customize_AutoSizeToContent_Description" xml:space="preserve">
+    <value>Keeps the panel's height matched to its icons automatically.</value>
+  </data>
+  <data name="Customize_AutoSizeToContent_Header" xml:space="preserve">
+    <value>Auto-size to content</value>
+  </data>
+  <data name="Customize_Browse_Button" xml:space="preserve">
+    <value>Browse…</value>
+  </data>
+  <data name="Customize_BrowseFolderSource_A11y" xml:space="preserve">
+    <value>Browse for Folder Portal source</value>
+  </data>
+  <data name="Customize_BrowseFolder_Title" xml:space="preserve">
+    <value>Select source folder for Folder Portal</value>
+  </data>
+  <data name="Customize_ClearFolder_A11y" xml:space="preserve">
+    <value>Clear Folder Portal</value>
+  </data>
+  <data name="Customize_ClearFolder_Button" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+  <data name="Customize_ContentFilter_Header" xml:space="preserve">
+    <value>Content filter</value>
+  </data>
+  <data name="Customize_Content_Header" xml:space="preserve">
+    <value>Content</value>
+  </data>
+  <data name="Customize_FolderPortal_Description" xml:space="preserve">
+    <value>Mirrors a folder's contents instead of a manually curated item list. Folder Portal panels always sort by name and ignore manual drag-drop.</value>
+  </data>
+  <data name="Customize_FolderPortal_Header" xml:space="preserve">
+    <value>Folder Portal</value>
+  </data>
+  <data name="Customize_IconLayout_Description" xml:space="preserve">
+    <value>Fixed spacing keeps icons evenly gapped; Adaptive stretch spreads them to fill the panel (legacy).</value>
+  </data>
+  <data name="Customize_Layout_Header" xml:space="preserve">
+    <value>Layout</value>
+  </data>
+  <data name="Customize_SortMode_FolderPortal_Description" xml:space="preserve">
+    <value>Folder Portal panels always sort by name.</value>
+  </data>
+  <data name="Customize_SortMode_Header" xml:space="preserve">
+    <value>Sort order</value>
+  </data>
+  <data name="Customize_SortMode_Manual_Description" xml:space="preserve">
+    <value>Manual keeps the order you arrange; By name sorts alphabetically.</value>
+  </data>
+  <data name="Customize_SurfaceOpacity_Header" xml:space="preserve">
+    <value>Surface opacity</value>
+  </data>
+  <data name="Customize_SurfaceStyle_GlassHint_Description" xml:space="preserve">
+    <value>Glass reads best on dark wallpapers; for light wallpapers, Solid or Ambient stay more readable.</value>
+  </data>
+  <data name="Customize_TextColor_Header" xml:space="preserve">
+    <value>Text color (hex)</value>
+  </data>
+  <data name="Customize_Title_Header" xml:space="preserve">
+    <value>Title</value>
+  </data>
+  <data name="Customize_View_Header" xml:space="preserve">
+    <value>View</value>
+  </data>
+  <data name="Customize_WindowTitle_Format" xml:space="preserve">
+    <value>Customize “{0}”</value>
+  </data>
+  <!-- ==== END WP-4b ==== -->
+  <!-- ==== BEGIN WP-5 ViewModels (Settings_Confirm_, Snapshot_, Page_Confirm_) ==== -->
+  <data name="Page_Confirm_Remove_ManagedFiles_Message" xml:space="preserve">
+    <value>The page will be permanently removed, along with every panel on it. Files moved into those panels will be deleted from disk without the ability to restore them via the Recycle Bin. Continue?</value>
+  </data>
+  <data name="Page_Confirm_Remove_Message" xml:space="preserve">
+    <value>The page and every panel on it will be removed. Continue?</value>
+  </data>
+  <data name="Page_Confirm_Remove_Title" xml:space="preserve">
+    <value>Remove Page</value>
+  </data>
+  <data name="Settings_Confirm_AlignAll_Message_Format" xml:space="preserve">
+    <value>Every panel on the current page ({0}) will be moved onto the workspace grid and resized to whole grid units. There is no single-step undo for this. Continue?</value>
+  </data>
+  <data name="Settings_Confirm_AlignAll_Title" xml:space="preserve">
+    <value>Align all panels to grid</value>
+  </data>
+  <data name="Settings_Confirm_RemovePanel_ManagedFiles_Message" xml:space="preserve">
+    <value>The panel will be permanently removed. Files moved into it will be deleted from disk without the ability to restore them via the Recycle Bin. Continue?</value>
+  </data>
+  <data name="Settings_Confirm_RemovePanel_Message" xml:space="preserve">
+    <value>The panel will be removed. Continue?</value>
+  </data>
+  <data name="Settings_Confirm_RemovePanel_Title" xml:space="preserve">
+    <value>Remove Panel</value>
+  </data>
+  <data name="Snapshot_Capture_Label" xml:space="preserve">
+    <value>Snapshot name:</value>
+  </data>
+  <data name="Snapshot_Capture_Title" xml:space="preserve">
+    <value>Save snapshot</value>
+  </data>
+  <data name="Snapshot_Delete_Message_Format" xml:space="preserve">
+    <value>Delete snapshot “{0}”? This cannot be undone.</value>
+  </data>
+  <data name="Snapshot_Delete_Title" xml:space="preserve">
+    <value>Delete snapshot</value>
+  </data>
+  <data name="Snapshot_Delete_UnnamedFallback" xml:space="preserve">
+    <value>this snapshot</value>
+  </data>
+  <data name="Snapshot_Restore_Message" xml:space="preserve">
+    <value>The current layout will be replaced by this snapshot. Continue?</value>
+  </data>
+  <data name="Snapshot_Restore_Title" xml:space="preserve">
+    <value>Restore Layout</value>
+  </data>
+  <!-- ==== END WP-5 ==== -->
+</root>

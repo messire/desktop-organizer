@@ -130,6 +130,10 @@ public class PanelDefaultsTests
 
         var model = PanelDefaults.CreateNew(settings.Object, "work");
 
+        // "New Panel" (Panel_NewTitle) — asserted in English because LocalizationSource.Current lazily
+        // defaults to English (docs/PLANS/localization.md R-5) unless some other test in this process
+        // already called LocalizationSource.Initialize with a different instance (App is never
+        // constructed in these WPF-free unit tests, so that never happens here).
         Assert.Equal("New Panel", model.Title);
         Assert.Equal("work", model.PageId);
         Assert.Equal("#445566", model.AccentColor);

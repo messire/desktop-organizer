@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using DesktopOrganizer.UI.Interaction;
+using DesktopOrganizer.UI.Localization;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 
@@ -178,14 +179,18 @@ public partial class ChildWindow
         var panels = _windowManager.GetAllChildWindows().ToList();
         if (panels.Count == 0) return;
 
-        var policyName = targetPolicy == IconLayoutPolicy.FixedGap ? "Fixed spacing" : "Adaptive stretch (legacy)";
+        var loc = LocalizationSource.Current;
+        var policyName = loc.GetString(targetPolicy == IconLayoutPolicy.FixedGap
+            ? "Enum_IconLayoutPolicy_FixedGap"
+            : "Enum_IconLayoutPolicy_LegacyStretch");
+        var panelsText = loc.FormatPlural("Plural_Panels", panels.Count);
 
         // Scope decision (P06 fix-cycle, orchestrator): both broadcasts apply to every panel on every
         // page (see docs/PLANS/workspace-grid-06-fit-content.md §4) — the dialog text says so explicitly,
         // distinct from P03's "Align all", which is current-page-only.
         if (!_confirmation.Confirm(
-                $"Apply the \"{policyName}\" icon layout to all panels on all pages ({panels.Count} panel(s))? This cannot be undone automatically.",
-                "Apply icon layout to all panels"))
+                loc.Format("Panel_Confirm_ApplyIconLayout_Format", policyName, panelsText),
+                loc.GetString("Panel_Confirm_ApplyIconLayout_Title")))
             return;
 
         foreach (var panel in panels)
@@ -209,13 +214,17 @@ public partial class ChildWindow
         var panels = _windowManager.GetAllChildWindows().ToList();
         if (panels.Count == 0) return;
 
-        var modeName = targetMode == PanelSizingMode.AutoContent ? "Auto-size to content" : "Manual";
+        var loc = LocalizationSource.Current;
+        var modeName = loc.GetString(targetMode == PanelSizingMode.AutoContent
+            ? "Enum_PanelSizingMode_AutoContent"
+            : "Enum_PanelSizingMode_Manual");
+        var panelsText = loc.FormatPlural("Plural_Panels", panels.Count);
 
         // Scope decision (P06 fix-cycle, orchestrator): see ApplyIconLayoutPolicyToAllMenu_Click's
         // remarks — same "all pages" scope and unified "cannot be undone" wording (P06 fix-cycle UX-P1).
         if (!_confirmation.Confirm(
-                $"Apply the \"{modeName}\" sizing mode to all panels on all pages ({panels.Count} panel(s))? This cannot be undone automatically.",
-                "Apply sizing mode to all panels"))
+                loc.Format("Panel_Confirm_ApplySizingMode_Format", modeName, panelsText),
+                loc.GetString("Panel_Confirm_ApplySizingMode_Title")))
             return;
 
         foreach (var panel in panels)

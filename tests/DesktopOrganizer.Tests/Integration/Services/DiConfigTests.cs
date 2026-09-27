@@ -50,6 +50,21 @@ public class DiConfigTests
     }
 
     /// <summary>
+    /// Verifies that <see cref="ILocalizationService"/> (docs/PLANS/localization.md §2.2/§4.0)
+    /// resolves without throwing and is registered as a singleton — the same instance backs both
+    /// <c>App.StartApp</c>'s <c>ApplyLanguage</c> call and every other consumer (tray, ViewModels).
+    /// </summary>
+    [Fact]
+    public void RegisterServices_ILocalizationService_ResolvesAsSingleton()
+    {
+        var first = _serviceProvider.GetRequiredService<ILocalizationService>();
+        var second = _serviceProvider.GetRequiredService<ILocalizationService>();
+
+        Assert.NotNull(first);
+        Assert.Same(first, second);
+    }
+
+    /// <summary>
     /// Ensures that singleton services are reused across resolutions.
     /// </summary>
     [Fact]
@@ -436,6 +451,52 @@ public class DiConfigTests
 
             Assert.Same(firstVm, secondVm);
             Assert.Same(firstSnapshots, secondSnapshots);
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+            SafeDeleteDirectory(storageRoot);
+        }
+    }
+
+    // ── Localization (docs/PLANS/localization.md §4.8, WP-6 item 5) ──────────
+    //
+    // ILocalizationService itself already resolves as a singleton per
+    // RegisterServices_ILocalizationService_ResolvesAsSingleton above (registered once in
+    // DesktopOrganizer.Services' DiConfig, which UiDiConfig.ConfigureServices builds on top of). The
+    // test below resolves every UI-layer consumer that takes ILocalizationService through its own
+    // constructor — the tray, the page/system-icons managers, and the settings window's VM — from that
+    // SAME provider, confirming none of them accidentally shadow the registration with a second one.
+
+    /// <summary>
+    /// Verifies that <see cref="ITrayIconManager"/>, <see cref="IPageManager"/>,
+    /// <see cref="ISystemIconsPanelManager"/>, and <see cref="MainWindowViewModel"/> — every UI-layer
+    /// consumer of <see cref="ILocalizationService"/> — resolve without throwing through the full UI
+    /// service collection, and that <see cref="ILocalizationService"/> itself is still the one singleton
+    /// instance backing all of them ("один экземпляр для трея и UI").
+    /// </summary>
+    [Fact]
+    public void UiConfigureServices_LocalizationConsumers_ResolveCorrectly()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        var storageRoot = NewTempStorageRoot();
+        try
+        {
+            var services = new ServiceCollection();
+            UiDiConfig.ConfigureServices(services, tempDir, storageRoot);
+            using var serviceProvider = services.BuildServiceProvider();
+
+            var localization = serviceProvider.GetRequiredService<ILocalizationService>();
+            var trayIconManager = serviceProvider.GetRequiredService<ITrayIconManager>();
+            var pageManager = serviceProvider.GetRequiredService<IPageManager>();
+            var systemIconsPanelManager = serviceProvider.GetRequiredService<ISystemIconsPanelManager>();
+            var mainWindowViewModel = serviceProvider.GetRequiredService<MainWindowViewModel>();
+
+            Assert.NotNull(trayIconManager);
+            Assert.NotNull(pageManager);
+            Assert.NotNull(systemIconsPanelManager);
+            Assert.NotNull(mainWindowViewModel);
+            Assert.Same(localization, serviceProvider.GetRequiredService<ILocalizationService>());
         }
         finally
         {

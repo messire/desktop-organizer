@@ -1,6 +1,7 @@
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Diagnostics;
 using DesktopOrganizer.UI.Lifecycle;
+using DesktopOrganizer.UI.Localization;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State;
@@ -43,6 +44,7 @@ public partial class App : Application
     private IDiagnosticsLog? _diagnosticsLog;
     private IApplicationStateService? _applicationState;
     private IPageManager? _pageManager;
+    private ILocalizationService? _localization;
 
     private ITrayIconManager TrayIconManager
         => (_trayIconManager ??= _serviceProvider.GetService<ITrayIconManager>())!;
@@ -76,6 +78,9 @@ public partial class App : Application
 
     private IDiagnosticsLog DiagnosticsLog
         => (_diagnosticsLog ??= _serviceProvider.GetService<IDiagnosticsLog>())!;
+
+    private ILocalizationService Localization
+        => (_localization ??= _serviceProvider.GetService<ILocalizationService>())!;
 
     private static string GetAppVersion()
         => System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
@@ -264,9 +269,31 @@ public partial class App : Application
 
     private void StartApp(object? sender, StartupEventArgs e)
     {
-        // Must run before anything else in StartApp: InitTrayIcon()/LoadPanels() below are the first
-        // things that can construct a Window (ChildWindow/MainWindow/SystemIconsPanelWindow), and every
-        // one of those XAML files resolves StaticResource keys this builds.
+        // Localization bootstrap (docs/PLANS/localization.md §2.5 steps a-c) — must run before
+        // EVERYTHING else in StartApp, including LoadResourceDictionaries() below: it is the first
+        // thing that can construct a Window (ChildWindow/MainWindow/SystemIconsPanelWindow all resolve
+        // {loc:Loc}/{loc:LocBinding} bindings against LocalizationSource.Current), and
+        // FrameworkElement.LanguageProperty's default metadata override (CultureSync.Attach) is only
+        // honoured if it runs before the first FrameworkElement is ever constructed.
+        //
+        // a. Resolve IAppSettings.Language (the persisted preference — a single additive user.config
+        //    scalar, D-1) against the ILocalizationService singleton DiConfig already registered with
+        //    SystemCulture.OriginalUiCulture (captured by Program.Main, before any override).
+        Localization.ApplyLanguage(AppSettings.Language);
+
+        // b. Publish this exact instance as the one sanctioned static access point (L-5) for every
+        //    markup extension/converter/static helper XAML and CLR code construct outside of DI. Called
+        //    exactly once — see LocalizationSource.Initialize's own remarks for why calling it twice
+        //    with a different instance would be a bug, not a no-op.
+        LocalizationSource.Initialize(Localization);
+
+        // c. Override FrameworkElement.LanguageProperty's default metadata and start keeping every
+        //    open Window's Language / the UI thread's own culture in sync with future language switches.
+        CultureSync.Attach(Localization, this);
+
+        // Must run before anything else that can construct a Window: InitTrayIcon()/LoadPanels() below
+        // are the first things that can construct one (ChildWindow/MainWindow/SystemIconsPanelWindow),
+        // and every one of those XAML files resolves StaticResource keys this builds.
         LoadResourceDictionaries();
 
         // D-12 (docs/PLANS/phase-6-edit-layout-ux.md §1): published as an application resource, not a

@@ -82,6 +82,7 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     private readonly IDesktopIntegrationService _desktopIntegration;
     private readonly IMonitorService _monitorService;
     private readonly IVirtualDesktopService _virtualDesktopService;
+    private readonly ILocalizationService _localization;
     private readonly Func<SystemIconsPanelWindow> _windowFactory;
 
     private SystemIconsPanelWindow? _window;
@@ -99,6 +100,10 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     /// </param>
     /// <param name="monitorService">Provides monitor topology; changes trigger re-placement.</param>
     /// <param name="virtualDesktopService">Resolves/enforces which virtual desktop the panel appears on.</param>
+    /// <param name="localization">
+    /// Resolves <see cref="SystemIconsPanelModel.Items"/>'s display labels (docs/PLANS/localization.md
+    /// §2.9) and drives their hot re-translation on every language switch.
+    /// </param>
     /// <param name="windowFactory">
     /// Creates a NEW <see cref="SystemIconsPanelWindow"/> on every (re)open — must not cache; the
     /// previous instance is closed first.
@@ -108,15 +113,18 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
         IDesktopIntegrationService desktopIntegration,
         IMonitorService monitorService,
         IVirtualDesktopService virtualDesktopService,
+        ILocalizationService localization,
         Func<SystemIconsPanelWindow> windowFactory)
     {
         _applicationStateService = applicationStateService;
         _desktopIntegration = desktopIntegration;
         _monitorService = monitorService;
         _virtualDesktopService = virtualDesktopService;
+        _localization = localization;
         _windowFactory = windowFactory;
 
         _monitorService.MonitorsChanged += OnMonitorsChanged;
+        _localization.CultureChanged += OnCultureChanged;
     }
 
     /// <inheritdoc />
@@ -158,9 +166,13 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     public void Load()
     {
         var dto = _applicationStateService.SystemIconsPanel;
-        if (dto is null) return;
+        if (dto is not null)
+            SystemIconsPanelStateMapper.ApplyTo(dto, Model);
 
-        SystemIconsPanelStateMapper.ApplyTo(dto, Model);
+        // docs/PLANS/localization.md §2.9: Label is never persisted (SystemIconsPanelStateMapper/
+        // SystemIconsPanelItemStateDto carry no such field) — it is always derived from the current
+        // culture, for every item, whether or not a document was ever persisted.
+        Model.RefreshLabels(ResolveIconLabel);
     }
 
     /// <inheritdoc />
@@ -233,6 +245,7 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
     public void Dispose()
     {
         _monitorService.MonitorsChanged -= OnMonitorsChanged;
+        _localization.CultureChanged -= OnCultureChanged;
         ClosePanel();
         DisposeVirtualDesktopTimer();
         DisposeZOrderTimer();
@@ -688,6 +701,32 @@ internal sealed class SystemIconsPanelManager : ISystemIconsPanelManager, IDispo
         _ineffectiveMoveCount = 0;
         Model.VirtualDesktopFeatureIneffective = false;
     }
+
+    // Labels (docs/PLANS/localization.md §2.9) — never persisted, always derived from the current culture.
+
+    /// <summary>
+    /// Resolves <paramref name="kind"/>'s display label for <see cref="ILocalizationService.CurrentCulture"/>
+    /// — the <c>SystemIcon_{kind}</c> RESX key seeded by WP-0S, falling back to
+    /// <see cref="SystemIconDescriptor.DefaultCaption"/> (an English literal — Core has no
+    /// localization dependency) for a kind the RESX files have not caught up with yet.
+    /// </summary>
+    /// <param name="kind">The well-known shell item to resolve a label for.</param>
+    private string ResolveIconLabel(SystemIconKind kind)
+    {
+        var key = $"SystemIcon_{kind}";
+        var localized = _localization.GetString(key);
+
+        return string.Equals(localized, key, StringComparison.Ordinal)
+            ? SystemIconDescriptor.Table[kind].DefaultCaption
+            : localized;
+    }
+
+    /// <summary>
+    /// <see cref="ILocalizationService.CultureChanged"/> subscriber — re-resolves every item's label for
+    /// the new culture. <see cref="SystemIconsPanelModel.Items"/>' <c>Kind</c>/<c>IsVisible</c>/<c>Order</c>
+    /// are all untouched by a language switch; only <see cref="SystemIconItemModel.Label"/> changes.
+    /// </summary>
+    private void OnCultureChanged(object? sender, CultureChangedEventArgs e) => Model.RefreshLabels(ResolveIconLabel);
 
     // Window placement / monitor changes
     private void PositionWindow(Window window)

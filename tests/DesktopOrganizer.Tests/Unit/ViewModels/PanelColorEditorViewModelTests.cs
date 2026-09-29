@@ -22,7 +22,7 @@ public class PanelColorEditorViewModelTests
     private readonly List<(string Accent, string Text)> _setBothCalls = [];
     private int _resetOverrideCalls;
     private string _accent = PanelColorPresets.Blue.AccentHex;
-    private string _text = PanelColorPresets.Blue.DarkModeTextHex; // #FFFFFF -> Mode.Dark
+    private string _text = PanelColorPresets.Blue.DarkModeTextHex; // #E1E7EF (pale Blue tint) -> Mode.Dark
 
     /// <summary>Verifies that <see cref="PanelColorEditorViewModel.Presets"/> exposes exactly the twelve presets, in <see cref="PanelColorPresets.All"/>'s order.</summary>
     [Fact]
@@ -95,7 +95,7 @@ public class PanelColorEditorViewModelTests
     [Fact]
     public void ApplyPreset_InDarkMode_WritesAccentAndDarkModeText()
     {
-        var sut = BuildSut(); // starts Dark (white text)
+        var sut = BuildSut(); // starts Dark (pale Blue tint text)
         var violet = sut.Presets.Single(p => p.Preset.Id == "Violet");
 
         violet.ApplyCommand.Execute(null);
@@ -364,6 +364,107 @@ public class PanelColorEditorViewModelTests
         Assert.Empty(_setBothCalls);
     }
 
+    /// <summary>
+    /// Backlog 1.x item 4 (§4.2b): re-applying the SAME accent whose current text has DRIFTED from that
+    /// preset's own pair (a stale pre-#4 pairing, or a manual Advanced-card edit) must re-apply the
+    /// preset's own text — the extended no-op guard only skips the write when BOTH the accent AND the
+    /// expected text already match, not the accent alone.
+    /// </summary>
+    [Fact]
+    public void ApplyAccent_SameAccentButDriftedText_ReappliesPresetPair()
+    {
+        _accent = PanelColorPresets.Violet.AccentHex;
+        _text = "#DDDDDD"; // legacy default text, not Violet's own DarkModeTextHex
+        var sut = BuildSut();
+
+        sut.ApplyAccent(PanelColorPresets.Violet.AccentHex);
+
+        Assert.Equal([(PanelColorPresets.Violet.AccentHex, PanelColorPresets.Violet.DarkModeTextHex)], _setBothCalls);
+    }
+
+    /// <summary>Backlog 1.x item 4 (§4.2b): re-applying the SAME accent whose text ALREADY matches that preset's own pair writes nothing.</summary>
+    [Fact]
+    public void ApplyAccent_SameAccentAndMatchingText_WritesNothing()
+    {
+        _accent = PanelColorPresets.Violet.AccentHex;
+        _text = PanelColorPresets.Violet.DarkModeTextHex;
+        var sut = BuildSut();
+
+        sut.ApplyAccent(PanelColorPresets.Violet.AccentHex);
+
+        Assert.Empty(_setBothCalls);
+    }
+
+    /// <summary>Backlog 1.x item 4 (§4.2c): every preset option's <see cref="ColorPresetOption.PreviewTextHex"/> starts out as that preset's own text for the editor's initial mode.</summary>
+    [Fact]
+    public void PreviewTextHex_InitiallyMatchesPresetsOwnTextForCurrentMode()
+    {
+        var sut = BuildSut(); // starts Dark
+        var violet = sut.Presets.Single(p => p.Preset.Id == "Violet");
+
+        Assert.Equal(PanelColorPresets.Violet.DarkModeTextHex, violet.PreviewTextHex);
+    }
+
+    /// <summary>
+    /// Backlog 1.x item 4 (§4.2c): switching Mode updates EVERY preset option's
+    /// <see cref="ColorPresetOption.PreviewTextHex"/> to that preset's text for the NEW mode. Uses
+    /// <see cref="BuildWriteThroughSut"/>: <see cref="PanelColorEditorViewModel.Mode"/> is DERIVED from the
+    /// owner's stored text, so the new mode is only observable once the owner's <c>setText</c> actually
+    /// stores the written value — exactly what a real owner does before the VM's own <c>Refresh()</c>.
+    /// </summary>
+    [Fact]
+    public void SetMode_UpdatesEveryPresetOptionsPreviewText()
+    {
+        var sut = BuildWriteThroughSut(); // starts Dark
+        Assert.All(sut.Presets, p => Assert.Equal(p.Preset.DarkModeTextHex, p.PreviewTextHex));
+
+        sut.SetModeCommand.Execute(PanelThemeMode.Light);
+
+        Assert.Equal(PanelThemeMode.Light, sut.Mode);
+        Assert.All(sut.Presets, p => Assert.Equal(p.Preset.LightModeTextHex, p.PreviewTextHex));
+    }
+
+    /// <summary>Backlog 1.x item 4 (§4.2 "Выделение свотча"): the selected preset's option is flagged <see cref="ColorPresetOption.IsModified"/> when the panel's actual text has drifted from that preset's own pair.</summary>
+    [Fact]
+    public void SelectedPreset_WithDriftedText_IsFlaggedModified()
+    {
+        _accent = PanelColorPresets.Violet.AccentHex;
+        _text = "#DDDDDD"; // legacy default text, not Violet's own DarkModeTextHex
+        var sut = BuildSut();
+
+        var violet = sut.Presets.Single(p => p.Preset.Id == "Violet");
+
+        Assert.True(violet.IsSelected);
+        Assert.True(violet.IsModified);
+    }
+
+    /// <summary>The selected preset's option is NOT flagged <see cref="ColorPresetOption.IsModified"/> when the panel's actual text already matches that preset's own pair.</summary>
+    [Fact]
+    public void SelectedPreset_WithMatchingText_IsNotFlaggedModified()
+    {
+        _accent = PanelColorPresets.Violet.AccentHex;
+        _text = PanelColorPresets.Violet.DarkModeTextHex;
+        var sut = BuildSut();
+
+        var violet = sut.Presets.Single(p => p.Preset.Id == "Violet");
+
+        Assert.False(violet.IsModified);
+    }
+
+    /// <summary>A non-selected preset option is never flagged <see cref="ColorPresetOption.IsModified"/>, regardless of the panel's current text.</summary>
+    [Fact]
+    public void NonSelectedPreset_IsNeverFlaggedModified()
+    {
+        _accent = PanelColorPresets.Violet.AccentHex;
+        _text = "#DDDDDD";
+        var sut = BuildSut();
+
+        var red = sut.Presets.Single(p => p.Preset.Id == "Red");
+
+        Assert.False(red.IsSelected);
+        Assert.False(red.IsModified);
+    }
+
     /// <summary>M7: <see cref="PanelColorEditorViewModel.ResetDescriptionKey"/> defaults to the generic "Reset to defaults" key when the host does not supply an override.</summary>
     [Fact]
     public void ResetDescriptionKey_DefaultsToGenericKey()
@@ -393,7 +494,7 @@ public class PanelColorEditorViewModelTests
     [Fact]
     public void SetMode_SameMode_WritesNothing()
     {
-        var sut = BuildSut(); // starts Dark (white text)
+        var sut = BuildSut(); // starts Dark (pale Blue tint text)
 
         sut.SetModeCommand.Execute(PanelThemeMode.Dark);
 
@@ -410,4 +511,30 @@ public class PanelColorEditorViewModelTests
         v => _setTextCalls.Add(v),
         (accent, text) => _setBothCalls.Add((accent, text)),
         withResetOverride ? () => _resetOverrideCalls++ : null);
+
+    /// <summary>
+    /// Like <see cref="BuildSut"/>, but the owner fakes WRITE THROUGH into <see cref="_accent"/>/<see cref="_text"/>
+    /// (while still recording every call), mirroring a real owner — needed wherever a test observes state
+    /// the VM re-derives from the owner's stored colours after its own write (e.g. <see cref="PanelColorEditorViewModel.Mode"/>).
+    /// </summary>
+    private PanelColorEditorViewModel BuildWriteThroughSut() => new(
+        _colorPickerMock.Object,
+        () => _accent,
+        v =>
+        {
+            _setAccentCalls.Add(v);
+            _accent = v;
+        },
+        () => _text,
+        v =>
+        {
+            _setTextCalls.Add(v);
+            _text = v;
+        },
+        (accent, text) =>
+        {
+            _setBothCalls.Add((accent, text));
+            _accent = accent;
+            _text = text;
+        });
 }

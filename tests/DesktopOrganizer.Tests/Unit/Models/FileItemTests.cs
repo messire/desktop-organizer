@@ -423,4 +423,200 @@ public class FileItemTests
         Assert.False(changed);
         Assert.Equal(0, raised);
     }
+
+    // ---------------------------------------------------------------------------
+    // CreatePending/ApplyProbe/RelocateInPlace/IsProbePending (ADR-046 D-5): an item can appear on the
+    // UI thread without ever touching the file system — the real Exists/IsDirectory observation is
+    // applied later, off-thread, via ApplyProbe.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="FileItem.CreatePending"/> never touches the file system: a path on a drive that
+    /// cannot possibly exist neither throws nor blocks, and the item is optimistically
+    /// <see cref="FileItem.Exists"/> <see langword="true"/> with <see cref="FileItem.IsProbePending"/>
+    /// <see langword="true"/> until <see cref="FileItem.ApplyProbe"/> runs.
+    /// </summary>
+    [Fact]
+    public void CreatePending_NonExistentDrive_DoesNotThrow_OptimisticallyExists_ProbePending()
+    {
+        var item = FileItem.CreatePending(@"Q:\nope\ghost.txt", null);
+
+        Assert.True(item.Exists);
+        Assert.True(item.IsProbePending);
+        Assert.Equal(@"Q:\nope\ghost.txt", item.Path);
+    }
+
+    /// <summary>
+    /// A regular (non-<see cref="FileItem.CreatePending"/>) constructor call leaves
+    /// <see cref="FileItem.IsProbePending"/> <see langword="false"/> — the file-system-probing
+    /// constructor already performed a real observation.
+    /// </summary>
+    [Fact]
+    public void RegularConstructor_IsProbePendingIsFalse()
+    {
+        var item = new FileItem(@"C:\fake\A.txt", null);
+
+        Assert.False(item.IsProbePending);
+    }
+
+    /// <summary>
+    /// <see cref="FileItem.CreatePending"/>'s directory-ness heuristic: an extensionless path is guessed
+    /// to be a directory, matching <c>IconProvider</c>'s own missing-path heuristic.
+    /// </summary>
+    [Fact]
+    public void CreatePending_NoExtension_GuessesIsDirectoryTrue()
+    {
+        var item = FileItem.CreatePending(@"Q:\nope\SomeFolder", null);
+
+        Assert.True(item.IsDirectory);
+    }
+
+    /// <summary>
+    /// <see cref="FileItem.CreatePending"/>'s directory-ness heuristic: a path with an extension is
+    /// guessed to be a file.
+    /// </summary>
+    [Fact]
+    public void CreatePending_WithExtension_GuessesIsDirectoryFalse()
+    {
+        var item = FileItem.CreatePending(@"Q:\nope\ghost.txt", null);
+
+        Assert.False(item.IsDirectory);
+    }
+
+    /// <summary>
+    /// An explicit <c>isDirectoryHint</c> always wins over the extension heuristic — a portal that
+    /// already knows an entry's directory-ness (e.g. from enumerating with attributes) shouldn't be
+    /// second-guessed by <see cref="FileItem.CreatePending"/>.
+    /// </summary>
+    [Fact]
+    public void CreatePending_IsDirectoryHint_TakesPrecedenceOverHeuristic()
+    {
+        // Would normally guess "file" (has an extension) — the explicit hint overrides that.
+        var item = FileItem.CreatePending(@"Q:\nope\Weird.folder", null, isDirectoryHint: true);
+
+        Assert.True(item.IsDirectory);
+    }
+
+    /// <summary>
+    /// <see cref="FileItem.ApplyProbe"/> clears <see cref="FileItem.IsProbePending"/> and only raises
+    /// <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/> for the values that
+    /// actually flipped from their optimistic <see cref="FileItem.CreatePending"/> defaults.
+    /// </summary>
+    [Fact]
+    public void ApplyProbe_OnlyRaisesPropertyChangedForValuesThatFlipped()
+    {
+        // CreatePending's optimistic defaults: Exists = true, IsDirectory = true (no extension).
+        var item = FileItem.CreatePending(@"Q:\nope\SomeFolder", null);
+
+        var raised = new List<string?>();
+        item.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        // The real probe confirms both optimistic guesses — nothing actually changed.
+        var directoryChanged = item.ApplyProbe(exists: true, isDirectory: true);
+
+        Assert.False(item.IsProbePending);
+        Assert.False(directoryChanged);
+        Assert.Empty(raised);
+    }
+
+    /// <summary>
+    /// <see cref="FileItem.ApplyProbe"/> raises <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/>
+    /// for <see cref="FileItem.Exists"/> when the probe contradicts the optimistic guess, and returns
+    /// <see langword="true"/> when <see cref="FileItem.IsDirectory"/> also flipped.
+    /// </summary>
+    [Fact]
+    public void ApplyProbe_ContradictsOptimisticGuess_RaisesPropertyChangedAndReturnsDirectoryChanged()
+    {
+        // Optimistic guess: Exists = true, IsDirectory = true (no extension). Real probe: missing.
+        var item = FileItem.CreatePending(@"Q:\nope\SomeFolder", null);
+
+        var raised = new List<string?>();
+        item.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        var directoryChanged = item.ApplyProbe(exists: false, isDirectory: false);
+
+        Assert.False(item.Exists);
+        Assert.False(item.IsDirectory);
+        Assert.True(directoryChanged);
+        Assert.Contains(nameof(FileItem.Exists), raised);
+        Assert.Contains(nameof(FileItem.IsDirectory), raised);
+    }
+
+    /// <summary>
+    /// A second <see cref="FileItem.ApplyProbe"/> call behaves like any other re-observation — it is not
+    /// restricted to only the first, pending one.
+    /// </summary>
+    [Fact]
+    public void ApplyProbe_CalledTwice_SecondCallStillApplies()
+    {
+        var item = FileItem.CreatePending(@"Q:\nope\ghost.txt", null);
+        item.ApplyProbe(exists: true, isDirectory: false);
+        Assert.False(item.IsProbePending);
+
+        var directoryChanged = item.ApplyProbe(exists: false, isDirectory: false);
+
+        Assert.False(item.Exists);
+        Assert.False(directoryChanged);
+    }
+
+    /// <summary>
+    /// <see cref="FileItem.RelocateInPlace"/> raises the exact same <see cref="System.ComponentModel.INotifyPropertyChanged.PropertyChanged"/>
+    /// set as <see cref="FileItem.Relocate"/>, without ever touching the file system: a path on a
+    /// non-existent drive still ends up <see cref="FileItem.Exists"/> <see langword="true"/> (the rename
+    /// service's own success is already the existence proof).
+    /// </summary>
+    [Fact]
+    public void RelocateInPlace_UpdatesAllDerivedProperties_WithoutFileSystemAccess()
+    {
+        var item = new FileItem(@"Q:\nope\Old.txt", null);
+
+        var newIcon = new BitmapImage();
+        var raised = new List<string?>();
+        item.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        item.RelocateInPlace(@"Q:\nope\New.lnk", newIcon);
+
+        Assert.Equal(@"Q:\nope\New.lnk", item.Path);
+        Assert.Same(newIcon, item.Icon);
+        Assert.Equal("New.lnk", item.Name);
+        Assert.Equal(".lnk", item.Type);
+        Assert.True(item.IsShortcut);
+        Assert.True(item.Exists); // no fs access — the rename's own success is the proof
+
+        Assert.Contains(nameof(FileItem.Path), raised);
+        Assert.Contains(nameof(FileItem.Icon), raised);
+        Assert.Contains(nameof(FileItem.Name), raised);
+        Assert.Contains(nameof(FileItem.DisplayName), raised);
+        Assert.Contains(nameof(FileItem.Type), raised);
+        Assert.Contains(nameof(FileItem.IsShortcut), raised);
+    }
+
+    /// <summary>
+    /// <see cref="FileItem.RelocateInPlace"/> leaves <see cref="FileItem.IsDirectory"/> untouched — a
+    /// rename can never change what a path resolves to on disk beyond its name.
+    /// </summary>
+    [Fact]
+    public void RelocateInPlace_DoesNotChangeIsDirectory()
+    {
+        var item = FileItem.CreatePending(@"Q:\nope\SomeFolder", null); // IsDirectory guessed true
+
+        item.RelocateInPlace(@"Q:\nope\RenamedFolder", null);
+
+        Assert.True(item.IsDirectory);
+    }
+
+    /// <summary>
+    /// A cosmetic <c>displayName</c> override is cleared by <see cref="FileItem.RelocateInPlace"/>, same
+    /// as <see cref="FileItem.Relocate"/>.
+    /// </summary>
+    [Fact]
+    public void RelocateInPlace_ClearsDisplayNameOverride()
+    {
+        var item = new FileItem(@"C:\fake\Old.docx", null, displayName: "Override.docx");
+        Assert.Equal("Override.docx", item.DisplayName);
+
+        item.RelocateInPlace(@"C:\fake\New.docx", null);
+
+        Assert.Equal("New.docx", item.DisplayName);
+    }
 }

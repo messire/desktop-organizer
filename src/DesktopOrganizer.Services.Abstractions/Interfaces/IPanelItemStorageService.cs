@@ -330,4 +330,95 @@ public interface IPanelItemStorageService
     /// <param name="storedPath">A managed path a panel currently references.</param>
     /// <returns>What happened; see <see cref="ManagedRecycleKind"/>.</returns>
     ManagedRecycleResult RecycleManagedItem(string storedPath);
+
+    /// <summary>
+    /// Duplicates a managed item into a brand-new per-item directory
+    /// (<c>{storageRoot}\{newGuid}\{same name}</c>) and records a manifest entry for the copy with the
+    /// SAME original path as <paramref name="storedPath"/>'s own manifest entry. Never touches
+    /// <paramref name="storedPath"/> itself — the source is read-only for the whole duration of this
+    /// call (ADR-045, «Panel clone to page»).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Two manifest entries, one original path (ADR-045 «Known limitation»).</b> This is a deliberate
+    /// trade-off, not an oversight: giving the copy a distinct synthetic original path would let
+    /// <see cref="Restore"/> put it back somewhere the user never had a file, which is worse than the
+    /// consequences below. Both are already handled elsewhere in this codebase's "explicit refusal over
+    /// guessing" style:
+    /// <list type="bullet">
+    /// <item><description><see cref="Restore"/> on either copy still works — it moves that specific
+    /// managed path back to the recorded original, resolving a collision at the destination the same
+    /// Explorer-style way it already does (<c>name (2).ext</c>) if the other copy (or anything else) is
+    /// already there.</description></item>
+    /// <item><description><see cref="TryFindManagedPath"/> becomes ambiguous for that original path once
+    /// both copies are live (two live candidates) and correctly refuses to guess, returning
+    /// <see langword="false"/> — the existing principle <see cref="TryFindManagedPath"/>'s own remarks
+    /// already document. <see cref="FindManagedCandidates"/> still reports both.</description></item>
+    /// <item><description>Cross-panel reconciliation
+    /// (<c>DesktopOrganizer.UI.Services.WindowManager.ResolveStalePanelPaths</c> at startup, and — M-1 fix,
+    /// code review, panel clone to page — <c>ChildWindowViewModel.ResolveManagedReplacements</c>'s ongoing
+    /// per-panel self-heal via <c>IWindowManager.GetManagedPathsClaimedByOtherPanels</c>) already treats an
+    /// ambiguous manifest as "leave stale, never guess" — both require exactly one live, UNCLAIMED
+    /// candidate (not already directly referenced by a different live panel) before remapping a panel's
+    /// stale <c>FilePaths</c> entry, so this never causes one panel to silently start pointing at the other
+    /// panel's copy.</description></item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// M-2 fix (code review, panel clone to page): a managed item with no manifest entry of its own (a very
+    /// old legacy item imported before Move semantics existed — see
+    /// <see cref="RestoreOutcome.OriginalPathUnknown"/>) copies as a legacy item too — the copy gets no
+    /// manifest entry either, and later resolves to <see cref="RestoreOutcome.OriginalPathUnknown"/> on its
+    /// own <see cref="Restore"/>, exactly like the source. <see cref="ManagedCopyOutcome.Failed"/> is only
+    /// returned when the manifest read for <paramref name="storedPath"/> itself is UNTRUSTED (a transient
+    /// disk failure) — that means the source's own manifest state could not be determined at all, not that
+    /// an entry was confirmed absent.
+    /// </para>
+    /// <para>
+    /// File → <see cref="System.IO.File.Copy(string, string)"/> (verified byte-for-byte, same discipline
+    /// as <see cref="MoveIn"/>'s cross-volume path); directory → recursive verified copy, subject to the
+    /// same <see cref="MoveInDirectory"/> safety cap (file count / total size) since the destination is
+    /// always on the same volume as the source's storage root regardless of where the source itself came
+    /// from. A free-space pre-check (<see cref="System.IO.DriveInfo.AvailableFreeSpace"/>, 5% margin)
+    /// runs before any bytes are copied. The copy happens BEFORE the manifest write (the reverse order of
+    /// <see cref="MoveIn"/>/<see cref="MoveInDirectory"/>): unlike a move, nothing here is destructive to
+    /// the source, so there is no "manifest before the destructive step" invariant to protect — instead,
+    /// if the manifest write fails, the just-created copy is deleted (a fresh duplicate, never the
+    /// original) and <see cref="ManagedCopyOutcome.Failed"/> is returned.
+    /// </para>
+    /// </remarks>
+    /// <param name="storedPath">A managed path previously returned by <see cref="MoveIn"/>, <see cref="MoveInDirectory"/>, this method, or <see cref="RenameManaged"/>.</param>
+    /// <returns>What happened; see <see cref="ManagedCopyOutcome"/>.</returns>
+    ManagedCopyResult CopyManaged(string storedPath);
+
+    /// <summary>
+    /// Rollback helper for a clone operation that failed midway through copying several managed items
+    /// (ADR-045): deletes ONLY the per-item directories this service itself just created through
+    /// <see cref="CopyManaged"/> in the caller's current operation, and removes their manifest entries.
+    /// </summary>
+    /// <remarks>
+    /// Amendment ADR-035 (2026-09-29): this is the one place outside <see cref="ReleaseToRecycleBin"/>/
+    /// <see cref="RecycleManagedItem"/> that permanently deletes managed content without going through the
+    /// Recycle Bin — deliberately so, because every path handed to this method is a copy this very
+    /// operation created moments ago and the caller is about to discard (the clone failed before it could
+    /// ever be shown to the user); it never held any content the user had a chance to see or act on.
+    /// <see cref="ReleaseToRecycleBin"/> remains the ONLY way to get rid of an already-adopted managed
+    /// item's content. A path that is not a per-item managed directory this service could have produced
+    /// (outside managed storage, the storage root itself, a bare per-item GUID wrapper, or a legacy
+    /// flat-layout item) is left completely untouched — this method only ever removes what
+    /// <see cref="CopyManaged"/> itself lays out. Never throws; a path whose deletion fails is skipped
+    /// (its manifest entry is left in place too, so the orphaned copy stays findable rather than becoming
+    /// bookkeeping-less) and reported only through <see cref="IAppLog"/>, not to the caller.
+    /// <para>
+    /// M-3 fix (code review, panel clone to page): enforced, not merely documented — a path is only ever
+    /// eligible for deletion here if THIS instance itself produced it via <see cref="CopyManaged"/> and has
+    /// not already discarded it. A caller that mistakenly hands in an arbitrary (if syntactically valid)
+    /// per-item managed path — a real, already-adopted item from <see cref="MoveIn"/>/
+    /// <see cref="MoveInDirectory"/>, or a copy from an entirely different, already-finished operation —
+    /// can therefore never have it irrevocably deleted outside the Recycle Bin just by being passed to this
+    /// method.
+    /// </para>
+    /// </remarks>
+    /// <param name="copyPaths">Managed paths previously returned by <see cref="CopyManaged"/> (<see cref="ManagedCopyResult.CopyPath"/>) during the same, still-in-progress operation.</param>
+    void DiscardCopies(IReadOnlyList<string> copyPaths);
 }

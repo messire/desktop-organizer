@@ -77,6 +77,18 @@ added retroactively once an older build without it is already out in the field, 
 reader has no way to learn the new rule after the fact. It is baked into `JsonApplicationStateStore.Load`
 from commit C2 onward, before any schema beyond v1 exists.
 
+**Concrete instance: v6 → v5 (ADR-043, page display names).** The first release with schema v6 (pages
+gain a separate display `name` next to their stable `id`) is the first concrete instance of this scenario
+in the field. Nothing above is special-cased for it — the same rung-7 read-only session applies verbatim.
+Two things specific to this particular step are worth naming for anyone reading this file to recover from
+it: (1) the pre-upgrade snapshot this step writes is named `application-state.premigration-v5.json` — by
+the *source* schema version (5), not the target (6), matching every other step's naming (see
+`StateStorePaths.PreMigrationBackupPath`); (2) if a stale file with that exact name is already present
+from an earlier, unrelated incident, `WritePreMigrationBackupIfMissing`'s existing `File.Exists` guard
+skips writing a fresh one — the recovery snapshot on disk would then be older than the actual state right
+before this upgrade. ADR-043 documents this as a known, accepted risk (R-2), closed by a manual step
+(rename or delete the stale file before upgrading), not by a code change to this mechanism.
+
 ## Scenario C — manual recovery: `--restore-state-backup`
 
 Scenarios A and B are both automatic — no user action is required, and both are safe by construction.

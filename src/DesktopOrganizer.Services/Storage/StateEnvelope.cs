@@ -24,7 +24,14 @@ internal static class StateEnvelope
     /// (ADR-024 D-9) exist to bring any older on-disk document up to exactly this version; a document
     /// newer than this is never migrated downward (D-7 rung 7).
     /// </summary>
-    public const int CurrentSchemaVersion = 5;
+    /// <remarks>
+    /// v6 (ADR-043, docs/PLANS/page-display-names.md): <c>pages</c> gains a stable page id + separate
+    /// display <c>name</c> per page (<c>pages.items[{id,name?}]</c> replaces <c>pages.ids[]</c>) — see
+    /// <see cref="Migrations.V5ToV6Migration"/>. Purely a <c>pages</c>-section reshape; every other
+    /// payload key (<c>panels</c>/<c>layoutSnapshots</c>/<c>systemIconsPanel</c>), including every
+    /// <c>pageId</c> reference inside them, is unaffected.
+    /// </remarks>
+    public const int CurrentSchemaVersion = 6;
 
     /// <summary>
     /// The synthetic schema version legacy <c>user.config</c> data is treated as being "at" once

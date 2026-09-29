@@ -34,7 +34,7 @@ gesture lifecycle, полный список событий и privacy-инва�
 |---|---|---|
 | `timestamp` | ISO 8601 с офсетом | `DateTimeOffset.Now` на момент `Write` |
 | `seq` | integer | Монотонный счётчик per-process (не переживает перезапуск) |
-| `category` | string | `session` \| `gesture` \| `capture` \| `panel` \| `state` (Фаза 4) \| `layout` (Фаза 6) |
+| `category` | string | `session` \| `gesture` \| `capture` \| `panel` \| `state` (Фаза 4) \| `layout` (Фаза 6) \| `icon` (P08, extended ADR-046) \| `liveness` (ADR-046) |
 | `name` | string | Имя события (см. таблицу ниже) |
 | `scope` | string \| null | Первые 8 символов `Guid` панели (`N`-формат), `null` для session-событий |
 | `payload` | object | Поля события, см. ниже |
@@ -112,6 +112,8 @@ guard-мьютекс) **не резолвит `IDiagnosticsLog` вообще**: 
 | `PanelClosing` | 0 | `thumbIsDragging` |
 | `ExistenceRefreshFailed` | **P08 fix cycle 1, 2026-09-22 (UX P2)** — `GestureDiagnostics.ExistenceRefreshFailed`, вызывается из `ChildWindowViewModel.RefreshExistence`'s `catch` | `exceptionType` (`Exception.GetType().Name`) — **никогда** `Exception.Message`. Заменяет `Console.Error.WriteLine`, который в `WinExe`-процессе никто не читает (тот же класс дефекта, что и `icon`-категория ниже) |
 | `AlignToWorkspaceGridRefused` | **P03 fix cycle 1 final verification, 2026-09-22** — `GestureDiagnostics.AlignToWorkspaceGridRefused`, вызывается из `ChildWindow.WorkspaceGrid.cs` при отказе `WorkspaceGridPlacement.TryAlign` | `reason` — код (`NoMonitor` / `Unmeasured`), **никогда** title/path панели. Заменяет `Console.Error.WriteLine` |
+| `PanelItemsBuilt` | **ADR-046, backlog 1.x item 7** — `GestureDiagnostics.PanelItemsBuilt`, `Stopwatch` вокруг `BaseViewModel.AddFilesCore` + непосредственно следующего фильтра/сортировки в `LoadFromModel`/`ReplaceAll`/Folder-Portal-ресинке. Ровно та часть метрики ROADMAP «не дольше одного кадра», которую можно измерить без Windows-GUI — построение `FileItem`'ов без fs/shell (D-5) плюс проход фильтра/сортировки; загрузка иконок и liveness-проба асинхронны и не блокируют этот проход (генерация контейнеров невиртуализированной `AdaptiveIconGridPanel`, ADR-018, — отдельная, не покрываемая этим событием стоимость, см. `docs/PLANS/background-icon-loading.md` §8.4) | `count` (int, число элементов после перестройки), `elapsedMicroseconds` (long) |
+| `IconPipelineSynchronousFallbackUsed` | **ADR-046 D-13, ревью iteration 2 (L-4)** — `GestureDiagnostics.IconPipelineSynchronousFallbackUsed`, вызывается когда `BaseViewModel`/`ChildWindowViewModel` получили реальные `IIconLoadQueue`/`IItemProbeQueue`, но у конструирующего потока не было живого `SynchronizationContext` для доставки — VM молча деградировал до синхронного легаси-пайплайна (`SynchronousIconLoadQueue`/`SynchronousItemProbeQueue`, UI/Services). Ожидаемо для headless/тестового вызывающего; в продакшене обычно означает, что панель-ViewModel сконструирована до установки UI-диспетчерского `SynchronizationContext` | `component` — закрытый набор: `"iconLoadQueue"` \| `"itemProbeQueue"` |
 
 ### `state` (scope = null) — Фаза 4, ADR-024
 
@@ -206,7 +208,7 @@ enum-имён/строковых токенов) и `bytes`/`attempts`/`migratio
 заведено, поскольку существующие ассерты уже покрывают privacy-инвариант точечно там, где событие
 пишется.
 
-### `icon` (scope = null) — P08, docs/DIAGNOSTICS/icon-loading-findings.md; extended release polish 1.0 (ADR-039)
+### `icon` (scope = null) — P08, docs/DIAGNOSTICS/icon-loading-findings.md; extended release polish 1.0 (ADR-039); extended ADR-046 (background STA icon loading, backlog 1.x item 7)
 
 | Событие | Источник | Payload |
 |---|---|---|
@@ -219,6 +221,16 @@ enum-имён/строковых токенов) и `bytes`/`attempts`/`migratio
 | `ImageListIconFailed` (**release polish 1.0**, ADR-039 stage 2) | `IconHandler.GetSystemImageListIconHandle` — `IImageList::GetIcon` returned a null icon handle for a resolved image-list handle | `extension`, `imageList` (int — the `SHIL_*` constant actually used, e.g. `IconHandler.ShilExtraLarge`) |
 | `IconRetrievalFailed` | `IconProvider`'s per-stage `catch` (`TryShellItemImage`/`TrySystemImageList`/`TryRetrieveIcon`) — any exception during shell lookup/bitmap creation for the corresponding fallback stage | `extension`, `errorType` (`Exception.GetType().Name`), `stage` (**release polish 1.0**, ADR-039 — closed set: `"shellItem"` / `"imageList"` / `"fileAttributes"`, one of `IconProvider`'s private stage-name constants) |
 | `IconFreshnessCheckFailed` | `IconProvider.TryGetLastWriteTimeUtc` — `File`/`Directory.GetLastWriteTimeUtc` threw | `extension`, `errorType` |
+| `IconQueueStarted` (**ADR-046**) | `StaIconLoadQueue.EnsureLaneRunning` — a lane's worker starts (or resumes after being idle) draining its queue | `lane` (closed set: `"local"` \| `"remote"`) |
+| `IconQueueDrained` (**ADR-046**) | `StaIconLoadQueue` — a lane's queue emptied out (also the third trigger, alongside batch-size/flush-interval, for flushing every group's result buffer — D-9) | `lane`, `jobs` (int, jobs processed this drain), `elapsedMs` (long) |
+| `IconJobTimedOut` (**ADR-046 D-4**) | `StaIconLoadQueue`'s watchdog pass — a job/type-job has been executing longer than `IconLoadQueueOptions.StuckJobTimeout` (default 5 s) | `lane`, `extension` (the stuck job's `IconDiagnostics.SafeExtension`, or its type-key for a type-job) |
+| `IconWorkerAbandoned` (**ADR-046 D-4**) | `StaIconLoadQueue`'s watchdog pass — the stuck worker is detached (`IStaWorker.Abandon()`) and a replacement is created for the lane | `lane`, `abandoned` (int, the lane's running count of abandoned-but-not-yet-returned workers) |
+| `IconLaneDisabled` (**ADR-046 D-4**) | `StaIconLoadQueue` — a lane exceeded `IconLoadQueueOptions.MaxAbandonedWorkersPerLane` (default 2) simultaneously-abandoned workers and disabled itself for the rest of the session; its jobs now resolve `Unavailable` immediately | `lane` |
+| `RemoteRootQuarantined` (**ADR-046 D-3**) | `StaIconLoadQueue`'s watchdog pass, via `IRemoteRootCircuitBreaker.ReportStuck` — a Remote-lane job's own network root is opened (quarantined) after a stuck-job timeout | `rootKind` (closed set: `"unc"` \| `"mappedDrive"` \| `"shortcutTarget"` — never the root path itself) |
+| `IconQueueBackpressureDropped` (**ADR-046 D-10**) | `StaIconLoadQueue.Submit` — a pending `Background`-priority job with no live waiters was evicted because `IconLoadQueueOptions.MaxPendingJobs` (default 20 000) was reached | `count` (int, always `1` — one event per eviction) |
+| `IconQueueSinkThrew` (**ADR-046 D-9**) | `StaIconLoadQueue` — a group's `onResults` delivery callback threw; the exception is swallowed here so it never reaches `DispatcherUnhandledException` (which would otherwise terminate the process via `CrashCoordinator`) | `errorType` (`Exception.GetType().Name`) |
+| `IconResultNotFrozen` (**ADR-046 C-4**) | `StaIconLoadQueue` — a result's `ImageSource` failed the explicit runtime `IsFrozen` check before crossing the worker→UI boundary (a rare mock/provider defect, not the production `IconProvider`); the result is downgraded to `Outcome = Failed` and the icon is not delivered | `stage` (closed set: `"typeIcon"` for a type-job, or the lane name — `"local"`/`"remote"` — for a regular icon-fetch job) |
+| `IconQueueWatchdogPassFailed` (**ADR-046**) | `StaIconLoadQueue`'s watchdog timer callback — an unexpected exception during a watchdog pass, caught so the timer keeps running | `errorType` |
 
 Replaces four `Console.Error.WriteLine` call sites the P00 baseline audit found silently discarded by
 the `WinExe` process (nothing reads process stderr) and absent from the JSONL log entirely (0 of 698
@@ -269,6 +281,17 @@ is superseded by this allow-list. Enforced by `IconDiagnosticsTests.SafeExtensio
 `IconDiagnosticsTests.SafeExtension_ShortAlphanumericFileNameFragment_IsAcceptedAsIfItWereARealExtension`
 (documents the residual limitation explicitly, not silently). See ADR-027 Amendment (2026-09-22) for the
 corresponding decision record.
+
+### `liveness` (scope = null) — ADR-046, backlog 1.x item 7
+
+| Событие | Источник | Payload |
+|---|---|---|
+| `ItemProbeFailed` | `BackgroundItemProbeQueue`'s per-path `catch` around `IPathProbe.Probe` — an unexpected exception while probing one path of a liveness batch on the thread pool; the batch's `Task` does not fault, the path's own result degrades to `Exists = false, IsKnown = false` (legacy `File.Exists` semantics) | `errorType` (`Exception.GetType().Name`) |
+
+Liveness (7c, ADR-046) moved `ChildWindowViewModel`'s background existence-liveness poll off the UI thread
+onto `BackgroundItemProbeQueue` (thread pool, ≤2 concurrent batches). `ItemProbeFailed` is this category's
+only event today — the pass-level outcomes (timeout, generation mismatch, disposed VM) are not logged, only
+applied/discarded per the invariants in `docs/PLANS/background-icon-loading.md` §7.1/§7.2 (M-A/M-C).
 
 ### `layout` (scope = null для `LayoutModeChanged`, panel id prefix для `SizingModeChanged`) — Фаза 6/ADR-026, workspace-grid/ADR-029
 
@@ -335,6 +358,17 @@ do not apply to them.
 | `MoveItemFailed` | `PanelItemsUninstallRestorer.TryMoveItem` — an exception while moving a single item to its resolved target during `--restore-panel-items` | `source` (path), `target` (path) — **exception**: unlike every other event in this document, these two carry the actual file paths, not just an extension; accepted because this event only ever reaches the local diagnostics log of the same machine the uninstall is running on, at the exact moment those paths are being reported as *not yet successfully moved* — the operator reading the log needs the real paths to find and move the file by hand |
 | `VerifiedCopySourceDeleteFailed` | `PanelItemsUninstallRestorer.DeleteVerifiedSourceOrWarn` — a cross-volume source could not be deleted after its copy was already verified byte-for-byte (still counted as restored, not failed) | `source` (path), `target` (path), `exception` (`ex.Message`, not just the type name — same accepted exception as `MoveItemFailed` above) |
 | `EnumerateStorageRootFailed` / `EnumerateItemDirectoryFailed` / `ManifestReadFailed` / `ManifestTempLeftoverDeleteFailed` / `GuidDirectoryCleanupFailed` / `StorageRootCleanupFailed` | `PanelItemsUninstallRestorer` — best-effort enumeration/cleanup steps during `--restore-panel-items`, logged via `Log.Error(source, name, ex, ...)` | `path` (the folder/file involved — same accepted-path exception as above); the underlying `Exception` is passed to `IAppLog.Error` itself, which is responsible for its own message/type formatting |
+| `PanelCloned` (backlog 1.x item 8, ADR-045) | `WindowManager.ClonePanelToPage` — logged via `Log.Info` right after the clone is registered, logged, and persisted, just before `OnChildWindowAdded` fires | `panelId` (the SOURCE panel's opaque id — never a title), `skippedMissingItems` (int — count of managed items that no longer existed on disk and were silently skipped rather than copied; never surfaced to the user, only logged here) |
+| `PanelCloneCreateFailed` (backlog 1.x item 8, ADR-045) | `WindowManager.ClonePanelToPage`'s `catch` — any exception after item copying succeeded but before the clone finished registering (e.g. `Window.Show()` itself threw); logged via `Log.Error` with the exception | `panelId` (the SOURCE panel's opaque id) |
+| `PanelCloneCloseFailed` (backlog 1.x item 8, ADR-045) | `WindowManager.ClonePanelToPage`'s rollback path — `Window.Close()` on the half-created clone window itself threw while unwinding a failed clone; logged via `Log.Error` with the exception, isolated in its own `try/catch` so it can never prevent the rest of the rollback (discarding the fresh managed-item copies) from completing | `panelId` (the SOURCE panel's opaque id) |
+| `SystemThemeInitial` (backlog 1.x item 6, ADR-047) | `SystemThemeProvider.Start` — the theme/high-contrast/font-size snapshot read once at startup, before the listener window exists | `appsUseLightTheme`, `systemUsesLightTheme`, `highContrast` (bool), `systemColorsFingerprint` (`"X8"`-formatted hash of `GetSysColor` values — order-sensitive, deterministic, never randomised per process), `messageFontSize` (double) |
+| `SystemThemeChanged` (backlog 1.x item 6, ADR-047) | `SystemThemeProvider.Refresh` — the debounced (100 ms) re-read after a `WM_SETTINGCHANGE`/`WM_SYSCOLORCHANGE`/`WM_THEMECHANGED` broadcast actually changed the snapshot; an unrelated broadcast (or one that round-trips back to the same values) logs nothing | same fields as `SystemThemeInitial` |
+| `ListenerWindowCreateFailed` (backlog 1.x item 6, ADR-047) | `SystemThemeProvider.Start` — the provider's own hidden `WS_POPUP` listener window could not be created; the provider degrades to "theme read once at startup", never throws | `win32Error` (int, `GetLastError()`) |
+| `StartFailed` / `ReadFailed` / `WndProcError` / `ChangedHandlerFailed` / `ReleaseFailed` (backlog 1.x item 6, ADR-047) | `SystemThemeProvider` — best-effort `catch` blocks around, respectively: `Start()` itself, a registry/`SystemParametersInfo` read, the window procedure, a `Changed` subscriber's own handler, and window teardown in `Dispose()` | `errorType` (`Exception.GetType().Name`) via `Log.Error(source, name, ex)` — never `ex.Message` |
+| `ImmersiveDarkModeUnsupported` (backlog 1.x item 6, ADR-047) | `WindowFrameTheming.LogUnsupportedOnce` — the running Windows build predates the immersive dark-mode caption attribute (older than Windows 10 1809); logged once per process, not once per window | `windowsBuild` (int) |
+| `ImmersiveDarkModeFailed` (backlog 1.x item 6, ADR-047) | `WindowFrameTheming.TryApply` — `DwmSetWindowAttribute` either threw or returned a failing `HRESULT`; rate-limited to one entry per window handle per minute (a window that keeps failing does not spam the log every `ThemeChanged`) | `attribute` (20 or 19), `dark` (bool, failing-HRESULT case only), `hresult` (`"0x{hr:X8}"`, failing-HRESULT case only), `suppressedSinceLast` (int, how many further failures for the same window were rate-limited away since the last entry) |
+| `NativeMenuModeApplied` (backlog 1.x item 6, ADR-047, phase 6.4b) | `NativeMenuTheming.TryApply` — the process's classic Win32 menus (a panel item's shell context menu, a window's system menu) were switched to `ForceDark`/`Default` via the undocumented `SetPreferredAppMode` uxtheme ordinal; idempotent (a repeat call for the same `dark` value logs nothing) | `dark` (bool) |
+| `SetPreferredAppModeUnavailable` / `FlushMenuThemesUnavailable` (backlog 1.x item 6, ADR-047, phase 6.4b) | `NativeMenuTheming.TryApply` — the corresponding `uxtheme.dll` ordinal (135/136) could not be resolved or the call itself failed; logged once per process (not once per request), the feature then silently no-ops for the rest of the session | `windowsBuild` (int) |
 
 ## Использование при диагностике зависания
 

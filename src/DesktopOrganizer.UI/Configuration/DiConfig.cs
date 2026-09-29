@@ -1,10 +1,13 @@
-﻿using DesktopOrganizer.Localization;
+﻿using System.Windows.Threading;
+using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Configuration;
 using DesktopOrganizer.UI.Diagnostics;
+using DesktopOrganizer.UI.Lifecycle;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State;
+using DesktopOrganizer.UI.Theming;
 using DesktopOrganizer.UI.ViewModels;
 using DesktopOrganizer.UI.Views;
 using Microsoft.Extensions.DependencyInjection;
@@ -76,14 +79,53 @@ public static class DiConfig
             sp.GetRequiredService<ILocalizationService>(),
             SystemCulture.OriginalUiCulture,
             sp.GetRequiredService<AboutViewModel>(),
-            sp.GetRequiredService<IColorPickerService>()));
+            sp.GetRequiredService<IColorPickerService>(),
+            sp.GetRequiredService<IPanelCloneFlow>(),
+            sp.GetRequiredService<IStatusNotifier>(),
+            sp.GetRequiredService<IDesktopIconsService>()));
         services.AddTransient<ChildWindowViewModel>();       // Per-panel VM — has file state
         services.AddSingleton<LayoutSnapshotsViewModel>();  // Snapshots section VM
         services.AddSingleton<AboutViewModel>();            // About section VM (release-hardening-1.0.md §G2)
 
-        services.AddSingleton<IConfirmationService, ConfirmationService>();
-        services.AddSingleton<IInputDialogService, InputDialogService>();
+        // Design system 1.x §3 phase 6.3 (docs/PLANS/design-system-1x.md §2.8, ADR-047 D-9): the
+        // AppDialogWindow seam ConfirmationService/InputDialogService depend on instead of showing a real
+        // Window themselves, plus the non-blocking status surface MainWindowViewModel.Status forwards to
+        // MainWindow.xaml's InfoBar host. DispatcherDebounceTimer is constructed lazily here (not resolved
+        // through DI itself — it has no registration of its own) so Application.Current already exists by
+        // the time this factory runs, the same convention ApplicationStateService/ChildWindowViewModel's
+        // own lazily-constructed debounce timers already follow.
+        services.AddSingleton<IDialogPresenter, DialogPresenter>();
+
+        // L-4 fix (review round): Application.Current is null in any host that never constructs a WPF
+        // Application (e.g. a plain unit-test ServiceProvider built straight from RegisterServices) —
+        // Dispatcher.CurrentDispatcher (the calling thread's own dispatcher, creating one if needed) avoids
+        // a NullReferenceException the moment this factory runs outside a real App, at the cost of no
+        // longer necessarily being the UI-thread dispatcher in that fallback case — acceptable here since
+        // production always resolves this after OnStartup, when Application.Current already exists.
+        services.AddSingleton<IStatusNotifier>(_ => new SettingsStatusNotifier(new DispatcherDebounceTimer(Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher)));
+
+        // Factory lambdas (not the reflection-based AddSingleton<TService, TImplementation>() every other
+        // registration in this file uses): both constructors are internal, since they take the internal
+        // IDialogPresenter (ConfirmationService's own remarks) — the DI container's own reflection only
+        // ever looks at PUBLIC constructors, so it could never find either one on its own.
+        services.AddSingleton<IConfirmationService>(sp =>
+            new ConfirmationService(sp.GetRequiredService<IDialogPresenter>(), sp.GetRequiredService<ILocalizationService>()));
+        services.AddSingleton<IInputDialogService>(sp =>
+            new InputDialogService(sp.GetRequiredService<IDialogPresenter>(), sp.GetRequiredService<ILocalizationService>()));
         services.AddSingleton<IExternalLinkLauncher, ExternalLinkLauncher>();
+
+        // Design system 1.x §3 phase 6.1 (docs/PLANS/design-system-1x.md, ADR-047 D-2): the "Palette T"
+        // (application chrome) theme singleton — Start()-ed from App.StartApp, right after
+        // LoadResourceDictionaries(). ISystemThemeProvider/IWindowFrameTheming are DesktopOrganizer.Services
+        // registrations (Services' own DiConfig).
+        services.AddSingleton<IAppThemeService, AppThemeService>();
+
+        // H-1/LOW-3 fixes (code review, panel clone to page, backlog 1.x wave 3 review): the shared
+        // "Copy to page" flow (busy cursor + failure notification + stale-page re-sync) both
+        // MainWindowViewModel and ChildWindowViewModel call instead of IWindowManager.ClonePanelToPage
+        // directly — see IPanelCloneFlow's own remarks.
+        services.AddSingleton<IBusyIndicator, MouseWaitCursorBusyIndicator>();
+        services.AddSingleton<IPanelCloneFlow, PanelCloneFlow>();
 
         // "Customize panel…" dialog (docs/prompts/settings-window-redesign.md D-3, WP-B): the VM/window
         // are transient (a fresh one is built the first time the dialog opens, or after it was closed),
@@ -123,6 +165,19 @@ public static class DiConfig
         services.AddSingleton<ILayoutEditModeService, LayoutEditModeService>();
         services.AddSingleton<IPageManager, PageManagerService>();
         services.AddSingleton<ILayoutSnapshotService, LayoutSnapshotService>();
+
+        // backlog-1x-master-plan.md §1/§2: round-robin page switching for the tray icon's double-click
+        // and the tray context menu's "Pages" submenu (ADR-044). Singleton, IDisposable — constructed
+        // once, Start()-ed from App.InitTrayIcon, and disposed implicitly with every other IDisposable
+        // singleton when _serviceProvider.Dispose() runs.
+        services.AddSingleton<TrayPagesAdapter>();
+
+        // Design system 1.x phase 6.4/6.4b (ADR-047 D-10/D-11): the tray menu palette (Start()-ed from
+        // App.InitTrayIcon, right after TrayPagesAdapter) and the dark/light mode of the classic Win32 menus
+        // (Start()-ed from App.StartApp, right after IAppThemeService.Start()). Both IDisposable singletons,
+        // disposed with the provider.
+        services.AddSingleton<TrayThemeAdapter>();
+        services.AddSingleton<NativeMenuThemeAdapter>();
         services.AddSingleton<MainWindow>();   // Singleton: hidden, not re-created
         services.AddTransient<ChildWindow>();
 

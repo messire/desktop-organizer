@@ -17,6 +17,22 @@
     <conv:IconBoxWidthConverter x:Key="IconBoxWidth"/>
 
     <!--
+        Backlog 1.x wave 2 review M-F: a MenuItem's default HeaderTemplate wraps a plain STRING Header in
+        an AccessText-aware presenter, which silently consumes a single leading/embedded "_" as an
+        access-key marker instead of showing it — a page literally named "Foo_Bar" would render as
+        "FooBar" with "B" underlined. Every "Move/Copy to page ▸" menu (ChildWindow.xaml's header
+        ContextMenu, PanelsSection.xaml's own Move/Copy buttons) sets this as its ItemContainerStyle's
+        HeaderTemplate alongside its Header binding: Header still carries the resolved display string
+        (needed for the binding/converter plumbing), but this template's plain TextBlock — never
+        access-key-aware — is what actually renders it, showing every character of the page's name
+        verbatim. ContentSource="Header" default plumbing means this template's own DataContext IS the
+        Header value, so `{Binding}` (no Path) is exactly that string.
+    -->
+    <DataTemplate x:Key="PlainTextHeaderTemplate">
+        <TextBlock Text="{Binding}"/>
+    </DataTemplate>
+
+    <!--
         Shared "selected/active" chrome tokens (finalization MINOR m-1) moved to
         Resources/Styles/Brushes.xaml as of C5 (D-2) — same key names (SelectionFillBrush/
         SelectionStrokeBrush), still consumed here by FileNameEditBoxStyle below and by

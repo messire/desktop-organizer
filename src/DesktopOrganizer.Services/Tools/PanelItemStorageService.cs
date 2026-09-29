@@ -67,6 +67,21 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     /// </summary>
     private readonly HashSet<string> _deferredAdoptionWarned = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// M-3 fix (code review, panel clone to page): every managed path this instance has itself produced
+    /// via <see cref="CopyManaged"/>, for the lifetime of this (singleton) instance — guarded by
+    /// <see cref="_manifestLock"/>, same as the manifest cache it lives alongside. <see cref="DiscardCopies"/>
+    /// only ever deletes a path found in this set (removing it once deleted), so a caller that mistakenly
+    /// hands it an arbitrary managed path — one that was never a clone copy, e.g. a real already-adopted
+    /// item from <see cref="MoveIn(string)"/>/<see cref="MoveInDirectory(string)"/>, or a copy from an
+    /// entirely different, already-finished operation — can never have it irrevocably deleted outside the
+    /// Recycle Bin. A successfully discarded copy is removed from this set; a copy that is never discarded
+    /// (the clone that created it succeeded) lingers here for the rest of the process — bounded by how many
+    /// successful clones a session ever makes, accepted as negligible (same trade-off as
+    /// <see cref="_deferredAdoptionWarned"/> above).
+    /// </summary>
+    private readonly HashSet<string> _copiesThisSession = new(StringComparer.OrdinalIgnoreCase);
+
     // Authoritative in-memory copy of the manifest, lazily loaded from disk on first access and
     // kept in sync via write-through on every mutation (see the "Manifest" region below). This
     // service is registered as a DI singleton and used exclusively from the UI thread, but all
@@ -576,6 +591,238 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
             : new ManagedRecycleResult(ManagedRecycleKind.Kept, storedPath);
     }
 
+    /// <inheritdoc />
+    public ManagedCopyResult CopyManaged(string storedPath)
+    {
+        var notManaged = new ManagedCopyResult(ManagedCopyOutcome.NotManaged, null);
+        if (!IsManaged(storedPath)) return notManaged;
+
+        string full;
+        try
+        {
+            full = Path.GetFullPath(storedPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception)
+        {
+            return notManaged; // malformed — IsManaged already rejects most of these.
+        }
+
+        // Same M8 guard as ReleaseToRecycleBin/ForgetMovedOut: never the storage root or a bare per-item
+        // GUID wrapper directory itself, only an actual item strictly below one.
+        if (!IsStrictlyManagedItem(full)) return notManaged;
+
+        var isDirectory = Directory.Exists(full);
+        var isFile = !isDirectory && File.Exists(full);
+        if (!isDirectory && !isFile) return new ManagedCopyResult(ManagedCopyOutcome.SourceMissing, null);
+
+        // M-2 fix (code review, panel clone to page): a legacy item with no manifest entry of its own (a
+        // TRUSTED read that found no entry) copies as a legacy item too — its copy's manifest state
+        // mirrors the source's, same as every other appearance/behavior field a clone duplicates (see the
+        // interface doc remarks). Only an UNTRUSTED manifest read (a transient disk failure) blocks the
+        // clone entirely: it means the source's own manifest state — legacy or not — could not actually be
+        // determined at all, not that an entry was confirmed absent.
+        var (original, trusted) = ReadManifestEntry(full);
+        if (!trusted) return new ManagedCopyResult(ManagedCopyOutcome.Failed, null);
+
+        string? destPath = null;
+        try
+        {
+            if (isDirectory)
+            {
+                string[] files;
+                try
+                {
+                    files = Directory.GetFiles(full, "*", SearchOption.AllDirectories);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(
+                        "PanelItemStorageService",
+                        "CopyManagedEnumerateFailed",
+                        ex,
+                        new KeyValuePair<string, object?>("path", storedPath));
+                    return new ManagedCopyResult(ManagedCopyOutcome.Failed, null);
+                }
+
+                if (files.Length > MaxDirectoryImportFileCount) return new ManagedCopyResult(ManagedCopyOutcome.TooLarge, null);
+
+                long totalBytes = 0;
+                try
+                {
+                    foreach (var file in files)
+                    {
+                        totalBytes += new FileInfo(file).Length;
+                        if (totalBytes > MaxDirectoryImportBytes) return new ManagedCopyResult(ManagedCopyOutcome.TooLarge, null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // A file vanished/became inaccessible mid-scan — bail out rather than copy a partial view.
+                    Log.Error(
+                        "PanelItemStorageService",
+                        "CopyManagedSizeFailed",
+                        ex,
+                        new KeyValuePair<string, object?>("path", storedPath));
+                    return new ManagedCopyResult(ManagedCopyOutcome.Failed, null);
+                }
+
+                if (!HasSufficientFreeSpace(full, totalBytes)) return new ManagedCopyResult(ManagedCopyOutcome.InsufficientSpace, null);
+
+                destPath = BuildDestinationDirectoryPath(full);
+                Directory.CreateDirectory(_storageRoot);
+
+                if (!ManagedStorageFileOps.TryCopyDirectoryVerified(full, destPath))
+                {
+                    ManagedStorageFileOps.TryDeletePartialDirectory(destPath);
+                    TryCleanupEmptyItemDirectory(destPath);
+                    Log.Warn(
+                        "PanelItemStorageService",
+                        "CopyManagedVerifiedCopyFailed",
+                        new KeyValuePair<string, object?>("path", storedPath));
+                    return new ManagedCopyResult(ManagedCopyOutcome.Failed, null);
+                }
+            }
+            else
+            {
+                long size;
+                try
+                {
+                    size = new FileInfo(full).Length;
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(
+                        "PanelItemStorageService",
+                        "CopyManagedSizeFailed",
+                        ex,
+                        new KeyValuePair<string, object?>("path", storedPath));
+                    return new ManagedCopyResult(ManagedCopyOutcome.Failed, null);
+                }
+
+                if (!HasSufficientFreeSpace(full, size)) return new ManagedCopyResult(ManagedCopyOutcome.InsufficientSpace, null);
+
+                destPath = BuildDestinationPath(full);
+                Directory.CreateDirectory(_storageRoot);
+
+                if (!ManagedStorageFileOps.TryCopyFileVerified(full, destPath))
+                {
+                    ManagedStorageFileOps.TryDeletePartialFile(destPath);
+                    TryCleanupEmptyItemDirectory(destPath);
+                    Log.Warn(
+                        "PanelItemStorageService",
+                        "CopyManagedVerifiedCopyFailed",
+                        new KeyValuePair<string, object?>("path", storedPath));
+                    return new ManagedCopyResult(ManagedCopyOutcome.Failed, null);
+                }
+            }
+
+            // Unlike MoveIn/MoveInDirectory, the copy happens BEFORE the manifest write: nothing here is
+            // destructive to the source, so there is no "manifest before the destructive step" invariant
+            // to protect. If the manifest write fails, the fresh duplicate (never the original) is
+            // removed instead. M-2: a legacy source with no manifest entry of its own (see the guard above)
+            // needs no manifest write at all — the copy is legacy too, exactly like the source.
+            if (original is not null && !WriteManifestEntry(destPath, original))
+            {
+                if (isDirectory) ManagedStorageFileOps.TryDeletePartialDirectory(destPath);
+                else ManagedStorageFileOps.TryDeletePartialFile(destPath);
+                TryCleanupEmptyItemDirectory(destPath);
+                Log.Warn(
+                    "PanelItemStorageService",
+                    "CopyManagedManifestWriteFailed",
+                    new KeyValuePair<string, object?>("path", storedPath));
+                return new ManagedCopyResult(ManagedCopyOutcome.Failed, null);
+            }
+
+            // M-3: only a path recorded here is ever eligible for PanelItemStorageService.DiscardCopies.
+            lock (_manifestLock) _copiesThisSession.Add(destPath);
+
+            return new ManagedCopyResult(ManagedCopyOutcome.Copied, destPath);
+        }
+        catch (Exception ex)
+        {
+            if (destPath is not null)
+            {
+                if (isDirectory) ManagedStorageFileOps.TryDeletePartialDirectory(destPath);
+                else ManagedStorageFileOps.TryDeletePartialFile(destPath);
+                RemoveManifestEntry(destPath);
+                TryCleanupEmptyItemDirectory(destPath);
+            }
+
+            Log.Error(
+                "PanelItemStorageService",
+                "CopyManagedFailed",
+                ex,
+                new KeyValuePair<string, object?>("path", storedPath));
+            return new ManagedCopyResult(ManagedCopyOutcome.Failed, null);
+        }
+    }
+
+    /// <inheritdoc />
+    public void DiscardCopies(IReadOnlyList<string> copyPaths)
+    {
+        ArgumentNullException.ThrowIfNull(copyPaths);
+        if (copyPaths.Count == 0) return;
+
+        var toRemoveFromManifest = new List<string>();
+
+        foreach (var copyPath in copyPaths)
+        {
+            string full;
+            try
+            {
+                full = Path.GetFullPath(copyPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch (Exception)
+            {
+                continue; // malformed — cannot be one of ours.
+            }
+
+            // Only an actual per-item managed item this service itself could have produced via
+            // CopyManaged (never the storage root, a bare per-item GUID wrapper, or a legacy flat-layout
+            // item, which CopyManaged never creates) is eligible for direct deletion here.
+            if (!IsStrictlyManagedItem(full) || !TryGetPerItemLayout(full, out _, out _)) continue;
+
+            // M-3 fix (code review, panel clone to page): defense in depth beyond the structural guard
+            // above — only a path THIS instance actually produced via CopyManaged (see _copiesThisSession's
+            // own remarks) is eligible for deletion here at all, never an arbitrary (if syntactically valid)
+            // per-item managed path a caller mistakenly hands in.
+            bool isThisSessionCopy;
+            lock (_manifestLock) isThisSessionCopy = _copiesThisSession.Contains(full);
+            if (!isThisSessionCopy) continue;
+
+            try
+            {
+                var isDirectory = Directory.Exists(full);
+
+                // H-2 fix (code review, panel clone to page): CopyManaged carries the ReadOnly attribute
+                // over from the source (File.Copy/a verbatim directory copy) — clear it first, the same
+                // guard ManagedStorageFileOps.TryDeletePartialDirectory/TryDeletePartialFile already apply,
+                // so a read-only copy (e.g. of a read-only source document) doesn't fail this delete.
+                ManagedStorageFileOps.ClearReadOnlyRecursive(full, isDirectory);
+
+                if (isDirectory) Directory.Delete(full, recursive: true);
+                else if (File.Exists(full)) File.Delete(full);
+            }
+            catch (Exception ex)
+            {
+                // Left exactly as it is — including its manifest entry, so the orphan stays findable —
+                // rather than losing track of a copy this method failed to remove.
+                Log.Error(
+                    "PanelItemStorageService",
+                    "DiscardCopyDeleteFailed",
+                    ex,
+                    new KeyValuePair<string, object?>("path", copyPath));
+                continue;
+            }
+
+            TryCleanupEmptyItemDirectory(full);
+            toRemoveFromManifest.Add(full);
+            lock (_manifestLock) _copiesThisSession.Remove(full);
+        }
+
+        RemoveManifestEntries(toRemoveFromManifest);
+    }
+
     /// <summary>
     /// Same as <see cref="MoveIn(string)"/>, but with an internal-only escape hatch for tests: when
     /// <paramref name="forceCrossVolume"/> is <see langword="true"/>, the same-volume fast path is
@@ -885,6 +1132,32 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
         if (truncated.Length == 0) truncated = "_"; // degenerate case: nothing survived trimming
 
         return Path.Combine(parentDir, truncated + ext);
+    }
+
+    /// <summary>
+    /// M-2 (ADR-045): true when copying <paramref name="requiredBytes"/> onto the volume that hosts
+    /// <paramref name="anchorPath"/> (the managed storage root — every <see cref="CopyManaged"/>
+    /// destination lives there) would leave at least a 5% safety margin of free space. Conservatively
+    /// returns <see langword="true"/> (never blocks the copy on this check alone) when the volume cannot
+    /// be inspected — the verified copy itself is still the authoritative gate against actually running
+    /// out of space.
+    /// </summary>
+    /// <param name="anchorPath">A path on the volume the copy will land on.</param>
+    /// <param name="requiredBytes">The total size, in bytes, about to be copied.</param>
+    private static bool HasSufficientFreeSpace(string anchorPath, long requiredBytes)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(anchorPath);
+            if (string.IsNullOrEmpty(root)) return true;
+
+            var required = (long)(requiredBytes * 1.05);
+            return new DriveInfo(root).AvailableFreeSpace >= required;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
     }
 
     // Volume detection, ResolveCollisionFreeName, and the copy-then-verify cross-volume helpers

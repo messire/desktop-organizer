@@ -55,7 +55,7 @@ internal sealed class ApplicationStateService : IApplicationStateService
     public IReadOnlyList<ChildWindowModel> Panels { get; private set; } = [];
 
     /// <inheritdoc />
-    public IReadOnlyList<string> PageIds { get; private set; } = ["default"];
+    public IReadOnlyList<PageDescriptor> Pages { get; private set; } = [new PageDescriptor("default", null)];
 
     /// <inheritdoc />
     public string CurrentPageId { get; private set; } = "default";
@@ -123,12 +123,7 @@ internal sealed class ApplicationStateService : IApplicationStateService
         // ELEMENT ({"panels":[null]}) or a snapshot whose own "panels" is null. Skipped, never thrown.
         Panels = (document.Panels ?? []).Where(p => p is not null).Select(PanelStateMapper.FromDto).ToList();
 
-        var pages = document.Pages ?? new PagesStateDto();
-        var pageIds = pages.Ids;
-        PageIds = pageIds is { Count: > 0 } ? pageIds : ["default"];
-        CurrentPageId = string.IsNullOrWhiteSpace(pages.CurrentPageId)
-            ? "default"
-            : pages.CurrentPageId;
+        (Pages, CurrentPageId) = PagesStateMapper.FromDto(document.Pages);
 
         Snapshots = (document.LayoutSnapshots ?? []).Where(s => s is not null).Select(ToLayoutSnapshot).ToList();
 
@@ -262,11 +257,7 @@ internal sealed class ApplicationStateService : IApplicationStateService
             var panels = windowManager.GetAllChildWindows().Select(PanelStateMapper.ToDto).ToList();
 
             var pageManager = ResolvePageManager();
-            var pages = new PagesStateDto
-            {
-                Ids = [.. pageManager.Pages],
-                CurrentPageId = pageManager.CurrentPage,
-            };
+            var pages = PagesStateMapper.ToDto(pageManager.PageDescriptors, pageManager.CurrentPage);
 
             var snapshotService = ResolveLayoutSnapshotService();
             var snapshots = snapshotService.Snapshots.Select(ToSnapshotDto).ToList();

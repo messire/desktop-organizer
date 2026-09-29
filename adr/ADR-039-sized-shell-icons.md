@@ -1,6 +1,9 @@
 # ADR-039: Sized Shell Icons via IShellItemImageFactory
 
-Status: Accepted (2026-09-27)
+Status: Accepted (2026-09-27) — Amended 2026-09-30 ([ADR-046](ADR-046-background-icon-loading.md): the
+"Known follow-up" below is closed — every `GetIcon` call now runs on a dedicated background STA worker
+thread, not the UI thread; the three-stage fallback, the `(path, bucket)` cache, and the UNC/offline skip
+described in this ADR are unchanged)
 
 ## Context
 
@@ -123,12 +126,11 @@ Positive:
   (unchanged from the pre-1.0 behavior) — the uniform placeholder is strictly the last resort.
 
 Negative / known follow-up:
-- **All icon extraction is still synchronous on the UI thread.** Stages 1–2 open the shell item on the
-  calling (UI) thread; the UNC/offline skip (above) removes the two most common multi-second stalls but
-  does not eliminate every one (a `.lnk` to an unreachable share, a slow local shell extension). The
-  complete fix — fetching high-resolution icons on a dedicated background STA thread, showing a generic
-  icon immediately and swapping in the real one when ready — is a backlog item, not implemented in this
-  round.
+- ~~**All icon extraction is still synchronous on the UI thread.**~~ **Closed by ADR-046 (2026-09-30):**
+  every `GetIcon`/`GetTypeIcon` call now runs on a dedicated background STA worker queue (two lanes,
+  Local/Remote, with a circuit breaker on the remote root) — a generic placeholder, then a type icon, then
+  the real icon is swapped in via `FileItem.UpdateIcon` as results arrive. This paragraph is left in place,
+  struck through, as the historical record of the gap ADR-046 closes; see ADR-046 for the design.
 - Every fallback-stage failure is logged (`IconHandleFailed`, `ShellItemImageFailed`,
   `SystemIconIndexFailed`, `ImageListIconFailed`, `IconBitmapReadFailed`, `IconBitmapDestroyFailed`,
   `IconRetrievalFailed` with a closed-set `stage` field, `IconFreshnessCheckFailed` —
@@ -151,3 +153,6 @@ does not visibly stall the panel; a OneDrive online-only file's icon does not fo
   per-window DPI-scale source this ADR reuses rather than duplicating.
 - `docs/Refactoring/Testing/diagnostics-log-events.md` — the `icon` category event list, extended by this
   round.
+- [ADR-046](ADR-046-background-icon-loading.md) — closes the "known follow-up" above: moves every `GetIcon`
+  call off the UI thread onto a background STA worker queue, without changing this ADR's fallback chain,
+  cache key, or UNC/offline skip.

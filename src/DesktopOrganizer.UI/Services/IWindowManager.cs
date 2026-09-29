@@ -10,11 +10,6 @@ namespace DesktopOrganizer.UI.Services;
 public interface IWindowManager
 {
     /// <summary>
-    /// Triggered when the visibility of the main window changes.
-    /// </summary>
-    event EventHandler<bool> OnMainWindowVisibilityChanged;
-
-    /// <summary>
     /// Triggered when a child window is added.
     /// </summary>
     event EventHandler<ChildWindowModel> OnChildWindowAdded;
@@ -25,10 +20,14 @@ public interface IWindowManager
     event EventHandler<ChildWindowModel> OnChildWindowRemoved;
 
     /// <summary>
-    /// Toggles the main application window: shows/activates it if currently hidden, hides it if
-    /// currently visible. Used by the tray icon's double-click gesture.
+    /// M-D fix (code review, panel clone to page, backlog 1.x wave 3 review): triggered whenever
+    /// <see cref="MovePanelToPage"/> actually reassigns a panel's page — regardless of which UI surface
+    /// invoked it (a panel's own header context menu, via <c>ChildWindowViewModel.MovePanelToPageCommand</c>,
+    /// never goes through <c>MainWindowViewModel</c> at all). Lets any subscriber whose own panel list is
+    /// keyed by page (<c>MainWindowViewModel.PanelsOnCurrentPage</c>) refresh itself without depending on
+    /// some unrelated event happening to fire first.
     /// </summary>
-    void StartMainWindow();
+    event EventHandler<ChildWindowModel> OnChildWindowPageChanged;
 
     /// <summary>
     /// Shows and activates the main application window unconditionally — never hides it. If the
@@ -247,6 +246,60 @@ public interface IWindowManager
     /// <param name="panel">The panel to move.</param>
     /// <param name="pageId">The destination page identifier.</param>
     void MovePanelToPage(Models.ChildWindowModel panel, string pageId);
+
+    /// <summary>
+    /// Creates a fully independent copy of <paramref name="source"/> on <paramref name="pageId"/> — which
+    /// may equal <paramref name="source"/>'s own page (Panels section's "Copy to page ▾", ADR-045 «Panel
+    /// clone to page»). Every saved field is duplicated (through <c>PanelStateMapper</c>, the same
+    /// serialization contract every other panel uses), so the clone and the source share nothing mutable:
+    /// changing or deleting either afterwards never affects the other.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Transactional: either the clone is created complete, or nothing happens at all. Every app-managed
+    /// item the source references is duplicated into its own brand-new per-item storage directory
+    /// (<c>IPanelItemStorageService.CopyManaged</c>) — never a shared managed path between the two panels.
+    /// A managed item whose file is already gone from disk is left out of the clone entirely (counted in
+    /// <see cref="PanelCloneResult.SkippedMissingItems"/>) rather than copying a reference to
+    /// nothing that two panels would then both "own". A non-managed reference (an external file, or a
+    /// shortcut the user left where it was) is duplicated as the SAME path in both panels — it belongs to
+    /// the user, not this app, so there is nothing to copy. Any copy failure discards every managed copy
+    /// already made for this attempt (<c>IPanelItemStorageService.DiscardCopies</c>) before returning — the
+    /// source is never touched.
+    /// </para>
+    /// <para>
+    /// A Folder Portal clone (<see cref="Models.ChildWindowModel.SourceFolderPath"/> set) copies only the
+    /// folder BINDING, exactly like every other appearance/behavior field — never the folder's contents; the
+    /// clone gets its own live <c>FileSystemWatcher</c> on the same folder once created.
+    /// </para>
+    /// <para>
+    /// The clone's title follows Explorer's own collision convention against every panel already on
+    /// <paramref name="pageId"/> ("Notes" → "Notes — copy" → "Notes — copy (2)", localized). Its geometry is
+    /// the source's own position/size verbatim when <paramref name="pageId"/> differs from the source's
+    /// page; on the SAME page it is offset by one grid step and clamped into its monitor's work area instead,
+    /// so it never sits exactly on top of the source.
+    /// </para>
+    /// </remarks>
+    /// <param name="source">The panel to clone. Never mutated.</param>
+    /// <param name="pageId">The clone's destination page — may be <paramref name="source"/>'s own current page.</param>
+    /// <returns>What happened; see <see cref="PanelCloneOutcome"/>.</returns>
+    PanelCloneResult ClonePanelToPage(Models.ChildWindowModel source, string pageId);
+
+    /// <summary>
+    /// M-1 fix (code review, panel clone to page): every app-managed path (see
+    /// <c>IPanelItemStorageService.IsManaged</c>) currently listed, as-is, in ANY live panel's
+    /// <see cref="Models.ChildWindowModel.FilePaths"/> OTHER than <paramref name="excludingPanelId"/> — the
+    /// same "claimed" concept <c>LoadWindowsState</c>'s own up-front <c>ResolveStalePanelPaths</c> pass
+    /// already applies once, at startup. Exposed so a live panel's ONGOING per-item stale-path self-heal
+    /// (<c>ChildWindowViewModel.ResolveManagedReplacements</c>, which runs on every model load/reload —
+    /// not just at startup) can stay claim-aware too: after <see cref="ClonePanelToPage"/> gives a second
+    /// panel its own live copy of a managed item, a DIFFERENT (e.g. stale) panel's entry for the pre-clone
+    /// original path must never be healed onto that copy — it belongs to the panel that was just cloned
+    /// into, not to whichever other panel happens to still reference the same original path.
+    /// </summary>
+    /// <param name="excludingPanelId">The panel whose own <see cref="Models.ChildWindowModel.FilePaths"/> are excluded from the result.</param>
+    /// <returns>Every OTHER live panel's directly-referenced managed paths (case-insensitive).</returns>
+    IReadOnlySet<string> GetManagedPathsClaimedByOtherPanels(Guid excludingPanelId);
 
     /// <summary>
     /// One attempt at putting every panel back on the desktop after Explorer was restarted (ADR-034).

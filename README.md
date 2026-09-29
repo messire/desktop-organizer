@@ -42,12 +42,19 @@ original file back where it came from.
 
 - Multiple movable, resizable panels ("fences") embedded directly into the desktop — hidden from
   Alt+Tab/taskbar, always below your other windows.
-- Multiple pages of panels, switchable from the tray/settings, each with its own panel set.
+- Multiple pages of panels, switchable from the tray/settings, each with its own panel set and its own
+  editable name (rename a page from Settings → Pages); the tray's right-click menu lists every page by
+  name for quick switching, and double-clicking the tray icon cycles to the next one.
+- Copy a panel to another page (including its own page) as a fully independent duplicate — its own copies
+  of any managed files, so deleting one copy never touches the other.
 - Grid view and list view per panel, with icon-size, sort mode (manual drag-to-reorder or by name),
   content filter, and roll-up (collapse to just the title bar).
 - Move semantics on drag & drop: dropping a file/folder into a panel moves it into the app's managed
   storage (no duplicate desktop shortcut); removing it from the panel restores it to where it came from.
 - Folder Portals: point a panel at a real folder and it mirrors that folder's contents live.
+- Icons load in the background: panels stay responsive at startup and while you work even with a large
+  Folder Portal or shortcuts pointing at a currently-unreachable network share — items show a placeholder,
+  then their real icon, as soon as it's ready.
 - Multi-monitor aware placement, magnetic grid snapping while dragging/resizing, and layout snapshots
   (save/restore a full arrangement of pages and panels by name).
 - A dedicated "system icons" sidebar panel for the classic desktop icons (This PC, Recycle Bin, etc.),
@@ -57,6 +64,9 @@ original file back where it came from.
 - Start with Windows (optional, toggle in the installer's finish page or in Settings — both control the
   exact same setting).
 - Full English and Russian UI, switchable live from Settings without restarting.
+- A single, consistent light/dark interface that follows Windows' own app-mode setting live (no
+  restart) across Settings, the "Customize panel…" window, every menu and dialog, and the tray — including
+  High Contrast; a panel's own colors are unaffected, that's still yours to set.
 - Installing or uninstalling over a running instance asks it to close gracefully first (state save,
   desktop icons restored) instead of just blocking.
 
@@ -128,6 +138,11 @@ left off. Delete `%LocalAppData%\DesktopOrganizer` yourself if you want a truly 
   back onto any panel — the panel it belonged to is gone by the time you restore it.
 - Very long file paths (beyond `MAX_PATH`) are not supported by the underlying Recycle Bin/shell
   operations the app relies on for some file actions.
+- Downgrading to a version older than 0.8.0 after running 0.8.0 or newer is not supported automatically:
+  the older build sees a settings-file format it doesn't recognize and starts with an empty, read-only
+  session (your data is not deleted — the file itself is left untouched, and going back to 0.8.0+ picks
+  it right back up). Manual recovery on an older version requires restoring the automatic pre-upgrade
+  snapshot by hand — see the Upgrade notes in `CHANGELOG.md`.
 
 ## License
 
@@ -169,13 +184,20 @@ DesktopOrganizer тихо работает из трея и позволяет �
 
 - Несколько перемещаемых, изменяемых по размеру панелей ("fences"), встроенных прямо в слой рабочего
   стола — скрыты из Alt+Tab/панели задач, всегда под другими окнами.
-- Несколько страниц панелей, переключаемых из трея/настроек, каждая — со своим набором панелей.
+- Несколько страниц панелей, переключаемых из трея/настроек, каждая — со своим набором панелей и своим
+  редактируемым именем (переименование — в Настройках → Страницы); меню трея показывает список страниц по
+  именам для быстрого переключения, а двойной клик по иконке трея переключает на следующую страницу.
+- Копирование панели на другую страницу (в том числе на ту же самую) как полностью независимой копии —
+  со своими копиями всех перемещённых в неё файлов, удаление одной копии никогда не затрагивает другую.
 - Вид «сетка» и вид «список» для каждой панели, размер значков, режим сортировки (ручной
   drag-to-reorder или по имени), фильтр содержимого, сворачивание в заголовок (roll-up).
 - Move-семантика drag&drop: перетаскивание файла/папки в панель перемещает его в управляемое хранилище
   приложения (без дублирующего ярлыка на столе); удаление из панели возвращает файл туда, откуда он был
   взят.
 - Folder Portals: панель может «смотреть» на реальную папку и живо отражать её содержимое.
+- Иконки загружаются в фоне: панели остаются отзывчивыми при старте и в работе, даже с большим Folder
+  Portal или ярлыками на временно недоступную сетевую шару — элемент сначала показывает плейсхолдер, затем
+  свою настоящую иконку, как только она готова.
 - Учёт нескольких мониторов при размещении, магнитное прилипание к сетке при перетаскивании/ресайзе, и
   снапшоты раскладки (сохранение/восстановление всей расстановки страниц и панелей по имени).
 - Отдельная боковая панель «системные значки» для классических значков рабочего стола (Этот компьютер,
@@ -185,6 +207,9 @@ DesktopOrganizer тихо работает из трея и позволяет �
 - Запуск вместе с Windows (по желанию, галочка на финальной странице инсталлятора или в Настройках —
   обе стороны управляют ровно одной и той же настройкой).
 - Полный русский и английский интерфейс, переключается вживую в Настройках без перезапуска.
+- Единый светлый/тёмный интерфейс, который следует системному режиму приложений Windows вживую (без
+  перезапуска) — окно настроек, окно «Настроить панель…», все меню и диалоги, трей; поддерживается и режим
+  высокой контрастности. Цвет самих панелей при этом не меняется — это по-прежнему твой выбор.
 - Установка/удаление поверх запущенного приложения сначала просит его штатно закрыться (сохранение
   состояния, восстановление значков рабочего стола), а не просто блокируется.
 
@@ -256,6 +281,11 @@ JSON Lines, до 10 файлов по 10 МБ) в `%LOCALAPPDATA%\DesktopOrganiz
   элемента), а не обратно на панель — панель, которой он принадлежал, к моменту восстановления уже удалена.
 - Очень длинные пути (больше `MAX_PATH`) не поддерживаются операциями Корзины/shell, на которые опирается
   часть файловых действий приложения.
+- Откат на версию старше 0.8.0 после запуска 0.8.0 или новее не поддерживается автоматически: старая
+  сборка видит незнакомый ей формат файла настроек и стартует с пустой, недоступной для записи сессией
+  (данные не удаляются — сам файл остаётся нетронутым, и возврат на 0.8.0+ сразу возвращает всё на место).
+  Ручное восстановление на старой версии требует вручную восстановить автоматический снимок,
+  сделанный перед апгрейдом, — см. раздел Upgrade notes в `CHANGELOG.md`.
 
 ## Лицензия
 

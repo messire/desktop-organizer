@@ -1,6 +1,11 @@
 # ADR-031: Settings Window — Sidebar Navigation + Panel Customize Dialog
 
-Status: Accepted (2026-09-26)
+Status: Accepted (2026-09-26) — Amended 2026-09-27 (ADR-032: D-8 «только английский» — superseded);
+Amended 2026-09-29 (ADR-042 amendment, бэклог 1.x пункт 5: карточная раскладка `PanelCustomizeWindow`/
+`NewPanelDefaultsSection` упрощена до Preview → «Цвет» → «Дополнительно», боковая навигация и немодальность
+самого окна не пересмотрены); Amended 2026-10-09 (D-6: переключатель «Show desktop icons» возвращён в
+Settings → General по явной просьбе пользователя, добавлено событие `IDesktopIconsService.VisibilityChanged`
+— см. «Amendment (2026-10-09)» в конце документа)
 
 Ветка `feature/settings-window-redesign` (от `rc/0.6.0`, база `3628cc4`). Источник решения — бриф
 `docs/prompts/settings-window-redesign.md` (инвентарь текущих настроек, решения D-1..D-10, разбивка на
@@ -190,6 +195,10 @@ Customize "{Title}"
 подтверждением.
 
 ### D-6. Трей: возвращается «Show desktop icons»
+
+> **Частично отменено 2026-10-09** — удаление переключателя из окна настроек (первое предложение ниже)
+> пересмотрено: он возвращён в Settings → General, см. «Amendment (2026-10-09)» в конце документа. Трей-часть
+> D-6 (пункт + `ToggleDesktopIconsRequested`/`SetDesktopIconsVisible`) остаётся в силе.
 
 Чекбокс «Show desktop icons» удаляется из окна настроек (сессионная команда, не преференция — п.
 «Контекст» выше), но не теряется: в трей возвращается checkable-пункт «Show desktop icons», рядом с
@@ -393,3 +402,44 @@ per-panel scope в отдельное окно-компаньон — то, чт
 D-8 выше. Вся поверхность, добавленная этим ADR (боковая навигация `MainWindow`, `PanelCustomizeWindow`,
 карточки `Settings.*`), локализована пакетами WP-4a/WP-4b фичи локализации. Остальные решения этого ADR
 (D-1..D-7, D-9, D-10) не пересматриваются.
+
+## Amendment (2026-10-09): D-6 — «Show desktop icons» возвращён в Settings → General
+
+**Что изменилось.** Переключатель «Show desktop icons» (`Theme.ToggleSwitch` в `SettingsCard`,
+`Views/Settings/GeneralSection.xaml`, привязка `MainWindowViewModel.DesktopIconsVisible`, TwoWay) снова
+находится в окне настроек — рядом с пунктом трея и жестом двойного клика по рабочему столу. Остаются
+действительными: трей-пункт, `ITrayIconManager.ToggleDesktopIconsRequested`/`SetDesktopIconsVisible(bool)`,
+остальные решения D-1..D-5, D-7, D-9, D-10. Раздел «Контекст» (п. 4) и «Позитивные последствия» (пункт про
+session-команды) в части «Show desktop icons не живёт в настройках» этим amendment'ом устарели; «Edit layout
+mode» по-прежнему вне окна настроек (amendment к ADR-026 не пересматривается).
+
+**Причина.** Явная просьба пользователя: переключатель должен быть находим в Settings. Обоснование D-6
+«сессионная команда, не преференция» остаётся верным для **персистентности** (состояние по-прежнему не
+сохраняется и не попадает в `IAppSettings`/`application-state.json`; описание карточки в RESX прямо
+говорит, что при закрытии приложения значки возвращаются), но не для **размещения**: наличие сессионного
+переключателя в настройках — осознанное отступление от рекомендации «команды не в настройках».
+
+**Контракт синхронизации (новый).** Раньше галка трея обновлялась в трёх точках (старт, клик, двойной клик),
+а внешние/косвенные изменения (R-13 плана `docs/PLANS/settings-window-redesign.md`) не наблюдались. Теперь
+источник правды один — `IDesktopIconsService`, и он оповещает всех:
+
+- `IDesktopIconsService.VisibilityChanged` (`EventHandler?`, `Services.Abstractions/Interfaces/IDesktopIconsService.cs`)
+  вызывается из `DesktopIconsService.SetIconsVisible`, `Toggle` (через `SetIconsVisible`) и **успешного**
+  `ReapplyDesiredVisibility` (восстановление «скрыто» после рестарта Explorer, ADR-034). Событие приходит в
+  потоке вызывающего; допускается ложное срабатывание (подписчики сами перечитывают `AreIconsVisible`),
+  пропуск — нет.
+- Подписчики: `App.xaml.cs` `InitTrayIcon` → `ITrayIconManager.SetDesktopIconsVisible(AreIconsVisible)`
+  (галка трея), с защитой `Dispatcher.CheckAccess()` — `CrashCoordinator` может восстанавливать значки из
+  фонового потока падающего процесса, там WinForms-пункт трогать нельзя, галка остаётся как есть; и
+  `MainWindowViewModel` → `OnPropertyChanged(nameof(DesktopIconsVisible))` (переключатель в настройках).
+- Не наблюдается: изменение видимости **вне приложения** (Проводник → Вид → «Отображать значки рабочего
+  стола»). Это остаётся известным ограничением; закрыт только R-13 для изменений, инициированных самим
+  приложением.
+
+**Persistence не затронута.** Ноль новых ключей `IAppSettings`/`user.config`, ноль изменений схемы и DTO
+(ADR-024, `schemaVersion` без изменений). Состояние — только `IDesktopIconsService.DesiredVisible` (in-memory,
+намерение ADR-034) и живая видимость `SHELLDLL_DefView`.
+
+**Отклонённая альтернатива** — отдельный ADR для события `VisibilityChanged`: это синхронизационная деталь
+уже принятых решений (D-6 и ADR-034), а не самостоятельное архитектурное решение; зафиксировано здесь и в
+amendment к [ADR-034](ADR-034-explorer-restart-recovery.md).

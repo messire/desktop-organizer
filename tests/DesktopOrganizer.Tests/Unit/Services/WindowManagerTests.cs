@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
@@ -613,23 +614,27 @@ public class WindowManagerTests
     }
 
     /// <summary>
-    /// Verifies that a path that still exists on disk is never resolved through the storage service —
-    /// only genuinely stale (missing) paths trigger a candidate lookup.
+    /// B-6 (ADR-046 7c): the manifest lookup (<see cref="IPanelItemStorageService.FindManagedCandidates"/>)
+    /// now runs BEFORE checking whether the original path still exists on disk (manifest-first — see
+    /// <see cref="WindowManager.ResolveStalePanelPaths"/>'s own remarks for why), but the REMAP OUTCOME is
+    /// unchanged: a path that still exists is never replaced, even when the manifest happens to also know
+    /// of a (now-irrelevant) managed candidate for it.
     /// </summary>
     [Fact]
-    public void ResolveStalePanelPaths_PathAlreadyExists_NeverConsultsStorage()
+    public void ResolveStalePanelPaths_PathAlreadyExists_NeverRemapped_EvenWhenManifestHasACandidate()
     {
         var existing = Path.Combine(Path.GetTempPath(), $"DOrgWmResolveExisting_{Guid.NewGuid():N}.txt");
         File.WriteAllText(existing, "content");
         var panel = new ChildWindowModel { FilePaths = [existing] };
         var storageMock = new Mock<IPanelItemStorageService>();
         storageMock.Setup(s => s.IsManaged(It.IsAny<string>())).Returns(false);
+        storageMock.Setup(s => s.FindManagedCandidates(existing)).Returns([Path.Combine(Path.GetTempPath(), "irrelevant-candidate.txt")]);
 
         try
         {
             WindowManager.ResolveStalePanelPaths([panel], storageMock.Object);
 
-            storageMock.Verify(s => s.FindManagedCandidates(It.IsAny<string>()), Times.Never);
+            Assert.Equal([existing], panel.FilePaths);
         }
         finally
         {
@@ -1065,6 +1070,127 @@ public class WindowManagerTests
         applicationStateServiceMock.Verify(s => s.SaveNow(), Times.Never);
     }
 
+    /// <summary>
+    /// Пробел в тестах (final review, panel clone to page, backlog 1.x): a real page change raises
+    /// <see cref="WindowManager.OnChildWindowPageChanged"/> exactly once — the event
+    /// <c>MainWindowViewModel.MovePanelToPageCommand</c>'s own NEW-6 fix now relies on instead of calling
+    /// <c>RefreshPanelsOnCurrentPage()</c> directly (<c>MainWindowViewModelTests</c>'s own remarks).
+    /// </summary>
+    [Fact]
+    public void MovePanelToPage_RealPageChange_RaisesOnChildWindowPageChangedOnce()
+    {
+        var manager = BuildWindowManager(out _, out _, currentPage: "default");
+        var panel = new ChildWindowModel { PageId = "other", IsVisible = false };
+        var raisedCount = 0;
+        ChildWindowModel? raisedFor = null;
+        manager.OnChildWindowPageChanged += (_, model) =>
+        {
+            raisedCount++;
+            raisedFor = model;
+        };
+
+        manager.MovePanelToPage(panel, "work");
+
+        Assert.Equal(1, raisedCount);
+        Assert.Same(panel, raisedFor);
+    }
+
+    /// <summary>
+    /// Пробел в тестах: a same-page "move" (already on the destination page) never raises
+    /// <see cref="WindowManager.OnChildWindowPageChanged"/> — there is no actual change for any subscriber
+    /// to react to.
+    /// </summary>
+    [Fact]
+    public void MovePanelToPage_AlreadyOnDestinationPage_NeverRaisesOnChildWindowPageChanged()
+    {
+        var manager = BuildWindowManager(out _, out _, currentPage: "default");
+        var panel = new ChildWindowModel { PageId = "work", IsVisible = true };
+        var raisedCount = 0;
+        manager.OnChildWindowPageChanged += (_, _) => raisedCount++;
+
+        manager.MovePanelToPage(panel, "work");
+
+        Assert.Equal(0, raisedCount);
+    }
+
+    /// <summary>
+    /// Пробел в тестах: an unknown destination page (fix-cycle finding 10's silent no-op) never raises
+    /// <see cref="WindowManager.OnChildWindowPageChanged"/> either — the panel never actually moved.
+    /// </summary>
+    [Fact]
+    public void MovePanelToPage_UnknownPageId_NeverRaisesOnChildWindowPageChanged()
+    {
+        var manager = BuildWindowManager(out _, out var pageManagerMock, currentPage: "default");
+        pageManagerMock.SetupGet(p => p.Pages).Returns(["default", "work"]);
+        var panel = new ChildWindowModel { PageId = "work", IsVisible = true };
+        var raisedCount = 0;
+        manager.OnChildWindowPageChanged += (_, _) => raisedCount++;
+
+        manager.MovePanelToPage(panel, "no-such-page");
+
+        Assert.Equal(0, raisedCount);
+    }
+
+    // ── GetManagedPathsClaimedByOtherPanels — _loadingStates seam (M-C fix, code review, panel clone to
+    // page, backlog 1.x wave 3 review) ─────────────────────────────────────────────────────────────────
+    private static readonly FieldInfo LoadingStatesField =
+        typeof(WindowManager).GetField("_loadingStates", BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+    /// <summary>
+    /// Пробел в тестах (final review, panel clone to page, backlog 1.x): while <c>_loadingStates</c> is
+    /// set (only for the duration of <see cref="WindowManager.LoadWindowsState"/> — see that field's own
+    /// remarks), a managed path referenced by one of the STILL-LOADING panels is reported as claimed for
+    /// every OTHER panel, even though <c>_childWindows</c> (populated only as each panel finishes
+    /// constructing) doesn't contain it yet. Reflection sets the field directly — <c>_childWindows</c>
+    /// itself can't be populated without a real WPF <c>ChildWindow</c> (this class's own remarks), so this
+    /// seam is otherwise unreachable from a fully mocked <see cref="WindowManager"/> instance.
+    /// </summary>
+    [Fact]
+    public void GetManagedPathsClaimedByOtherPanels_LoadingStatesSet_IncludesTheirManagedPaths()
+    {
+        var manager = BuildWindowManager(out _, out var itemStorageMock);
+        itemStorageMock.Setup(s => s.IsManaged(@"C:\managed\loading.lnk")).Returns(true);
+        var loadingPanel = new ChildWindowModel { Id = Guid.NewGuid(), FilePaths = [@"C:\managed\loading.lnk"] };
+        LoadingStatesField.SetValue(manager, new List<ChildWindowModel> { loadingPanel });
+
+        var claimed = manager.GetManagedPathsClaimedByOtherPanels(Guid.NewGuid());
+
+        Assert.Contains(@"C:\managed\loading.lnk", claimed);
+    }
+
+    /// <summary>
+    /// The loading panel excluded by its own id is never counted against itself — same "never claims its
+    /// own paths" contract <c>_childWindows</c>' own loop above already has.
+    /// </summary>
+    [Fact]
+    public void GetManagedPathsClaimedByOtherPanels_LoadingStatesSet_ExcludesTheExcludedPanelId()
+    {
+        var manager = BuildWindowManager(out _, out var itemStorageMock);
+        itemStorageMock.Setup(s => s.IsManaged(@"C:\managed\own.lnk")).Returns(true);
+        var loadingPanelId = Guid.NewGuid();
+        var loadingPanel = new ChildWindowModel { Id = loadingPanelId, FilePaths = [@"C:\managed\own.lnk"] };
+        LoadingStatesField.SetValue(manager, new List<ChildWindowModel> { loadingPanel });
+
+        var claimed = manager.GetManagedPathsClaimedByOtherPanels(loadingPanelId);
+
+        Assert.DoesNotContain(@"C:\managed\own.lnk", claimed);
+    }
+
+    /// <summary>
+    /// Outside of a <see cref="WindowManager.LoadWindowsState"/> call, <c>_loadingStates</c> is
+    /// <see langword="null"/> — <see cref="WindowManager.GetManagedPathsClaimedByOtherPanels"/> must not
+    /// throw and must report nothing from it (the default/every-other-call-time shape).
+    /// </summary>
+    [Fact]
+    public void GetManagedPathsClaimedByOtherPanels_LoadingStatesNull_ReturnsEmpty()
+    {
+        var manager = BuildWindowManager(out _, out _);
+
+        var claimed = manager.GetManagedPathsClaimedByOtherPanels(Guid.NewGuid());
+
+        Assert.Empty(claimed);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
     private static MonitorInfo BuildMonitor(Rect workArea) =>
         new("\\\\.\\DISPLAY1", workArea, workArea, IsPrimary: true);
@@ -1109,6 +1235,33 @@ public class WindowManagerTests
 
     private static WindowManager BuildWindowManager(IReadOnlyList<ChildWindowModel>? panels = null)
         => BuildWindowManager(out _, panels);
+
+    /// <summary>
+    /// Same shape as the other <c>BuildWindowManager</c> overloads, but also exposes the mocked
+    /// <see cref="IPanelItemStorageService"/> — needed only by the <c>_loadingStates</c> seam tests above,
+    /// which stub <see cref="IPanelItemStorageService.IsManaged"/> directly.
+    /// </summary>
+    private static WindowManager BuildWindowManager(
+        out Mock<IApplicationStateService> applicationStateServiceMock,
+        out Mock<IPanelItemStorageService> itemStorageMock)
+    {
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        var monitorServiceMock = new Mock<IMonitorService>();
+        itemStorageMock = new Mock<IPanelItemStorageService>();
+        applicationStateServiceMock = new Mock<IApplicationStateService>();
+        applicationStateServiceMock.SetupGet(s => s.Panels).Returns([]);
+
+        var appSettingsMock = new Mock<IAppSettings>();
+        appSettingsMock.SetupGet(s => s.GridSize).Returns(1);
+
+        return new WindowManager(
+            serviceProviderMock.Object,
+            monitorServiceMock.Object,
+            itemStorageMock.Object,
+            applicationStateServiceMock.Object,
+            appSettingsMock.Object,
+            FakeDesktopScale.Uniform().Object);
+    }
 
     private static WindowManager BuildWindowManager(out Mock<IApplicationStateService> applicationStateServiceMock, IReadOnlyList<ChildWindowModel>? panels = null)
     {

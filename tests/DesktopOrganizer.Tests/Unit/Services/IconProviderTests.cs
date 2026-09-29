@@ -964,6 +964,174 @@ public class IconProviderTests
         }
     }
 
+    // ── ADR-046: TryPeekCachedIcon/TryPeekTypeIcon/GetTypeIcon/PlaceholderIcon ────────────────────────
+
+    /// <summary>A path already resolved by <see cref="IconProvider.GetIcon(string, int)"/> can be peeked back without touching the icon handler again.</summary>
+    [Fact]
+    public void TryPeekCachedIcon_AfterGetIcon_HitsWithoutTouchingHandler()
+    {
+        var path = CreateTempFile("peek-hit");
+        try
+        {
+            var expectedIcon = new DrawingImage();
+            SetupMocks(path, ValidIconHandle, expectedIcon);
+            _iconProvider.GetIcon(path, 32);
+            _iconHandlerMock.Invocations.Clear();
+
+            var hit = _iconProvider.TryPeekCachedIcon(path, 32, out var icon);
+
+            Assert.True(hit);
+            Assert.Same(expectedIcon, icon);
+            _iconHandlerMock.Verify(
+                h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, It.IsAny<FileAttribute>(), It.IsAny<FileFlag>()),
+                Times.Never);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>The same path at a different (snapped) pixel size is a cache miss — sizes are part of the key.</summary>
+    [Fact]
+    public void TryPeekCachedIcon_DifferentBucket_Misses()
+    {
+        var path = CreateTempFile("peek-miss-bucket");
+        try
+        {
+            SetupMocks(path, ValidIconHandle, new DrawingImage());
+            _iconProvider.GetIcon(path, 32);
+
+            var hit = _iconProvider.TryPeekCachedIcon(path, 256, out var icon);
+
+            Assert.False(hit);
+            Assert.Null(icon);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>A path never resolved at all is a cache miss, without ever touching the icon handler (no fs/shell access for a pure peek).</summary>
+    [Fact]
+    public void TryPeekCachedIcon_NeverResolved_MissesWithoutTouchingHandler()
+    {
+        var hit = _iconProvider.TryPeekCachedIcon(@"C:\never-queried.txt", 32, out var icon);
+
+        Assert.False(hit);
+        Assert.Null(icon);
+        _iconHandlerMock.Verify(
+            h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, It.IsAny<FileAttribute>(), It.IsAny<FileFlag>()),
+            Times.Never);
+    }
+
+    /// <summary><see cref="IconProvider.GetTypeIcon"/> caches by lower-cased extension, independent of the exact path/case that first resolved it.</summary>
+    [Fact]
+    public void GetTypeIcon_CachesPerExtension_RegardlessOfPathOrCase()
+    {
+        var expectedIcon = new DrawingImage();
+        _iconHandlerMock
+            .Setup(h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags))
+            .Returns(ValidIconHandle);
+
+        // Not ValidIconHandle: GetIconHandle's `ref` out-value can't be set through this mock (see the
+        // GetIcon_BehavesCorrectly_ForVariousFilePaths/InvalidFilePath remark above) — TryRetrieveIcon
+        // always calls CreateBitmap with the ref struct's own (never-actually-set) IconHandle field.
+        _iconFactoryMock.Setup(f => f.CreateBitmap(It.IsAny<IntPtr>())).Returns(expectedIcon);
+
+        var first = _iconProvider.GetTypeIcon("a.TXT", isDirectory: false);
+        var second = _iconProvider.GetTypeIcon("completely/different/b.txt", isDirectory: false);
+
+        Assert.Same(expectedIcon, first);
+        Assert.Same(first, second);
+        _iconHandlerMock.Verify(
+            h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags),
+            Times.Once);
+    }
+
+    /// <summary>A directory's type icon is cached under a key ("&lt;dir&gt;") distinct from any file extension's cache entry.</summary>
+    [Fact]
+    public void GetTypeIcon_Directory_CachesSeparatelyFromFiles()
+    {
+        var fileIcon = new DrawingImage();
+        var dirIcon = new DrawingImage();
+
+        // GetIconHandle's `ref` out-value can't be set through this mock (see the sibling test's remark
+        // above), so CreateBitmap can't be told apart by its IntPtr argument either — a small piece of
+        // per-call state recorded by GetIconHandle's own Callback distinguishes the two paths instead.
+        ImageSource? nextIcon = null;
+        _iconHandlerMock
+            .Setup(h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags))
+            .Callback(() => nextIcon = fileIcon)
+            .Returns(ValidIconHandle);
+        _iconHandlerMock
+            .Setup(h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, DirectoryAttributes, IconFlags))
+            .Callback(() => nextIcon = dirIcon)
+            .Returns(ValidIconHandle);
+        _iconFactoryMock.Setup(f => f.CreateBitmap(It.IsAny<IntPtr>())).Returns(() => nextIcon!);
+
+        var file = _iconProvider.GetTypeIcon("a.txt", isDirectory: false);
+        var directory = _iconProvider.GetTypeIcon("SomeFolder", isDirectory: true);
+
+        Assert.Same(fileIcon, file);
+        Assert.Same(dirIcon, directory);
+    }
+
+    /// <summary>A failed type-icon resolution returns the placeholder but is NOT cached — a later call retries instead of sticking the whole extension with the placeholder forever.</summary>
+    [Fact]
+    public void GetTypeIcon_Failure_ReturnsPlaceholderAndIsNotCached()
+    {
+        _iconHandlerMock
+            .Setup(h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, It.IsAny<FileAttribute>(), IconFlags))
+            .Returns(InvalidIconHandle);
+        var placeholder = new DrawingImage();
+        _iconFactoryMock.Setup(f => f.CreateBitmap()).Returns(placeholder);
+
+        var first = _iconProvider.GetTypeIcon("fails.abc", isDirectory: false);
+        var second = _iconProvider.GetTypeIcon("fails.abc", isDirectory: false);
+
+        Assert.Same(placeholder, first);
+        Assert.Same(placeholder, second);
+        _iconHandlerMock.Verify(
+            h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, It.IsAny<FileAttribute>(), IconFlags),
+            Times.Exactly(2));
+    }
+
+    /// <summary>Before any <see cref="IconProvider.GetTypeIcon"/> call for a given extension, <see cref="IconProvider.TryPeekTypeIcon"/> misses.</summary>
+    [Fact]
+    public void TryPeekTypeIcon_BeforeGetTypeIcon_Misses()
+        => Assert.Null(_iconProvider.TryPeekTypeIcon("a.txt", isDirectory: false));
+
+    /// <summary>After <see cref="IconProvider.GetTypeIcon"/> resolves an extension, <see cref="IconProvider.TryPeekTypeIcon"/> hits for any path with that extension.</summary>
+    [Fact]
+    public void TryPeekTypeIcon_AfterGetTypeIcon_Hits()
+    {
+        var expectedIcon = new DrawingImage();
+        _iconHandlerMock
+            .Setup(h => h.GetIconHandle(It.IsAny<string>(), ref It.Ref<ShellFileInfo>.IsAny, FileAttributes, IconFlags))
+            .Returns(ValidIconHandle);
+        _iconFactoryMock.Setup(f => f.CreateBitmap(It.IsAny<IntPtr>())).Returns(expectedIcon);
+
+        _iconProvider.GetTypeIcon("a.txt", isDirectory: false);
+        var peeked = _iconProvider.TryPeekTypeIcon("unrelated/b.txt", isDirectory: false);
+
+        Assert.Same(expectedIcon, peeked);
+    }
+
+    /// <summary>Concurrent first-time access to <c>PlaceholderIcon</c> from multiple threads still publishes exactly one shared instance (ADR-046 C-2).</summary>
+    [Fact]
+    public void PlaceholderIcon_AccessedConcurrently_PublishesExactlyOneInstance()
+    {
+        IIconProvider provider = _iconProvider;
+        _iconFactoryMock.Setup(f => f.CreateBitmap()).Returns(() => new DrawingImage());
+
+        var results = new ImageSource[16];
+        Parallel.For(0, results.Length, i => results[i] = provider.PlaceholderIcon);
+
+        Assert.All(results, r => Assert.Same(results[0], r));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
     private static T GetPayloadValue<T>(KeyValuePair<string, object?>[] payload, string key)
         => (T)payload.Single(kv => kv.Key == key).Value!;

@@ -269,19 +269,254 @@ public class TrayIconManagerTests
     }
 
     /// <summary>
-    /// Verifies that <see cref="TrayIconManager.Initialize"/> still wires the tray icon's double-click
-    /// to <see cref="TrayIconManager.OnToggleMainWindowVisibilityRequested"/>.
+    /// Verifies that <see cref="TrayIconManager.Initialize"/> wires the tray icon's double-click to
+    /// <see cref="TrayIconManager.OnNextPageRequested"/> (backlog-1x-master-plan.md §1, ADR-044) — this
+    /// layer no longer toggles the main window on double-click (that gesture is now round-robin page
+    /// switching, decided by <c>DesktopOrganizer.UI.Lifecycle.TrayPagesAdapter</c>).
     /// </summary>
     [Fact]
-    public void Initialize_StillWires_DoubleClick_ToToggleMainWindowVisibilityRequested()
+    public void Initialize_Wires_DoubleClick_ToNextPageRequested()
     {
         _sut.Initialize();
         var raised = false;
-        _sut.OnToggleMainWindowVisibilityRequested += (_, _) => raised = true;
+        _sut.OnNextPageRequested += (_, _) => raised = true;
 
         _notifyIconAdapterMock.Raise(a => a.DoubleClick += null, _notifyIconAdapterMock.Object, EventArgs.Empty);
 
         Assert.True(raised);
+    }
+
+    /// <summary>
+    /// backlog-1x-master-plan.md §2: verifies that <see cref="TrayIconManager.SetPages"/> builds one
+    /// per-page item for each entry, checked only on the current one, and positioned in the "Pages"
+    /// submenu after the built-in "Next page" item and its separator.
+    /// </summary>
+    [Fact]
+    public void SetPages_BuildsOnePerPageItem_CheckedOnlyOnCurrent()
+    {
+        _sut.Initialize();
+
+        _sut.SetPages([new("a", "Alpha", IsCurrent: false), new("b", "Beta", IsCurrent: true)]);
+
+        var pagesItem = FindItem(_capturedMenu!, TrayIconManager.PagesItemName);
+        var dropDownItems = pagesItem.DropDownItems.Cast<ToolStripItem>().ToList();
+        Assert.IsType<ToolStripMenuItem>(dropDownItems[0]);
+        Assert.Equal(TrayIconManager.NextPageItemName, dropDownItems[0].Name);
+        Assert.IsType<ToolStripSeparator>(dropDownItems[1]);
+        var alpha = Assert.IsType<ToolStripMenuItem>(dropDownItems[2]);
+        var beta = Assert.IsType<ToolStripMenuItem>(dropDownItems[3]);
+        Assert.Equal("Alpha", alpha.Text);
+        Assert.False(alpha.Checked);
+        Assert.Equal("Beta", beta.Text);
+        Assert.True(beta.Checked);
+    }
+
+    /// <summary>
+    /// A repeated <see cref="TrayIconManager.SetPages"/> call with the same (Id, DisplayName) sequence but
+    /// a different current page mutates only <see cref="ToolStripMenuItem.Checked"/> in place — the same
+    /// <see cref="ToolStripMenuItem"/> instances are reused (MAJOR-1's "mutate, never rebuild" rule), not
+    /// recreated.
+    /// </summary>
+    [Fact]
+    public void SetPages_SameComposition_DifferentCurrent_MutatesCheckedInPlace_DoesNotRecreateItems()
+    {
+        _sut.Initialize();
+        _sut.SetPages([new("a", "Alpha", IsCurrent: true), new("b", "Beta", IsCurrent: false)]);
+        var pagesItem = FindItem(_capturedMenu!, TrayIconManager.PagesItemName);
+        var before = pagesItem.DropDownItems.Cast<ToolStripItem>().Skip(2).ToList();
+
+        _sut.SetPages([new("a", "Alpha", IsCurrent: false), new("b", "Beta", IsCurrent: true)]);
+
+        var after = pagesItem.DropDownItems.Cast<ToolStripItem>().Skip(2).ToList();
+        Assert.Same(before[0], after[0]);
+        Assert.Same(before[1], after[1]);
+        Assert.False(((ToolStripMenuItem)after[0]).Checked);
+        Assert.True(((ToolStripMenuItem)after[1]).Checked);
+    }
+
+    /// <summary>
+    /// A composition change (a page added/removed/renamed — anything but the current page) disposes the
+    /// stale per-page items and builds fresh ones. <see cref="TrayIconManager.NextPageItemName"/> and the
+    /// separator preceding the per-page entries are untouched.
+    /// </summary>
+    /// <remarks>
+    /// Disposal is observed through <see cref="System.ComponentModel.Component.Disposed"/>, not
+    /// <see cref="ToolStripItem.IsDisposed"/>: WinForms only sets <c>IsDisposed</c> when an item is
+    /// disposed while it still has an <see cref="ToolStripItem.Owner"/>, and <c>SetPages</c> detaches each
+    /// stale item from the submenu before calling <see cref="System.ComponentModel.Component.Dispose()"/>
+    /// on it — so <c>IsDisposed</c> stays <see langword="false"/> even though the item was released.
+    /// </remarks>
+    [Fact]
+    public void SetPages_CompositionChanged_DisposesStaleItems_KeepsNextPageItemAndSeparator()
+    {
+        _sut.Initialize();
+        _sut.SetPages([new("a", "Alpha", IsCurrent: true), new("b", "Beta", IsCurrent: false)]);
+        var pagesItem = FindItem(_capturedMenu!, TrayIconManager.PagesItemName);
+        var staleItems = pagesItem.DropDownItems.Cast<ToolStripItem>().Skip(2).ToList();
+        var disposedCount = 0;
+        staleItems.ForEach(item => item.Disposed += (_, _) => disposedCount++);
+
+        _sut.SetPages([new("a", "Alpha", IsCurrent: true), new("c", "Gamma", IsCurrent: false)]);
+
+        Assert.Equal(staleItems.Count, disposedCount);
+        Assert.DoesNotContain(pagesItem.DropDownItems.Cast<ToolStripItem>(), staleItems.Contains);
+        var dropDownItems = pagesItem.DropDownItems.Cast<ToolStripItem>().ToList();
+        Assert.Equal(TrayIconManager.NextPageItemName, dropDownItems[0].Name);
+        Assert.IsType<ToolStripSeparator>(dropDownItems[1]);
+        Assert.Equal(["Alpha", "Gamma"], dropDownItems.Skip(2).Select(i => i.Text));
+    }
+
+    /// <summary>
+    /// M-F fix (code review, panel clone to page, backlog 1.x wave 3 review): a page display name
+    /// containing a single literal <c>&amp;</c> must render with a DOUBLED <c>&amp;&amp;</c> in the
+    /// per-page item's own <see cref="ToolStripItem.Text"/> — WinForms treats a lone <c>&amp;</c> as a
+    /// mnemonic-accelerator prefix (see <c>TrayIconManager.EscapeAmpersand</c>'s own remarks), which would
+    /// otherwise silently drop the character from what the user actually sees.
+    /// </summary>
+    [Fact]
+    public void SetPages_DisplayNameContainsAmpersand_EscapesToDoubleAmpersand()
+    {
+        _sut.Initialize();
+
+        _sut.SetPages([new("a", "R&D", IsCurrent: false)]);
+
+        var pagesItem = FindItem(_capturedMenu!, TrayIconManager.PagesItemName);
+        var item = (ToolStripMenuItem)pagesItem.DropDownItems.Cast<ToolStripItem>().Skip(2).Single();
+        Assert.Equal("R&&D", item.Text);
+    }
+
+    /// <summary>
+    /// LOW-2 fix (code review, panel clone to page, backlog 1.x wave 3 review): once
+    /// <see cref="TrayIconManager.Dispose"/> has run, <see cref="TrayIconManager.SetPages"/> must be a
+    /// silent no-op — never resurrecting the disposed <see cref="ContextMenuStrip"/> (see <c>_disposed</c>'s
+    /// own remarks in <c>TrayIconManager.cs</c>) and never throwing from touching disposed WinForms
+    /// components.
+    /// </summary>
+    [Fact]
+    public void SetPages_AfterDispose_IsNoOp_DoesNotThrow()
+    {
+        _sut.Initialize();
+        _sut.Dispose();
+
+        var exception = Record.Exception(() => _sut.SetPages([new("a", "Alpha", IsCurrent: true)]));
+
+        Assert.Null(exception);
+    }
+
+    /// <summary>
+    /// LOW-2 fix: same guarantee as <see cref="SetPages_AfterDispose_IsNoOp_DoesNotThrow"/>, for
+    /// <see cref="TrayIconManager.UpdateContextMenu"/> — a lifecycle-ordering race during shutdown
+    /// (e.g. a queued dispatcher callback) must not resurrect the menu strip after <c>Dispose</c>.
+    /// </summary>
+    [Fact]
+    public void UpdateContextMenu_AfterDispose_IsNoOp_DoesNotThrow()
+    {
+        _sut.UpdateContextMenu(isMainWindowVisible: false, isEditLayoutChecked: false, canEnterEditLayout: true, isLockLayoutChecked: false);
+        _sut.Dispose();
+
+        var exception = Record.Exception(() => _sut.UpdateContextMenu(
+            isMainWindowVisible: false, isEditLayoutChecked: true, canEnterEditLayout: false, isLockLayoutChecked: true));
+
+        Assert.Null(exception);
+    }
+
+    /// <summary>
+    /// Review L-6 (LOW-2 fix shape): <see cref="TrayIconManager.SetDesktopIconsVisible"/> after
+    /// <see cref="TrayIconManager.Dispose"/> is a silent no-op — in particular it must not lazily build (and
+    /// hand the adapter) a fresh strip when the menu had never been built before disposal.
+    /// </summary>
+    [Fact]
+    public void SetDesktopIconsVisible_AfterDispose_IsNoOp_DoesNotResurrectStrip()
+    {
+        _sut.Dispose();
+
+        var exception = Record.Exception(() => _sut.SetDesktopIconsVisible(true));
+
+        Assert.Null(exception);
+        Assert.Null(_capturedMenu);
+        _notifyIconAdapterMock.Verify(a => a.SetContextMenu(It.IsAny<ContextMenuStrip>()), Times.Never);
+    }
+
+    /// <summary>Clicking a per-page item raises <see cref="TrayIconManager.OnPageSelected"/> with its id.</summary>
+    [Fact]
+    public void PageItem_Click_RaisesOnPageSelected_WithItsId()
+    {
+        _sut.Initialize();
+        _sut.SetPages([new("page-1", "Alpha", IsCurrent: false)]);
+        string? selectedId = null;
+        _sut.OnPageSelected += (_, id) => selectedId = id;
+
+        var pagesItem = FindItem(_capturedMenu!, TrayIconManager.PagesItemName);
+        var item = (ToolStripMenuItem)pagesItem.DropDownItems.Cast<ToolStripItem>().Skip(2).Single();
+        item.PerformClick();
+
+        Assert.Equal("page-1", selectedId);
+    }
+
+    /// <summary>Clicking the "Next page" submenu item raises the same <see cref="TrayIconManager.OnNextPageRequested"/> as the tray icon's double-click.</summary>
+    [Fact]
+    public void NextPageItem_Click_RaisesOnNextPageRequested()
+    {
+        _sut.Initialize();
+
+        // "Next page" is enabled only with two or more pages, and a disabled ToolStripItem's
+        // PerformClick is a no-op — so the menu needs a multi-page snapshot for the click to land.
+        _sut.SetPages([new("a", "Alpha", IsCurrent: true), new("b", "Beta", IsCurrent: false)]);
+        var raised = false;
+        _sut.OnNextPageRequested += (_, _) => raised = true;
+
+        FindPagesSubmenuItem(_capturedMenu!, TrayIconManager.NextPageItemName).PerformClick();
+
+        Assert.True(raised);
+    }
+
+    /// <summary>The "Next page" item is disabled with fewer than two pages, and enabled with two or more.</summary>
+    /// <param name="pageCount">Number of pages passed to <see cref="TrayIconManager.SetPages"/>.</param>
+    /// <param name="expectedEnabled">Expected <see cref="ToolStripItem.Enabled"/> of the "Next page" item.</param>
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(2, true)]
+    public void SetPages_NextPageItemEnabled_OnlyWithMultiplePages(int pageCount, bool expectedEnabled)
+    {
+        _sut.Initialize();
+
+        _sut.SetPages(Enumerable.Range(0, pageCount).Select(i => new TrayPageEntry($"p{i}", $"Page {i}", IsCurrent: i == 0)).ToList());
+
+        Assert.Equal(expectedEnabled, FindPagesSubmenuItem(_capturedMenu!, TrayIconManager.NextPageItemName).Enabled);
+    }
+
+    /// <summary>
+    /// docs/PLANS/localization.md L-7: a language switch re-labels the "Pages" and "Next page" items —
+    /// never the per-page entries themselves, which are data supplied by <see cref="TrayIconManager.SetPages"/>.
+    /// </summary>
+    [Fact]
+    public void CultureChanged_RelabelsPagesAndNextPageItems()
+    {
+        _sut.Initialize();
+        var pagesItem = FindItem(_capturedMenu!, TrayIconManager.PagesItemName);
+        var nextPageItem = FindPagesSubmenuItem(_capturedMenu!, TrayIconManager.NextPageItemName);
+        Assert.Equal("Pages", pagesItem.Text);
+        Assert.Equal("Next page", nextPageItem.Text);
+
+        _localization.ApplyLanguage("ru");
+
+        Assert.Equal("Страницы", pagesItem.Text);
+        Assert.Equal("Следующая страница", nextPageItem.Text);
+    }
+
+    /// <summary>
+    /// The top-level <see cref="ContextMenuStrip"/> is still built and handed to the adapter exactly once,
+    /// even across multiple <see cref="TrayIconManager.SetPages"/> calls (MAJOR-1).
+    /// </summary>
+    [Fact]
+    public void SetPages_CalledMultipleTimes_DoesNotHandTheAdapterANewContextMenuStrip()
+    {
+        _sut.Initialize();
+
+        _sut.SetPages([new("a", "Alpha", IsCurrent: true)]);
+        _sut.SetPages([new("a", "Alpha", IsCurrent: false), new("b", "Beta", IsCurrent: true)]);
+
+        _notifyIconAdapterMock.Verify(a => a.SetContextMenu(It.IsAny<ContextMenuStrip>()), Times.Once);
     }
 
     /// <summary>
@@ -451,6 +686,11 @@ public class TrayIconManagerTests
 
     private static ToolStripMenuItem FindItem(ContextMenuStrip menu, string name) =>
         Assert.IsType<ToolStripMenuItem>(Assert.Single(menu.Items.Cast<ToolStripItem>(), i => i.Name == name));
+
+    // "Next page" and the per-page entries live in the "Pages" submenu (backlog-1x-master-plan.md §2.1),
+    // not in the top-level strip's Items that FindItem searches.
+    private static ToolStripMenuItem FindPagesSubmenuItem(ContextMenuStrip menu, string name) =>
+        Assert.IsType<ToolStripMenuItem>(Assert.Single(FindItem(menu, TrayIconManager.PagesItemName).DropDownItems.Cast<ToolStripItem>(), i => i.Name == name));
 
     private ContextMenuStrip CaptureMenuFromUpdate(bool isEditLayoutChecked, bool canEnterEditLayout, bool isLockLayoutChecked)
     {

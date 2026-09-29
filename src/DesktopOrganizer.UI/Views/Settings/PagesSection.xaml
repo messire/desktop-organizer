@@ -3,28 +3,68 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:beh="clr-namespace:DesktopOrganizer.UI.Behaviors"
+             xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
              xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             xmlns:svc="clr-namespace:DesktopOrganizer.UI.Services"
+             xmlns:vm="clr-namespace:DesktopOrganizer.UI.ViewModels"
+             xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
              mc:Ignorable="d"
              d:DesignWidth="460">
+    <UserControl.Resources>
+        <conv:PageRenameErrorConverter x:Key="PageRenameError"/>
+
+        <!-- "Make current"/"⋯" hide while this row is being edited, so the row only ever offers the
+             TextBox's own commit (Enter/lost focus)/cancel (Escape) affordances. Two styles (Button vs.
+             DropDownButton are sibling ToggleButton/Button types, neither a base of the other — see
+             Resources/Styles/Theme.Controls.xaml's own remarks on why DropDownButton's style can't be
+             BasedOn Theme.Button either) sharing the identical trigger. -->
+        <Style x:Key="Pages.RowButton" TargetType="Button" BasedOn="{StaticResource Theme.Button.Subtle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- UX-MEDIUM fix (6.5 review round): BasedOn Theme.Button.Overflow (ShowChevron="False") instead of
+             the plain DropDownButton style — this row's own Content is already the "⋯" overflow glyph, so
+             the base style's own trailing chevron would draw a second, redundant "opens something" glyph
+             right next to it. -->
+        <Style x:Key="Pages.RowMoreButton" TargetType="controls:DropDownButton" BasedOn="{StaticResource Theme.Button.Overflow}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
     <StackPanel>
         <TextBlock Text="{loc:Loc Settings_Nav_Pages}" Style="{StaticResource Settings.PageHeader}"/>
 
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <StackPanel>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="{loc:Loc Settings_Nav_Pages}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
-                    <Button Grid.Column="1" Content="{loc:Loc Settings_Pages_AddPage_Button}" Padding="12,6" Command="{Binding AddPageCommand}"/>
-                </Grid>
-
-                <ItemsControl ItemsSource="{Binding Pages}" Margin="0,10,0,0"
+        <controls:SettingsCard Header="{loc:Loc Settings_Nav_Pages}"
+                                Description="{loc:Loc Settings_Pages_Description}">
+            <controls:SettingsCard.ActionContent>
+                <Button Content="{loc:Loc Settings_Pages_AddPage_Button}" VerticalAlignment="Center" Command="{Binding AddPageCommand}"/>
+            </controls:SettingsCard.ActionContent>
+            <ItemsControl ItemsSource="{Binding Pages}"
                               AutomationProperties.Name="{loc:Loc Settings_Nav_Pages}">
                     <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border BorderBrush="{StaticResource Brush.Settings.CardBorder}" BorderThickness="0,0,0,1" Padding="0,8">
+                        <DataTemplate DataType="{x:Type vm:PageItemViewModel}">
+                            <!-- Focusable so F2 (ADR-043 §5.1) can target "the row with focus". L-7 fix
+                                 (backlog 1.x wave 1 review): this Border used to have no Background, so
+                                 WPF's own hit-testing skipped straight through any click that landed on
+                                 the row's empty space (between/around its child Grid columns) to whatever
+                                 was behind it — the click never reached the Border at all, let alone
+                                 focused it, despite Focusable="True". Background="Transparent" (still
+                                 fully transparent visually) makes the whole row hit-testable, and
+                                 PageRow_MouseLeftButtonDown explicitly calls Focus() on it — a click that
+                                 instead lands on a child Button/TextBox still focuses THAT element as
+                                 normal; this handler only matters for the row's own otherwise-empty area. -->
+                            <Border BorderBrush="{DynamicResource Theme.Stroke.Card}" BorderThickness="0,0,0,1" Padding="0,8"
+                                    Background="Transparent"
+                                    Focusable="True"
+                                    MouseLeftButtonDown="PageRow_MouseLeftButtonDown"
+                                    KeyDown="PageRow_KeyDown">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -32,14 +72,27 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
 
+                                    <!-- View mode: display name + current badge. Hidden while IsEditing. -->
                                     <StackPanel Grid.Column="0" Orientation="Horizontal">
-                                        <!-- Page IDs are DATA, never re-translated when the language changes
-                                             (D-5/L-10) — only "default" resolves to a localized display name;
-                                             any other ID (including "Page N") is shown exactly as-is. -->
-                                        <TextBlock Text="{loc:LocBinding Converter={StaticResource PageDisplayName}}" VerticalAlignment="Center"/>
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <!-- Page names are DATA (ADR-043) — only an unnamed "default" page
+                                             resolves to a localized display name; every other page's name
+                                             is shown exactly as stored. -->
+                                        <TextBlock Text="{loc:LocBinding Display, Converter={StaticResource PageDisplayName}}"
+                                                   VerticalAlignment="Center"
+                                                   MouseLeftButtonDown="PageNameText_MouseLeftButtonDown"/>
                                         <TextBlock Text="{loc:Loc Settings_Pages_CurrentBadge}" VerticalAlignment="Center"
                                                    Margin="4,0,0,0"
-                                                   Foreground="{StaticResource Brush.Settings.TextMuted}" FontSize="11">
+                                                   Foreground="{DynamicResource Theme.Text.Secondary}"
+                                                   FontSize="{DynamicResource Font.Size.Caption}">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
                                                     <Setter Property="Visibility" Value="Collapsed"/>
@@ -47,7 +100,7 @@
                                                         <DataTrigger Value="True">
                                                             <DataTrigger.Binding>
                                                                 <MultiBinding Converter="{StaticResource EqualityToBool}">
-                                                                    <Binding/>
+                                                                    <Binding Path="Id"/>
                                                                     <Binding Path="DataContext.CurrentPage" RelativeSource="{RelativeSource AncestorType=UserControl}"/>
                                                                 </MultiBinding>
                                                             </DataTrigger.Binding>
@@ -59,21 +112,65 @@
                                         </TextBlock>
                                     </StackPanel>
 
-                                    <Button Grid.Column="1" Content="{loc:Loc Settings_Pages_MakeCurrent_Button}" Padding="8,4" Margin="0,0,8,0"
-                                            FontSize="11"
-                                            AutomationProperties.Name="{loc:LocBinding Converter={StaticResource PageDisplayName}, FormatKey=Settings_Pages_MakeCurrent_Format}"
+                                    <!-- Edit mode: inline TextBox + inline error hint (never a MessageBox —
+                                         ADR-013 Decision 6's rule applies here too). Visible only while
+                                         IsEditing. -->
+                                    <StackPanel Grid.Column="0" Visibility="{Binding IsEditing, Converter={StaticResource BooleanToVisibility}}">
+                                        <TextBox Text="{Binding EditingName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 MaxLength="{x:Static svc:PageNameRules.MaxLength}"
+                                                 AutomationProperties.Name="{loc:Loc Settings_Pages_NameBox_AutomationName}"
+                                                 beh:InlineRenameBehavior.IsRenameEditor="True"
+                                                 beh:InlineRenameBehavior.CommitCommand="{Binding DataContext.CommitRenamePageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                 beh:InlineRenameBehavior.CommitOnLostFocusCommand="{Binding DataContext.CommitRenamePageOnLostFocusCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                 beh:InlineRenameBehavior.CancelCommand="{Binding DataContext.CancelRenamePageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                                        <TextBlock Style="{StaticResource Settings.CardDescription}"
+                                                   Foreground="{DynamicResource Theme.Text.Caution}"
+                                                   TextWrapping="Wrap" Margin="0,4,0,0"
+                                                   Text="{loc:LocBinding RenameError, Converter={StaticResource PageRenameError}}"
+                                                   Visibility="{Binding HasRenameError, Converter={StaticResource BooleanToVisibility}}"/>
+                                    </StackPanel>
+
+                                    <Button Grid.Column="1" Content="{loc:Loc Settings_Pages_MakeCurrent_Button}" Margin="0,0,4,0"
+                                            Style="{StaticResource Pages.RowButton}"
+                                            AutomationProperties.Name="{loc:LocBinding Display, Converter={StaticResource PageDisplayName}, FormatKey=Settings_Pages_MakeCurrent_Format}"
                                             Command="{Binding DataContext.SwitchPageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                            CommandParameter="{Binding}"/>
-                                    <Button Grid.Column="2" Content="{loc:Loc Common_Remove_Button}" Padding="8,4" FontSize="11"
-                                            AutomationProperties.Name="{loc:LocBinding Converter={StaticResource PageDisplayName}, FormatKey=Settings_Pages_Remove_Format}"
-                                            Command="{Binding DataContext.RemovePageCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                            CommandParameter="{Binding}"/>
+                                            CommandParameter="{Binding Id}"/>
+                                    <!-- "⋯" overflow (§2.7 D-8): Rename (F2)/Remove behind one control per
+                                         row, same language as PanelsSection's "Ещё". This DropDownButton
+                                         lives INSIDE the per-page DataTemplate, so its own DataContext is
+                                         the page item, not MainWindowViewModel — Tag bridges the gap for
+                                         the menu's Command bindings (a ContextMenu popup does not resolve
+                                         RelativeSource AncestorType=UserControl; only PlacementTarget does,
+                                         and PlacementTarget's OWN DataContext here is the page, not the
+                                         VM — see PanelsSection.xaml's "Ещё" menu for the simpler case where
+                                         no Tag bridge is needed, because that DropDownButton is NOT itself
+                                         inside a per-item template). -->
+                                    <controls:DropDownButton Grid.Column="2"
+                                                              Style="{StaticResource Pages.RowMoreButton}"
+                                                              Content="{StaticResource Icon.Glyph.Overflow}"
+                                                              FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons"
+                                                              AutomationProperties.Name="{loc:LocBinding Display, Converter={StaticResource PageDisplayName}, FormatKey=Settings_Pages_More_A11y_Format}"
+                                                              Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                        <controls:DropDownButton.Menu>
+                                            <ContextMenu Style="{StaticResource Theme.ContextMenu}">
+                                                <ContextMenu.Resources>
+                                                    <Style TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}"/>
+                                                </ContextMenu.Resources>
+                                                <MenuItem Header="{loc:Loc Common_Rename}" InputGestureText="F2"
+                                                          Command="{Binding PlacementTarget.Tag.BeginRenamePageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding}"/>
+                                                <Separator Style="{StaticResource Theme.Separator}"/>
+                                                <MenuItem Header="{loc:Loc Common_Remove_Button}"
+                                                          Command="{Binding PlacementTarget.Tag.RemovePageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding Id}"/>
+                                            </ContextMenu>
+                                        </controls:DropDownButton.Menu>
+                                    </controls:DropDownButton>
                                 </Grid>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
-            </StackPanel>
-        </Border>
+        </controls:SettingsCard>
     </StackPanel>
 </UserControl>

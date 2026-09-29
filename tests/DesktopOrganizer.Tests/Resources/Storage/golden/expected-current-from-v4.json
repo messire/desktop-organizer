@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "writtenAtUtc": "2026-09-21T09:00:00.0000000+00:00",
   "appVersion": "0.5.0",
   "panels": [
@@ -101,7 +101,7 @@
     }
   ],
   "pages": {
-    "ids": ["default", "work"],
+    "items": [{ "id": "default" }, { "id": "work", "name": "work" }],
     "currentPageId": "default"
   },
   "layoutSnapshots": [

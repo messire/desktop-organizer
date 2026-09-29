@@ -1,15 +1,18 @@
 ﻿using System.Diagnostics;
 using System.IO;
 using System.Security.Principal;
+using System.Threading;
 using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Diagnostics;
+using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.Services.Localization;
 using DesktopOrganizer.Services.Providers;
 using DesktopOrganizer.Services.SingleInstance;
 using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.Services.Storage.Migrations;
+using DesktopOrganizer.Services.Tools.IconLoading;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DesktopOrganizer.Services.Configuration;
@@ -143,6 +146,20 @@ public static class DiConfig
         // from MonitorService's. Inert until App calls Start(); disposed with the root provider.
         services.AddSingleton<IExplorerRestartMonitor, ExplorerRestartMonitor>();
 
+        // Windows light/dark/high-contrast preferences and the DWM caption colour (design system 1.x,
+        // phase 6.1, ADR-047 D-2). The provider owns its own hidden listener window, inert until the UI's
+        // theme service calls Start() on the UI thread; disposed with the root provider. The frame theming
+        // is a stateless DwmSetWindowAttribute wrapper gated on the Windows build.
+        services.AddSingleton<ISystemThemeProvider, SystemThemeProvider>();
+        services.AddSingleton<IWindowFrameTheming, WindowFrameTheming>();
+
+        // Tray menu popup DWM style (rounded corners + border colour, Windows 11 only) consumed by
+        // TrayIconManager, and the opt-in dark classic Win32 menus of this process (shell context menu of an
+        // icon, window system menus) driven by the UI's NativeMenuThemeAdapter — design system 1.x phase
+        // 6.4/6.4b, ADR-047 D-10/D-11. Both stateless apart from idempotence bookkeeping, both build-gated.
+        services.AddSingleton<ITrayMenuWindowStyler, TrayMenuWindowStyler>();
+        services.AddSingleton<INativeMenuTheming, NativeMenuTheming>();
+
         // Windows virtual desktops (Task View) — NOT physical monitors. Degrades silently
         // to IsSupported == false when the shell COM object is unavailable.
         services.AddSingleton<IVirtualDesktopService, VirtualDesktopService>();
@@ -160,6 +177,7 @@ public static class DiConfig
         services.AddSingleton<ISettingsMigration, V2ToV3Migration>();
         services.AddSingleton<ISettingsMigration, V3ToV4Migration>();
         services.AddSingleton<ISettingsMigration, V4ToV5Migration>();
+        services.AddSingleton<ISettingsMigration, V5ToV6Migration>();
 
         // Advisory storage-root lock (ADR-024 D-8, closes ADR-023 R-15). Singleton so the same instance
         // backs both Program.Main's TryAcquire() and IApplicationStateStore.IsWritable's live read of
@@ -247,6 +265,20 @@ public static class DiConfig
         services.AddSingleton<IShutdownRequestListener>(sp => new InstallerShutdownRequestListener(
             SingleInstanceNaming.InstallerShutdownRequestEventName,
             sp.GetRequiredService<IDiagnosticsLog>()));
+
+        // Background icon loading (ADR-046, docs/PLANS/background-icon-loading.md). 7b wires
+        // IIconLoadQueue into every ViewModel; worker threads start lazily on the first Submit (D-14), so
+        // resolving the queue creates no thread. IItemProbeQueue's real implementation
+        // (BackgroundItemProbeQueue, 7c) probes off the thread pool (D-12) — deliberately NOT one of
+        // StaIconLoadQueue's STA lanes, so a stuck network liveness probe can never stall icon loading;
+        // it shares IPathProbe (and therefore IRemoteRootCircuitBreaker) with the icon queue's Remote
+        // lane, so a quarantined root short-circuits both.
+        services.AddSingleton<IStaWorkerFactory, StaWorkerFactory>();
+        services.AddSingleton<IRemotePathClassifier, RemotePathClassifier>();
+        services.AddSingleton<IRemoteRootCircuitBreaker, RemoteRootCircuitBreaker>();
+        services.AddSingleton<IPathProbe, PathProbe>();
+        services.AddSingleton<IIconLoadQueue, StaIconLoadQueue>();
+        services.AddSingleton<IItemProbeQueue, BackgroundItemProbeQueue>();
     }
 
     /// <summary>

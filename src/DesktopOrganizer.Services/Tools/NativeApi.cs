@@ -1,5 +1,7 @@
-﻿using DesktopOrganizer.Services.Abstractions;
+﻿using System.Diagnostics.CodeAnalysis;
+using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Diagnostics;
+using DesktopOrganizer.Services.Enums;
 
 namespace DesktopOrganizer.Services.Tools;
 
@@ -23,6 +25,16 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
     private readonly HandleLogRateLimiter _hitTestFailures;
 
     private readonly IAppLog? _appLog;
+
+    // Undocumented uxtheme menu-theme exports (design system 1.x, phase 6.4b, ADR-047 D-11): the System32
+    // uxtheme.dll module, loaded (ref-counted) on the first TrySetPreferredAppMode/TryFlushMenuThemes call
+    // and released in Dispose; IntPtr.Zero when it could not be loaded.
+    private readonly Lazy<IntPtr> _uxTheme = new(LoadUxTheme, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    // Review L-2: 1 once Dispose released (or declined to load) the uxtheme reference. Guards the single
+    // NativeLibrary.Free against a repeated Dispose, and keeps GetUxThemeExport from resolving an export of
+    // a freed module — or lazily loading a new, never-freed reference — after disposal.
+    private int _uxThemeReleased;
 
     // ── Native shell context menu state (UI thread only) ─────────────────────────────────────────
     // The hidden helper window that owns every tracked shell context menu (see EnsureShellMenuHost) and
@@ -371,7 +383,9 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
     /// Destroys the hidden shell-menu helper window (see <see cref="EnsureShellMenuHost"/>) and unregisters
     /// its window class. Idempotent. Must run on the thread that created the window (the UI thread) for
     /// <c>DestroyWindow</c> to succeed; on any other thread the call fails harmlessly and the window dies with
-    /// the process.
+    /// the process. Also releases this instance's <c>uxtheme.dll</c> reference exactly once; afterwards
+    /// <see cref="TrySetPreferredAppMode"/>/<see cref="TryFlushMenuThemes"/> are no-ops answering
+    /// <see langword="false"/>.
     /// </summary>
     public void Dispose()
     {
@@ -380,6 +394,14 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         if (host.HasResources)
         {
             DestroyMessageWindow(host);
+        }
+
+        // Releases only this instance's own reference on uxtheme.dll (the module stays loaded for WPF/
+        // WinForms, which hold their own); the menu-theme mode already set stays in effect. Exactly once
+        // (review L-2): a second Dispose must not drop a reference this instance no longer owns.
+        if (Interlocked.Exchange(ref _uxThemeReleased, 1) == 0 && _uxTheme.IsValueCreated && _uxTheme.Value != IntPtr.Zero)
+        {
+            NativeLibrary.Free(_uxTheme.Value);
         }
     }
 
@@ -681,6 +703,145 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
     public bool KillTimer(IntPtr hwnd, IntPtr timerId)
         => hwnd != IntPtr.Zero && timerId != IntPtr.Zero && NativeMethods.KillTimerNative(hwnd, timerId);
 
+    // ── System theme and window frame (design system 1.x, phase 6.1, ADR-047 D-2) ────────────────
+
+    /// <inheritdoc />
+    public int? ReadCurrentUserDword(string keyPath, string valueName)
+    {
+        if (string.IsNullOrEmpty(keyPath) || valueName is null) return null;
+
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(keyPath, writable: false);
+            return key?.GetValue(valueName) is int value ? value : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public bool IsHighContrastOn()
+    {
+        try
+        {
+            // WinForms' SystemInformation.HighContrast calls SystemParametersInfo(SPI_GETHIGHCONTRAST) on
+            // every read (unlike WPF's SystemParameters.HighContrast, which is a cache refreshed by WPF's own
+            // WM_SETTINGCHANGE handling and may not have been updated yet when our listener fires). Managed
+            // API, so no new P/Invoke declaration is needed.
+            return System.Windows.Forms.SystemInformation.HighContrast;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public int GetSystemColor(int index)
+    {
+        try
+        {
+            return unchecked((int)NativeMethods.GetSysColor(index));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <inheritdoc />
+    public double GetMessageFontSize()
+    {
+        try
+        {
+            var metrics = new NativeMethods.NonClientMetricsW { cbSize = (uint)Marshal.SizeOf<NativeMethods.NonClientMetricsW>() };
+            if (!NativeMethods.SystemParametersInfoNonClientMetrics(NativeMethods.SpiGetNonClientMetrics, metrics.cbSize, ref metrics, 0))
+                return 0;
+
+            var height = Math.Abs(metrics.lfMessageFont.lfHeight);
+            if (height == 0) return 0;
+
+            // SPI_GETNONCLIENTMETRICS reports pixels at the system DPI; WPF converts the same way.
+            var hdc = NativeMethods.GetDC(IntPtr.Zero);
+            if (hdc == IntPtr.Zero) return 0;
+
+            try
+            {
+                var dpi = NativeMethods.GetDeviceCaps(hdc, NativeMethods.LogPixelsY);
+                return dpi > 0 ? height / DesktopScaleModel.ScaleFromDpi((uint)dpi) : 0;
+            }
+            finally
+            {
+                NativeMethods.ReleaseDC(IntPtr.Zero, hdc);
+            }
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <inheritdoc />
+    public int SetDwmWindowAttribute(IntPtr hwnd, int attribute, int value)
+    {
+        if (hwnd == IntPtr.Zero) return NativeMethods.EInvalidArg;
+
+        try
+        {
+            return NativeMethods.DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int));
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return NativeMethods.ENotImpl;
+        }
+        catch (Exception ex)
+        {
+            return ex.HResult < 0 ? ex.HResult : NativeMethods.EFail;
+        }
+    }
+
+    /// <inheritdoc />
+    public unsafe bool TrySetPreferredAppMode(int mode)
+    {
+        var export = GetUxThemeExport(NativeMethods.UxThemeOrdinalSetPreferredAppMode);
+        if (export == IntPtr.Zero) return false;
+
+        try
+        {
+            // PreferredAppMode SetPreferredAppMode(PreferredAppMode) — one 4-byte argument, 4-byte result.
+            // On 1809 the same ordinal is AllowDarkModeForApp(BOOL): an ABI-identical signature, so even a
+            // caller that bypassed the build gate could not unbalance the stack.
+            _ = ((delegate* unmanaged[Stdcall]<int, int>)export)(mode);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("NativeApi", "SetPreferredAppModeFailed", new KeyValuePair<string, object?>("hresult", ex.HResult));
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public unsafe bool TryFlushMenuThemes()
+    {
+        var export = GetUxThemeExport(NativeMethods.UxThemeOrdinalFlushMenuThemes);
+        if (export == IntPtr.Zero) return false;
+
+        try
+        {
+            // void FlushMenuThemes(void).
+            ((delegate* unmanaged[Stdcall]<void>)export)();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("NativeApi", "FlushMenuThemesFailed", new KeyValuePair<string, object?>("hresult", ex.HResult));
+            return false;
+        }
+    }
+
     // ── Native panel sizing primitives (ADR-022 / Phase 2) ──────────────────────────────────────
 
     /// <inheritdoc />
@@ -766,8 +927,8 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
 
     /// <inheritdoc />
     /// <remarks>
-    /// Expected on the UI (STA) thread (see <see cref="INativeApi.GetShellItemImage"/>). The factory's RCW
-    /// and the raw interface pointer are both released in <see langword="finally"/>; on any failure after
+    /// Expected on an STA thread (see <see cref="INativeApi.GetShellItemImage"/>). The factory's RCW
+    /// and the raw interface pointer are both released in <see langword="finally"/> on the calling thread; on any failure after
     /// <c>GetImage</c> produced a bitmap, that bitmap is deleted here, so the caller only ever owns a
     /// handle when the method returned 0.
     /// </remarks>
@@ -915,6 +1076,110 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         }
     }
 
+    // ── Background icon loading: remote-root classification (ADR-046 D-2, 7a-N) ────────────────
+    // Called from the icon worker's STA thread (RemotePathClassifier). Declarations in IconNativeMethods.
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <c>CoCreateInstance(CLSID_ShellLink)</c> → <c>IPersistFile::Load(STGM_READ)</c> →
+    /// <c>IShellLinkW::GetPath(SLGP_RAWPATH)</c>. <c>IShellLinkW::Resolve</c> is deliberately never called:
+    /// that is the step that searches for a moved target, may touch the network and may show UI. Loading the
+    /// <c>.lnk</c> only reads the local file. The RCW and the raw interface pointer are released in
+    /// <see langword="finally"/> on the calling thread, so no finalizer ever has to reach this apartment later
+    /// (R7-7). A target longer than the buffer is reported truncated — callers only need its root.
+    /// </remarks>
+    public unsafe bool TryGetShortcutRawTarget(string shortcutPath, [NotNullWhen(true)] out string? targetPath)
+    {
+        targetPath = null;
+        if (string.IsNullOrEmpty(shortcutPath)) return false;
+
+        var linkPtr = IntPtr.Zero;
+        object? link = null;
+        try
+        {
+            var clsid = IconNativeMethods.ClsidShellLink;
+            var iid = IconNativeMethods.IidIShellLinkW;
+            var hr = IconNativeMethods.CoCreateInstance(ref clsid, IntPtr.Zero, IconNativeMethods.ClsctxInprocServer, ref iid, out linkPtr);
+            if (hr < 0 || linkPtr == IntPtr.Zero) return false;
+
+            link = Marshal.GetObjectForIUnknown(linkPtr);
+            if (link is not IconNativeMethods.IPersistFile persistFile || link is not IconNativeMethods.IShellLinkW shellLink) return false;
+
+            if (persistFile.Load(shortcutPath, IconNativeMethods.StgmRead) < 0) return false;
+
+            var buffer = new char[IconNativeMethods.ShortcutPathBufferChars];
+            fixed (char* chars = buffer)
+            {
+                // S_FALSE (1) = the link has no path (PIDL-only target, e.g. a Control Panel item).
+                hr = shellLink.GetPath((IntPtr)chars, buffer.Length, IntPtr.Zero, IconNativeMethods.SlgpRawPath);
+            }
+
+            if (hr != 0) return false;
+
+            var length = Array.IndexOf(buffer, '\0');
+            var raw = new string(buffer, 0, length < 0 ? buffer.Length : length);
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+
+            targetPath = Environment.ExpandEnvironmentVariables(raw);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // COMException/InvalidCastException/SEHException from a corrupt link or a broken shell
+            // extension: an unreadable link is simply "not classified", never an exception on the worker.
+            targetPath = null;
+            return false;
+        }
+        finally
+        {
+            ReleaseComObjectQuietly(link);
+            if (linkPtr != IntPtr.Zero) Marshal.Release(linkPtr);
+        }
+    }
+
+    /// <inheritdoc />
+    public DriveKind GetDriveKind(string rootPath)
+    {
+        // GetDriveTypeW(NULL) would classify the CURRENT directory's root — never what a caller means.
+        if (string.IsNullOrEmpty(rootPath)) return DriveKind.Unknown;
+
+        try
+        {
+            return IconNativeMethods.GetDriveTypeW(rootPath) switch
+            {
+                IconNativeMethods.DriveNoRootDir => DriveKind.NoRootDirectory,
+                IconNativeMethods.DriveRemovable => DriveKind.Removable,
+                IconNativeMethods.DriveFixed => DriveKind.Fixed,
+                IconNativeMethods.DriveRemote => DriveKind.Remote,
+                IconNativeMethods.DriveCdRom => DriveKind.CdRom,
+                IconNativeMethods.DriveRamDisk => DriveKind.RamDisk,
+                _ => DriveKind.Unknown,
+            };
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return DriveKind.Unknown;
+        }
+    }
+
+    /// <summary>
+    /// Loads the System32 copy of <c>uxtheme.dll</c> (never a same-named DLL next to the executable).
+    /// </summary>
+    /// <returns>The module handle, or <see cref="IntPtr.Zero"/> when it cannot be loaded. Never throws.</returns>
+    private static IntPtr LoadUxTheme()
+    {
+        try
+        {
+            return NativeLibrary.TryLoad("uxtheme.dll", typeof(NativeApi).Assembly, DllImportSearchPath.System32, out var handle)
+                ? handle
+                : IntPtr.Zero;
+        }
+        catch
+        {
+            return IntPtr.Zero;
+        }
+    }
+
     private static System.Drawing.Rectangle ToRectangle(NativeMethods.RECT r)
         => System.Drawing.Rectangle.FromLTRB(r.left, r.top, r.right, r.bottom);
 
@@ -979,25 +1244,6 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         catch
         {
             return false;
-        }
-    }
-
-    /// <summary>
-    /// Reads a <c>REG_DWORD</c> under <c>HKEY_CURRENT_USER</c>.
-    /// </summary>
-    /// <param name="keyPath">Sub-key path below <c>HKCU</c>.</param>
-    /// <param name="valueName">Value name.</param>
-    /// <returns>The value, or <see langword="null"/> when absent, of another type, or unreadable. Never throws.</returns>
-    private static int? ReadCurrentUserDword(string keyPath, string valueName)
-    {
-        try
-        {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(keyPath, writable: false);
-            return key?.GetValue(valueName) is int value ? value : null;
-        }
-        catch
-        {
-            return null;
         }
     }
 
@@ -1099,6 +1345,30 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         catch (Exception)
         {
             // An RCW whose server died (Explorer restart, crashed extension) cannot be released any further.
+        }
+    }
+
+    /// <summary>
+    /// Resolves an ordinal-only <c>uxtheme.dll</c> export (<c>GetProcAddress</c> with <c>MAKEINTRESOURCE</c>).
+    /// </summary>
+    /// <param name="ordinal">The export ordinal.</param>
+    /// <returns>
+    /// The export address, or <see cref="IntPtr.Zero"/> when the module or the export is missing or this
+    /// instance is disposed (review L-2: <see cref="TrySetPreferredAppMode"/>/<see cref="TryFlushMenuThemes"/>
+    /// then answer <see langword="false"/> without touching the module). Never throws.
+    /// </returns>
+    private IntPtr GetUxThemeExport(int ordinal)
+    {
+        if (Volatile.Read(ref _uxThemeReleased) != 0) return IntPtr.Zero;
+
+        try
+        {
+            var module = _uxTheme.Value;
+            return module == IntPtr.Zero ? IntPtr.Zero : NativeMethods.GetProcAddressByOrdinal(module, ordinal);
+        }
+        catch
+        {
+            return IntPtr.Zero;
         }
     }
 
@@ -1472,6 +1742,16 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         public const int WmMenuChar = 0x0120;
         public const int ENoInterface = unchecked((int)0x80004002);
 
+        // Generic failure HRESULTs reported by SetDwmWindowAttribute instead of throwing.
+        public const int EInvalidArg = unchecked((int)0x80070057);
+        public const int ENotImpl = unchecked((int)0x80004001);
+        public const int EFail = unchecked((int)0x80004005);
+
+        // Undocumented, ordinal-only uxtheme exports (design system 1.x, phase 6.4b): SetPreferredAppMode
+        // (Windows 10 1903+) and FlushMenuThemes. Called through function pointers, see TrySetPreferredAppMode.
+        public const int UxThemeOrdinalSetPreferredAppMode = 135;
+        public const int UxThemeOrdinalFlushMenuThemes = 136;
+
         // HRESULT_FROM_WIN32(ERROR_CANCELLED): the user cancelled a confirmation the invoked command showed.
         public const int HResultCancelled = unchecked((int)0x800704C7);
 
@@ -1505,6 +1785,10 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         public const uint GaRoot = 2;
         public const int MdtEffectiveDpi = 0;
         public const int LogPixelsX = 88;
+        public const int LogPixelsY = 90;
+
+        // SPI_GETNONCLIENTMETRICS (system message font for the theme provider, review 6.1 M-1).
+        public const uint SpiGetNonClientMetrics = 0x0029;
         public const int SmCxScreen = 0;
         public const int SmCyScreen = 1;
 
@@ -2149,6 +2433,68 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         [return: MarshalAs(UnmanagedType.Bool)]
         public static partial bool KillTimerNative(IntPtr hWnd, IntPtr uIdEvent);
 
+        // DWM window attributes (design system 1.x, phase 6.1): 4-byte values only (BOOL/enum).
+        [LibraryImport("Dwmapi.dll", EntryPoint = "DwmSetWindowAttribute")]
+        public static partial int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
+        // GetProcAddress with an ordinal in the low word of lpProcName (MAKEINTRESOURCEA).
+        [LibraryImport("Kernel32.dll", EntryPoint = "GetProcAddress")]
+        public static partial IntPtr GetProcAddressByOrdinal(IntPtr hModule, nint ordinal);
+
+        // System colours / fonts (design system 1.x, phase 6.1 review M-1): change fingerprint for the
+        // theme provider — a high-contrast → high-contrast switch changes only these, not the flags.
+        [LibraryImport("User32.dll", EntryPoint = "GetSysColor")]
+        public static partial uint GetSysColor(int nIndex);
+
+        [LibraryImport("User32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool SystemParametersInfoNonClientMetrics(uint uiAction, uint uiParam, ref NonClientMetricsW pvParam, uint fWinIni);
+
+        /// <summary>
+        /// <c>LOGFONTW</c>. The face name is a fixed <see cref="ushort"/> buffer (UTF-16 code units) so the
+        /// struct stays blittable for the <c>LibraryImport</c> source generator; it is never read.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public unsafe struct LogFontW
+        {
+            public int lfHeight;
+            public int lfWidth;
+            public int lfEscapement;
+            public int lfOrientation;
+            public int lfWeight;
+            public byte lfItalic;
+            public byte lfUnderline;
+            public byte lfStrikeOut;
+            public byte lfCharSet;
+            public byte lfOutPrecision;
+            public byte lfClipPrecision;
+            public byte lfQuality;
+            public byte lfPitchAndFamily;
+            public fixed ushort lfFaceName[32];
+        }
+
+        /// <summary><c>NONCLIENTMETRICSW</c> including <c>iPaddedBorderWidth</c> (Vista+, 504 bytes).</summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct NonClientMetricsW
+        {
+            public uint cbSize;
+            public int iBorderWidth;
+            public int iScrollWidth;
+            public int iScrollHeight;
+            public int iCaptionWidth;
+            public int iCaptionHeight;
+            public LogFontW lfCaptionFont;
+            public int iSmCaptionWidth;
+            public int iSmCaptionHeight;
+            public LogFontW lfSmCaptionFont;
+            public int iMenuWidth;
+            public int iMenuHeight;
+            public LogFontW lfMenuFont;
+            public LogFontW lfStatusFont;
+            public LogFontW lfMessageFont;
+            public int iPaddedBorderWidth;
+        }
+
         /// <summary>
         /// <c>MONITORENUMPROC</c>. <paramref name="lprcMonitor"/> is kept as a raw pointer (the
         /// caller reads the rectangles through <c>GetMonitorInfo</c> instead), which keeps the
@@ -2193,11 +2539,50 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         /// <summary><c>E_INVALIDARG</c>.</summary>
         public const int EInvalidArg = unchecked((int)0x80070057);
 
+        /// <summary><c>CLSCTX_INPROC_SERVER</c>.</summary>
+        public const uint ClsctxInprocServer = 0x1;
+
+        /// <summary><c>STGM_READ</c>: open the <c>.lnk</c> read-only.</summary>
+        public const int StgmRead = 0x0;
+
+        /// <summary><c>SLGP_RAWPATH</c>: the stored path as-is (environment variables unexpanded), no resolution.</summary>
+        public const uint SlgpRawPath = 0x4;
+
+        /// <summary>
+        /// Buffer for <c>IShellLinkW::GetPath</c>. Larger than <c>MAX_PATH</c> so ordinary long targets fit; a
+        /// longer one is truncated, which is harmless for root classification.
+        /// </summary>
+        public const int ShortcutPathBufferChars = 2048;
+
+        /// <summary><c>DRIVE_NO_ROOT_DIR</c>.</summary>
+        public const uint DriveNoRootDir = 1;
+
+        /// <summary><c>DRIVE_REMOVABLE</c>.</summary>
+        public const uint DriveRemovable = 2;
+
+        /// <summary><c>DRIVE_FIXED</c>.</summary>
+        public const uint DriveFixed = 3;
+
+        /// <summary><c>DRIVE_REMOTE</c>.</summary>
+        public const uint DriveRemote = 4;
+
+        /// <summary><c>DRIVE_CDROM</c>.</summary>
+        public const uint DriveCdRom = 5;
+
+        /// <summary><c>DRIVE_RAMDISK</c>.</summary>
+        public const uint DriveRamDisk = 6;
+
         /// <summary><c>IID_IShellItemImageFactory</c>.</summary>
         public static readonly Guid IidIShellItemImageFactory = new("BCC18B79-BA16-442F-80C4-8A59C30C463B");
 
         /// <summary><c>IID_IImageList</c>.</summary>
         public static readonly Guid IidIImageList = new("46EB5926-582E-4017-9FDF-E8998DAA0950");
+
+        /// <summary><c>CLSID_ShellLink</c>.</summary>
+        public static readonly Guid ClsidShellLink = new("00021401-0000-0000-C000-000000000046");
+
+        /// <summary><c>IID_IShellLinkW</c>.</summary>
+        public static readonly Guid IidIShellLinkW = new("000214F9-0000-0000-C000-000000000046");
 
         // riid = IID_IShellItemImageFactory: asks for the factory interface directly, no intermediate
         // IShellItem RCW. Requires COM to be initialized on the calling thread (the WPF UI thread is STA).
@@ -2206,6 +2591,13 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
 
         [LibraryImport("Shell32.dll", EntryPoint = "SHGetImageList")]
         public static partial int SHGetImageList(int iImageList, ref Guid riid, out IntPtr ppvObj);
+
+        // ADR-046 D-2: .lnk raw target / drive type (TryGetShortcutRawTarget, GetDriveKind).
+        [LibraryImport("Ole32.dll", EntryPoint = "CoCreateInstance")]
+        public static partial int CoCreateInstance(ref Guid rclsid, IntPtr pUnkOuter, uint dwClsContext, ref Guid riid, out IntPtr ppv);
+
+        [LibraryImport("Kernel32.dll", EntryPoint = "GetDriveTypeW", StringMarshalling = StringMarshalling.Utf16)]
+        public static partial uint GetDriveTypeW(string lpRootPathName);
 
         [LibraryImport("Gdi32.dll", EntryPoint = "DeleteObject")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -2347,6 +2739,55 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
             /// <param name="picon">Receives the icon; the caller owns it (<c>DestroyIcon</c>).</param>
             [PreserveSig]
             int GetIcon(int i, int flags, out IntPtr picon);
+        }
+
+        /// <summary>
+        /// COM interop declaration of the shell's <c>IShellLinkW</c> interface, up to <c>GetPath</c>.
+        /// </summary>
+        /// <remarks>
+        /// <c>GetPath</c> is the first method after <c>IUnknown</c>; the remaining methods (including
+        /// <c>Resolve</c>, which must never be called here) are intentionally not declared.
+        /// </remarks>
+        [ComImport]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        [Guid("000214F9-0000-0000-C000-000000000046")]
+        public interface IShellLinkW
+        {
+            /// <summary><c>IShellLinkW.GetPath</c>: copies the link target's path.</summary>
+            /// <param name="pszFile">Caller-allocated UTF-16 buffer.</param>
+            /// <param name="cch">Size of <paramref name="pszFile"/> in characters.</param>
+            /// <param name="pfd">Optional <c>WIN32_FIND_DATAW</c>, or <see cref="IntPtr.Zero"/>.</param>
+            /// <param name="fFlags">Combination of <c>SLGP_*</c> flags.</param>
+            [PreserveSig]
+            int GetPath(IntPtr pszFile, int cch, IntPtr pfd, uint fFlags);
+        }
+
+        /// <summary>
+        /// COM interop declaration of <c>IPersistFile</c> (with its <c>IPersist</c> base slot), up to <c>Load</c>.
+        /// </summary>
+        /// <remarks>
+        /// Declaration order MUST match the native vtable; <c>GetClassID</c>/<c>IsDirty</c> exist only as
+        /// vtable slots — never remove or reorder.
+        /// </remarks>
+        [ComImport]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        [Guid("0000010B-0000-0000-C000-000000000046")]
+        public interface IPersistFile
+        {
+            /// <summary><c>IPersist.GetClassID</c> (vtable slot only).</summary>
+            /// <param name="pClassID">Receives the CLSID.</param>
+            [PreserveSig]
+            int GetClassID(out Guid pClassID);
+
+            /// <summary><c>IPersistFile.IsDirty</c> (vtable slot only).</summary>
+            [PreserveSig]
+            int IsDirty();
+
+            /// <summary><c>IPersistFile.Load</c>: loads the object from a file.</summary>
+            /// <param name="pszFileName">Absolute path of the file.</param>
+            /// <param name="dwMode">Combination of <c>STGM_*</c> flags.</param>
+            [PreserveSig]
+            int Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, int dwMode);
         }
     }
 }

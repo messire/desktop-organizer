@@ -371,6 +371,11 @@ public partial class ChildWindow : Window
         // Non-blocking hint whenever an inline-rename attempt fails (see ChildWindowViewModel.RenameError).
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
 
+        // ADR-046 D-6: a page switch hides/shows this window (WindowManager) without going back through
+        // ChildWindowViewModel.LoadFromModel, so the panel's background icon-load priority is kept in
+        // sync here instead — Visible (current page) always dequeues ahead of Background (hidden pages).
+        IsVisibleChanged += OnIsVisibleChanged;
+
         // P06 hook (docs/fix-prompts/06-fit-content.md) — see ChildWindow.ContentSizing.cs.
         InitializeContentSizing();
     }
@@ -594,6 +599,7 @@ public partial class ChildWindow : Window
         DetachContentSizing();
 
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        IsVisibleChanged -= OnIsVisibleChanged;
         _layoutEditMode.ModeChanged -= OnLayoutModeChanged;
         _layoutEditMode.PropertyChanged -= OnLayoutEditModePropertyChanged;
         _panelVisualState.Dispose();
@@ -721,30 +727,70 @@ public partial class ChildWindow : Window
     }
 
     /// <summary>
+    /// Keeps <see cref="ChildWindowViewModel.SetIconLoadVisibility"/> in sync with this window's actual
+    /// on-screen visibility (ADR-046 D-6) — <c>WindowManager</c> hides every panel not on the current page
+    /// (and shows those that are) by toggling <see cref="UIElement.Visibility"/> directly, without going
+    /// back through <see cref="ChildWindowViewModel.LoadFromModel"/>.
+    /// </summary>
+    /// <param name="sender">Unused; present to match the <see cref="DependencyPropertyChangedEventHandler"/> signature.</param>
+    /// <param name="e">The visibility-changed event; <see cref="DependencyPropertyChangedEventArgs.NewValue"/> is the new <see cref="bool"/> visibility.</param>
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+        => _viewModel.SetIconLoadVisibility((bool)e.NewValue);
+
+    /// <summary>
     /// Handles the global inline-rename shortcut: <c>F2</c> begins renaming the currently selected
-    /// file item (Feature B, DoD 8). No-op if nothing is selected, the panel title is itself being
-    /// renamed (<see cref="PanelTitleRenameBehavior.IsEditingTitle"/>) — F2 should not fight the title
-    /// editor for focus — or a file item rename is already in progress (repeated F2 would otherwise
-    /// re-run <see cref="ChildWindowViewModel.BeginRenameCommand"/> and overwrite the text the user
-    /// already typed with <see cref="FileItem.DisplayName"/> again).
+    /// file item (Feature B, DoD 8), or — when nothing is selected — the panel's own title (same action
+    /// as <c>HeaderContextMenu</c>'s "Rename" item, which shows this same <c>F2</c> gesture hint;
+    /// design-system-1x.md §2.6 p.3). No-op if the panel title is already being renamed
+    /// (<see cref="PanelTitleRenameBehavior.IsEditingTitle"/>) — F2 should not fight the title editor for
+    /// focus — or a file item rename is already in progress (repeated F2 would otherwise re-run
+    /// <see cref="ChildWindowViewModel.BeginRenameCommand"/> and overwrite the text the user already
+    /// typed with <see cref="FileItem.DisplayName"/> again).
+    /// <para>
+    /// Also handles <c>Enter</c>: opens the selected file item (the same action as a double-click,
+    /// <see cref="FileList_MouseDoubleClick"/>), through <see cref="ChildWindowViewModel.OpenSelectedFileCommand"/>.
+    /// Deliberately skipped while either editor is open — the window's tunnelling Preview event fires
+    /// BEFORE the title/rename <see cref="TextBox"/>es' own <c>PreviewKeyDown</c>, which is where their
+    /// Enter means "commit" — and whenever the key originates in any text input, so a future editor
+    /// cannot regress into "Enter launches the file mid-edit".
+    /// </para>
     /// <para>
     /// Also handles <c>Escape</c>: exits <see cref="ILayoutEditModeService"/>'s Edit Layout mode
     /// (docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #4). Best-effort only — this panel carries
-    /// <c>WS_EX_NOACTIVATE</c> and has never received keyboard input reliably in this state (same
-    /// unverified risk class as ADR-013 R1's F2/inline-rename) — the tray icon and this panel's own
+    /// <c>WS_EX_NOACTIVATE</c>; keyboard input reaching it was verified live for F2/inline-rename
+    /// (ADR-013 R1, Windows 11, 2026-09-27) — the tray icon and this panel's own
     /// <c>HeaderContextMenu</c> "Edit layout" item remain the guaranteed exit paths; <c>Escape</c> is
     /// never the sole way out (R-6).
     /// </para>
     /// </summary>
     private void ChildWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.F2)
+        if (e.Key == Key.Enter)
+        {
+            if (_titleRename.IsEditingTitle) return;
+            if (e.OriginalSource is TextBoxBase) return;
+            if (!_viewModel.OpenSelectedFileCommand.CanExecute(null)) return;
+
+            _viewModel.OpenSelectedFileCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.F2)
         {
             if (_titleRename.IsEditingTitle) return;
             if (_viewModel.EditingItem is not null) return;
-            if (_viewModel.SelectedFile is null) return;
 
-            _viewModel.BeginRenameCommand.Execute(_viewModel.SelectedFile);
+            if (_viewModel.SelectedFile is null)
+            {
+                // Same call RenameMenu_Click makes — nothing selected inside the panel, so F2 (like the
+                // menu's own "Rename" item) targets the panel's own title instead of a file item.
+                _titleRename.BeginRename();
+                _panelVisualState.Refresh();
+            }
+            else
+            {
+                _viewModel.BeginRenameCommand.Execute(_viewModel.SelectedFile);
+            }
+
             e.Handled = true;
         }
         else if (e.Key == Key.Escape && _layoutEditMode.IsEditing)

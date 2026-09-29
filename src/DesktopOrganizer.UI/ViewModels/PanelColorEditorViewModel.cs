@@ -205,13 +205,20 @@ public sealed class PanelColorEditorViewModel : INotifyPropertyChanged
     /// <param name="accentHex">The accent colour to apply, canonical uppercase <c>#RRGGBB</c>.</param>
     public void ApplyAccent(string accentHex)
     {
-        // m11: a re-application of the SAME (already-normalized) accent is a no-op — same "unchanged edit
-        // costs nothing" guard PickCustomAccent/PickCustomText already apply to their own picker results.
-        if (string.Equals(accentHex, AccentColor, StringComparison.OrdinalIgnoreCase)) return;
-
         var mode = Mode;
         var preset = PanelColorPresets.FindByAccent(accentHex);
         var text = preset?.TextFor(mode) ?? PanelThemeRules.DefaultTextFor(mode);
+
+        // m11 (backlog 1.x item 4, §4.2b): a re-application is a no-op only when BOTH the accent AND the
+        // EXPECTED paired text already match — not the accent alone. Comparing the accent only (the
+        // original m11 guard) meant a panel whose accent already matched a preset but whose text had
+        // drifted from that preset's own pair (a stale pre-#4 pairing, or a manual Advanced-card edit)
+        // could never have the preset's text re-applied by clicking the very same swatch again.
+        if (string.Equals(accentHex, AccentColor, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(text, TextColor, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
 
         _setBoth(accentHex, text);
         Refresh();
@@ -278,8 +285,20 @@ public sealed class PanelColorEditorViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsCustomSelected));
 
         var selected = SelectedPreset;
+        var mode = Mode;
+        var currentText = TextColor;
         foreach (var option in Presets)
-            option.IsSelected = option.Preset.Equals(selected);
+        {
+            var isSelected = option.Preset.Equals(selected);
+            option.IsSelected = isSelected;
+
+            // Backlog 1.x item 4 (§4.2c/§4.2 "Выделение свотча"): every swatch previews its OWN paired
+            // text for the CURRENT mode (not just the accent), and the SELECTED swatch additionally flags
+            // itself "modified" when the panel's actual text has drifted from that exact pair — the same
+            // drift ApplyAccent's own no-op guard above now re-applies on the next click.
+            option.UpdatePreviewText(mode);
+            option.SetModified(isSelected && !string.Equals(currentText, option.Preset.TextFor(mode), StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     private void OnPropertyChanged(string propertyName)

@@ -1,11 +1,15 @@
 ﻿using System.IO;
+using System.Reflection;
 using System.Threading;
+using System.Windows.Threading;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Configuration;
 using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.Services.Interfaces;
+using DesktopOrganizer.Services.Tools.IconLoading;
 using DesktopOrganizer.UI.Diagnostics;
+using DesktopOrganizer.UI.Lifecycle;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State;
 using DesktopOrganizer.UI.ViewModels;
@@ -349,6 +353,84 @@ public class DiConfigTests
         Assert.Same(first, second);
     }
 
+    // ── Background icon loading (ADR-046, M9) ─────────────────────────────────
+    //
+    // IIconLoadQueue/IItemProbeQueue registration end-to-end: singleton, no worker thread started merely
+    // by resolving the queue (D-14), and IItemProbeQueue resolves to the real BackgroundItemProbeQueue
+    // (7c) — thread-pool based, never faulting except on cancellation (L6's original stub-fault concern
+    // no longer applies once the real implementation landed).
+
+    /// <summary>
+    /// <see cref="IIconLoadQueue"/> resolves as the real <see cref="StaIconLoadQueue"/> singleton — the
+    /// same instance backs every resolution, and merely resolving it starts no worker thread (D-14): one
+    /// only ever spins up lazily on the first <see cref="IIconLoadGroup.Submit"/>.
+    /// </summary>
+    [Fact]
+    public void RegisterServices_IIconLoadQueue_ResolvesAsSingletonAndStartsNoWorkerThreads()
+    {
+        var services = new ServiceCollection();
+        services.RegisterServices();
+        using var serviceProvider = services.BuildServiceProvider();
+
+        var first = serviceProvider.GetRequiredService<IIconLoadQueue>();
+        var second = serviceProvider.GetRequiredService<IIconLoadQueue>();
+
+        Assert.Same(first, second);
+        var queue = Assert.IsType<StaIconLoadQueue>(first);
+        Assert.False(queue.HasCreatedAnyWorker);
+    }
+
+    /// <summary>
+    /// <see cref="IItemProbeQueue"/> resolves as the real <see cref="BackgroundItemProbeQueue"/> singleton
+    /// (7c) — the same instance backs every resolution.
+    /// </summary>
+    [Fact]
+    public void RegisterServices_IItemProbeQueue_ResolvesAsSingleton()
+    {
+        var first = _serviceProvider.GetRequiredService<IItemProbeQueue>();
+        var second = _serviceProvider.GetRequiredService<IItemProbeQueue>();
+
+        Assert.Same(first, second);
+        Assert.IsType<BackgroundItemProbeQueue>(first);
+    }
+
+    /// <summary>
+    /// The real <see cref="BackgroundItemProbeQueue"/> (7c) actually probes: a path that exists on disk
+    /// resolves <c>Exists = true</c>, proving the DI graph wires <see cref="IPathProbe"/> through
+    /// correctly end-to-end (not just that SOME <see cref="IItemProbeQueue"/> was registered).
+    /// </summary>
+    /// <returns>A task that completes when the test is done.</returns>
+    [Fact]
+    public async Task RegisterServices_IItemProbeQueue_ProbeAsync_ProbesRealPaths()
+    {
+        var probeQueue = _serviceProvider.GetRequiredService<IItemProbeQueue>();
+
+        var results = await probeQueue.ProbeAsync([Environment.SystemDirectory], CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.True(result.Exists);
+        Assert.True(result.IsDirectory);
+    }
+
+    /// <summary>
+    /// Disposing the root <see cref="ServiceProvider"/> after resolving <see cref="IIconLoadQueue"/> must
+    /// never throw, even though nothing ever called <see cref="IIconLoadGroup.Submit"/> (no worker thread
+    /// was ever created for <see cref="IDisposable.Dispose"/> to tear down).
+    /// </summary>
+    [Fact]
+    public void RegisterServices_IIconLoadQueue_ProviderDisposal_DoesNotThrow()
+    {
+        var services = new ServiceCollection();
+        services.RegisterServices();
+        var serviceProvider = services.BuildServiceProvider();
+
+        serviceProvider.GetRequiredService<IIconLoadQueue>();
+
+        var exception = Record.Exception(serviceProvider.Dispose);
+
+        Assert.Null(exception);
+    }
+
     // ── DesktopOrganizer.UI's DiConfig ──────────────────────────────────────
     //
     // UiDiConfig.ConfigureServices() builds the full UI service collection (ViewModels, windows,
@@ -628,7 +710,99 @@ public class DiConfigTests
         }
     }
 
+    // ── Per-panel ViewModel composition (review M-4, backlog 1.x wave 4) ─────
+    //
+    // ChildWindowViewModel is registered as a plain AddTransient<ChildWindowViewModel>(): DI picks its
+    // longest constructor and fills every OPTIONAL dependency it can resolve, silently leaving the rest at
+    // their null defaults. A registration that goes missing (or a parameter type that drifts) therefore
+    // never fails resolution — it just degrades the panel (no "Copy to page", synchronous icon/liveness
+    // pipeline). These tests pin the composed graph instead of mere resolvability.
+
+    /// <summary>
+    /// Review M-4: resolved on an STA thread with a live <see cref="DispatcherSynchronizationContext"/>
+    /// (as <c>ChildWindow</c> does in production), <see cref="ChildWindowViewModel"/> receives the singleton
+    /// <see cref="IPanelCloneFlow"/>, <see cref="IWindowManager"/> and <see cref="IPageManager"/>, and uses
+    /// the real <see cref="IIconLoadQueue"/>/<see cref="IItemProbeQueue"/> — not the synchronous D-13
+    /// fallbacks (ADR-046).
+    /// </summary>
+    [Fact]
+    public void UiConfigureServices_ChildWindowViewModel_OnUiThread_GetsCloneFlowManagersAndRealQueues()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        var storageRoot = NewTempStorageRoot();
+        try
+        {
+            StaTestRunner.Run(() =>
+            {
+                // ChildWindowViewModel's constructor looks its item templates up in Application.Current.
+                WpfApplicationHost.EnsureApplication();
+                var previousContext = SynchronizationContext.Current;
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+                try
+                {
+                    var services = new ServiceCollection();
+                    UiDiConfig.ConfigureServices(services, tempDir, storageRoot);
+                    using var serviceProvider = services.BuildServiceProvider();
+
+                    using var viewModel = serviceProvider.GetRequiredService<ChildWindowViewModel>();
+
+                    Assert.Same(serviceProvider.GetRequiredService<IPanelCloneFlow>(), PrivateField<ChildWindowViewModel>(viewModel, "_panelCloneFlow"));
+                    Assert.Same(serviceProvider.GetRequiredService<IWindowManager>(), PrivateField<ChildWindowViewModel>(viewModel, "_windowManager"));
+                    Assert.Same(serviceProvider.GetRequiredService<IPageManager>(), PrivateField<ChildWindowViewModel>(viewModel, "_pageManager"));
+
+                    Assert.False(viewModel.UsedSynchronousIconLoadQueueFallbackDespiteSupplied);
+                    Assert.False(viewModel.UsedSynchronousItemProbeQueueFallbackDespiteSupplied);
+
+                    // The flags above are also false when NO queue was supplied — pin the real instances too.
+                    Assert.Same(serviceProvider.GetRequiredService<IItemProbeQueue>(), PrivateField<BaseViewModel>(viewModel, "_itemProbeQueue"));
+                    Assert.IsType<StaIconLoadGroup>(PrivateField<BaseViewModel>(viewModel, "_iconLoadGroup"));
+                }
+                finally
+                {
+                    SynchronizationContext.SetSynchronizationContext(previousContext);
+                }
+            });
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+            SafeDeleteDirectory(storageRoot);
+        }
+    }
+
+    /// <summary>
+    /// Review M-4 / design system 1.x phase 6.4: the tray-palette and native-menu-theme adapters resolve
+    /// through the full UI service collection as singletons (resolving alone does not Start them).
+    /// </summary>
+    [Fact]
+    public void UiConfigureServices_TrayAndNativeMenuThemeAdapters_ResolveAsSingletons()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        var storageRoot = NewTempStorageRoot();
+        try
+        {
+            var services = new ServiceCollection();
+            UiDiConfig.ConfigureServices(services, tempDir, storageRoot);
+            using var serviceProvider = services.BuildServiceProvider();
+
+            var trayThemeAdapter = serviceProvider.GetRequiredService<TrayThemeAdapter>();
+            var nativeMenuThemeAdapter = serviceProvider.GetRequiredService<NativeMenuThemeAdapter>();
+
+            Assert.Same(trayThemeAdapter, serviceProvider.GetRequiredService<TrayThemeAdapter>());
+            Assert.Same(nativeMenuThemeAdapter, serviceProvider.GetRequiredService<NativeMenuThemeAdapter>());
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+            SafeDeleteDirectory(storageRoot);
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+    private static object? PrivateField<TDeclaring>(object instance, string name) =>
+        (typeof(TDeclaring).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(TDeclaring).Name, name)).GetValue(instance);
+
     private static string NewTempDiagnosticsDirectory() =>
         Path.Combine(Path.GetTempPath(), $"DOrgDiConfigDiag_{Guid.NewGuid():N}");
 

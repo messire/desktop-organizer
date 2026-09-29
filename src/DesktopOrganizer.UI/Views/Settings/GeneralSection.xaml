@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <StackPanel>
@@ -11,91 +12,84 @@
 
         <!-- Language (docs/PLANS/localization.md §2.9 contract C-5): LanguageOptions/SelectedLanguageOption
              are provided by MainWindowViewModel (WP-5). Placed first per §4.5. -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Settings_General_Language_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Text="{loc:Loc Settings_General_Language_Description}"
-                               Style="{StaticResource Settings.CardDescription}"/>
-                </StackPanel>
-                <ComboBox Grid.Column="1" MinWidth="140" VerticalAlignment="Center"
+        <controls:SettingsCard Header="{loc:Loc Settings_General_Language_Header}"
+                                Description="{loc:Loc Settings_General_Language_Description}">
+            <controls:SettingsCard.ActionContent>
+                <!-- An explicit ItemTemplate (same shape as PanelsSection's page picker) rather than
+                     DisplayMemberPath: both work with Theme.ComboBox now, but the template is the
+                     mechanism the closed box has always honoured, and it cannot regress to ToString(). -->
+                <ComboBox MinWidth="140" VerticalAlignment="Center"
                           AutomationProperties.Name="{loc:Loc Settings_General_Language_Header}"
                           ItemsSource="{Binding LanguageOptions}"
-                          SelectedItem="{Binding SelectedLanguageOption, Mode=TwoWay}"
-                          DisplayMemberPath="DisplayName"/>
-            </Grid>
-        </Border>
+                          SelectedItem="{Binding SelectedLanguageOption, Mode=TwoWay}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding DisplayName}"/>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
 
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Settings_General_Autostart_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Text="{loc:Loc Settings_General_Autostart_Description}"
-                               Style="{StaticResource Settings.CardDescription}"/>
-                </StackPanel>
-                <CheckBox Grid.Column="1" VerticalAlignment="Center"
-                          Style="{StaticResource Settings.ToggleCheckBox}"
+        <controls:SettingsCard Header="{loc:Loc Settings_General_Autostart_Header}"
+                                Description="{loc:Loc Settings_General_Autostart_Description}">
+            <controls:SettingsCard.ActionContent>
+                <CheckBox VerticalAlignment="Center"
+                          Style="{StaticResource Theme.ToggleSwitch}"
                           AutomationProperties.Name="{loc:Loc Settings_General_Autostart_Header}"
                           IsChecked="{Binding AutostartEnabled, Mode=TwoWay}"/>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
 
-        <Expander Header="{loc:Loc Settings_General_Advanced_Header}" IsExpanded="False" Margin="0,4,0,0">
-            <StackPanel Margin="0,10,0,0">
-                <Border Style="{StaticResource Settings.CardBorder}">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                            <TextBlock Text="{loc:Loc Settings_General_NativeResize_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                            <TextBlock Style="{StaticResource Settings.CardDescription}"
-                                       Text="{loc:Loc Settings_General_NativeResize_Description}"/>
-                        </StackPanel>
-                        <CheckBox Grid.Column="1" VerticalAlignment="Center"
-                                  Style="{StaticResource Settings.ToggleCheckBox}"
+        <!-- Session-only shell state, not a stored preference (ADR-003): the same switch the tray's
+             "Show desktop icons" item and the desktop double-click gesture flip. Kept in sync through
+             IDesktopIconsService.VisibilityChanged → MainWindowViewModel.DesktopIconsVisible. -->
+        <controls:SettingsCard Header="{loc:Loc Settings_General_DesktopIcons_Header}"
+                                Description="{loc:Loc Settings_General_DesktopIcons_Description}">
+            <controls:SettingsCard.ActionContent>
+                <CheckBox VerticalAlignment="Center"
+                          Style="{StaticResource Theme.ToggleSwitch}"
+                          AutomationProperties.Name="{loc:Loc Settings_General_DesktopIcons_Header}"
+                          IsChecked="{Binding DesktopIconsVisible, Mode=TwoWay}"/>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
+
+        <Expander Style="{StaticResource Settings.CardExpander}" IsExpanded="False" Margin="0,4,0,0"
+                  AutomationProperties.Name="{loc:Loc Settings_General_Advanced_Header}">
+            <Expander.Header>
+                <TextBlock Text="{loc:Loc Settings_General_Advanced_Header}" Style="{StaticResource Settings.CardHeader}"/>
+            </Expander.Header>
+            <StackPanel>
+                <controls:SettingsCard Header="{loc:Loc Settings_General_NativeResize_Header}"
+                                        Description="{loc:Loc Settings_General_NativeResize_Description}">
+                    <controls:SettingsCard.ActionContent>
+                        <CheckBox VerticalAlignment="Center"
+                                  Style="{StaticResource Theme.ToggleSwitch}"
                                   AutomationProperties.Name="{loc:Loc Settings_General_NativeResize_Header}"
                                   IsChecked="{Binding NativePanelSizing, Mode=TwoWay}"/>
-                    </Grid>
-                </Border>
+                    </controls:SettingsCard.ActionContent>
+                </controls:SettingsCard>
 
-                <Border Style="{StaticResource Settings.CardBorder}">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                            <TextBlock Text="{loc:Loc Settings_General_ResetHints_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                            <TextBlock Style="{StaticResource Settings.CardDescription}"
-                                       Text="{loc:Loc Settings_General_ResetHints_Description}"/>
-                            <TextBlock Text="{loc:Loc Settings_General_ResetHints_NoneMessage}" Margin="0,4,0,0">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasOneTimeHintsToReset}" Value="False">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                        </StackPanel>
-                        <Button Grid.Column="1" Content="{loc:Loc Settings_General_ResetHints_Button}" Padding="12,6" VerticalAlignment="Center"
+                <controls:SettingsCard Header="{loc:Loc Settings_General_ResetHints_Header}"
+                                        Description="{loc:Loc Settings_General_ResetHints_Description}">
+                    <controls:SettingsCard.ActionContent>
+                        <Button Content="{loc:Loc Settings_General_ResetHints_Button}" VerticalAlignment="Center"
                                 AutomationProperties.Name="{loc:Loc Settings_General_ResetHints_Header}"
                                 Command="{Binding ResetOneTimeHintsCommand}"/>
-                    </Grid>
-                </Border>
+                    </controls:SettingsCard.ActionContent>
+                    <TextBlock Text="{loc:Loc Settings_General_ResetHints_NoneMessage}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasOneTimeHintsToReset}" Value="False">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </controls:SettingsCard>
             </StackPanel>
         </Expander>
     </StackPanel>

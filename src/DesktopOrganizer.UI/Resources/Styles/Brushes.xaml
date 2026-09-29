@@ -67,19 +67,9 @@
     <!-- Sidebar (SystemIconsPanelWindow, C5) — see Colors.xaml's Color.Sidebar.Background remarks. -->
     <SolidColorBrush x:Key="Brush.Sidebar.Background" Color="{StaticResource Color.Sidebar.Background}" po:Freeze="True"/>
 
-    <SolidColorBrush x:Key="Brush.Settings.ChromeBackground" Color="{StaticResource Color.Settings.ChromeBackground}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.ChromeBorder" Color="{StaticResource Color.Settings.ChromeBorder}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.TabActiveBackground" Color="{StaticResource Color.Settings.TabActiveBackground}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.IconMuted" Color="{StaticResource Color.Settings.IconMuted}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.TextMuted" Color="{StaticResource Color.Settings.TextMuted}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.SwatchBorder" Color="{StaticResource Color.Settings.SwatchBorder}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.Warning" Color="{StaticResource Color.Settings.Warning}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.TextPrimary" Color="{StaticResource Color.Settings.TextPrimary}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.CardBackground" Color="{StaticResource Color.Settings.CardBackground}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.CardBorder" Color="{StaticResource Color.Settings.CardBorder}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.HoverOverlay" Color="{StaticResource Color.Settings.HoverOverlay}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.ToggleTrackOff" Color="{StaticResource Color.Settings.ToggleTrackOff}" po:Freeze="True"/>
-    <SolidColorBrush x:Key="Brush.Settings.ToggleThumb" Color="{StaticResource Color.Settings.ToggleThumb}" po:Freeze="True"/>
+    <!-- Phase 6.1: the Settings window's former fixed-light brush set moved to
+         DesktopOrganizer.UI.Theming.ThemeResourceBuilder (Theme.* keys, DynamicResource, theme-aware) —
+         see Colors.xaml's own remarks. -->
 
     <!--
         ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §2.3, D-11 /

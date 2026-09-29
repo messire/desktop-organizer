@@ -18,6 +18,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:uimodels="clr-namespace:DesktopOrganizer.UI.Models"
         xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
+        xmlns:behaviors="clr-namespace:DesktopOrganizer.UI.Behaviors"
         xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
         xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
         xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
@@ -123,16 +124,22 @@
                             menu is already proven to receive input correctly via the right-click path
                             below — a freshly-constructed ContextMenu would be an unproven input surface
                             on a window that never activates, with no upside over reusing this one.
-                            Control.ContextMenu/Control.MenuItem (Controls.xaml, staged in C4 with no
-                            consumer until now) replace the previous unstyled system ContextMenu chrome —
-                            the implicit MenuItem style applies to every item below without touching their
-                            existing Header/Command/IsChecked markup.
+
+                            docs/PLANS/design-system-1x.md §2.6/§3 phase 6.2c (ADR-047 D-7): this menu
+                            follows the THEME of Windows (Palette T, Theme.ContextMenu/Theme.MenuItem/
+                            Theme.Separator, Resources/Styles/Controls.xaml), not this panel's own Ambient
+                            Accent palette (Palette P) — it sits right next to the native shell-menu the
+                            panel's own icons already open (ADR-040), which the OS draws in its own theme;
+                            a menu painted in the panel's user-chosen accent colour would read as a third,
+                            unrelated visual language between the two. Replaces the pre-6.2c
+                            Control.ContextMenu/Control.MenuItem (now removed, no other consumer).
                         -->
                         <ContextMenu x:Name="HeaderContextMenu"
-                                     Style="{StaticResource Control.ContextMenu}"
+                                     Style="{StaticResource Theme.ContextMenu}"
                                      Closed="HeaderContextMenu_Closed">
                             <ContextMenu.Resources>
-                                <Style TargetType="MenuItem" BasedOn="{StaticResource Control.MenuItem}"/>
+                                <Style TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}"/>
+                                <Style TargetType="Separator" BasedOn="{StaticResource Theme.Separator}"/>
                                 <!-- P06 (docs/fix-prompts/06-fit-content.md): combines CanEnterEditLayout
                                      (StaticResource LayoutEditMode) with a per-panel ViewMode==Grid check
                                      for the "Auto-size to content"/"Fit panel to content" IsEnabled
@@ -141,8 +148,22 @@
                                 <!-- P04 fix-cycle 1 (MV-21): the NOT gate the "Size" submenu's
                                      "…AND NOT IsRolledUp" rule needs — see NotBooleanConverter. -->
                                 <conv:NotBooleanConverter x:Key="Not"/>
+                                <!-- Declared LOCALLY (not reused from Resources/Styles/Settings.xaml's own
+                                     identically-keyed "PageDisplayName", which PanelsSection.xaml's
+                                     identically-shaped Move/Copy-to-page ContextMenus rely on): several
+                                     ChildWindow-constructing test harnesses (docs/Refactoring/Testing/
+                                     sta-test-conventions.md) build their OWN trimmed Application.Resources
+                                     merge chain that omits Settings.xaml — this panel's own Window has never
+                                     before needed anything from that dictionary. A local declaration here
+                                     keeps this window self-contained instead of quietly depending on every
+                                     ChildWindow test fixture also listing Settings.xaml. -->
+                                <loc:PageDisplayNameConverter x:Key="PageDisplayName"/>
                             </ContextMenu.Resources>
-                            <MenuItem Header="{loc:Loc Common_Rename}" Click="RenameMenu_Click"/>
+                            <!-- design-system-1x §2.6 p.3: InputGestureText="F2" — ChildWindow_PreviewKeyDown's
+                                 global F2 shortcut renames the selected file item when one is selected, and
+                                 falls back to this SAME panel-title rename (RenameMenu_Click) when nothing is
+                                 selected, so the hint is accurate either way. -->
+                            <MenuItem Header="{loc:Loc Common_Rename}" InputGestureText="F2" Click="RenameMenu_Click"/>
                             <!--
                                 docs/prompts/settings-window-redesign.md D-3/WP-B: opens the modeless
                                 "Customize panel…" dialog for THIS panel's Model — always enabled (unlike
@@ -151,6 +172,95 @@
                                 live regardless of Edit Layout mode, same as Rename above).
                             -->
                             <MenuItem Header="{loc:Loc Panel_Menu_Customize}" Click="CustomizePanelMenu_Click"/>
+                            <!--
+                                UX review, backlog 1.x item 8 (Fences parity — "Send Fence to Page"):
+                                dynamically populated from ChildWindowViewModel.Pages (kept in sync with
+                                IPageManager.PagesChanged/localization the same way PanelsSection.xaml's
+                                identically-shaped "Move/Copy to page ▾" ContextMenus are), routed through
+                                ChildWindowViewModel.MovePanelToPageCommand/CopyPanelToPageCommand — never a
+                                Click handler — exactly like the IconLayoutPolicy/ContentFilter/SortMode
+                                radio groups elsewhere in this same menu. ItemContainerStyle's bindings use
+                                RelativeSource AncestorType=ContextMenu — proven to resolve correctly through
+                                a submenu's own Popup by the "Icon layout"/"Panel sizing" submenus above.
+                                The current page is disabled (via MovePanelToPageCommand.CanExecute, not an
+                                explicit IsEnabled here — same as the IconLayoutPolicy items) and checked, so
+                                the user can see at a glance where the panel already is.
+
+                                M-1 (6.5 review round): unlike the IconLayoutPolicy/ContentFilter/SortMode
+                                radio groups, this checked item does NOT need
+                                behaviors:RadioMenuItemRefreshBehavior — CanExecute disables it, so it can
+                                never actually be re-clicked while checked, and the "same pattern" bug (a
+                                click that toggles IsChecked locally with no source change to correct it)
+                                is unreachable here.
+                            -->
+                            <MenuItem Header="{loc:Loc Panel_Menu_MoveToPage}" x:Name="MoveToPageMenu"
+                                      ItemsSource="{Binding PlacementTarget.DataContext.Pages,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                <MenuItem.ItemContainerStyle>
+                                    <Style TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}">
+                                        <Setter Property="Header" Value="{loc:LocBinding Display, Converter={StaticResource PageDisplayName}}"/>
+                                        <!-- M-F fix (backlog 1.x wave 2 review): Header above is a plain
+                                             string — WPF's default MenuItem HeaderTemplate would run it
+                                             through an access-key-aware presenter and silently eat a "_" in
+                                             the page's own name. This plain-TextBlock template (Resources/
+                                             Templates.xaml) shows it verbatim instead. -->
+                                        <Setter Property="HeaderTemplate" Value="{StaticResource PlainTextHeaderTemplate}"/>
+                                        <!-- IsCheckable is REQUIRED for the IsChecked binding below to
+                                             render anything at all — Theme.MenuItem (BasedOn above) sets
+                                             no default, and an unchecked MenuItem with IsCheckable="False"
+                                             never shows a check glyph regardless of IsChecked's value
+                                             (LOW-6, backlog 1.x wave 2 review: kept, not redundant). -->
+                                        <Setter Property="IsCheckable" Value="True"/>
+                                        <Setter Property="Command"
+                                                Value="{Binding PlacementTarget.DataContext.MovePanelToPageCommand,
+                                                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                        <Setter Property="CommandParameter" Value="{Binding Id}"/>
+                                        <!-- UX review, backlog 1.x item 8 ("panel clone to page" parity pass,
+                                             Fences' "Send Fence to Page"): compares a page item's own Id
+                                             against this panel's Model.PageId — a Style Setter's
+                                             ConverterParameter cannot itself be a Binding, so a two-value
+                                             MultiBinding is the only way to compare two runtime values.
+                                             EqualityToBoolConverter (Resources/Templates.xaml, merged
+                                             app-wide — LOW-5, backlog 1.x wave 2 review) rather than a
+                                             second, locally-declared instance: every ChildWindow-constructing
+                                             test harness that trims Settings.xaml out of its own resource
+                                             chain (see PageDisplayName's remarks above) already merges
+                                             Templates.xaml regardless, so this key resolves everywhere this
+                                             window is ever constructed. -->
+                                        <Setter Property="IsChecked">
+                                            <Setter.Value>
+                                                <MultiBinding Converter="{StaticResource EqualityToBool}" Mode="OneWay">
+                                                    <Binding Path="Id"/>
+                                                    <Binding Path="PlacementTarget.DataContext.Model.PageId"
+                                                             RelativeSource="{RelativeSource AncestorType=ContextMenu}"/>
+                                                </MultiBinding>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </MenuItem.ItemContainerStyle>
+                            </MenuItem>
+                            <!--
+                                Copy variant of the submenu above — unlike Move, the current page stays
+                                enabled (a copy onto the panel's own page is exactly how a same-page
+                                duplicate is requested, ADR-045) and there is no "already here" checkmark to
+                                show.
+                            -->
+                            <MenuItem Header="{loc:Loc Panel_Menu_CopyToPage}" x:Name="CopyToPageMenu"
+                                      ItemsSource="{Binding PlacementTarget.DataContext.Pages,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                <MenuItem.ItemContainerStyle>
+                                    <Style TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}">
+                                        <Setter Property="Header" Value="{loc:LocBinding Display, Converter={StaticResource PageDisplayName}}"/>
+                                        <!-- M-F fix (backlog 1.x wave 2 review) — see MoveToPageMenu's
+                                             identical remarks above. -->
+                                        <Setter Property="HeaderTemplate" Value="{StaticResource PlainTextHeaderTemplate}"/>
+                                        <Setter Property="Command"
+                                                Value="{Binding PlacementTarget.DataContext.CopyPanelToPageCommand,
+                                                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                        <Setter Property="CommandParameter" Value="{Binding Id}"/>
+                                    </Style>
+                                </MenuItem.ItemContainerStyle>
+                            </MenuItem>
                             <MenuItem Header="{loc:Loc Panel_Menu_RollUpDown}" Click="RollUpMenu_Click"/>
                             <!--
                                 Stage S (docs/PLANS/workspace-grid-03-04-integration.md §1.4) created both
@@ -221,8 +331,13 @@
                             -->
                             <MenuItem Header="{loc:Loc Common_IconLayout_Header}" x:Name="IconLayoutMenu"
                                       IsEnabled="{Binding CanEnterEditLayout, Source={StaticResource LayoutEditMode}, Mode=OneWay}">
+                                <!-- M-1 fix (6.5 review round): behaviors:RadioMenuItemRefreshBehavior.IsRadioItem
+                                     re-applies the IsChecked binding after a click so re-selecting the ALREADY
+                                     checked item doesn't leave WPF's own local SetCurrentValue(false) toggle
+                                     stuck when the command is a no-op for an unchanged enum value. -->
                                 <MenuItem Header="{loc:Loc Enum_IconLayoutPolicy_LegacyStretch}"
                                           IsCheckable="True"
+                                          behaviors:RadioMenuItemRefreshBehavior.IsRadioItem="True"
                                           IsChecked="{Binding PlacementTarget.DataContext.Model.IconLayoutPolicy,
                                                               RelativeSource={RelativeSource AncestorType=ContextMenu},
                                                               Converter={StaticResource EnumEquals},
@@ -233,6 +348,7 @@
                                           CommandParameter="{x:Static uimodels:IconLayoutPolicy.LegacyStretch}"/>
                                 <MenuItem Header="{loc:Loc Enum_IconLayoutPolicy_FixedGap}"
                                           IsCheckable="True"
+                                          behaviors:RadioMenuItemRefreshBehavior.IsRadioItem="True"
                                           IsChecked="{Binding PlacementTarget.DataContext.Model.IconLayoutPolicy,
                                                               RelativeSource={RelativeSource AncestorType=ContextMenu},
                                                               Converter={StaticResource EnumEquals},
@@ -315,69 +431,97 @@
                             <MenuItem Header="{loc:Loc Common_LockLayout}" IsCheckable="True" Click="LockLayoutMenu_Click"
                                       IsChecked="{Binding IsLayoutLocked, Source={StaticResource LayoutEditMode}, Mode=OneWay}"/>
                             <Separator/>
-                            <MenuItem Header="{loc:Loc Panel_Menu_ContentHeader}" IsEnabled="False" FontWeight="SemiBold"/>
-                            <MenuItem Header="{loc:Loc Enum_PanelContentFilter_ShowAll}"
-                                      IsCheckable="True"
-                                      IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
-                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
-                                                          Converter={StaticResource EnumEquals},
-                                                          ConverterParameter={x:Static uimodels:PanelContentFilter.ShowAll},
-                                                          Mode=OneWay}"
-                                      Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
-                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                      CommandParameter="{x:Static uimodels:PanelContentFilter.ShowAll}"/>
-                            <MenuItem Header="{loc:Loc Enum_PanelContentFilter_HideAll}"
-                                      IsCheckable="True"
-                                      IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
-                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
-                                                          Converter={StaticResource EnumEquals},
-                                                          ConverterParameter={x:Static uimodels:PanelContentFilter.HideAll},
-                                                          Mode=OneWay}"
-                                      Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
-                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                      CommandParameter="{x:Static uimodels:PanelContentFilter.HideAll}"/>
-                            <MenuItem Header="{loc:Loc Enum_PanelContentFilter_HideShortcuts}"
-                                      IsCheckable="True"
-                                      IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
-                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
-                                                          Converter={StaticResource EnumEquals},
-                                                          ConverterParameter={x:Static uimodels:PanelContentFilter.HideShortcuts},
-                                                          Mode=OneWay}"
-                                      Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
-                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                      CommandParameter="{x:Static uimodels:PanelContentFilter.HideShortcuts}"/>
-                            <MenuItem Header="{loc:Loc Enum_PanelContentFilter_FoldersOnly}"
-                                      IsCheckable="True"
-                                      IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
-                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
-                                                          Converter={StaticResource EnumEquals},
-                                                          ConverterParameter={x:Static uimodels:PanelContentFilter.FoldersOnly},
-                                                          Mode=OneWay}"
-                                      Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
-                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                      CommandParameter="{x:Static uimodels:PanelContentFilter.FoldersOnly}"/>
-                            <Separator/>
-                            <MenuItem Header="{loc:Loc Panel_Menu_ArrangeIconsHeader}" IsEnabled="False" FontWeight="SemiBold"/>
-                            <MenuItem Header="{loc:Loc Enum_PanelSortMode_Manual}"
-                                      IsCheckable="True"
-                                      IsChecked="{Binding PlacementTarget.DataContext.EffectiveSortMode,
-                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
-                                                          Converter={StaticResource EnumEquals},
-                                                          ConverterParameter={x:Static uimodels:PanelSortMode.Manual},
-                                                          Mode=OneWay}"
-                                      Command="{Binding PlacementTarget.DataContext.SetSortModeCommand,
-                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                      CommandParameter="{x:Static uimodels:PanelSortMode.Manual}"/>
-                            <MenuItem Header="{loc:Loc Enum_PanelSortMode_Name}"
-                                      IsCheckable="True"
-                                      IsChecked="{Binding PlacementTarget.DataContext.EffectiveSortMode,
-                                                          RelativeSource={RelativeSource AncestorType=ContextMenu},
-                                                          Converter={StaticResource EnumEquals},
-                                                          ConverterParameter={x:Static uimodels:PanelSortMode.Name},
-                                                          Mode=OneWay}"
-                                      Command="{Binding PlacementTarget.DataContext.SetSortModeCommand,
-                                                        RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                      CommandParameter="{x:Static uimodels:PanelSortMode.Name}"/>
+                            <!--
+                                docs/PLANS/design-system-1x.md §2.6 p.3 (ADR-047 D-7, UX review backlog 1.x
+                                item 6): the two radio groups below — "Content" (visibility filter) and
+                                "Arrange icons" (sort mode) — move from a flat, disabled-MenuItem-as-header
+                                run (S-17's own anti-pattern: an IsEnabled="False" MenuItem drawn as a
+                                section label has no reliable contrast of its own, ChromeContrastAuditTests'
+                                own ≈3.0:1 finding) into two proper submenus, the SAME shape "Icon layout"/
+                                "Panel sizing" above already use — this is also how Stardock Fences 5/6
+                                groups its own ContextMenu (fences-ux-parity-reviewer confirmed the parity
+                                read). Falls back to Theme.MenuItem.GroupHeader (Resources/Styles/
+                                Controls.xaml) as a flat, enabled, ≥4.5:1-contrast label instead, if a later
+                                review ever reverses this call — that fallback style already exists and is
+                                simply unused while this submenu shape stands. The header TEXT is unchanged
+                                (existing Panel_Menu_ContentHeader/Panel_Menu_ArrangeIconsHeader keys — no
+                                new RESX needed), only its ROLE (SubmenuHeader instead of a disabled Item).
+                            -->
+                            <!-- M-1 fix (6.5 review round): behaviors:RadioMenuItemRefreshBehavior.IsRadioItem
+                                 on all four items below — see its own remarks and the IconLayoutPolicy group
+                                 above for why a re-click of the ALREADY selected item needs it. -->
+                            <MenuItem Header="{loc:Loc Panel_Menu_ContentHeader}" x:Name="ContentFilterMenu">
+                                <MenuItem Header="{loc:Loc Enum_PanelContentFilter_ShowAll}"
+                                          IsCheckable="True"
+                                          behaviors:RadioMenuItemRefreshBehavior.IsRadioItem="True"
+                                          IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
+                                                              RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                              Converter={StaticResource EnumEquals},
+                                                              ConverterParameter={x:Static uimodels:PanelContentFilter.ShowAll},
+                                                              Mode=OneWay}"
+                                          Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                          CommandParameter="{x:Static uimodels:PanelContentFilter.ShowAll}"/>
+                                <MenuItem Header="{loc:Loc Enum_PanelContentFilter_HideAll}"
+                                          IsCheckable="True"
+                                          behaviors:RadioMenuItemRefreshBehavior.IsRadioItem="True"
+                                          IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
+                                                              RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                              Converter={StaticResource EnumEquals},
+                                                              ConverterParameter={x:Static uimodels:PanelContentFilter.HideAll},
+                                                              Mode=OneWay}"
+                                          Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                          CommandParameter="{x:Static uimodels:PanelContentFilter.HideAll}"/>
+                                <MenuItem Header="{loc:Loc Enum_PanelContentFilter_HideShortcuts}"
+                                          IsCheckable="True"
+                                          behaviors:RadioMenuItemRefreshBehavior.IsRadioItem="True"
+                                          IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
+                                                              RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                              Converter={StaticResource EnumEquals},
+                                                              ConverterParameter={x:Static uimodels:PanelContentFilter.HideShortcuts},
+                                                              Mode=OneWay}"
+                                          Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                          CommandParameter="{x:Static uimodels:PanelContentFilter.HideShortcuts}"/>
+                                <MenuItem Header="{loc:Loc Enum_PanelContentFilter_FoldersOnly}"
+                                          IsCheckable="True"
+                                          behaviors:RadioMenuItemRefreshBehavior.IsRadioItem="True"
+                                          IsChecked="{Binding PlacementTarget.DataContext.Model.ContentFilter,
+                                                              RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                              Converter={StaticResource EnumEquals},
+                                                              ConverterParameter={x:Static uimodels:PanelContentFilter.FoldersOnly},
+                                                              Mode=OneWay}"
+                                          Command="{Binding PlacementTarget.DataContext.SetContentFilterCommand,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                          CommandParameter="{x:Static uimodels:PanelContentFilter.FoldersOnly}"/>
+                            </MenuItem>
+                            <!-- M-1 fix (6.5 review round): behaviors:RadioMenuItemRefreshBehavior.IsRadioItem
+                                 on both items below — see the IconLayoutPolicy group's own remarks above. -->
+                            <MenuItem Header="{loc:Loc Panel_Menu_ArrangeIconsHeader}" x:Name="SortModeMenu">
+                                <MenuItem Header="{loc:Loc Enum_PanelSortMode_Manual}"
+                                          IsCheckable="True"
+                                          behaviors:RadioMenuItemRefreshBehavior.IsRadioItem="True"
+                                          IsChecked="{Binding PlacementTarget.DataContext.EffectiveSortMode,
+                                                              RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                              Converter={StaticResource EnumEquals},
+                                                              ConverterParameter={x:Static uimodels:PanelSortMode.Manual},
+                                                              Mode=OneWay}"
+                                          Command="{Binding PlacementTarget.DataContext.SetSortModeCommand,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                          CommandParameter="{x:Static uimodels:PanelSortMode.Manual}"/>
+                                <MenuItem Header="{loc:Loc Enum_PanelSortMode_Name}"
+                                          IsCheckable="True"
+                                          behaviors:RadioMenuItemRefreshBehavior.IsRadioItem="True"
+                                          IsChecked="{Binding PlacementTarget.DataContext.EffectiveSortMode,
+                                                              RelativeSource={RelativeSource AncestorType=ContextMenu},
+                                                              Converter={StaticResource EnumEquals},
+                                                              ConverterParameter={x:Static uimodels:PanelSortMode.Name},
+                                                              Mode=OneWay}"
+                                          Command="{Binding PlacementTarget.DataContext.SetSortModeCommand,
+                                                            RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                          CommandParameter="{x:Static uimodels:PanelSortMode.Name}"/>
+                            </MenuItem>
                         </ContextMenu>
                     </Grid.ContextMenu>
 
@@ -596,7 +740,13 @@
 
         <!-- One-time, non-blocking Move-semantics hint (see ChildWindowViewModel.MoveHintRequested).
              Not a modal dialog: StaysOpen=false, no hit-testing, doesn't steal focus from the drop
-             gesture or any in-progress rename. Auto-dismissed from code-behind after ~4s. -->
+             gesture or any in-progress rename. Auto-dismissed from code-behind after ~4s.
+             docs/PLANS/design-system-1x.md §2.5/§3 phase 6.2c: Theme.Popup.Chrome (Palette T,
+             Theme.Surface.Flyout/Theme.Stroke.Card — same theme-aware family as HeaderContextMenu above,
+             replacing the pre-6.2c Control.Popup.Chrome/always-dark Brush.Surface.Elevated) with
+             Theme.Text.Primary/Font.Size.Caption instead of the fixed Palette-P Brush.Text.Primary/literal
+             11 — this hint is Palette T chrome (a system affordance floating over the panel), not part of
+             the panel's own user-configured Ambient Accent surface. -->
         <Popup x:Name="MoveHintPopup"
                PlacementTarget="{Binding ElementName=TitleText}"
                Placement="Bottom"
@@ -604,18 +754,19 @@
                StaysOpen="False"
                Focusable="False"
                IsHitTestVisible="False">
-            <Border Style="{StaticResource Control.Popup.Chrome}"
+            <Border Style="{StaticResource Theme.Popup.Chrome}"
                     MaxWidth="260">
                 <TextBlock TextWrapping="Wrap"
-                           Foreground="{StaticResource Brush.Text.Primary}"
-                           FontSize="11"
+                           Foreground="{DynamicResource Theme.Text.Primary}"
+                           FontSize="{DynamicResource Font.Size.Caption}"
                            Text="{loc:Loc Hint_Move_Message}"/>
             </Border>
         </Popup>
 
         <!-- Non-blocking rename-error hint (ChildWindowViewModel.RenameError). Same pattern as
              MoveHintPopup above — never a MessageBox: the panel carries WS_EX_NOACTIVATE, so a
-             modal dialog would never receive activation/input either (ADR-013 risk R1). -->
+             modal dialog would never receive activation/input either (ADR-013 risk R1). Theme.Popup.Chrome
+             — see MoveHintPopup's own remarks above. -->
         <Popup x:Name="RenameErrorPopup"
                PlacementTarget="{Binding ElementName=FileListHost}"
                Placement="Center"
@@ -623,12 +774,12 @@
                StaysOpen="False"
                Focusable="False"
                IsHitTestVisible="False">
-            <Border Style="{StaticResource Control.Popup.Chrome}"
+            <Border Style="{StaticResource Theme.Popup.Chrome}"
                     MaxWidth="260">
                 <TextBlock x:Name="RenameErrorText"
                            TextWrapping="Wrap"
-                           Foreground="{StaticResource Brush.Text.Primary}"
-                           FontSize="11"/>
+                           Foreground="{DynamicResource Theme.Text.Primary}"
+                           FontSize="{DynamicResource Font.Size.Caption}"/>
             </Border>
         </Popup>
     </Grid>

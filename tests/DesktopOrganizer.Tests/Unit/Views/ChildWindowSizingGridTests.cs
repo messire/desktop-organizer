@@ -497,24 +497,10 @@ public class ChildWindowSizingGridTests
                 _app.Resources = _originalResources!;
         }
 
-        private static void MergeResourceDictionaries(Application app)
-        {
-            var merged = app.Resources.MergedDictionaries;
-            foreach (var relativePath in new[]
-                     {
-                         "/Resources/Styles/Colors.xaml",
-                         "/Resources/Styles/Spacing.xaml",
-                         "/Resources/Styles/Brushes.xaml",
-                         "/Resources/Styles/Typography.xaml",
-                         "/Resources/Styles/Icons.xaml",
-                         "/Resources/Styles/Controls.xaml",
-                         "/Resources/Styles/Panels.xaml",
-                         "/Resources/Templates.xaml",
-                     })
-            {
-                merged.Add(new ResourceDictionary { Source = new Uri($"/DesktopOrganizer.UI;component{relativePath}", UriKind.Relative) });
-            }
-        }
+        // docs/PLANS/design-system-1x.md R-7: shared with four other ChildWindow-family harnesses via
+        // Helpers.TestThemeResources — see that class's own remarks for why this used to be a
+        // hand-duplicated eight-entry list here.
+        private static void MergeResourceDictionaries(Application app) => TestThemeResources.MergeReduced(app);
     }
 
     /// <summary>

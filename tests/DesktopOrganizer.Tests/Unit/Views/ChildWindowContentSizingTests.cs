@@ -449,6 +449,31 @@ public class ChildWindowContentSizingTests
     }
 
     /// <summary>
+    /// L-5 fix (review round, design-system-1x.md §2.8): this broadcast cannot be undone — the
+    /// confirmation must use the Warning icon (Enter defaults to "No"), not the Question default.
+    /// </summary>
+    [Fact]
+    public void ApplyIconLayoutPolicyToAllMenu_Click_Confirms_WithWarningIcon()
+    {
+        RunOnStaThread(() =>
+        {
+            using var harness = ChildWindowContentSizingHarness.Build();
+            var model = BuildGridModel(itemCount: 1, windowWidth: 260d, windowHeight: 300d, policy: IconLayoutPolicy.FixedGap);
+            harness.Window.Initialize(model);
+
+            harness.WindowManagerMock.Setup(w => w.GetAllChildWindows()).Returns([model]);
+            harness.ConfirmationMock.Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<System.Windows.MessageBoxImage>())).Returns(true);
+
+            Invoke(harness.Window, "ApplyIconLayoutPolicyToAllMenu_Click");
+
+            harness.ConfirmationMock.Verify(
+                c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), System.Windows.MessageBoxImage.Warning),
+                Times.Once);
+            return 0;
+        });
+    }
+
+    /// <summary>
     /// Verifies that when the user declines confirmation, clicking "Apply icon layout to all panels"
     /// never broadcasts the current panel's icon layout policy to other panels.
     /// </summary>
@@ -496,6 +521,30 @@ public class ChildWindowContentSizingTests
         });
 
         Assert.Equal(PanelSizingMode.AutoContent, otherPanel.SizingMode);
+    }
+
+    /// <summary>
+    /// L-5 fix (review round, design-system-1x.md §2.8): see <see cref="ApplyIconLayoutPolicyToAllMenu_Click_Confirms_WithWarningIcon"/>'s own remarks — same Warning icon, not the Question default.
+    /// </summary>
+    [Fact]
+    public void ApplySizingModeToAllMenu_Click_Confirms_WithWarningIcon()
+    {
+        RunOnStaThread(() =>
+        {
+            using var harness = ChildWindowContentSizingHarness.Build();
+            var model = BuildGridModel(itemCount: 1, windowWidth: 260d, windowHeight: 300d, sizingMode: PanelSizingMode.AutoContent);
+            harness.Window.Initialize(model);
+
+            harness.WindowManagerMock.Setup(w => w.GetAllChildWindows()).Returns([model]);
+            harness.ConfirmationMock.Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<System.Windows.MessageBoxImage>())).Returns(true);
+
+            Invoke(harness.Window, "ApplySizingModeToAllMenu_Click");
+
+            harness.ConfirmationMock.Verify(
+                c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), System.Windows.MessageBoxImage.Warning),
+                Times.Once);
+            return 0;
+        });
     }
 
     // ----- P06 fix-cycle MAJOR-1: IsLayoutLocked guards both "Apply to all panels…" broadcasts -----
@@ -964,24 +1013,10 @@ public class ChildWindowContentSizingTests
                 _app.Resources = _originalResources!;
         }
 
-        private static void MergeResourceDictionaries(Application app)
-        {
-            var merged = app.Resources.MergedDictionaries;
-            foreach (var relativePath in new[]
-                     {
-                         "/Resources/Styles/Colors.xaml",
-                         "/Resources/Styles/Spacing.xaml",
-                         "/Resources/Styles/Brushes.xaml",
-                         "/Resources/Styles/Typography.xaml",
-                         "/Resources/Styles/Icons.xaml",
-                         "/Resources/Styles/Controls.xaml",
-                         "/Resources/Styles/Panels.xaml",
-                         "/Resources/Templates.xaml",
-                     })
-            {
-                merged.Add(new ResourceDictionary { Source = new Uri($"/DesktopOrganizer.UI;component{relativePath}", UriKind.Relative) });
-            }
-        }
+        // docs/PLANS/design-system-1x.md R-7: shared with four other ChildWindow-family harnesses via
+        // Helpers.TestThemeResources — see that class's own remarks for why this used to be a
+        // hand-duplicated eight-entry list here.
+        private static void MergeResourceDictionaries(Application app) => TestThemeResources.MergeReduced(app);
     }
 
     /// <summary>

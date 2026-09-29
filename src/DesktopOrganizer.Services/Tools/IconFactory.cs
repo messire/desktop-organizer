@@ -1,4 +1,5 @@
-﻿using System.Windows.Interop;
+﻿using System.Threading;
+using System.Windows.Interop;
 using Brushes = System.Windows.Media.Brushes;
 using Pen = System.Windows.Media.Pen;
 
@@ -23,8 +24,21 @@ internal class IconFactory: IIconFactory
     private static ImageSource? _placeholderIcon;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ADR-046 C-2: <c>_placeholderIcon</c> is published through <see cref="Interlocked.CompareExchange{T}(ref T, T, T)"/>
+    /// rather than the previous plain <c>??=</c>, which was safe only as long as every caller ran on the
+    /// UI thread — the background icon-load queue's worker threads can now race the UI thread (and each
+    /// other) into this method. If two threads race, both may render a throwaway duplicate bitmap; only
+    /// the FIRST one actually published wins and is what every caller (including the "loser") ends up
+    /// returning, so there is still ever only one shared instance in circulation.
+    /// </remarks>
     public ImageSource CreateBitmap()
-        => _placeholderIcon ?? CreatePlaceHolder();
+    {
+        if (_placeholderIcon is { } cached) return cached;
+
+        var created = CreatePlaceholderBitmap();
+        return Interlocked.CompareExchange(ref _placeholderIcon, created, null) ?? created;
+    }
 
     /// <inheritdoc />
     public ImageSource CreateBitmap(IntPtr iconHandle)
@@ -147,7 +161,7 @@ internal class IconFactory: IIconFactory
         return straightAlpha ? PixelFormats.Bgra32 : PixelFormats.Pbgra32;
     }
 
-    private static RenderTargetBitmap CreatePlaceHolder()
+    private static RenderTargetBitmap CreatePlaceholderBitmap()
     {
         var drawingVisual = new DrawingVisual();
 
@@ -174,7 +188,6 @@ internal class IconFactory: IIconFactory
         var bitmap = new RenderTargetBitmap(Width, Height, Dpi, Dpi, PixelFormats.Pbgra32);
         bitmap.Render(drawingVisual);
         bitmap.Freeze();
-        _placeholderIcon = bitmap;
         return bitmap;
     }
 }

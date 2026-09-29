@@ -30,6 +30,21 @@ public class WindowManager : IWindowManager
     private IPageManager? _pageManager;
 
     /// <summary>
+    /// M-C fix (code review, panel clone to page, backlog 1.x wave 3 review): the full panel-state batch
+    /// <see cref="LoadWindowsState"/> is currently (re)constructing panels from, set only for the duration
+    /// of that method's own <see cref="CreateEachIsolated"/> loop — see
+    /// <see cref="GetManagedPathsClaimedByOtherPanels"/>'s remarks for why. <see langword="null"/> at every
+    /// other time (a live "Copy to page" clone, an ordinary panel edit, …), where <see cref="_childWindows"/>
+    /// alone is already the complete picture.
+    /// </summary>
+    private IReadOnlyList<ChildWindowModel>? _loadingStates;
+
+    // Lazily resolved (ADR-045): only ClonePanelToPage's title resolution needs it, so — like
+    // _pageManager above — it is never added as a constructor parameter every test/DI call site would
+    // otherwise have to supply.
+    private ILocalizationService? _localization;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="WindowManager"/> class.
     /// </summary>
     /// <param name="serviceProvider">DI provider used to resolve windows.</param>
@@ -81,8 +96,7 @@ public class WindowManager : IWindowManager
 
     private IPageManager PageManager => _pageManager ??= _serviceProvider.GetRequiredService<IPageManager>();
 
-    /// <inheritdoc />
-    public event EventHandler<bool>? OnMainWindowVisibilityChanged;
+    private ILocalizationService Localization => _localization ??= _serviceProvider.GetRequiredService<ILocalizationService>();
 
     /// <inheritdoc />
     public event EventHandler<ChildWindowModel>? OnChildWindowAdded;
@@ -91,15 +105,7 @@ public class WindowManager : IWindowManager
     public event EventHandler<ChildWindowModel>? OnChildWindowRemoved;
 
     /// <inheritdoc />
-    public void StartMainWindow()
-    {
-        var mainWindow = GetOrCreateMainWindow();
-
-        if (mainWindow.Visibility == Visibility.Visible)
-            HideWindow(mainWindow);
-        else
-            ShowWindow(mainWindow);
-    }
+    public event EventHandler<ChildWindowModel>? OnChildWindowPageChanged;
 
     /// <inheritdoc />
     public void ShowMainWindow()
@@ -443,23 +449,34 @@ public class WindowManager : IWindowManager
         // why this must run here rather than inside each panel's own ChildWindowViewModel.LoadFromModel.
         ResolveStalePanelPaths(states, _itemStorage);
 
-        var skipped = CreateEachIsolated(states, state => CreateChildWindow(state));
-        if (skipped > 0)
+        // M-C fix (code review, panel clone to page, backlog 1.x wave 3 review): see _loadingStates' own
+        // remarks and GetManagedPathsClaimedByOtherPanels'. Cleared in `finally` so a panel that fails to
+        // construct (CreateEachIsolated's own per-item isolation) never leaves this set permanently.
+        _loadingStates = states;
+        try
         {
-            Log.Warn(
-                "WindowManager",
-                "CorruptSavedPanelsSkipped",
-                new KeyValuePair<string, object?>("skipped", skipped),
-                new KeyValuePair<string, object?>("total", states.Count));
+            var skipped = CreateEachIsolated(states, state => CreateChildWindow(state));
+            if (skipped > 0)
+            {
+                Log.Warn(
+                    "WindowManager",
+                    "CorruptSavedPanelsSkipped",
+                    new KeyValuePair<string, object?>("skipped", skipped),
+                    new KeyValuePair<string, object?>("total", states.Count));
 
-            // ADR-024 finalization C-1: a skipped panel means whatever gets persisted next reflects
-            // fewer panels than the document ApplicationStateService.Load() actually returned. Without
-            // this, the first Save() after this load (any user action — a single drag) would silently
-            // overwrite the on-disk primary with the reduced set, and the next Save() after that would
-            // overwrite .bak too, permanently losing the skipped panel(s) with nothing but a
-            // Console.Error line as a trace. ReportPartialLoad preserves the still-complete on-disk
-            // document in quarantine before that first overwrite can happen.
-            _applicationStateService.ReportPartialLoad("PartialPanelLoad");
+                // ADR-024 finalization C-1: a skipped panel means whatever gets persisted next reflects
+                // fewer panels than the document ApplicationStateService.Load() actually returned. Without
+                // this, the first Save() after this load (any user action — a single drag) would silently
+                // overwrite the on-disk primary with the reduced set, and the next Save() after that would
+                // overwrite .bak too, permanently losing the skipped panel(s) with nothing but a
+                // Console.Error line as a trace. ReportPartialLoad preserves the still-complete on-disk
+                // document in quarantine before that first overwrite can happen.
+                _applicationStateService.ReportPartialLoad("PartialPanelLoad");
+            }
+        }
+        finally
+        {
+            _loadingStates = null;
         }
     }
 
@@ -482,11 +499,10 @@ public class WindowManager : IWindowManager
 
         foreach (var (window, model) in _childWindows.Values)
         {
-            var monitor = !string.IsNullOrEmpty(model.MonitorDeviceId)
-                ? _monitorService.FindByDeviceName(model.MonitorDeviceId)
-                : null;
-            monitor ??= _monitorService.FindMonitorAt(new System.Windows.Point(model.Position.X, model.Position.Y))
-                        ?? _monitorService.GetPrimaryMonitor();
+            // L-6 fix (code review): shares ResolveMonitorForPosition's lookup instead of a third inline
+            // copy of the same "stored device id, else the monitor under the current position, else
+            // primary" resolution — see that method's own remarks.
+            var monitor = ResolveMonitorForPosition(model);
 
             if (ResolveGridAlignedBounds(model, monitor) is { } bounds)
             {
@@ -531,6 +547,281 @@ public class WindowManager : IWindowManager
         panel.IsVisible = pageId == PageManager.CurrentPage;
         ApplyPanelVisibility(panel);
         SaveWindowsStateNow();
+
+        // M-D fix (code review, panel clone to page, backlog 1.x wave 3 review): a panel moved via its
+        // OWN header context menu (ChildWindowViewModel.MovePanelToPageCommand) never goes through
+        // MainWindowViewModel at all, so that ViewModel's Panels/PanelsOnCurrentPage — built once from
+        // GetAllChildWindows() and otherwise only ever refreshed by OnChildWindowAdded/Removed/PageChanged
+        // — kept showing the panel under its stale page until some UNRELATED event happened to trigger a
+        // refresh. This event lets it react to a page reassignment specifically, regardless of which UI
+        // surface triggered it.
+        OnChildWindowPageChanged?.Invoke(this, panel);
+    }
+
+    /// <inheritdoc />
+    public PanelCloneResult ClonePanelToPage(ChildWindowModel source, string pageId)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        var unknownPage = new PanelCloneResult(PanelCloneOutcome.UnknownPage, null, 0);
+        if (string.IsNullOrWhiteSpace(pageId) || !PageManager.Pages.Contains(pageId)) return unknownPage;
+
+        // Sync only the source panel (SyncEachIsolated for a single window, same discipline MovePanelToPage's
+        // caller — RemovePanel — already applies before inspecting FilePaths) so the clone starts from the
+        // FilePaths/geometry actually on screen, not a stale in-memory snapshot.
+        if (_childWindows.TryGetValue(source.Id, out var sourceEntry))
+            SyncEachIsolated([sourceEntry], e => e.Window.SyncToModel());
+
+        // H-1 fix (code review, panel clone to page): the title is resolved BEFORE any managed item is
+        // copied. It is pure in-memory work that cannot itself leave an orphaned copy behind if it throws,
+        // so resolving it first keeps the try/catch below focused solely on the steps that follow a
+        // successful copy — exactly the steps that DO need a rollback.
+        var titlesOnTargetPage = _childWindows.Values
+            .Where(entry => entry.Model.PageId == pageId)
+            .Select(entry => entry.Model.Title)
+            .ToList();
+        var title = PanelCloneTitles.Resolve(source.Title, titlesOnTargetPage, Localization);
+
+        var itemsPlan = BuildClonedFilePaths(source.FilePaths, _itemStorage);
+        if (!itemsPlan.Success) return new PanelCloneResult(itemsPlan.FailureOutcome, null, 0);
+
+        Guid? clonedWindowId = null;
+        ChildWindowModel? clone = null;
+        var addedRaised = false;
+
+        // NEW-3 fix (final review, panel clone to page, backlog 1.x): flips once SaveWindowsStateNow()
+        // below has actually run — tells the catch block whether the on-disk state still needs undoing.
+        // Without this, a subscriber to OnChildWindowAdded that throws (after that save already
+        // succeeded) left the clone AND its managed-item copies committed to disk, even though the catch
+        // below fully unwinds the clone from memory (_childWindows, DiscardCopies, Window.Close()) —
+        // "removed everywhere except the one place that survives a restart" is worse than never having
+        // cleaned up in memory at all.
+        var persisted = false;
+        try
+        {
+            clone = PanelCloneBuilder.Build(source, pageId, title, itemsPlan.FilePaths);
+            clone.IsVisible = pageId == PageManager.CurrentPage;
+            clonedWindowId = clone.Id;
+
+            // Only a SAME-page clone needs its own spot — a different-page clone keeps the source's exact
+            // position/monitor verbatim (ADR-045 §8.3), same as every OTHER copied geometry field.
+            if (pageId == source.PageId)
+                PanelCloneGeometry.Offset(clone, _appSettings.GridSize, ResolveMonitorForPosition(clone));
+
+            // M-B fix (code review, panel clone to page, backlog 1.x wave 3 review): registers and shows
+            // the window via CreateChildWindowCore directly — NOT the public CreateChildWindow, which
+            // would raise OnChildWindowAdded immediately. See the remarks on addedRaised below for why
+            // that event must wait.
+            CreateChildWindowCore(clone);
+
+            // L-4 fix (code review): SkippedMissingItems is deliberately never surfaced to the user (see
+            // MainWindowViewModel.CopyPanelToPage's own remarks) — this is the one place it is actually
+            // recorded, opaque panel id only (privacy invariant), never a title.
+            Log.Info(
+                "WindowManager",
+                "PanelCloned",
+                new KeyValuePair<string, object?>("panelId", source.Id),
+                new KeyValuePair<string, object?>("skippedMissingItems", itemsPlan.SkippedMissingItems));
+
+            // Structural change (a brand-new panel), like every other panel create/delete/move call site —
+            // persisted synchronously so it can never be lost to a debounce window that never gets to elapse.
+            SaveWindowsStateNow();
+            persisted = true;
+
+            // M-B fix (code review, panel clone to page, backlog 1.x wave 3 review): OnChildWindowAdded is
+            // raised as the LAST step inside this try — strictly after the window is registered, logged
+            // AND persisted — so a throw from any of those earlier steps can never leave
+            // MainWindowViewModel.Panels (or any other subscriber) holding a "ghost" entry for a clone this
+            // method is about to unwind in the catch below. addedRaised only flips once the event has
+            // actually started firing, which tells the catch below whether a matching
+            // OnChildWindowRemoved is owed.
+            addedRaised = true;
+            OnChildWindowAdded?.Invoke(this, clone);
+
+            return new PanelCloneResult(PanelCloneOutcome.Cloned, clone, itemsPlan.SkippedMissingItems);
+        }
+        catch (Exception ex)
+        {
+            // M-A fix (code review, panel clone to page, backlog 1.x wave 3 review): the managed-item
+            // copies made by BuildClonedFilePaths above are discarded FIRST and unconditionally — never
+            // gated on whatever happens to the failed window below, which touches WPF/native resources and
+            // can itself throw. Under the previous ordering, an exception from Window.Close() skipped
+            // DiscardCopies entirely and left the fresh managed copies orphaned on disk.
+            _itemStorage.DiscardCopies(itemsPlan.CreatedCopies);
+
+            // H-1 fix (code review, panel clone to page): if CreateChildWindowCore got far enough to
+            // register the panel before failing (e.g. Show() itself threw), it must be unregistered
+            // DIRECTLY — never through RemoveChildWindow(releaseManagedItems: true), which would move the
+            // very copies just discarded above to the Recycle Bin instead, and would also raise
+            // OnChildWindowRemoved unconditionally, even for a panel OnChildWindowAdded was never raised
+            // for.
+            if (clonedWindowId is { } id && _childWindows.TryGetValue(id, out var failedEntry))
+            {
+                _childWindows.Remove(id);
+
+                // M-A fix: isolated in its own try/catch and logged — a native Close() failure must never
+                // prevent this catch from finishing its own cleanup (the DiscardCopies call above already
+                // ran regardless).
+                try
+                {
+                    failedEntry.Window.Close();
+                }
+                catch (Exception closeEx)
+                {
+                    Log.Error(
+                        "WindowManager",
+                        "PanelCloneCloseFailed",
+                        closeEx,
+                        new KeyValuePair<string, object?>("panelId", source.Id));
+                }
+            }
+
+            // NEW-3 fix (final review, panel clone to page, backlog 1.x): the earlier SaveWindowsStateNow()
+            // above already committed the clone (with its now-DISCARDED managed-item copies) to disk — a
+            // second synchronous save re-persists the fully-unwound in-memory state (clone removed from
+            // _childWindows, its window closed) so the on-disk file matches what every OTHER subscriber
+            // now sees, instead of resurrecting the clone (pointing at copies that no longer exist) on the
+            // next load. Isolated in its own try/catch and logged, same discipline as the Window.Close()
+            // cleanup above — a save failure here must never prevent this catch from finishing, and this
+            // clone-create failure is reported to the caller regardless either way.
+            if (persisted)
+            {
+                try
+                {
+                    SaveWindowsStateNow();
+                }
+                catch (Exception saveEx)
+                {
+                    Log.Error(
+                        "WindowManager",
+                        "PanelCloneRollbackSaveFailed",
+                        saveEx,
+                        new KeyValuePair<string, object?>("panelId", source.Id));
+                }
+            }
+
+            // M-B fix: only raised when OnChildWindowAdded actually started firing above — never for a
+            // clone that failed before ever being announced to any subscriber. M-5 fix (review 6.1): raised
+            // AFTER the rollback save above and isolated in its own try/catch — a throwing subscriber here
+            // (we are already inside a catch) would otherwise escape this method and skip both the on-disk
+            // rollback and the failure log/result below.
+            if (addedRaised && clone is not null)
+            {
+                try
+                {
+                    OnChildWindowRemoved?.Invoke(this, clone);
+                }
+                catch (Exception removedEx)
+                {
+                    Log.Error(
+                        "WindowManager",
+                        "PanelCloneRemovedHandlerFailed",
+                        removedEx,
+                        new KeyValuePair<string, object?>("panelId", source.Id));
+                }
+            }
+
+            // Opaque source panel id only — never a panel title (privacy invariant).
+            Log.Error(
+                "WindowManager",
+                "PanelCloneCreateFailed",
+                ex,
+                new KeyValuePair<string, object?>("panelId", source.Id));
+
+            return new PanelCloneResult(PanelCloneOutcome.CopyFailed, null, 0);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlySet<string> GetManagedPathsClaimedByOtherPanels(Guid excludingPanelId)
+    {
+        var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (id, entry) in _childWindows)
+        {
+            if (id == excludingPanelId) continue;
+            CollectManagedPaths(entry.Model, claimed);
+        }
+
+        // M-C fix (code review, panel clone to page, backlog 1.x wave 3 review): during LoadWindowsState's
+        // own CreateEachIsolated loop, _childWindows above only contains the panels constructed SO FAR — a
+        // panel later in the same batch (not yet registered) would otherwise look "unclaimed" to an
+        // EARLIER panel's own ChildWindowViewModel.ResolveManagedReplacements self-heal, even though the
+        // later panel's own FilePaths already reference that exact same managed path once IT, too, finishes
+        // loading — letting two panels in the same startup batch heal onto the same managed item.
+        // _loadingStates (set only for the duration of LoadWindowsState) closes that gap; it is
+        // <see langword="null"/> at every other call time, where _childWindows alone is already complete.
+        if (_loadingStates is not null)
+        {
+            foreach (var state in _loadingStates)
+            {
+                if (state.Id == excludingPanelId) continue;
+                if (_childWindows.ContainsKey(state.Id)) continue; // already covered above
+                CollectManagedPaths(state, claimed);
+            }
+        }
+
+        return claimed;
+    }
+
+    /// <summary>
+    /// The "duplicate every item" half of <see cref="ClonePanelToPage"/> (ADR-045): copies every MANAGED
+    /// path in <paramref name="sourceFilePaths"/> into its own brand-new per-item storage directory
+    /// (<see cref="IPanelItemStorageService.CopyManaged"/>); a non-managed path (an external file, or a
+    /// shortcut the user left where it was) is carried over unchanged — it belongs to the user, not this
+    /// app, so there is nothing to duplicate; a managed path whose file is already gone from disk is left
+    /// out of the clone entirely (<see cref="PanelCloneItemsPlan.SkippedMissingItems"/>) rather than
+    /// copying a reference to nothing that two panels would then both "own". Any other copy failure rolls
+    /// back every managed copy already made in THIS call (<see cref="IPanelItemStorageService.DiscardCopies"/>)
+    /// and reports the failing outcome — the clone is either complete, or none of it happened.
+    /// </summary>
+    /// <remarks>
+    /// Internal (rather than <see langword="private"/>) solely so <c>DesktopOrganizer.Tests</c> can unit
+    /// test this pure model+storage logic directly, without needing a real WPF <see cref="ChildWindow"/> —
+    /// mirrors <see cref="ReleaseManagedItems"/>.
+    /// </remarks>
+    /// <param name="sourceFilePaths">The source panel's <see cref="ChildWindowModel.FilePaths"/> (already synced to the live panel).</param>
+    /// <param name="storage">Duplicates app-managed item copies.</param>
+    /// <returns>The plan: either the clone's own file path list, or which outcome to fail with.</returns>
+    internal static PanelCloneItemsPlan BuildClonedFilePaths(IReadOnlyList<string> sourceFilePaths, IPanelItemStorageService storage)
+    {
+        var clonedPaths = new List<string>(sourceFilePaths.Count);
+        var createdCopies = new List<string>();
+        var skippedMissingItems = 0;
+
+        foreach (var path in sourceFilePaths)
+        {
+            if (!storage.IsManaged(path))
+            {
+                clonedPaths.Add(path);
+                continue;
+            }
+
+            var copy = storage.CopyManaged(path);
+            if (copy.Outcome == ManagedCopyOutcome.Copied && copy.CopyPath is not null)
+            {
+                clonedPaths.Add(copy.CopyPath);
+                createdCopies.Add(copy.CopyPath);
+                continue;
+            }
+
+            if (copy.Outcome == ManagedCopyOutcome.SourceMissing)
+            {
+                skippedMissingItems++;
+                continue;
+            }
+
+            storage.DiscardCopies(createdCopies);
+            var outcome = copy.Outcome switch
+            {
+                ManagedCopyOutcome.TooLarge => PanelCloneOutcome.TooLarge,
+                ManagedCopyOutcome.InsufficientSpace => PanelCloneOutcome.InsufficientSpace,
+                _ => PanelCloneOutcome.CopyFailed,
+            };
+            return PanelCloneItemsPlan.Failed(outcome);
+        }
+
+        return PanelCloneItemsPlan.Ok(clonedPaths, skippedMissingItems, createdCopies);
     }
 
     /// <summary>
@@ -669,13 +960,21 @@ public class WindowManager : IWindowManager
             {
                 var path = panel.FilePaths[i];
                 if (string.IsNullOrWhiteSpace(path)) continue;
-                if (File.Exists(path) || Directory.Exists(path)) continue;
 
+                // B-6 (ADR-046 7c): manifest lookup FIRST — FindManagedCandidates is a purely in-memory
+                // manifest scan (its own File.Exists/Directory.Exists calls only ever touch LOCAL managed
+                // candidates under %LOCALAPPDATA%, never `path` itself) — and only THEN check whether the
+                // original `path` still exists. The remap condition itself is unchanged (original missing
+                // AND exactly one unclaimed candidate — an AND of two checks, whose result cannot depend on
+                // evaluation order), but at startup, with every saved panel's paths checked before any
+                // window is even created, a `Z:\`/UNC entry with no managed candidate at all no longer pays
+                // for a network round-trip up front for every such panel.
                 var candidates = storage.FindManagedCandidates(path)
                     .Where(candidate => !claimed.Contains(candidate))
                     .ToList();
 
                 if (candidates.Count != 1) continue; // none, ambiguous, or every candidate already claimed
+                if (File.Exists(path) || Directory.Exists(path)) continue; // original still valid — nothing to remap
 
                 var candidate = candidates[0];
                 pendingRemaps.Add((panel, i, candidate));
@@ -1047,6 +1346,26 @@ public class WindowManager : IWindowManager
     }
 
     /// <summary>
+    /// Adds every app-managed path <paramref name="model"/> directly references, as-is, to
+    /// <paramref name="claimed"/> — the shared "claimed" rule <see cref="GetManagedPathsClaimedByOtherPanels"/>
+    /// and <see cref="ResolveStalePanelPaths"/> both apply. A Folder Portal panel never persists/consults
+    /// <see cref="ChildWindowModel.FilePaths"/> (see <see cref="ResolveStalePanelPaths"/>'s remarks), so
+    /// nothing of theirs can ever be "claimed".
+    /// </summary>
+    /// <param name="model">The panel whose <see cref="ChildWindowModel.FilePaths"/> are inspected.</param>
+    /// <param name="claimed">The case-insensitive set to add every managed path to.</param>
+    private void CollectManagedPaths(ChildWindowModel model, HashSet<string> claimed)
+    {
+        if (!string.IsNullOrWhiteSpace(model.SourceFolderPath)) return;
+
+        foreach (var path in model.FilePaths)
+        {
+            if (!string.IsNullOrWhiteSpace(path) && _itemStorage.IsManaged(path))
+                claimed.Add(path);
+        }
+    }
+
+    /// <summary>
     /// Seeds a brand-new install with exactly one empty panel (README.md's "On first run it creates one
     /// empty panel" — Install step 3, both language sections), so a user who just installed the app sees
     /// something rather than an entirely blank desktop. Only ever fires on a genuine first run — see
@@ -1163,6 +1482,26 @@ public class WindowManager : IWindowManager
     // MainWindow is a singleton in DI — always returns the same instance
     private MainWindow GetOrCreateMainWindow()
         => _serviceProvider.GetRequiredService<MainWindow>();
+
+    /// <summary>
+    /// The "stored device id, else the monitor under the current position, else primary" monitor lookup
+    /// shared by <see cref="ClonePanelToPage"/> (via <see cref="PanelCloneGeometry.Offset"/>) and
+    /// <see cref="NormalizePanelsToGrid"/> (L-6 fix, code review — the latter used to keep its own inline
+    /// copy of this exact same logic). <see cref="ResolveMonitorPlacement"/> keeps its own separate copy:
+    /// unlike these two read-only lookups, it also WRITES <see cref="ChildWindowModel.MonitorDeviceId"/> as
+    /// part of resolving where a panel restores to, which the callers of this method must not be coupled to.
+    /// </summary>
+    /// <param name="model">The panel whose monitor is resolved.</param>
+    private MonitorInfo ResolveMonitorForPosition(ChildWindowModel model)
+    {
+        var target = !string.IsNullOrEmpty(model.MonitorDeviceId)
+            ? _monitorService.FindByDeviceName(model.MonitorDeviceId)
+            : null;
+
+        return target
+            ?? _monitorService.FindMonitorAt(new System.Windows.Point(model.Position.X, model.Position.Y))
+            ?? _monitorService.GetPrimaryMonitor();
+    }
 
     /// <summary>
     /// Ensures the panel is placed on a valid monitor:
@@ -1322,15 +1661,66 @@ public class WindowManager : IWindowManager
         mainWindow.Show();
         mainWindow.WindowState = WindowState.Normal;
         mainWindow.Activate();
-        MainWindowVisibilityChanged(true);
     }
+}
 
-    private void HideWindow(MainWindow mainWindow)
+/// <summary>
+/// The outcome of <see cref="WindowManager.BuildClonedFilePaths"/> (ADR-045): either every item copied
+/// successfully (<see cref="Success"/>, with <see cref="FilePaths"/> ready to hand to
+/// <c>PanelCloneBuilder.Build</c>), or a copy failed and every managed copy already made for this attempt
+/// was rolled back (<see cref="FailureOutcome"/>).
+/// </summary>
+/// <remarks>
+/// <c>default(PanelCloneItemsPlan)</c> reports success with an empty, non-<see langword="null"/>
+/// <see cref="FilePaths"/> — a loose test double returning the default value never causes a
+/// <see cref="NullReferenceException"/> in a caller that only checks <see cref="Success"/> first.
+/// </remarks>
+internal readonly record struct PanelCloneItemsPlan
+{
+    private PanelCloneItemsPlan(bool success, List<string>? filePaths, int skippedMissingItems, IReadOnlyList<string>? createdCopies, PanelCloneOutcome failureOutcome)
     {
-        mainWindow.Hide();
-        MainWindowVisibilityChanged(false);
+        Success = success;
+        FilePaths = filePaths ?? [];
+        SkippedMissingItems = skippedMissingItems;
+        CreatedCopies = createdCopies ?? [];
+        FailureOutcome = failureOutcome;
     }
 
-    private void MainWindowVisibilityChanged(bool visibility)
-        => OnMainWindowVisibilityChanged?.Invoke(this, visibility);
+    /// <summary>Gets a value indicating whether every item copied successfully.</summary>
+    public bool Success { get; }
+
+    /// <summary>The clone's own file path list, ready for <c>PanelCloneBuilder.Build</c>. Empty when <see cref="Success"/> is <see langword="false"/>.</summary>
+    public List<string> FilePaths { get; }
+
+    /// <summary>How many managed items were left out because their file was already gone. Always <c>0</c> when <see cref="Success"/> is <see langword="false"/>.</summary>
+    public int SkippedMissingItems { get; }
+
+    /// <summary>
+    /// H-1 fix (code review, panel clone to page): every managed copy <c>BuildClonedFilePaths</c> itself
+    /// created for THIS attempt (a subset of <see cref="FilePaths"/> — excludes non-managed paths carried
+    /// over as-is) — so <see cref="WindowManager.ClonePanelToPage"/> can still roll them back via
+    /// <see cref="IPanelItemStorageService.DiscardCopies"/> if something AFTER this plan was built (title
+    /// resolution already happened earlier, geometry, <c>CreateChildWindow</c>) throws. Always empty when
+    /// <see cref="Success"/> is <see langword="false"/> — <c>BuildClonedFilePaths</c> already discards its
+    /// own copies itself before reporting a failure.
+    /// </summary>
+    public IReadOnlyList<string> CreatedCopies { get; }
+
+    /// <summary>Which <see cref="PanelCloneOutcome"/> <see cref="WindowManager.ClonePanelToPage"/> should fail with. Meaningless when <see cref="Success"/> is <see langword="true"/>.</summary>
+    public PanelCloneOutcome FailureOutcome { get; }
+
+    /// <summary>Creates a successful plan.</summary>
+    /// <param name="filePaths">The clone's own file path list.</param>
+    /// <param name="skippedMissingItems">See <see cref="SkippedMissingItems"/>.</param>
+    /// <param name="createdCopies">See <see cref="CreatedCopies"/>.</param>
+    public static PanelCloneItemsPlan Ok(List<string> filePaths, int skippedMissingItems, IReadOnlyList<string> createdCopies)
+    {
+        ArgumentNullException.ThrowIfNull(filePaths);
+        ArgumentNullException.ThrowIfNull(createdCopies);
+        return new PanelCloneItemsPlan(true, filePaths, skippedMissingItems, createdCopies, default);
+    }
+
+    /// <summary>Creates a failed plan.</summary>
+    /// <param name="outcome">See <see cref="FailureOutcome"/>.</param>
+    public static PanelCloneItemsPlan Failed(PanelCloneOutcome outcome) => new(false, null, 0, null, outcome);
 }

@@ -4,39 +4,33 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <StackPanel>
         <TextBlock Text="{loc:Loc Settings_Nav_About}" Style="{StaticResource Settings.PageHeader}"/>
 
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <StackPanel>
-                <!-- "DesktopOrganizer" is the product name — never translated (docs/PLANS/localization.md
-                     §0.2). -->
-                <TextBlock Text="DesktopOrganizer" Style="{StaticResource Settings.CardHeader}"/>
-                <TextBlock Style="{StaticResource Settings.CardDescription}">
-                    <Run Text="{loc:LocBinding AppVersion, FormatKey=Settings_About_Version_Format}"/>
-                </TextBlock>
-            </StackPanel>
-        </Border>
+        <!-- "DesktopOrganizer" is the product name — never translated (docs/PLANS/localization.md §0.2).
+             Description binds straight to the DependencyProperty (loc:LocBinding provides a real Binding,
+             same as any other {Binding}-shaped MarkupExtension) — no wrapping Run/TextBlock needed, unlike
+             the pre-6.2b manual Border, which had to host a Run inside its own literal TextBlock. -->
+        <controls:SettingsCard Header="DesktopOrganizer"
+                                Description="{loc:LocBinding AppVersion, FormatKey=Settings_About_Version_Format}"/>
 
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Settings_About_StorageFolder_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Text="{Binding StorageFolderPath}" Style="{StaticResource Settings.CardDescription}" TextWrapping="Wrap"/>
-                </StackPanel>
-                <Button Grid.Column="1" Content="{loc:Loc Settings_About_OpenFolder_Button}" Padding="12,6" VerticalAlignment="Center"
+        <controls:SettingsCard Header="{loc:Loc Settings_About_StorageFolder_Header}"
+                                Description="{Binding StorageFolderPath}">
+            <controls:SettingsCard.ActionContent>
+                <Button Content="{loc:Loc Settings_About_OpenFolder_Button}" VerticalAlignment="Center"
                         Command="{Binding OpenStorageFolderCommand}"/>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
 
         <!-- Manual "check for updates" (release-hardening-1.0.md §G2): no automatic check at startup and
-             no persisted "last checked" state — a click here is the only network call this app ever makes. -->
+             no persisted "last checked" state — a click here is the only network call this app ever makes.
+             Kept as a manual Border (not SettingsCard): the status line needs
+             AutomationProperties.LiveSetting="Polite" (a screen reader should notice "Checking…" turning
+             into a result without focus moving), which SettingsCard's fixed Description DataTemplate has
+             no hook to set. -->
         <Border Style="{StaticResource Settings.CardBorder}">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -45,13 +39,14 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Margin="0,0,16,0">
                     <TextBlock Text="{loc:Loc Settings_About_Update_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Text="{Binding About.StatusText}" Style="{StaticResource Settings.CardDescription}" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding About.StatusText}" Style="{StaticResource Settings.CardDescription}"
+                               TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="{loc:Loc Settings_About_Update_ViewRelease_Button}" Padding="12,6" Margin="0,0,8,0"
+                    <Button Content="{loc:Loc Settings_About_Update_ViewRelease_Button}" Margin="0,0,8,0"
                             Visibility="{Binding About.HasReleaseLink, Converter={StaticResource BooleanToVisibility}}"
                             Command="{Binding About.OpenReleaseCommand}"/>
-                    <Button Content="{loc:Loc Settings_About_Update_CheckButton}" Padding="12,6"
+                    <Button Content="{loc:Loc Settings_About_Update_CheckButton}"
                             IsEnabled="{Binding About.IsChecking, Converter={StaticResource NotBoolean}}"
                             Command="{Binding About.CheckForUpdatesCommand}"/>
                 </StackPanel>
@@ -59,19 +54,16 @@
         </Border>
 
         <!-- Fixed external links (release-hardening-1.0.md §G2) — every one opened via IExternalLinkLauncher (ShellExecute), never a direct process launch. -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <StackPanel>
-                <TextBlock Text="{loc:Loc Settings_About_Links_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                    <Button Content="{loc:Loc Settings_About_Links_ProjectPage_Button}" Padding="12,6" Margin="0,0,8,0"
-                            Command="{Binding About.OpenProjectPageCommand}"/>
-                    <Button Content="{loc:Loc Settings_About_Links_ReportProblem_Button}" Padding="12,6" Margin="0,0,8,0"
-                            Command="{Binding About.ReportProblemCommand}"/>
-                    <Button Content="{loc:Loc Settings_About_Links_OpenLogsFolder_Button}" Padding="12,6"
-                            Command="{Binding About.OpenLogsFolderCommand}"/>
-                </StackPanel>
+        <controls:SettingsCard Header="{loc:Loc Settings_About_Links_Header}">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="{loc:Loc Settings_About_Links_ProjectPage_Button}" Style="{StaticResource Theme.Button.Link}" Margin="0,0,16,0"
+                        Command="{Binding About.OpenProjectPageCommand}"/>
+                <Button Content="{loc:Loc Settings_About_Links_ReportProblem_Button}" Style="{StaticResource Theme.Button.Link}" Margin="0,0,16,0"
+                        Command="{Binding About.ReportProblemCommand}"/>
+                <Button Content="{loc:Loc Settings_About_Links_OpenLogsFolder_Button}" Style="{StaticResource Theme.Button.Link}"
+                        Command="{Binding About.OpenLogsFolderCommand}"/>
             </StackPanel>
-        </Border>
+        </controls:SettingsCard>
 
         <TextBlock Text="{loc:Loc Settings_About_Diagnostics_Message}" Style="{StaticResource Settings.CardDescription}" Margin="0,4,0,0"/>
     </StackPanel>

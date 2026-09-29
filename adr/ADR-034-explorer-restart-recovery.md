@@ -1,6 +1,7 @@
 # ADR-034: Explorer Restart Recovery
 
-Status: Accepted (2026-09-27) — amends ADR-001, ADR-019/ADR-020
+Status: Accepted (2026-09-27) — amends ADR-001, ADR-019/ADR-020; Amended 2026-10-09 (ADR-031 amendment:
+`IDesktopIconsService.VisibilityChanged`, tray checkmark is now event-driven — see the end of this document)
 
 ## Context
 
@@ -132,3 +133,14 @@ window open. See `docs/PLANS/release-hardening-1.0.md` §4 DoD for the full chec
 - ADR-037 (PerMonitorV2 + Dual-Mode Desktop Scale) — `IDesktopScaleProvider.Refresh()`/`BeginBatch()`,
   consumed at the end of `RecoverDesktopLayer`; the top-level-mode outcome this ADR documents is the same
   mode ADR-037 calls "T".
+
+## Amendment (2026-10-09): desktop-icons visibility is now an event (ADR-031 amendment)
+
+`IDesktopIconsService.VisibilityChanged` is raised by `SetIconsVisible`/`Toggle` and by a **successful**
+`ReapplyDesiredVisibility()` (the "hidden" intent re-applied to the new `SHELLDLL_DefView`, step 3 above;
+not raised when it returns `false` and will be retried). Subscribers keep the tray checkmark
+(`App.xaml.cs`, guarded by `Dispatcher.CheckAccess()`) and the Settings → General toggle
+(`MainWindowViewModel.DesktopIconsVisible`) in sync, so the explicit tray resync in step 2 is now a safety
+net rather than the only path. The recovery algorithm, the session-only `DesiredVisible` intent and "zero
+new persisted state" are unchanged (ADR-034 intent preserved). Changes made by Explorer itself are still
+not observed.

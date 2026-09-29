@@ -936,6 +936,64 @@ public class ResourceDictionaryMergeTests
     }
 
     /// <summary>
+    /// Пробел в тестах (final review, panel clone to page, backlog 1.x): <c>PlainTextHeaderTemplate</c>
+    /// (<c>Templates.xaml</c>) exists specifically so a DATA string (a page display name — ADR-043) shown
+    /// as a <c>ContextMenu</c> item's <c>Header</c> renders through a plain <see cref="TextBlock"/> instead
+    /// of the default header template, which auto-generates an <see cref="System.Windows.Controls.AccessText"/>
+    /// that would otherwise interpret a literal <c>_</c> in the page name as a mnemonic-underline prefix and
+    /// swallow it from what the user sees (WinForms' own <c>&amp;</c> problem, <c>TrayIconManager</c>'s own
+    /// <c>EscapeAmpersand</c> — see that class' own remarks — but the WPF-side mnemonic character is
+    /// <c>_</c>, not <c>&amp;</c>, and the fix here is "use a template with no <c>AccessText</c> at all"
+    /// rather than doubling the character). This test loads the REAL template content and binds it to a
+    /// display name containing an underscore, verifying the rendered <see cref="TextBlock.Text"/> keeps it
+    /// literally, byte-for-byte.
+    /// </summary>
+    [Fact]
+    public void PlainTextHeaderTemplate_DisplayNameContainsUnderscore_RendersItLiterally()
+    {
+        var text = RunOnStaThread(() =>
+        {
+            var originalHighContrast = HighContrastState.IsActive;
+            var beforeEnsure = Application.Current;
+            var app = WpfApplicationHost.EnsureApplication();
+            var ownsApplication = !ReferenceEquals(app, beforeEnsure);
+            var originalResources = ownsApplication ? null : app.Resources;
+
+            try
+            {
+                app.Resources = new ResourceDictionary();
+                MergeResourceDictionaries(app, highContrast: false);
+
+                var template = (DataTemplate)app.Resources["PlainTextHeaderTemplate"];
+
+                // A ContentPresenter — not a bare template.LoadContent() — matches how MenuItem itself
+                // actually applies HeaderTemplate in production (Header/HeaderTemplate ultimately flow
+                // through a ContentPresenter): the presenter's OWN Content becomes the generated template
+                // root's DataContext, which is what makes this template's plain <TextBlock Text="{Binding}"/>
+                // resolve at all — a template root returned by LoadContent() directly, with no
+                // ContentPresenter/logical parent ever attaching it to anything, never leaves its
+                // BindingExpression past BindingStatus.Unattached, no matter what its DataContext is set to.
+                var presenter = new ContentPresenter { Content = "R&D_Team", ContentTemplate = template };
+                presenter.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                presenter.Arrange(new Rect(presenter.DesiredSize));
+                presenter.UpdateLayout();
+
+                var textBlock = (TextBlock)VisualTreeHelper.GetChild(presenter, 0);
+                return textBlock.Text;
+            }
+            finally
+            {
+                HighContrastState.IsActive = originalHighContrast;
+
+                if (!ownsApplication)
+                    app.Resources = originalResources!;
+            }
+        });
+
+        Assert.Equal("R&D_Team", text);
+    }
+
+    /// <summary>
     /// Depth-first visual-tree search for a descendant of type <typeparamref name="T"/> named
     /// <paramref name="name"/> — used only by
     /// <see cref="ListViewTemplate_NarrowWidth_RealListBoxClampsLabelAndHasNoHorizontalOverflow"/> to reach

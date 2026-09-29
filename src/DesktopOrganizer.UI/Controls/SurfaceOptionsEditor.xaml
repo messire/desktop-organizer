@@ -1,0 +1,125 @@
+<UserControl x:Class="DesktopOrganizer.UI.Controls.SurfaceOptionsEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             xmlns:uimodels="clr-namespace:DesktopOrganizer.UI.Models"
+             xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
+             xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+             mc:Ignorable="d"
+             x:Name="Root"
+             d:DesignWidth="380">
+    <!--
+        Backlog 1.x wave 2 review (M-G): the "Surface style"/"Opacity" pair that PanelColorEditor's
+        AdvancedExtraContent hosts — extracted out of PanelCustomizeWindow.xaml and
+        NewPanelDefaultsSection.xaml, which used to duplicate this ~70-line block near-verbatim (only the
+        binding targets differed). Each host now supplies just three DependencyProperties below instead of
+        the whole markup.
+
+        This is its OWN separate UserControl/compiled class (not inline content assigned to
+        PanelColorEditor.AdvancedExtraContent, as it was before this fix) specifically so it can carry
+        x:Name/AutomationProperties.LabeledBy on its own internal labels: content declared directly inside
+        a property-element like <PanelColorEditor.AdvancedExtraContent> shares ITS enclosing page's
+        NameScope at compile time, which used to collide with PanelColorEditor's own compiled field names
+        (Root/AccentHexBox/… — WPF error MC3093) the moment anything in there carried an x:Name — hence the
+        old "Path=Children[0]" tree-position LabeledBy workaround both hosts used to need. A dedicated
+        UserControl has its OWN InitializeComponent()/NameScope, entirely independent of PanelColorEditor's,
+        so SurfaceStyleLabel/OpacityLabel below are ordinary, unambiguous x:Names.
+
+        GroupName is a single literal, not host-configurable: RadioButton.GroupName exclusivity is scoped
+        to the shared VISUAL TREE ROOT the RadioButtons live under (the containing Window/PresentationSource)
+        — NOT to a NameScope; two RadioButtons with the same GroupName in the same NameScope but under
+        different visual roots are already independent regardless of this control's own NameScope shape.
+        NEW-5 fix (final review, panel clone to page, backlog 1.x): this remark previously named NameScope
+        as the scoping mechanism, which is incorrect. What still holds is the conclusion: PanelCustomizeWindow
+        (its own separate Window) and NewPanelDefaultsSection (embedded in MainWindow's settings) are always
+        different visual roots, so their own SurfaceOptionsEditor instances never see each other's
+        RadioButtons regardless of sharing the same GroupName string.
+
+        DataContext is inherited from whatever hosts this control (via ContentPresenter, once assigned to
+        PanelColorEditor.AdvancedExtraContent — see that property's own remarks in PanelColorEditor.xaml.cs
+        for why that is PanelColorEditorViewModel/"Colors", not the outer window's own ViewModel) — every
+        binding below therefore targets this control's OWN DependencyProperties via ElementName="Root",
+        never {Binding} straight to DataContext.
+    -->
+    <UserControl.Resources>
+        <conv:EnumDisplayNameConverter x:Key="EnumDisplayName"/>
+    </UserControl.Resources>
+    <StackPanel>
+        <TextBlock Text="{loc:Loc Common_Surface_Header}" Style="{StaticResource Settings.CardHeader}" Margin="0,0,0,10"/>
+
+        <Grid Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="SurfaceStyleLabel" Grid.Column="0" Text="{loc:Loc Common_SurfaceStyle_Header}"
+                       VerticalAlignment="Center" TextWrapping="Wrap"/>
+            <Border Grid.Column="1" Style="{StaticResource Settings.SegmentedGroup}">
+                <UniformGrid Rows="1" Columns="3"
+                             KeyboardNavigation.TabNavigation="Once"
+                             KeyboardNavigation.DirectionalNavigation="Contained">
+                    <RadioButton GroupName="SurfaceOptionsEditor.SurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
+                                 AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                 Command="{Binding SurfaceStyleCommand, ElementName=Root}"
+                                 CommandParameter="{x:Static uimodels:PanelSurfaceStyle.Solid}"
+                                 Content="{loc:LocBinding Source={x:Static uimodels:PanelSurfaceStyle.Solid}, Converter={StaticResource EnumDisplayName}}">
+                        <RadioButton.IsChecked>
+                            <Binding Path="SurfaceStyle" ElementName="Root" Mode="OneWay"
+                                     Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static uimodels:PanelSurfaceStyle.Solid}"/>
+                        </RadioButton.IsChecked>
+                    </RadioButton>
+                    <RadioButton GroupName="SurfaceOptionsEditor.SurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
+                                 AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                 Command="{Binding SurfaceStyleCommand, ElementName=Root}"
+                                 CommandParameter="{x:Static uimodels:PanelSurfaceStyle.Ambient}"
+                                 Content="{loc:LocBinding Source={x:Static uimodels:PanelSurfaceStyle.Ambient}, Converter={StaticResource EnumDisplayName}}">
+                        <RadioButton.IsChecked>
+                            <Binding Path="SurfaceStyle" ElementName="Root" Mode="OneWay"
+                                     Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static uimodels:PanelSurfaceStyle.Ambient}"/>
+                        </RadioButton.IsChecked>
+                    </RadioButton>
+                    <RadioButton GroupName="SurfaceOptionsEditor.SurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
+                                 AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
+                                 Command="{Binding SurfaceStyleCommand, ElementName=Root}"
+                                 CommandParameter="{x:Static uimodels:PanelSurfaceStyle.Glass}"
+                                 Content="{loc:LocBinding Source={x:Static uimodels:PanelSurfaceStyle.Glass}, Converter={StaticResource EnumDisplayName}}">
+                        <RadioButton.IsChecked>
+                            <Binding Path="SurfaceStyle" ElementName="Root" Mode="OneWay"
+                                     Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static uimodels:PanelSurfaceStyle.Glass}"/>
+                        </RadioButton.IsChecked>
+                    </RadioButton>
+                </UniformGrid>
+            </Border>
+        </Grid>
+        <TextBlock Text="{loc:Loc Common_SurfaceStyle_GlassHint_Description}"
+                   Style="{StaticResource Settings.CardDescription}" Margin="0,0,0,10"/>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="40"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="OpacityLabel" Grid.Column="0" Text="{loc:Loc Common_SurfaceOpacity_Header}"
+                       VerticalAlignment="Center" TextWrapping="Wrap"/>
+            <!-- Minimum bound to SurfaceComposer.MinSurfaceOpacity (0.35, the same floor
+                 SurfaceComposer.ClampOpacity already enforces at render time) rather than a hardcoded
+                 literal — WPF's own Value-coercion here only clamps the DISPLAYED position, it never writes
+                 the coerced value back through this TwoWay binding (OpacitySliderMinimumCoercionTests). -->
+            <Slider Grid.Column="1" VerticalAlignment="Center"
+                    AutomationProperties.LabeledBy="{Binding ElementName=OpacityLabel}"
+                    Minimum="{x:Static theming:SurfaceComposer.MinSurfaceOpacity}" Maximum="1" TickFrequency="1"
+                    Value="{Binding SurfaceOpacity, ElementName=Root, Mode=TwoWay}"/>
+            <TextBlock Grid.Column="2" Margin="8,0,0,0" VerticalAlignment="Center" TextAlignment="Right">
+                <TextBlock.Text>
+                    <MultiBinding StringFormat="{}{0:P0}">
+                        <Binding Path="SurfaceOpacity" ElementName="Root"/>
+                        <loc:CultureBinding/>
+                    </MultiBinding>
+                </TextBlock.Text>
+            </TextBlock>
+        </Grid>
+    </StackPanel>
+</UserControl>

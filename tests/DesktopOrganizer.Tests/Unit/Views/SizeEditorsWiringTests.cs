@@ -1,7 +1,10 @@
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
 using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Controls;
 using DesktopOrganizer.UI.Models;
+using DesktopOrganizer.UI.Theming;
 using DesktopOrganizer.UI.Views.Settings;
 
 namespace DesktopOrganizer.Tests.Unit.Views;
@@ -73,27 +76,106 @@ public class SizeEditorsWiringTests
     }
 
     /// <summary>
-    /// UX#3 (release-polish-1.0 visual review): <c>NewPanelDefaultsSection</c>'s Surface card comes BEFORE
-    /// its Icon size card — matching <c>PanelCustomizeWindow</c>'s own card order — where this section used
-    /// to have them reversed. Checked via document order in the logical tree: the Surface card's own
-    /// <c>OpacityLabel</c>-named element must appear before the icon-size <see cref="SteppedValueEditor"/>.
+    /// Backlog 1.x item 5 (§5.2/§5.6 DoD 3, superseding UX#3's "Surface card comes before Icon size card"
+    /// ordering check — that stand-alone card no longer exists): <c>NewPanelDefaultsSection</c> itself must
+    /// NOT host a Surface style/Opacity card of its own any more — those controls live inside the shared
+    /// <see cref="PanelColorEditor"/>'s collapsed-by-default "Advanced" card via
+    /// <see cref="PanelColorEditor.AdvancedExtraContent"/>, so they are no longer duplicated markup between
+    /// this section and <c>PanelCustomizeWindow.xaml</c> (which wires the identical content the same way).
+    /// Backlog 1.x wave 2 review (M-G): that content is now the single shared
+    /// <see cref="SurfaceOptionsEditor"/> control (rather than each host's own inline copy of its markup) —
+    /// this test now also pins that <see cref="PanelColorEditor.AdvancedExtraContent"/> reachable via
+    /// <see cref="LogicalTreeHelper"/> (M-G registers it as a real logical child — see
+    /// <c>PanelColorEditor.xaml.cs</c>'s own remarks), not merely via the
+    /// <see cref="PanelColorEditor.AdvancedExtraContent"/> property's own value.
     /// </summary>
     [Fact]
-    public void NewPanelDefaultsSection_SurfaceCard_ComesBeforeIconSizeCard()
+    public void NewPanelDefaultsSection_SurfaceControls_LiveInsideASharedSurfaceOptionsEditor_NotAsOwnCard()
     {
         StaTestRunner.Run(() =>
         {
             WpfApplicationHost.EnsureApplication();
             var section = new NewPanelDefaultsSection();
 
-            var elements = FindLogicalDescendants<FrameworkElement>(section).ToList();
-            var opacityLabelIndex = elements.FindIndex(e => e.Name == "OpacityLabel");
-            var iconSizeEditorIndex = elements.FindIndex(e => e is SteppedValueEditor);
+            var editor = FindLogicalDescendants<PanelColorEditor>(section).Single();
+            var surfaceEditor = Assert.IsType<SurfaceOptionsEditor>(editor.AdvancedExtraContent);
 
-            Assert.True(opacityLabelIndex >= 0, "OpacityLabel not found.");
-            Assert.True(iconSizeEditorIndex >= 0, "SteppedValueEditor not found.");
-            Assert.True(opacityLabelIndex < iconSizeEditorIndex, "Surface card must come before the Icon size card.");
+            // Exactly one SurfaceOptionsEditor anywhere in the section's logical tree — it lives inside
+            // PanelColorEditor's AdvancedExtraContent (a real logical child as of M-G), not as a separate
+            // stand-alone card of the section's own.
+            Assert.Same(surfaceEditor, FindLogicalDescendants<SurfaceOptionsEditor>(section).Single());
+
+            var surfaceRadios = FindLogicalDescendants<RadioButton>(surfaceEditor)
+                .Where(r => r.GroupName == "SurfaceOptionsEditor.SurfaceStyle")
+                .ToList();
+            Assert.Equal(3, surfaceRadios.Count);
+            Assert.Contains(FindLogicalDescendants<Slider>(surfaceEditor), s => s.Minimum.Equals(SurfaceComposer.MinSurfaceOpacity));
         });
+    }
+
+    /// <summary>
+    /// Backlog 1.x item 5/wave 2 review M-G: the shared <see cref="SurfaceOptionsEditor"/>'s Surface
+    /// style/Opacity controls resolve <see cref="AutomationProperties.LabeledByProperty"/> to the right
+    /// label via ordinary <c>ElementName</c> bindings — no longer the "Path=Children[0]" tree-position
+    /// workaround the inline markup this control replaced needed (MC3093 no longer applies: this control
+    /// has its own dedicated compiled NameScope — see its own XAML remarks). Exercises the REAL production
+    /// markup end-to-end (Show + expand), not just a synthetic analogue of the technique.
+    /// </summary>
+    [Fact]
+    public void NewPanelDefaultsSection_SurfaceControls_LabeledByResolvesToTheCorrectLabel()
+    {
+        StaTestRunner.Run(() =>
+        {
+            WpfApplicationHost.EnsureApplication();
+            var section = new NewPanelDefaultsSection();
+            var window = new Window { Content = section, ShowActivated = false, Left = -5000, Top = -5000 };
+            window.Show();
+            window.UpdateLayout();
+
+            // The Advanced card's body only materializes its visual children once expanded (Settings.
+            // CardExpander's own ContentPresenter skips Measure while Collapsed) — see PanelColorEditorTests'
+            // own remarks for the identical finding.
+            FindVisualDescendants<Expander>(section).Single(e => e.Style == (Style)Application.Current.Resources["Settings.CardExpander"]).IsExpanded = true;
+            window.UpdateLayout();
+
+            var surfaceRadios = FindVisualDescendants<RadioButton>(section).Where(r => r.GroupName == "SurfaceOptionsEditor.SurfaceStyle").ToList();
+            Assert.Equal(3, surfaceRadios.Count);
+            foreach (var radio in surfaceRadios)
+            {
+                var label = Assert.IsType<TextBlock>(AutomationProperties.GetLabeledBy(radio));
+                Assert.Equal("Style", label.Text);
+            }
+
+            var opacitySlider = FindVisualDescendants<Slider>(section).Single(s => s.Minimum.Equals(SurfaceComposer.MinSurfaceOpacity));
+            var opacityLabel = Assert.IsType<TextBlock>(AutomationProperties.GetLabeledBy(opacitySlider));
+            Assert.Equal("Opacity", opacityLabel.Text);
+
+            window.Close();
+        });
+    }
+
+    /// <summary>
+    /// Recursively enumerates every VISUAL-tree descendant of <paramref name="root"/> assignable to
+    /// <typeparamref name="T"/> — needed (unlike <see cref="FindLogicalDescendants{T}"/>) wherever content is
+    /// only realized during layout, e.g. anything inside a collapsed <c>Settings.CardExpander</c> or a
+    /// <see cref="PanelColorEditor.AdvancedExtraContent"/> <see cref="ContentPresenter"/> (see this file's
+    /// own remarks above).
+    /// </summary>
+    /// <typeparam name="T">The descendant type to find.</typeparam>
+    /// <param name="root">The visual-tree root to search from (exclusive of itself).</param>
+    private static IEnumerable<T> FindVisualDescendants<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+
+            if (child is T match) yield return match;
+
+            foreach (var nested in FindVisualDescendants<T>(child))
+                yield return nested;
+        }
     }
 
     /// <summary>

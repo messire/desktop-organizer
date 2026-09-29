@@ -55,6 +55,7 @@ public partial class App : Application
     private ShutdownSequence? _shutdownSequence;
     private CrashCoordinator? _crashCoordinator;
     private ShellRecoveryCoordinator? _shellRecovery;
+    private TrayPagesAdapter? _trayPagesAdapter;
 
     /// <summary>The same <c>Logs</c> folder <see cref="JsonLinesDiagnosticsLog"/> writes its JSONL sessions to (see <c>DiConfig.DefaultDiagnosticsLogDirectory</c>).</summary>
     private static string CrashLogDirectory => Path.Combine(AppStorageRoot.Default, "Logs");
@@ -67,6 +68,10 @@ public partial class App : Application
 
     private IWindowManager WindowManager
         => (_windowManager ??= _serviceProvider.GetService<IWindowManager>())!;
+
+    /// <summary>backlog-1x-master-plan.md §1: round-robin page switching for the tray icon's double-click.</summary>
+    private TrayPagesAdapter TrayPagesAdapter
+        => (_trayPagesAdapter ??= _serviceProvider.GetService<TrayPagesAdapter>())!;
 
     private IDesktopIconsService DesktopIcons
         => (_desktopIcons ??= _serviceProvider.GetService<IDesktopIconsService>())!;
@@ -404,6 +409,15 @@ public partial class App : Application
         merged.Add(LoadResourceDictionary("/Resources/Styles/Icons.xaml"));
         merged.Add(LoadResourceDictionary("/Resources/Styles/Controls.xaml"));
         merged.Add(LoadResourceDictionary("/Resources/Styles/Settings.xaml"));   // settings window + section UserControls (ADR-031)
+
+        // Design system 1.x phase 6.2a (docs/PLANS/design-system-1x.md §2.5/§3, ADR-047 D-1): the "Palette
+        // T" control/style catalogue (SettingsCard/DropDownButton/InfoBar default styles, Theme.Button.*,
+        // Theme.ToggleSwitch, Theme.ComboBox/TextBox/Slider/ScrollBar/ListBox/ListView, Theme.FocusVisual).
+        // Merged app-wide (every key here is EXPLICIT, x:Key-based — never an implicit TargetType style, so
+        // this never touches a panel's own stock controls; see that file's own remarks), immediately after
+        // Settings.xaml since Views/Settings/*.xaml's DataTemplate content (e.g. Theme.ToggleSwitch, which
+        // replaced Settings.ToggleCheckBox this phase) now resolves StaticResource keys from here too.
+        merged.Add(LoadResourceDictionary("/Resources/Styles/Theme.Controls.xaml"));
         merged.Add(LoadResourceDictionary("/Resources/Styles/Panels.xaml"));
         merged.Add(LoadResourceDictionary("/Resources/Templates.xaml"));
     }
@@ -454,6 +468,16 @@ public partial class App : Application
         // and every one of those XAML files resolves StaticResource keys this builds.
         LoadResourceDictionaries();
 
+        // Design system 1.x §3 phase 6.1 (docs/PLANS/design-system-1x.md, ADR-047 D-1/D-2): appends the
+        // "Palette T" theme dictionary (Theme.*/Font.Size.* DynamicResource keys) right after the static
+        // chain above — same "must run before any chrome window is constructed" reasoning, since
+        // MainWindow/PanelCustomizeWindow/AppDialogWindow all resolve those keys too.
+        _serviceProvider.GetRequiredService<IAppThemeService>().Start();
+
+        // Design system 1.x phase 6.4b (ADR-047 D-11): classic Win32 menus (icon shell menu, system menus)
+        // follow the theme just resolved — a no-op unless it is Dark (see NativeMenuThemeAdapter).
+        _serviceProvider.GetRequiredService<NativeMenuThemeAdapter>().Start();
+
         // D-12 (docs/PLANS/phase-6-edit-layout-ux.md §1): published as an application resource, not a
         // ChildWindowViewModel property (DO-002 §0 — zero changed lines there), so a panel's
         // HeaderContextMenu — which lives in its own visual tree and does not inherit attached DPs — can
@@ -496,9 +520,11 @@ public partial class App : Application
         // Second half of the write barrier (ADR-024 D-11 / finalization MAJOR M-1): every one of the
         // four state-owning consumers has now had the chance to read its own slice of the document
         // ApplicationState.Load() returned in Program.Main — WindowManager via LoadPanels() above,
-        // PageManager and LayoutSnapshotService transitively via LoadPanels()'s MainWindowViewModel
-        // resolution (whose constructor requires a LayoutSnapshotsViewModel, whose own constructor
-        // calls ILayoutSnapshotService.Load()), and SystemIconsPanelManager via the Load() immediately
+        // PageManager (L-6 fix, backlog 1.x wave 1 review: actually constructed earlier than this line,
+        // in InitTrayIcon() above via the TrayPagesAdapter DI resolution — backlog-1x-master-plan.md
+        // §1.1) and LayoutSnapshotService transitively via LoadPanels()'s MainWindowViewModel resolution
+        // (whose constructor requires a LayoutSnapshotsViewModel, whose own constructor calls
+        // ILayoutSnapshotService.Load()), and SystemIconsPanelManager via the Load() immediately
         // above — the last of the four to run. Any RequestSave()/SaveNow() before this line is now a
         // guaranteed no-op (ApplicationStateService.PersistNow) instead of risking a write that pulls
         // an empty/default section from a consumer that hasn't loaded yet and persists it over real
@@ -550,26 +576,21 @@ public partial class App : Application
     private void InitDesktopGestures()
     {
         // Heavy work is deferred off the hook callback via the dispatcher. D-6: the double-click gesture
-        // is a second entry point (besides the tray's own "Show desktop icons" click) that changes
-        // IDesktopIconsService's visibility, so it must refresh the tray checkmark too — see
-        // ITrayIconManager.SetDesktopIconsVisible's remarks — otherwise the checkmark goes stale the
-        // moment a user double-clicks the desktop instead of using the tray menu item.
+        // is one of three entry points (tray item, settings window's General toggle, this gesture) that
+        // change IDesktopIconsService's visibility; the tray checkmark and the settings toggle follow
+        // via IDesktopIconsService.VisibilityChanged (subscribed in InitTrayIcon / MainWindowViewModel),
+        // so this handler only has to flip the state on the UI thread.
         DesktopGestures.DesktopDoubleClicked += (_, _) => Current.Dispatcher.BeginInvoke(ToggleDesktopIcons);
         DesktopGestures.LassoCompleted += (_, args) => Current.Dispatcher.BeginInvoke(() => CreateLassoPanel(args));
         DesktopGestures.Start();
     }
 
     /// <summary>
-    /// Toggles real desktop icon visibility and keeps the tray's "Show desktop icons" checkmark in sync.
-    /// The one place both the double-click gesture (<see cref="InitDesktopGestures"/>) and the tray menu
-    /// item's own click (<see cref="InitTrayIcon"/>) route through, so the checkmark can never go stale
-    /// relative to whichever entry point the user actually used (D-6).
+    /// Toggles real desktop icon visibility. Both the double-click gesture (<see cref="InitDesktopGestures"/>)
+    /// and the tray menu item's own click (<see cref="InitTrayIcon"/>) route through here; every UI mirror
+    /// of the state refreshes itself from <see cref="IDesktopIconsService.VisibilityChanged"/> (D-6).
     /// </summary>
-    private void ToggleDesktopIcons()
-    {
-        DesktopIcons.Toggle();
-        TrayIconManager.SetDesktopIconsVisible(DesktopIcons.AreIconsVisible);
-    }
+    private void ToggleDesktopIcons() => DesktopIcons.Toggle();
 
     private void LoadPanels()
     {
@@ -583,15 +604,20 @@ public partial class App : Application
     private void ShowSettingsWindow(object? sender, EventArgs e)
         => Current.Dispatcher.Invoke(() => WindowManager.ShowMainWindow());
 
-    private void ToggleSettingsWindow(object? sender, EventArgs e)
-        => Current.Dispatcher.Invoke(() => WindowManager.StartMainWindow());
-
     private void InitTrayIcon()
     {
         TrayIconManager.Initialize();
         TrayIconManager.OnShowMainWindowRequested += ShowSettingsWindow;
-        TrayIconManager.OnToggleMainWindowVisibilityRequested += ToggleSettingsWindow;
         TrayIconManager.OnExitRequested += (_, _) => Shutdown();
+
+        // backlog-1x-master-plan.md §1.1: started right after Initialize() so the round-robin
+        // double-click gesture (ADR-044) is wired for the whole lifetime of the tray icon, mirroring
+        // every other TrayIconManager.On*Requested subscription in this method.
+        TrayPagesAdapter.Start();
+
+        // Design system 1.x phase 6.4 (ADR-047 D-10): the tray menu follows the Windows mode (light/dark/
+        // high contrast) from here on — same "right after Initialize()" placement as the adapter above.
+        _serviceProvider.GetRequiredService<TrayThemeAdapter>().Start();
 
         // Installer-initiated graceful shutdown (installer/DesktopOrganizer.iss): resolved and started
         // here — never in ISingleInstanceCoordinator's own setup — because a listener must exist only
@@ -629,9 +655,20 @@ public partial class App : Application
         TrayIconManager.OnLockLayoutToggleRequested += (_, _) => layoutEditMode.IsLayoutLocked = !layoutEditMode.IsLayoutLocked;
 
         // D-6: routes through the same ToggleDesktopIcons() helper the desktop double-click gesture uses
-        // (InitDesktopGestures), so the checkmark is refreshed identically regardless of which entry
-        // point the user clicked.
+        // (InitDesktopGestures).
         TrayIconManager.ToggleDesktopIconsRequested += (_, _) => ToggleDesktopIcons();
+
+        // The checkmark is a snapshot (see ITrayIconManager.SetDesktopIconsVisible's remarks) — re-take it
+        // on every change the service makes, whichever entry point caused it (tray, settings window's
+        // General toggle, double-click gesture, Explorer-restart recovery). The service raises on the
+        // caller's thread: all of those are the UI thread, which the WinForms menu item requires. The one
+        // exception is CrashCoordinator restoring the icons from a faulting background thread
+        // (CrashOrigin.Background) — the process is terminating, so the checkmark is simply left alone.
+        DesktopIcons.VisibilityChanged += (_, _) =>
+        {
+            if (!Dispatcher.CheckAccess()) return;
+            TrayIconManager.SetDesktopIconsVisible(DesktopIcons.AreIconsVisible);
+        };
 
         // Reflects whatever IDesktopIconsService's visibility already is at startup (restored, if
         // necessary, from whatever RestoreDesktopIcons left it at on the previous exit) — mirrors

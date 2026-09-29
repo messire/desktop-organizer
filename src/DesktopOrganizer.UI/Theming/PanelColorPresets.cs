@@ -33,40 +33,53 @@ public sealed record PanelColorPreset(string Id, string AccentHex, string DarkMo
 /// </summary>
 public static class PanelColorPresets
 {
+    // Backlog 1.x item 4 (§4.2a, DarkModeTextHex): each CHROMATIC preset below now carries its OWN pale
+    // tint of its accent's hue (HSL lightness ~91%, saturation ~32%) instead of the shared plain white
+    // every preset used before this change — the root cause of "the preset doesn't seem to change the
+    // text" in Dark mode (every preset wrote the identical #FFFFFF). Every value is measured (see
+    // PanelColorPresetsContrastTests.ComposedSurface_MeetsMinimumTextContrast_ForEveryStyleAndOpacity) to
+    // clear ContrastCalculator.MinimumTextContrast (4.5:1) against SurfaceComposer.ComposeSurface's output
+    // for every PanelSurfaceStyle at both SurfaceComposer.MinSurfaceOpacity and MaxSurfaceOpacity, and to
+    // still resolve PanelThemeMode.Dark via PanelThemeRules.FromTextColor (its contrast against
+    // SurfaceComposer.DarkNeutralBase stays far higher than against LightNeutralBase — a light-lightness-
+    // 91% tint is still much brighter than the dark base and only barely dimmer than the near-white
+    // LightNeutralBase, so it never "jumps" mode). The two NEUTRAL presets (Graphite, Stone) keep the
+    // original plain white — ADR-042 amendment explicitly allows neutrals to stay white/near-white.
+
     /// <summary>The "Red" preset.</summary>
-    public static PanelColorPreset Red { get; } = new("Red", "#D9534F", "#FFFFFF", "#4A1F1E");
+    public static PanelColorPreset Red { get; } = new("Red", "#D9534F", "#EFE1E1", "#4A1F1E");
 
     /// <summary>The "Orange" preset.</summary>
-    public static PanelColorPreset Orange { get; } = new("Orange", "#E0812F", "#FFFFFF", "#4B2A0C");
+    public static PanelColorPreset Orange { get; } = new("Orange", "#E0812F", "#EFE8E1", "#4B2A0C");
 
     /// <summary>The "Amber" preset.</summary>
-    public static PanelColorPreset Amber { get; } = new("Amber", "#D6A324", "#FFFFFF", "#453309");
+    public static PanelColorPreset Amber { get; } = new("Amber", "#D6A324", "#EFEBE1", "#453309");
 
     /// <summary>The "Lime" preset.</summary>
-    public static PanelColorPreset Lime { get; } = new("Lime", "#8FB43A", "#FFFFFF", "#2F3D11");
+    public static PanelColorPreset Lime { get; } = new("Lime", "#8FB43A", "#EBEFE1", "#2F3D11");
 
     /// <summary>The "Green" preset.</summary>
-    public static PanelColorPreset Green { get; } = new("Green", "#3F9A5A", "#FFFFFF", "#173A24");
+    public static PanelColorPreset Green { get; } = new("Green", "#3F9A5A", "#E1EFE5", "#173A24");
 
     /// <summary>The "Teal" preset.</summary>
-    public static PanelColorPreset Teal { get; } = new("Teal", "#2F9C93", "#FFFFFF", "#12403C");
+    public static PanelColorPreset Teal { get; } = new("Teal", "#2F9C93", "#E1EFEE", "#12403C");
 
     /// <summary>The "Cyan" preset.</summary>
-    public static PanelColorPreset Cyan { get; } = new("Cyan", "#2E98C8", "#FFFFFF", "#123B4E");
+    public static PanelColorPreset Cyan { get; } = new("Cyan", "#2E98C8", "#E1EBEF", "#123B4E");
 
     /// <summary>The "Blue" preset — <see cref="Default"/>.</summary>
-    public static PanelColorPreset Blue { get; } = new("Blue", "#3F7FD9", "#FFFFFF", "#172F4B");
+    public static PanelColorPreset Blue { get; } = new("Blue", "#3F7FD9", "#E1E7EF", "#172F4B");
 
     /// <summary>The "Violet" preset.</summary>
-    public static PanelColorPreset Violet { get; } = new("Violet", "#7A5BE7", "#FFFFFF", "#2B2350");
+    public static PanelColorPreset Violet { get; } = new("Violet", "#7A5BE7", "#E4E1EF", "#2B2350");
 
     /// <summary>The "Magenta" preset.</summary>
-    public static PanelColorPreset Magenta { get; } = new("Magenta", "#C8559E", "#FFFFFF", "#4A1F3B");
+    public static PanelColorPreset Magenta { get; } = new("Magenta", "#C8559E", "#EFE1EA", "#4A1F3B");
 
-    /// <summary>The "Graphite" preset (neutral).</summary>
+    /// <summary>The "Graphite" preset (neutral) — stays plain white in Dark mode (no accent hue to tint toward that would read as meaningfully distinct).</summary>
     public static PanelColorPreset Graphite { get; } = new("Graphite", "#596273", "#FFFFFF", "#22262E");
 
-    /// <summary>The "Stone" preset (neutral).</summary>
+    /// <summary>The "Stone" preset (neutral) — stays plain white in Dark mode, same rationale as <see cref="Graphite"/>.</summary>
     public static PanelColorPreset Stone { get; } = new("Stone", "#7D7468", "#FFFFFF", "#2E2A26");
 
     /// <summary>All twelve presets, in the exact spectrum order they are displayed (neutrals last).</summary>
@@ -81,9 +94,11 @@ public static class PanelColorPresets
     /// <see cref="All"/> order, followed by (at most) four distinct text colours — collected by scanning
     /// <see cref="All"/> in order and, for each preset, considering <see cref="PanelColorPreset.DarkModeTextHex"/>
     /// then <see cref="PanelColorPreset.LightModeTextHex"/>, adding the first four distinct (case-insensitive)
-    /// values encountered. Since every preset shares the same <see cref="PanelColorPreset.DarkModeTextHex"/>
-    /// (<c>#FFFFFF</c>), this always yields that shared white plus the first three presets' own distinct
-    /// <see cref="PanelColorPreset.LightModeTextHex"/> values (Red/Orange/Amber) — always exactly 16 entries.
+    /// values encountered. Since backlog 1.x item 4 (§4.2a) every preset's own <see cref="PanelColorPreset.DarkModeTextHex"/>
+    /// is now distinct per chromatic preset (no longer a single shared <c>#FFFFFF</c>), this yields the
+    /// first two presets' own (dark, light) pair — <see cref="Red"/>'s <see cref="PanelColorPreset.DarkModeTextHex"/>/
+    /// <see cref="PanelColorPreset.LightModeTextHex"/> then <see cref="Orange"/>'s own pair — always exactly
+    /// 16 entries.
     /// </summary>
     public static IReadOnlyList<string> CustomDialogSeed { get; } = BuildCustomDialogSeed();
 

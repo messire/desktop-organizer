@@ -188,9 +188,13 @@ public partial class ChildWindow
         // Scope decision (P06 fix-cycle, orchestrator): both broadcasts apply to every panel on every
         // page (see docs/PLANS/workspace-grid-06-fit-content.md §4) — the dialog text says so explicitly,
         // distinct from P03's "Align all", which is current-page-only.
+        // L-5 fix (review round, design-system-1x.md §2.8): irreversible/hard-to-undo bulk action — the
+        // Warning icon defaults Enter to "No" (ConfirmationService's own remarks) instead of the
+        // Question default's "Yes", guarding this against an accidental Enter.
         if (!_confirmation.Confirm(
                 loc.Format("Panel_Confirm_ApplyIconLayout_Format", policyName, panelsText),
-                loc.GetString("Panel_Confirm_ApplyIconLayout_Title")))
+                loc.GetString("Panel_Confirm_ApplyIconLayout_Title"),
+                MessageBoxImage.Warning))
             return;
 
         foreach (var panel in panels)
@@ -222,9 +226,11 @@ public partial class ChildWindow
 
         // Scope decision (P06 fix-cycle, orchestrator): see ApplyIconLayoutPolicyToAllMenu_Click's
         // remarks — same "all pages" scope and unified "cannot be undone" wording (P06 fix-cycle UX-P1).
+        // L-5 fix (review round): see that same method's own remarks — Warning, not the Question default.
         if (!_confirmation.Confirm(
                 loc.Format("Panel_Confirm_ApplySizingMode_Format", modeName, panelsText),
-                loc.GetString("Panel_Confirm_ApplySizingMode_Title")))
+                loc.GetString("Panel_Confirm_ApplySizingMode_Title"),
+                MessageBoxImage.Warning))
             return;
 
         foreach (var panel in panels)

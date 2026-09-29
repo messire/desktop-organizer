@@ -47,6 +47,9 @@ internal class DesktopIconsService(INativeApi nativeApi) : IDesktopIconsService
     public bool? DesiredVisible { get; private set; }
 
     /// <inheritdoc />
+    public event EventHandler? VisibilityChanged;
+
+    /// <inheritdoc />
     public void SetIconsVisible(bool visible)
     {
         // Recorded before the shell call, and even when SHELLDLL_DefView cannot be found right now:
@@ -56,6 +59,11 @@ internal class DesktopIconsService(INativeApi nativeApi) : IDesktopIconsService
         var defView = FindDefView();
         if (defView != IntPtr.Zero)
             nativeApi.ShowWindow(defView, visible ? SwShow : SwHide);
+
+        // Raised even when the intent was merely recorded (no DefView yet): the mirrors re-read
+        // AreIconsVisible themselves, so a spurious notification costs one lookup, while a missed one
+        // leaves a checkmark stale.
+        VisibilityChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <inheritdoc />
@@ -75,7 +83,6 @@ internal class DesktopIconsService(INativeApi nativeApi) : IDesktopIconsService
 
             // ShowWindow's return value is the PREVIOUS visibility, not success — don't read it.
             nativeApi.ShowWindow(defView, SwHide);
-            return true;
         }
         catch
         {
@@ -83,6 +90,11 @@ internal class DesktopIconsService(INativeApi nativeApi) : IDesktopIconsService
             // window, so degrading to "not yet" is the right answer here.
             return false;
         }
+
+        // Outside the try: a throwing UI handler must surface, not be mistaken for "DefView not yet
+        // there" and retried.
+        VisibilityChanged?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     /// <summary>

@@ -145,7 +145,15 @@ internal static class ManagedStorageFileOps
     {
         try
         {
-            if (File.Exists(destPath)) File.Delete(destPath);
+            if (File.Exists(destPath))
+            {
+                // H-2 fix (code review, panel clone to page): File.Copy carries the ReadOnly attribute over
+                // from the source (e.g. a read-only document) — clear it first so this best-effort cleanup
+                // doesn't itself fail on the very attribute it copied verbatim. Same guard
+                // TryDeletePartialDirectory already applies for the directory case.
+                ClearReadOnlyRecursive(destPath, isDirectory: false);
+                File.Delete(destPath);
+            }
         }
         catch (Exception ex)
         {

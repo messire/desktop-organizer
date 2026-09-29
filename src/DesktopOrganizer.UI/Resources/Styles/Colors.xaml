@@ -14,12 +14,14 @@
         at runtime by Theming/SurfaceComposer.cs (C2) via PanelSurfaceBrushConverter, not baked into the
         token, so one neutral base color serves every SurfaceOpacity/PanelSurfaceStyle combination.
 
-        Color.Settings.* (bottom section) is a separate, deliberately light palette for the Settings
-        window (MainWindow.xaml), which Phase 5 does NOT restyle (D-9) — only its inline hex literals are
-        hoisted here verbatim, same RGB values.
+        Phase 6.1 (design-system-1x.md §3, ADR-047 D-2): the Settings window's own colours (formerly a
+        fixed-light group in this file) moved to DesktopOrganizer.UI.Theming.ThemePalette — Palette T,
+        "application chrome", is theme-aware (light/dark/high-contrast) and its C# source of truth also
+        feeds the tray menu renderer (phase 6.4), neither of which a WPF-only Color resource could do.
+        Nothing in Colors.xaml/Brushes.xaml represents the Settings window any more.
 
-        Colors.HighContrast.xaml overlays the Surface/Text/Border/Overlay/Selection/Sidebar/Settings
-        groups below (every group except Accent — a per-panel user choice, left as-is) when
+        Colors.HighContrast.xaml overlays the Surface/Text/Border/Overlay/Selection/Sidebar groups below
+        (every group except Accent — a per-panel user choice, left as-is) when
         SystemParameters.HighContrast is true (D-12; MAJOR-A widened the overlay past Surface/Text/Border).
     -->
 
@@ -106,34 +108,6 @@
         rendered colour, not just name it. Same RGBA value the inline literal already had.
     -->
     <Color x:Key="Color.Sidebar.Background">#55000000</Color>
-
-    <!--
-        Settings window (DO-003, D-9): inline hex literals from MainWindow.xaml hoisted verbatim (same
-        RGB values, only named — see D-9's table for the exact line numbers each token replaces). Not
-        part of the dark Ambient Accent palette above — the settings window stays a light, system-styled
-        window; these are consumed starting C7.
-    -->
-    <Color x:Key="Color.Settings.ChromeBackground">#F0F0F0</Color>
-    <Color x:Key="Color.Settings.ChromeBorder">#CCCCCC</Color>
-    <Color x:Key="Color.Settings.TabActiveBackground">White</Color>
-    <Color x:Key="Color.Settings.IconMuted">#888888</Color>
-    <Color x:Key="Color.Settings.TextMuted">#666666</Color>
-    <Color x:Key="Color.Settings.SwatchBorder">#888</Color>
-    <Color x:Key="Color.Settings.Warning">#B8860B</Color>
-
-    <!--
-        ADR-031 settings-window redesign: the sidebar/card shell of the (light) settings window. These
-        exist because the first cut of Settings.xaml borrowed Surface.Elevated/Text.Primary/Border.* from
-        the DARK Ambient Accent palette above, which rendered near-black cards with light text inside a
-        light, system-styled window. Everything the settings window and its dialogs paint must come from
-        Color.Settings.*, never from the panel palette.
-    -->
-    <Color x:Key="Color.Settings.TextPrimary">#1B1B1B</Color>
-    <Color x:Key="Color.Settings.CardBackground">White</Color>
-    <Color x:Key="Color.Settings.CardBorder">#E0E0E0</Color>
-    <Color x:Key="Color.Settings.HoverOverlay">#14000000</Color>
-    <Color x:Key="Color.Settings.ToggleTrackOff">#9A9A9A</Color>
-    <Color x:Key="Color.Settings.ToggleThumb">White</Color>
 
     <!--
         ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §2.3) —

@@ -108,12 +108,13 @@ fences-feature-planner (мастер-план всей фазы)
   `Services` (реализации, нативный interop в `Tools/`) → `UI` (Views/ViewModels/Models/Converters/Commands).
 - **Инварианты:** P/Invoke только за `INativeApi`; колбэк хука `WH_MOUSE_LL` — минимум работы + try/catch;
   единый источник правды вида панели — `ChildWindowModel` (INPC); битые пути не валят загрузку.
-- **Готовность:** ROADMAP Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» (ADR-033–038) закрыта; manual verify выполнена на Windows 11 (2026-09-27); открыты сквозные задачи.
+- **Готовность:** ROADMAP Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» (ADR-033–038) закрыта; manual verify выполнена на Windows 11 (2026-09-27); открыты сквозные задачи. Бэклог 1.x закрыт 2026-09-30, ADR-043–047.
 
 ## 🔒 Настройки и persistence — ЗАМОРОЖЕНЫ (не трогать без явного разрешения пользователя)
 
 Механизм хранения настроек и состояния в его текущем виде **менять нельзя**. Это касается всего контура
-ADR-024: `application-state.json` (`StateEnvelope`, **schemaVersion = 5**), лестница миграций
+ADR-024: `application-state.json` (`StateEnvelope`, **schemaVersion = 6**, поднята 2026-09-29 с явного
+разрешения пользователя — ADR-043), лестница миграций
 (`Migrations/V*To*`), `JsonApplicationStateStore` (атомарная запись, бэкапы, карантин, advisory lock,
 rung «newer schema → read-only»), `PanelStateMapper`/DTO, `ApplicationStateService`, `IAppSettings`/
 `AppSettings`/`Settings.settings`/`user.config`, `LayoutSnapshotService`, путей в `%LOCALAPPDATA%\DesktopOrganizer`.

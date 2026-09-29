@@ -1,4 +1,5 @@
-﻿using System.Windows.Media;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Windows.Media;
 
 namespace DesktopOrganizer.Services.Abstractions;
 
@@ -7,6 +8,13 @@ namespace DesktopOrganizer.Services.Abstractions;
 /// </summary>
 public interface IIconProvider
 {
+    /// <summary>
+    /// Gets this provider's own generic placeholder (the uniform gray square <see cref="GetIcon(string, int)"/>
+    /// falls back to as a last resort). Created once, thread-safe, frozen (ADR-046 C-4). The very first
+    /// access must happen on an STA thread (it may render a <see cref="System.Windows.Media.Imaging.RenderTargetBitmap"/>).
+    /// </summary>
+    ImageSource PlaceholderIcon { get; }
+
     /// <summary>
     /// Get file icon or placeholder at the default size (<see cref="IconPixelSize.Default"/> pixels).
     /// Equivalent to <see cref="GetIcon(string, int)"/> with <see cref="IconPixelSize.Default"/>.
@@ -45,4 +53,37 @@ public interface IIconProvider
     /// </summary>
     /// <param name="icon">The icon previously returned by <see cref="GetIcon(string, int)"/>.</param>
     bool IsPlaceholder(ImageSource? icon);
+
+    /// <summary>
+    /// Cache-only lookup in the existing <c>(path, Snap(size))</c> icon cache: no file-system access, no
+    /// shell call, and — unlike <see cref="GetIcon(string, int)"/> — no freshness check (the queued
+    /// <see cref="GetIcon(string, int)"/> call re-validates once it actually runs). Safe from any thread.
+    /// A hit moves the entry to the front of the LRU list, same as an ordinary <see cref="GetIcon(string, int)"/> hit.
+    /// </summary>
+    /// <param name="filePath">File path.</param>
+    /// <param name="pixelSize">Requested physical pixel size (snapped the same way as <see cref="GetIcon(string, int)"/>).</param>
+    /// <param name="icon">The cached icon, when found.</param>
+    /// <returns><see langword="true"/> when the cache already held a fresh-enough entry for this key.</returns>
+    bool TryPeekCachedIcon(string filePath, int pixelSize, [NotNullWhen(true)] out ImageSource? icon);
+
+    /// <summary>
+    /// Cache-only lookup of a type icon previously produced by <see cref="GetTypeIcon"/>. No file-system
+    /// access, no shell call. Safe from any thread.
+    /// </summary>
+    /// <param name="filePath">File path (only its extension is used as the cache key).</param>
+    /// <param name="isDirectory">Whether the item is a directory (directories share a single cache entry).</param>
+    /// <returns>The cached type icon, or <see langword="null"/> when none has been resolved yet.</returns>
+    ImageSource? TryPeekTypeIcon(string filePath, bool isDirectory);
+
+    /// <summary>
+    /// Resolves ONLY the generic type icon (<c>SHGFI_USEFILEATTRIBUTES | SHGFI_SHELLICONSIZE</c>, by
+    /// extension/attribute) — the pre-1.0 stage 3 fallback of <see cref="GetIcon(string, int)"/> — cached
+    /// per lower-case extension (or the closed <c>"&lt;dir&gt;"</c> token for a directory) in a cache
+    /// separate from <see cref="GetIcon(string, int)"/>'s own <c>(path, size)</c> cache. Never touches the
+    /// file system. The shell call itself must run on a worker thread in production (never the UI thread).
+    /// </summary>
+    /// <param name="filePath">File path (only its extension is used).</param>
+    /// <param name="isDirectory">Whether the item is a directory.</param>
+    /// <returns>A frozen type icon, or this provider's <see cref="PlaceholderIcon"/> on failure (not cached).</returns>
+    ImageSource GetTypeIcon(string filePath, bool isDirectory);
 }

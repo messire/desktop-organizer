@@ -1,0 +1,36 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Design-system-1x phase 6.2a (docs/PLANS/design-system-1x.md §2.5, ADR-047 D-1): implicit
+        (TargetType-only, no x:Key) Theme.* styles — the app's stock WPF controls (Button/CheckBox/
+        RadioButton/ComboBox/TextBox/Slider/ScrollBar/ListBox/ListView/GridViewColumnHeader), used
+        UN-styled (no explicit Style="…") anywhere inside a "chrome" Window's own visual tree, pick these
+        up automatically instead of falling back to Aero2.
+
+        Deliberately merged into a chrome WINDOW's own Window.Resources — MainWindow.xaml/
+        PanelCustomizeWindow.xaml/the future AppDialogWindow.xaml (6.2b/6.2c/6.3 wire this in; NOT done in
+        6.2a itself, per the plan's own §4 zone table: 6.2a owns Resources/Styles/*+Controls/*, not
+        Views/**) — NEVER into Application.Resources. An implicit Button/CheckBox/etc. style at the
+        Application level would restyle every stock control ChildWindow.xaml/SystemIconsPanelWindow.xaml
+        happens to use too (Palette P, ADR-025, frozen for this pass — §0.2 boundary). Theme.ToolTip is the
+        one deliberate exception to "explicit only" and lives in Controls.xaml instead, app-wide (see that
+        style's own remarks for why a ToolTip's separate popup visual tree makes it safe).
+
+        Every BasedOn target here is a Theme.* explicit style from Theme.Controls.xaml (merged immediately
+        before this dictionary in the App.xaml.cs order) or Controls.xaml (Theme.ContextMenu/MenuItem/
+        Popup.Chrome, merged even earlier) — this dictionary contributes NO new Setters of its own, only
+        the TargetType-keyed redirection.
+    -->
+    <Style TargetType="{x:Type Button}" BasedOn="{StaticResource Theme.Button}"/>
+    <Style TargetType="{x:Type CheckBox}" BasedOn="{StaticResource Theme.CheckBox}"/>
+    <Style TargetType="{x:Type RadioButton}" BasedOn="{StaticResource Theme.RadioButton}"/>
+    <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource Theme.ComboBox}"/>
+    <Style TargetType="{x:Type ComboBoxItem}" BasedOn="{StaticResource Theme.ComboBoxItem}"/>
+    <Style TargetType="{x:Type TextBox}" BasedOn="{StaticResource Theme.TextBox}"/>
+    <Style TargetType="{x:Type Slider}" BasedOn="{StaticResource Theme.Slider}"/>
+    <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource Theme.ScrollBar}"/>
+    <Style TargetType="{x:Type ListBox}" BasedOn="{StaticResource Theme.ListBox}"/>
+    <Style TargetType="{x:Type ListBoxItem}" BasedOn="{StaticResource Theme.ListBoxItem}"/>
+    <Style TargetType="{x:Type ListView}" BasedOn="{StaticResource Theme.ListView}"/>
+    <Style TargetType="{x:Type GridViewColumnHeader}" BasedOn="{StaticResource Theme.GridViewColumnHeader}"/>
+</ResourceDictionary>

@@ -7,20 +7,25 @@
              xmlns:vm="clr-namespace:DesktopOrganizer.UI.ViewModels"
              xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
              xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+             xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
              mc:Ignorable="d"
              x:Name="Root"
              d:DataContext="{d:DesignInstance Type=vm:PanelColorEditorViewModel, IsDesignTimeCreatable=False}"
              d:DesignWidth="380">
     <!--
-        ADR-042 redesign, polished per docs/prompts (release-polish-1.0 visual review) — three Settings-style
-        cards: Mode (Light/Dark segmented control, Light first per the Windows 11 convention — the default
-        for a NEW panel stays Dark, only the visual order changed), Accent colour (12 circular preset
-        swatches + a 13th "Custom…" cell, all in ONE WrapPanel flow so it wraps 7+6 instead of leaving the
-        custom cell stranded on its own row), and Advanced (a proper Settings.CardExpander card, collapsed
-        by default: raw accent/text hex boxes + "Reset to defaults"). The "Preview" card is a SEPARATE
-        control (Controls/PanelPreviewCard.xaml) that each host (PanelCustomizeWindow/NewPanelDefaultsSection)
-        places directly above this one — it needs opacity/surface-style/icon-size inputs this editor's own
-        ViewModel does not own.
+        Backlog 1.x item 5 (§5.2 "Целевая структура" — simplified colour editor, amends ADR-042's original
+        three-card layout): ONE "Colour" card — the 12 preset swatches + a 13th "Custom…" cell (unchanged
+        from ADR-042/backlog item 4, still a single WrapPanel flow so it wraps 7+6 instead of leaving the
+        custom cell stranded on its own row) with a compact, SECONDARY Light/Dark segmented toggle
+        underneath the grid (Settings.SegmentedGroup.Compact/SegmentedItem.Compact — smaller than the
+        former stand-alone "Mode" card, no card of its own) — and a collapsed-by-default "Advanced"
+        Settings.CardExpander holding everything else: raw accent/text hex boxes, the "Custom…" text
+        picker, each HOST's own surface-style/opacity controls (via AdvancedExtraContent — see
+        PanelColorEditor.xaml.cs's own remarks), and "Reset to defaults". The goal (§5.6 DoD 1): clicking a
+        preset is the ONE obvious path for the 90% case: Preview + the swatch grid is everything most users
+        ever need to touch. The "Preview" card is a SEPARATE control (Controls/PanelPreviewCard.xaml) that
+        each host (PanelCustomizeWindow/NewPanelDefaultsSection) places directly above this one — it needs
+        opacity/surface-style/icon-size inputs this editor's own ViewModel does not own.
 
         Swatch grid: the ItemsControl's ItemsSource is PanelColorEditorViewModel.SwatchItems — the VM's own
         Presets PLUS a single trailing CustomSwatchSlotMarker sentinel, computed once in the VM rather than
@@ -39,70 +44,25 @@
         giving the requested 7-then-6 wrap instead of 6+6+1.
 
         Local converter/resource note: this control is hosted inside PanelCustomizeWindow, whose OWN
-        closing-behavior test fixture (PanelCustomizeWindowClosingTests) now merges Settings.xaml too (see
-        that file's own remarks), so Settings.CardBorder/CardHeader/CardExpander/SegmentedGroup/SegmentedItem
-        and the app-wide EnumDisplayName/EnumEquals/HexBrush/LocKey resources all resolve there exactly as
-        they do in the real app — only AccentContrastForeground/PreviewIconSize (this control's own,
-        narrowly-scoped converters) are declared locally.
+        closing-behavior test fixture (PanelCustomizeWindowClosingTests) now merges Settings.xaml/
+        Theme.Controls.xaml too (see that file's own remarks), so Settings.CardExpander/SegmentedGroup/
+        SegmentedItem, controls:SettingsCard's default style, and the app-wide EnumDisplayName/EnumEquals/
+        HexBrush/LocKey resources all resolve there exactly as they do in the real app — only
+        AccentContrastForeground/PreviewIconSize (this control's own, narrowly-scoped converters) are
+        declared locally.
     -->
     <UserControl.Resources>
         <loc:LocKeyConverter x:Key="LocKey"/>
         <conv:AccentContrastForegroundConverter x:Key="AccentContrastForeground"/>
     </UserControl.Resources>
     <StackPanel>
-        <!-- ── Mode ───────────────────────────────────────────────────────────────────────────────── -->
-        <Border Style="{StaticResource Settings.CardBorder}">
+        <!-- ── Colour ─────────────────────────────────────────────────────────────────────────────── -->
+        <!-- design-system-1x.md §2.5/§3 phase 6.2c (follow-up DO-026): the real templated controls:SettingsCard
+             control replaces the pre-6.2c Border[Style=Settings.CardBorder] — Header/Description are now
+             plain loc strings the control's own default style renders (Settings.CardHeader/CardDescription's
+             former job); §5.2's one-line microcopy is Description. -->
+        <controls:SettingsCard Header="{loc:Loc Common_Color_Header}" Description="{loc:Loc Common_Color_Description}">
             <StackPanel>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="ModeLabel" Grid.Column="0" Text="{loc:Loc Common_Mode_Header}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center"/>
-                    <!-- m2 (release-polish-1.0 review round): AutomationProperties live on each RadioButton
-                         (LabeledBy the card header), not on the grouping Border — a screen reader announces
-                         "Light, radio button, Mode" per option instead of only ever reading the group's own
-                         name once. m5: no GroupName — this group's exclusivity is entirely VM-driven
-                         (SetModeCommand + the OneWay IsChecked binding below), the same pattern the swatch
-                         grid's preset RadioButtons already use, so WPF's own GroupName-syncing behaviour
-                         never fights the VM for which segment is checked. -->
-                    <Border Grid.Column="1" Style="{StaticResource Settings.SegmentedGroup}">
-                        <UniformGrid Rows="1" Columns="2"
-                                     KeyboardNavigation.TabNavigation="Once"
-                                     KeyboardNavigation.DirectionalNavigation="Contained">
-                            <!-- Light first, then Dark — Windows 11 segmented-control convention. The default
-                                 Mode for a newly-created panel is still Dark (PanelColorPresets.Default/
-                                 GlobalDefaultsViewModel) — only this visual ORDER changed. -->
-                            <RadioButton Style="{StaticResource Settings.SegmentedItem}"
-                                         AutomationProperties.LabeledBy="{Binding ElementName=ModeLabel}"
-                                         Command="{Binding SetModeCommand}" CommandParameter="{x:Static theming:PanelThemeMode.Light}"
-                                         Content="{loc:LocBinding Source={x:Static theming:PanelThemeMode.Light}, Converter={StaticResource EnumDisplayName}}">
-                                <RadioButton.IsChecked>
-                                    <Binding Path="Mode" Mode="OneWay" Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static theming:PanelThemeMode.Light}"/>
-                                </RadioButton.IsChecked>
-                            </RadioButton>
-                            <RadioButton Style="{StaticResource Settings.SegmentedItem}"
-                                         AutomationProperties.LabeledBy="{Binding ElementName=ModeLabel}"
-                                         Command="{Binding SetModeCommand}" CommandParameter="{x:Static theming:PanelThemeMode.Dark}"
-                                         Content="{loc:LocBinding Source={x:Static theming:PanelThemeMode.Dark}, Converter={StaticResource EnumDisplayName}}">
-                                <RadioButton.IsChecked>
-                                    <Binding Path="Mode" Mode="OneWay" Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static theming:PanelThemeMode.Dark}"/>
-                                </RadioButton.IsChecked>
-                            </RadioButton>
-                        </UniformGrid>
-                    </Border>
-                </Grid>
-                <!-- UX#5: microcopy explaining what switching the mode actually does (it re-derives the
-                     text colour for the current accent — it does not change the accent itself). -->
-                <TextBlock Text="{loc:Loc Common_Mode_Description}" Style="{StaticResource Settings.CardDescription}"/>
-            </StackPanel>
-        </Border>
-
-        <!-- ── Accent colour ──────────────────────────────────────────────────────────────────────── -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <StackPanel>
-                <TextBlock Text="{loc:Loc Common_AccentColor_Label}" Style="{StaticResource Settings.CardHeader}" Margin="0,0,0,10"/>
-
                 <!--
                     13 cells total (12 presets + the "Custom…" sentinel), ONE WrapPanel flow (see this
                     file's own remarks above for why a CompositeCollection + per-type DataTemplate, rather
@@ -125,37 +85,81 @@
                         <DataTemplate DataType="{x:Type vm:ColorPresetOption}">
                             <!-- No GroupName: exclusivity is driven entirely by the VM (IsSelected, bound
                                  OneWay below, re-published whenever ApplyCommand fires on ANY option) — same
-                                 pattern this swatch grid has always used. -->
+                                 pattern this swatch grid has always used. AutomationProperties.Name uses
+                                 FormatKey (backlog 1.x item 4, §4.2c) so a screen reader announces BOTH
+                                 halves of the pair ("Red: accent and text colour"), not just the preset name;
+                                 AutomationProperties.HelpText additionally announces the "modified" state
+                                 (IsModified) via a Style trigger, since HelpText has no FormatKey slot of its
+                                 own to combine with the Name binding above. -->
                             <RadioButton Command="{Binding ApplyCommand}"
                                          ToolTip="{loc:LocBinding NameKey, Converter={StaticResource LocKey}}"
-                                         AutomationProperties.Name="{loc:LocBinding NameKey, Converter={StaticResource LocKey}}"
+                                         AutomationProperties.Name="{loc:LocBinding NameKey, Converter={StaticResource LocKey}, FormatKey=Common_ColorPreset_Swatch_A11y_Format}"
                                          Margin="4" Padding="0" BorderThickness="0" Background="Transparent"
                                          HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <RadioButton.IsChecked>
                                     <Binding Path="IsSelected" Mode="OneWay"/>
                                 </RadioButton.IsChecked>
+                                <RadioButton.Style>
+                                    <Style TargetType="RadioButton">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsModified}" Value="True">
+                                                <Setter Property="AutomationProperties.HelpText" Value="{loc:Loc Common_ColorPreset_Modified_A11y}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </RadioButton.Style>
                                 <RadioButton.Template>
                                     <ControlTemplate TargetType="RadioButton">
                                         <Grid Width="32" Height="32">
                                             <Ellipse Fill="{Binding AccentHex, Converter={StaticResource HexBrush}}"
-                                                     Stroke="{StaticResource Brush.Settings.SwatchBorder}" StrokeThickness="1"/>
-                                            <!-- Selected-state ring (offset 2px in the accent colour itself) + a
-                                                 contrasting checkmark glyph — visible in High Contrast too (the
-                                                 1px hairline border above never disappears). -->
+                                                     Stroke="{DynamicResource Theme.Stroke.Control}" StrokeThickness="1"/>
+                                            <!-- Text-half preview (backlog 1.x item 4, §4.2c): a small type
+                                                 specimen ("Aa" / "Аа" — script-specific, hence a RESX key,
+                                                 Common_ColorPreset_TextSample_Label, not a literal: G-L1)
+                                                 in this preset's OWN paired text colour for the editor's
+                                                 CURRENT mode (ColorPresetOption.PreviewTextHex), so the swatch
+                                                 shows both halves of the (accent, text) pair — not just the
+                                                 accent — instead of the previous plain accent-filled circle. -->
+                                            <TextBlock Text="{loc:Loc Common_ColorPreset_TextSample_Label}"
+                                                       FontSize="{DynamicResource Font.Size.Caption}" FontWeight="SemiBold"
+                                                       Foreground="{Binding PreviewTextHex, Converter={StaticResource HexBrush}}"
+                                                       HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,4,3"/>
+                                            <!-- Selected-state ring + a contrasting checkmark glyph. design-system-1x.md
+                                                 §2.5/§3 phase 6.2c (ADR-042 HC gap): the ring now strokes
+                                                 Theme.Selection.Indicator (the SAME non-text "this is selected"
+                                                 token every other Palette T control uses — sidebar pill, selected
+                                                 segment) instead of this preset's own AccentHex — in High Contrast
+                                                 that token resolves to SystemColors.Highlight (guaranteed ≥3:1
+                                                 against the card), where an arbitrary user-picked accent hex was
+                                                 not. The swatch's OWN colour identity still comes through via the
+                                                 Ellipse Fill above; only the SELECTION indicator is now uniform. -->
                                             <Ellipse x:Name="SelectionRing" Margin="-3"
-                                                     Stroke="{Binding AccentHex, Converter={StaticResource HexBrush}}" StrokeThickness="2"
+                                                     Stroke="{DynamicResource Theme.Selection.Indicator}" StrokeThickness="2"
                                                      Visibility="Collapsed"/>
                                             <TextBlock x:Name="CheckGlyph" Text="{StaticResource Icon.Glyph.Checkmark}"
-                                                       FontFamily="Segoe MDL2 Assets" FontSize="13"
+                                                       FontFamily="Segoe MDL2 Assets" FontSize="{DynamicResource Font.Size.Caption}"
                                                        Foreground="{Binding AccentHex, Converter={StaticResource AccentContrastForeground}}"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                                        Visibility="Collapsed"/>
+                                            <!-- "Modified" marker (backlog 1.x item 4, §4.2 "Выделение
+                                                 свотча"): a small dot shown only on the SELECTED swatch when
+                                                 its actual text no longer matches this preset's own pair for
+                                                 the current mode — clicking the swatch again re-applies it
+                                                 (PanelColorEditorViewModel.ApplyAccent's no-op guard). -->
+                                            <Ellipse x:Name="ModifiedDot" Width="7" Height="7" Margin="0,-2,-2,0"
+                                                     HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                     Fill="{DynamicResource Theme.Text.Secondary}"
+                                                     Stroke="{DynamicResource Theme.Stroke.Control}" StrokeThickness="1"
+                                                     Visibility="Collapsed"/>
                                         </Grid>
                                         <ControlTemplate.Triggers>
                                             <Trigger Property="IsChecked" Value="True">
                                                 <Setter TargetName="SelectionRing" Property="Visibility" Value="Visible"/>
                                                 <Setter TargetName="CheckGlyph" Property="Visibility" Value="Visible"/>
                                             </Trigger>
+                                            <DataTrigger Binding="{Binding IsModified}" Value="True">
+                                                <Setter TargetName="ModifiedDot" Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
                                 </RadioButton.Template>
@@ -181,17 +185,18 @@
                                 <Button.Template>
                                     <ControlTemplate TargetType="Button">
                                         <Grid Width="32" Height="32" Margin="4">
-                                            <Ellipse x:Name="DashedRing" Stroke="{StaticResource Brush.Settings.TextMuted}" StrokeThickness="1.5" StrokeDashArray="2,2"/>
+                                            <Ellipse x:Name="DashedRing" Stroke="{DynamicResource Theme.Text.Secondary}" StrokeThickness="1.5" StrokeDashArray="2,2"/>
                                             <TextBlock x:Name="AddGlyph" Text="{StaticResource Icon.Glyph.Add}" FontFamily="Segoe MDL2 Assets"
-                                                       FontSize="12" Foreground="{StaticResource Brush.Settings.TextMuted}"
+                                                       FontSize="{DynamicResource Font.Size.Caption}" Foreground="{DynamicResource Theme.Text.Secondary}"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             <Ellipse x:Name="CustomFill" Visibility="Collapsed"
                                                      Fill="{Binding DataContext.AccentColor, ElementName=Root, Converter={StaticResource HexBrush}}"
-                                                     Stroke="{StaticResource Brush.Settings.SwatchBorder}" StrokeThickness="1"/>
+                                                     Stroke="{DynamicResource Theme.Stroke.Control}" StrokeThickness="1"/>
+                                            <!-- HC gap fix — see the preset swatch's own SelectionRing remarks above. -->
                                             <Ellipse x:Name="CustomSelectionRing" Margin="-3" Visibility="Collapsed"
-                                                     Stroke="{Binding DataContext.AccentColor, ElementName=Root, Converter={StaticResource HexBrush}}" StrokeThickness="2"/>
+                                                     Stroke="{DynamicResource Theme.Selection.Indicator}" StrokeThickness="2"/>
                                             <TextBlock x:Name="CustomCheckGlyph" Text="{StaticResource Icon.Glyph.Checkmark}"
-                                                       FontFamily="Segoe MDL2 Assets" FontSize="13" Visibility="Collapsed"
+                                                       FontFamily="Segoe MDL2 Assets" FontSize="{DynamicResource Font.Size.Caption}" Visibility="Collapsed"
                                                        Foreground="{Binding DataContext.AccentColor, ElementName=Root, Converter={StaticResource AccentContrastForeground}}"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Grid>
@@ -210,16 +215,54 @@
                         </DataTemplate>
                     </ItemsControl.Resources>
                 </ItemsControl>
+
+                <!-- §5.2: a compact, SECONDARY Light/Dark toggle under the swatch grid — no card of its
+                     own, smaller than the former stand-alone "Mode" card (Settings.SegmentedGroup.Compact/
+                     SegmentedItem.Compact, Resources/Styles/Settings.xaml). Same VM-driven exclusivity (no
+                     GroupName) and per-RadioButton AutomationProperties.LabeledBy as the card it replaces —
+                     see this file's own former remarks (still true, just visually de-emphasised now). -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ModeLabel" Grid.Column="0" Text="{loc:Loc Common_Mode_Header}" Style="{StaticResource Settings.CardDescription}" Margin="0" VerticalAlignment="Center"/>
+                    <Border Grid.Column="1" Style="{StaticResource Settings.SegmentedGroup.Compact}">
+                        <UniformGrid Rows="1" Columns="2"
+                                     KeyboardNavigation.TabNavigation="Once"
+                                     KeyboardNavigation.DirectionalNavigation="Contained">
+                            <!-- Light first, then Dark — Windows 11 segmented-control convention. The default
+                                 Mode for a newly-created panel is still Dark (PanelColorPresets.Default/
+                                 GlobalDefaultsViewModel) — only this visual ORDER changed. -->
+                            <RadioButton Style="{StaticResource Settings.SegmentedItem.Compact}"
+                                         AutomationProperties.LabeledBy="{Binding ElementName=ModeLabel}"
+                                         Command="{Binding SetModeCommand}" CommandParameter="{x:Static theming:PanelThemeMode.Light}"
+                                         Content="{loc:LocBinding Source={x:Static theming:PanelThemeMode.Light}, Converter={StaticResource EnumDisplayName}}">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="Mode" Mode="OneWay" Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static theming:PanelThemeMode.Light}"/>
+                                </RadioButton.IsChecked>
+                            </RadioButton>
+                            <RadioButton Style="{StaticResource Settings.SegmentedItem.Compact}"
+                                         AutomationProperties.LabeledBy="{Binding ElementName=ModeLabel}"
+                                         Command="{Binding SetModeCommand}" CommandParameter="{x:Static theming:PanelThemeMode.Dark}"
+                                         Content="{loc:LocBinding Source={x:Static theming:PanelThemeMode.Dark}, Converter={StaticResource EnumDisplayName}}">
+                                <RadioButton.IsChecked>
+                                    <Binding Path="Mode" Mode="OneWay" Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static theming:PanelThemeMode.Dark}"/>
+                                </RadioButton.IsChecked>
+                            </RadioButton>
+                        </UniformGrid>
+                    </Border>
+                </Grid>
             </StackPanel>
-        </Border>
+        </controls:SettingsCard>
 
         <!-- ── Advanced ───────────────────────────────────────────────────────────────────────────── -->
         <Expander Style="{StaticResource Settings.CardExpander}" IsExpanded="False"
-                  AutomationProperties.Name="{loc:Loc Common_Advanced_Header}">
+                  AutomationProperties.Name="{loc:Loc Common_ColorAdvanced_Header}">
             <Expander.Header>
                 <StackPanel>
-                    <TextBlock Text="{loc:Loc Common_Advanced_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Text="{loc:Loc Common_Advanced_Description}" Style="{StaticResource Settings.CardDescription}"/>
+                    <TextBlock Text="{loc:Loc Common_ColorAdvanced_Header}" Style="{StaticResource Settings.CardHeader}"/>
+                    <TextBlock Text="{loc:Loc Common_ColorAdvanced_Description}" Style="{StaticResource Settings.CardDescription}"/>
                 </StackPanel>
             </Expander.Header>
             <StackPanel>
@@ -237,7 +280,7 @@
                              ToolTip="{loc:Loc Common_HexColor_Hint}"
                              Text="{Binding AccentColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border Grid.Column="2" Width="24" Height="24" CornerRadius="3"
-                            BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
+                            BorderBrush="{DynamicResource Theme.Stroke.Control}" BorderThickness="1"
                             Background="{Binding AccentColor, Converter={StaticResource HexBrush}}"/>
                 </Grid>
 
@@ -255,12 +298,17 @@
                              ToolTip="{loc:Loc Common_HexColor_Hint}"
                              Text="{Binding TextColor, UpdateSourceTrigger=LostFocus}"/>
                     <Border Grid.Column="2" Width="24" Height="24" Margin="0,0,8,0" CornerRadius="3"
-                            BorderBrush="{StaticResource Brush.Settings.SwatchBorder}" BorderThickness="1"
+                            BorderBrush="{DynamicResource Theme.Stroke.Control}" BorderThickness="1"
                             Background="{Binding TextColor, Converter={StaticResource HexBrush}}"/>
                     <Button Grid.Column="3" Content="{loc:Loc Common_CustomColor_Button}" Padding="8,4"
                             AutomationProperties.Name="{loc:Loc Common_PickTextColor_A11y}"
                             Command="{Binding PickCustomTextCommand}"/>
                 </Grid>
+
+                <!-- §5.2: each host's OWN surface-style/opacity controls — see AdvancedExtraContent's own
+                     remarks (PanelColorEditor.xaml.cs) for why they bind back to the HOST's DataContext
+                     rather than this editor's own. Null (no host content) collapses to nothing. -->
+                <ContentPresenter Content="{Binding AdvancedExtraContent, ElementName=Root}"/>
 
                 <Button Content="{loc:Loc Common_ResetToDefaults_Button}" Padding="10,4" HorizontalAlignment="Left"
                         ToolTip="{loc:Loc Common_ResetToDefaults_Tooltip}"

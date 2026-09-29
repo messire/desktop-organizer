@@ -8,8 +8,14 @@
         App.xaml.cs LoadResourceDictionaries() (after Controls.xaml): the section UserControls are created
         through DataTemplates and parsed BEFORE they join MainWindow's visual tree, so a Window-local merge
         is invisible to their StaticResource lookups (see SettingsSectionsInitializeTests).
-        Palette: everything here uses Brush.Settings.* (light, system-styled window) — the dark Ambient
-        Accent tokens (Brush.Surface.*/Brush.Text.*/Brush.Border.*/Brush.Overlay.*) belong to desktop panels.
+        Palette: everything here uses Theme.* — Palette T, "application chrome" (docs/PLANS/design-system-1x.md
+        §2.1/§2.2, ADR-047 D-2), resolved live by DesktopOrganizer.UI.Theming.AppThemeService and consumed
+        exclusively through {DynamicResource} (a theme switch replaces the whole dictionary — StaticResource
+        would freeze whatever theme was active the moment this file first parsed). The pre-6.1 fixed-light
+        The fixed-light brush/colour tokens this file used to reference no longer exist (removed from
+        Colors.xaml/Brushes.xaml/Colors.HighContrast.xaml once every consumer here migrated). The dark
+        Ambient Accent tokens (Brush.Surface.*/Brush.Text.*/Brush.Border.*/Brush.Overlay.*, Palette P) still
+        belong to desktop panels only — never referenced here.
 
         "Settings card" pattern (D-9): a Settings.CardBorder wrapping a two-column Grid — a left
         StackPanel with a Settings.CardHeader + Settings.CardDescription (the description replaces what
@@ -29,43 +35,118 @@
 
     <!-- ── Sidebar navigation ─────────────────────────────────────────────────────────────────── -->
 
+    <!-- H-4 fix (6.1 review round, docs/PLANS/design-system-1x.md §1.1 H-4): a Grid (Auto glyph column +
+         "*" text column), not the pre-6.2b horizontal StackPanel — a StackPanel gives every child
+         UNLIMITED width along its own orientation during Measure, so the label TextBlock's own
+         TextTrimming/natural width is never actually constrained by the 220 DIP sidebar column, it just
+         silently draws past it. The "*" column instead hands the label exactly "column width minus the
+         glyph slot", which is what makes TextTrimming genuinely ellipsize a still-too-long ru-RU label
+         (e.g. "Расположение и привязка") instead of visually overflowing — the ToolTip carries the
+         un-truncated text either way. -->
     <DataTemplate x:Key="Settings.SidebarItemTemplate" DataType="{x:Type models:SettingsSectionInfo}">
-        <StackPanel Orientation="Horizontal" Margin="2,0">
+        <Grid Margin="2,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
             <!-- Fallback font list (fix-cycle finding 12): "Segoe Fluent Icons" ships the same PUA glyph
                  codepoints on Windows 11 and is used if "Segoe MDL2 Assets" isn't installed, so a system
-                 missing one of the two never renders these as an empty box. -->
-            <TextBlock Text="{Binding Glyph}"
+                 missing one of the two never renders these as an empty box.
+                 M-2 fix (6.5 review round): unlike the label TextBlock below, this glyph's base Foreground
+                 is deliberately Theme.Text.Secondary — a step dimmer than the container's own
+                 Theme.Text.Primary — so it cannot simply mirror the container's Foreground the way the
+                 label does. The DataTemplate.Triggers below instead swap ONLY the selected/hovered states
+                 to Theme.Selection.Text, matching Settings.SidebarListBoxItem/Settings.SidebarAboutToggle's
+                 own Foreground triggers — without them, in High Contrast a selected/hovered item drew this
+                 glyph in WindowText on the Highlight fill (≈1.4:1, WCAG 1.4.11). -->
+            <TextBlock x:Name="Glyph"
+                       Grid.Column="0"
+                       Text="{Binding Glyph}"
                        FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons"
-                       FontSize="14"
+                       FontSize="{DynamicResource Font.Size.Body}"
                        Width="20"
                        Margin="0,0,10,0"
                        VerticalAlignment="Center"
-                       Foreground="{StaticResource Brush.Settings.IconMuted}"/>
-            <TextBlock Text="{loc:LocBinding TitleKey, Converter={StaticResource LocKey}}" FontSize="12" VerticalAlignment="Center"/>
-        </StackPanel>
+                       Foreground="{DynamicResource Theme.Text.Secondary}"/>
+            <!-- L-8 fix (6.1 review round): mirrors the hosting ListBoxItem/ToggleButton's OWN Foreground
+                 (set explicitly by Settings.SidebarListBoxItem/Settings.SidebarAboutToggle below, including
+                 their hover/selected triggers) rather than an unset, non-theme-aware ambient default — this
+                 is also what lets a hover/selected state swap this text to Theme.Selection.Text (HC
+                 contrast against the Highlight fill those states use there) without this DataTemplate
+                 needing to know which container type hosts it. -->
+            <TextBlock Grid.Column="1"
+                       Text="{loc:LocBinding TitleKey, Converter={StaticResource LocKey}}"
+                       ToolTip="{loc:LocBinding TitleKey, Converter={StaticResource LocKey}}"
+                       TextTrimming="CharacterEllipsis"
+                       FontSize="{DynamicResource Font.Size.Body}"
+                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}"
+                       VerticalAlignment="Center"/>
+        </Grid>
+        <DataTemplate.Triggers>
+            <!-- M-2 fix (6.5 review round): three independent triggers — this template hosts under BOTH a
+                 ListBoxItem (IsSelected) and the standalone "About" ToggleButton (IsChecked), and either can
+                 also be IsMouseOver; an ancestor binding that finds no matching type resolves to
+                 UnsetValue/false and simply never fires, so all three coexist safely regardless of which
+                 container is actually hosting this template instance. -->
+            <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Control}}" Value="True">
+                <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Theme.Selection.Text}"/>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Theme.Selection.Text}"/>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Value="True">
+                <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Theme.Selection.Text}"/>
+            </DataTrigger>
+        </DataTemplate.Triggers>
     </DataTemplate>
 
     <!-- Shared chrome (hover/selected wash) for both the sidebar ListBoxItems and the standalone
-         "About" ToggleButton pinned below them, so the two read as one continuous nav list. -->
+         "About" ToggleButton pinned below them, so the two read as one continuous nav list.
+         Phase 6.1 (design-system-1x.md §1.1 S-1/§2.2, ADR-047 D-2/D-6): the selected item's fill alone
+         (Theme.Selection.Fill, white-on-white in Light) is not itself a ≥3:1 WCAG 1.4.11 state
+         indicator — a 3 DIP accent "Indicator" bar carries that job instead; the fill stays for the
+         larger, softer highlight area Win11's own selected nav items use. -->
     <Style x:Key="Settings.SidebarListBoxItem" TargetType="ListBoxItem">
         <Setter Property="Padding" Value="12,8"/>
         <Setter Property="Margin" Value="6,2"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <!-- L-8/H-1 fix (6.1 review round): an explicit base Foreground (rather than an unset ambient
+             default) — Settings.SidebarItemTemplate's own label mirrors THIS property, so it follows every
+             state below automatically. -->
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Primary}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
-                    <Border x:Name="Chrome"
-                            Background="Transparent"
-                            CornerRadius="{StaticResource Radius.Control}"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter/>
-                    </Border>
+                    <Grid>
+                        <Border x:Name="Chrome"
+                                Background="Transparent"
+                                CornerRadius="{StaticResource Radius.Control}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <Border x:Name="Indicator"
+                                Width="3"
+                                Margin="0,4"
+                                HorizontalAlignment="Left"
+                                CornerRadius="2"
+                                Background="Transparent"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
+                        <!-- H-1 HC fix (6.1 review round): in High Contrast, Theme.Control.Subtle.Hover
+                             resolves to SystemColors.Highlight — the SAME fill Theme.Selection.Fill/
+                             Indicator use for the SELECTED item below, so without an accompanying Foreground
+                             swap a hovered (not selected) item's text would sit on a Highlight background
+                             using ordinary WindowText, an unreliable-contrast combination. Theme.Selection.Text
+                             is Theme.Text.Primary in Light/Dark (no visible change there) and
+                             SystemColors.HighlightText in HC (the correct pairing for a Highlight fill). -->
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Theme.Control.Subtle.Hover}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Theme.Selection.Text}"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Brush.Settings.TabActiveBackground}"/>
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Theme.Selection.Fill}"/>
+                            <Setter TargetName="Indicator" Property="Background" Value="{DynamicResource Theme.Selection.Indicator}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Theme.Selection.Text}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -93,21 +174,34 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <!-- L-8/H-1 fix (6.1 review round) — see Settings.SidebarListBoxItem's identical remarks above. -->
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Primary}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="Chrome"
-                            Background="{TemplateBinding Background}"
-                            CornerRadius="{StaticResource Radius.Control}"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter/>
-                    </Border>
+                    <Grid>
+                        <Border x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{StaticResource Radius.Control}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <Border x:Name="Indicator"
+                                Width="3"
+                                Margin="0,4"
+                                HorizontalAlignment="Left"
+                                CornerRadius="2"
+                                Background="Transparent"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Theme.Control.Subtle.Hover}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Theme.Selection.Text}"/>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Brush.Settings.TabActiveBackground}"/>
+                            <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource Theme.Selection.Fill}"/>
+                            <Setter TargetName="Indicator" Property="Background" Value="{DynamicResource Theme.Selection.Indicator}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Theme.Selection.Text}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -118,66 +212,58 @@
     <!-- ── Section content ────────────────────────────────────────────────────────────────────── -->
 
     <Style x:Key="Settings.PageHeader" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="18"/>
+        <Setter Property="FontSize" Value="{DynamicResource Font.Size.Title}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Settings.TextPrimary}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Primary}"/>
         <Setter Property="Margin" Value="0,0,0,12"/>
+        <Setter Property="AutomationProperties.HeadingLevel" Value="Level1"/>
     </Style>
 
+    <!-- Phase 6.2a (design-system-1x.md §2.3/§2.5, ADR-047 D-4): group headers sit between PageHeader (L1)
+         and CardHeader in the visual hierarchy (§2.12: "PageHeader (L1) → GroupHeader (L2) → CardHeader →
+         Description"). No consumer yet in this commit (Views/Settings/** is 6.2b's own zone) — the style
+         exists here so 6.2b's screens have it ready. -->
+    <Style x:Key="Settings.GroupHeader" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="{DynamicResource Font.Size.BodyStrong}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Primary}"/>
+        <Setter Property="Margin" Value="0,24,0,8"/>
+        <Setter Property="AutomationProperties.HeadingLevel" Value="Level2"/>
+    </Style>
+
+    <!-- Phase 6.2a: geometry now Theme.Card.Padding/Theme.Radius.Card (ADR-047 D-5) instead of the
+         pre-6.2a 14,12 literal and Palette P's own Radius.Control (3 DIP — a value meant for panel chrome,
+         not this window; Theme.Radius.Card is 6). Margin stays a literal Thickness (0,0,0,Theme.Card.Gap):
+         Theme.Card.Gap is a bare sys:Double in Theming/ThemeResourceBuilder.cs (shared with any future
+         non-Margin consumer, e.g. a StackPanel gap converter), and a Margin/Thickness property cannot bind
+         a DynamicResource double directly (WPF does not run a TypeConverter over a resolved
+         DynamicResource value the way it does over a literal string) — so the 4 DIP value is duplicated
+         here as a plain literal, matching Theme.Card.Gap's own value. -->
     <Style x:Key="Settings.CardBorder" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource Brush.Settings.CardBackground}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.Settings.CardBorder}"/>
+        <Setter Property="Background" Value="{DynamicResource Theme.Surface.Card}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Stroke.Card}"/>
         <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
-        <Setter Property="CornerRadius" Value="{StaticResource Radius.Control}"/>
-        <Setter Property="Padding" Value="14,12"/>
-        <Setter Property="Margin" Value="0,0,0,10"/>
+        <Setter Property="CornerRadius" Value="{DynamicResource Theme.Radius.Card}"/>
+        <Setter Property="Padding" Value="{DynamicResource Theme.Card.Padding}"/>
+        <Setter Property="Margin" Value="0,0,0,4"/>
     </Style>
 
     <Style x:Key="Settings.CardHeader" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontSize" Value="{DynamicResource Font.Size.Body}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Settings.TextPrimary}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Primary}"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
     </Style>
 
+    <!-- Phase 6.1 (design-system-1x.md §2.3/§2.12, ADR-047 D-4): FontSize now DynamicResource
+         Font.Size.Caption (M, recomputed from SystemFonts.MessageFontSize) instead of the fixed 11 DIP
+         literal — closes the "no Palette T text below M" violation this was the last remaining instance
+         of in this style catalogue (11 < the Windows default M = 12). -->
     <Style x:Key="Settings.CardDescription" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="11"/>
-        <Setter Property="Foreground" Value="{StaticResource Brush.Settings.TextMuted}"/>
+        <Setter Property="FontSize" Value="{DynamicResource Font.Size.Caption}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Secondary}"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
         <Setter Property="Margin" Value="0,4,0,0"/>
-    </Style>
-
-    <!-- Toggle-style CheckBox (D-9: "toggle для on/off"). Track/thumb colours come from the LIGHT
-         Color.Settings.* tokens (Brushes.xaml) — never from the dark panel palette. -->
-    <Style x:Key="Settings.ToggleCheckBox" TargetType="CheckBox">
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="CheckBox">
-                    <Grid VerticalAlignment="Center" Width="36" Height="20">
-                        <Border x:Name="Track"
-                                CornerRadius="10"
-                                Background="{StaticResource Brush.Settings.ToggleTrackOff}"/>
-                        <Ellipse x:Name="Thumb"
-                                 Width="14" Height="14"
-                                 Fill="{StaticResource Brush.Settings.ToggleThumb}"
-                                 HorizontalAlignment="Left"
-                                 VerticalAlignment="Center"
-                                 Margin="3,0,0,0"/>
-                    </Grid>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Track" Property="Background" Value="{StaticResource Brush.Accent.Blue}"/>
-                            <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/>
-                            <Setter TargetName="Thumb" Property="Margin" Value="0,0,3,0"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.5"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
     </Style>
 
     <Style x:Key="Settings.RadioOption" TargetType="RadioButton">
@@ -207,14 +293,18 @@
         group, never escaping it to a sibling control) — no custom KeyDown handling needed for either.
     -->
     <Style x:Key="Settings.SegmentedGroup" TargetType="Border">
-        <!-- A visible gray "track" (same translucent-black overlay token the sidebar/card hover states
-             already use) is required so the SELECTED segment's white fill (Brush.Settings.TabActiveBackground,
-             the same token the sidebar's own selected item uses) actually pops — without it, a white segment
-             on a white Settings.CardBorder card would be invisible. -->
-        <Setter Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.Settings.CardBorder}"/>
+        <!-- H-1 HC fix (6.1 review round): the track used to be Theme.Control.Subtle.Hover, which in High
+             Contrast resolves to SystemColors.Highlight — the EXACT SAME fill Settings.SegmentedItem's own
+             IsChecked trigger below uses for the selected segment, making the track and the selected
+             segment indistinguishable (≈1:1 contrast) in HC. Theme.Control.Fill is a distinct HC token
+             (SystemColors.ControlBrush) while still reading as a plain, unobtrusive fill in Light/Dark —
+             see Settings.SegmentedItem's own IsChecked trigger for the M-4 "selected pops off Light's
+             otherwise-identical white track" half of this fix (an outline, since Control.Fill and
+             Selection.Fill are both pure white in Light). -->
+        <Setter Property="Background" Value="{DynamicResource Theme.Control.Fill}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Stroke.Card}"/>
         <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
-        <Setter Property="CornerRadius" Value="{StaticResource Radius.Control}"/>
+        <Setter Property="CornerRadius" Value="{DynamicResource Theme.Radius.Control}"/>
         <Setter Property="Padding" Value="2"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
     </Style>
@@ -240,12 +330,12 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Expander">
-                    <Border Background="{StaticResource Brush.Settings.CardBackground}"
-                            BorderBrush="{StaticResource Brush.Settings.CardBorder}"
+                    <Border Background="{DynamicResource Theme.Surface.Card}"
+                            BorderBrush="{DynamicResource Theme.Stroke.Card}"
                             BorderThickness="{StaticResource Thickness.Hairline}"
-                            CornerRadius="{StaticResource Radius.Control}"
-                            Padding="14,12"
-                            Margin="0,0,0,10">
+                            CornerRadius="{DynamicResource Theme.Radius.Card}"
+                            Padding="{DynamicResource Theme.Card.Padding}"
+                            Margin="0,0,0,4">
                         <StackPanel>
                             <ToggleButton x:Name="HeaderToggle"
                                           IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
@@ -257,16 +347,16 @@
                                           HorizontalContentAlignment="Stretch">
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
-                                        <Border x:Name="ToggleChrome" Background="Transparent" CornerRadius="{StaticResource Radius.Control}">
+                                        <Border x:Name="ToggleChrome" Background="Transparent" CornerRadius="{DynamicResource Theme.Radius.Control}">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="*"/>
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock x:Name="Chevron" Grid.Column="0" Margin="0,2,10,0"
-                                                           FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons" FontSize="10"
+                                                           FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons" FontSize="{DynamicResource Font.Size.Caption}"
                                                            VerticalAlignment="Top"
-                                                           Foreground="{StaticResource Brush.Settings.IconMuted}"
+                                                           Foreground="{DynamicResource Theme.Text.Secondary}"
                                                            Text="{StaticResource Icon.Glyph.ChevronDown}"/>
                                                 <ContentPresenter Grid.Column="1" ContentSource="Content" VerticalAlignment="Top"/>
                                             </Grid>
@@ -279,7 +369,7 @@
                                                  unresponsive to IsMouseOver, unlike every other clickable
                                                  Settings-card affordance (SegmentedItem, sidebar items). -->
                                             <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="ToggleChrome" Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
+                                                <Setter TargetName="ToggleChrome" Property="Background" Value="{DynamicResource Theme.Control.Subtle.Hover}"/>
                                             </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
@@ -299,41 +389,76 @@
         </Setter>
     </Style>
 
+    <!--
+        Backlog 1.x item 5 (§5.2/§5.3 "компактный вариант SegmentedGroup"): a smaller-footprint variant of
+        Settings.SegmentedGroup/SegmentedItem for a SECONDARY control that shouldn't compete visually with
+        a card's own primary content — e.g. PanelColorEditor.xaml's Light/Dark toggle, now placed directly
+        under the preset swatch grid instead of inside its own stand-alone "Mode" card. Same chrome/states
+        (BasedOn), just tighter padding and a smaller font.
+    -->
+    <Style x:Key="Settings.SegmentedGroup.Compact" TargetType="Border" BasedOn="{StaticResource Settings.SegmentedGroup}">
+        <Setter Property="Padding" Value="1"/>
+    </Style>
+
+    <!-- Phase 6.2a (H-3, ADR-047 D-6): FocusVisualStyle now the shared Theme.FocusVisual double-ring
+         (Resources/Styles/Theme.Controls.xaml) instead of a bespoke 1px BorderBrush/BorderThickness
+         template trigger — the plan's own H-3 finding ("сегменты — 1 px рамка фокуса"). Disabled no longer
+         uses a blanket Opacity (D-6 "disabled ≠ Opacity"): Foreground dims to Theme.Text.Disabled instead —
+         SegmentedItemStyleTests (adapted this phase) pins both changes. -->
     <Style x:Key="Settings.SegmentedItem" TargetType="RadioButton">
         <Setter Property="Padding" Value="10,5"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="Focusable" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource Theme.FocusVisual}"/>
+        <!-- H-1/L-8 fix (6.1 review round) — base, theme-aware Foreground (was an unset ambient default). -->
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Primary}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Border x:Name="Segment"
                             Background="Transparent"
-                            CornerRadius="{StaticResource Radius.Control}"
+                            BorderBrush="Transparent"
+                            BorderThickness="1"
+                            CornerRadius="{DynamicResource Theme.Radius.Control}"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <!-- H-1 HC fix — see Settings.SegmentedGroup's own remarks: Foreground swaps to
+                             Theme.Selection.Text so hover (Highlight in HC, from the fill trigger below)
+                             keeps readable text. -->
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Segment" Property="Background" Value="{StaticResource Brush.Settings.HoverOverlay}"/>
+                            <Setter TargetName="Segment" Property="Background" Value="{DynamicResource Theme.Control.Subtle.Hover}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Theme.Selection.Text}"/>
                         </Trigger>
+                        <!-- M-4 fix (6.1 review round): Theme.Selection.Fill and the track's own
+                             Theme.Control.Fill (Settings.SegmentedGroup) are both pure white in Light, so the
+                             fill alone no longer visually separates a selected segment from the track —
+                             an outline (the plan's own documented "или обводка" fallback) restores that
+                             separation in every theme, not just where the two fills happen to differ. -->
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Segment" Property="Background" Value="{StaticResource Brush.Settings.TabActiveBackground}"/>
+                            <Setter TargetName="Segment" Property="Background" Value="{DynamicResource Theme.Selection.Fill}"/>
+                            <Setter TargetName="Segment" Property="BorderBrush" Value="{DynamicResource Theme.Stroke.Control}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Theme.Selection.Text}"/>
                         </Trigger>
-                        <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="Segment" Property="BorderBrush" Value="{StaticResource Brush.Border.Focus}"/>
-                            <Setter TargetName="Segment" Property="BorderThickness" Value="1"/>
-                        </Trigger>
-                        <!-- M6 (release-polish-1.0 review round): a disabled segment (e.g. the Sort group
-                             while the panel is a Folder Portal, PanelCustomizeWindow.xaml) previously had NO
-                             visual cue at all — this template never referenced IsEnabled, so a disabled
-                             RadioButton looked identical to an enabled one. -->
+                        <!-- M6 (release-polish-1.0 review round), retargeted in 6.2a: a disabled segment
+                             (e.g. the Sort group while the panel is a Folder Portal, PanelCustomizeWindow.xaml)
+                             must still render visibly dimmed. -->
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.45"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Disabled}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- Backlog 1.x item 5 — see Settings.SegmentedGroup.Compact's own remarks above. Phase 6.2a: FontSize
+         now Font.Size.Caption (M) instead of the fixed 11 DIP literal (§2.3's own allowlist: "подписи
+         сегментов compact" is one of Font.Size.Caption's named consumers) — closes a T-3/T-4 finding. -->
+    <Style x:Key="Settings.SegmentedItem.Compact" TargetType="RadioButton" BasedOn="{StaticResource Settings.SegmentedItem}">
+        <Setter Property="Padding" Value="8,3"/>
+        <Setter Property="FontSize" Value="{DynamicResource Font.Size.Caption}"/>
     </Style>
 </ResourceDictionary>

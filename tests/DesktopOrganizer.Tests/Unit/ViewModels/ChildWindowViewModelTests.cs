@@ -586,6 +586,45 @@ public class ChildWindowViewModelTests
     }
 
     /// <summary>
+    /// M-1 fix (code review, panel clone to page): even though <see cref="IPanelItemStorageService.TryFindManagedPath"/>
+    /// reports a single, manifest-unambiguous live candidate, <see cref="ChildWindowViewModel.LoadFromModel"/>
+    /// must NOT heal onto it when <see cref="IWindowManager.GetManagedPathsClaimedByOtherPanels"/> reports
+    /// that some OTHER live panel already directly references that exact path (e.g. it is that other
+    /// panel's own <see cref="IWindowManager.ClonePanelToPage"/> copy) — the entry is left stale instead,
+    /// exactly like an ambiguous manifest or no candidate at all.
+    /// </summary>
+    [Fact]
+    public void LoadFromModel_StalePathWithLiveManagedCopyClaimedByAnotherPanel_KeepsOriginalPath()
+    {
+        var stalePath = @"C:\fake\moved-away.lnk";
+        var managedPath = NewTempFilePath();
+        File.WriteAllText(managedPath, "managed content");
+
+        var outManagedPath = managedPath;
+        _storageMock.Setup(s => s.TryFindManagedPath(stalePath, out outManagedPath)).Returns(true);
+
+        var windowManagerMock = new Mock<IWindowManager>();
+        windowManagerMock
+            .Setup(w => w.GetManagedPathsClaimedByOtherPanels(It.IsAny<Guid>()))
+            .Returns(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { managedPath });
+
+        using var sut = BuildSut(windowManager: windowManagerMock.Object);
+
+        try
+        {
+            sut.LoadFromModel(new ChildWindowModel { FilePaths = [stalePath] });
+
+            var item = Assert.Single(sut.AllItems);
+            Assert.Equal(stalePath, item.Path);
+            Assert.False(item.Exists);
+        }
+        finally
+        {
+            File.Delete(managedPath);
+        }
+    }
+
+    /// <summary>
     /// Verifies that when a stale path has no live managed copy, <see cref="ChildWindowViewModel.LoadFromModel"/>
     /// leaves the item exactly as it was — still shown, still marked non-existent — never dropped or
     /// silently replaced.
@@ -676,16 +715,22 @@ public class ChildWindowViewModelTests
     }
 
     /// <summary>
-    /// Verifies that the read-time stale-path remap never consults
-    /// <see cref="IPanelItemStorageService.TryFindManagedPath"/> for a path that already exists on disk.
+    /// B-5 (ADR-046 7c): the read-time stale-path remap now consults
+    /// <see cref="IPanelItemStorageService.TryFindManagedPath"/> BEFORE checking whether the original path
+    /// still exists (manifest lookup first — see <c>ChildWindowViewModel.ResolveManagedReplacements</c>'s
+    /// own remarks for why), but the REMAP OUTCOME is unchanged: a path that already exists on disk is
+    /// never replaced, even when the manifest happens to also know of a (now-irrelevant) managed candidate
+    /// for it.
     /// </summary>
     [Fact]
-    public void LoadFromModel_PathAlreadyExists_NeverConsultsStorageForResolution()
+    public void LoadFromModel_PathAlreadyExists_NeverRemapped_EvenWhenManifestHasACandidate()
     {
-        // The read-time remap only ever looks at paths that are already missing — an existing item
-        // must never pay the manifest-scan cost, and must never be "resolved" away from its own path.
         var existingPath = NewTempFilePath();
         File.WriteAllText(existingPath, "content");
+
+        var managedCandidate = NewTempFilePath();
+        var outManagedPath = managedCandidate;
+        _storageMock.Setup(s => s.TryFindManagedPath(existingPath, out outManagedPath)).Returns(true);
 
         using var sut = BuildSut();
 
@@ -695,9 +740,6 @@ public class ChildWindowViewModelTests
 
             var item = Assert.Single(sut.AllItems);
             Assert.Equal(existingPath, item.Path);
-            _storageMock.Verify(
-                s => s.TryFindManagedPath(It.IsAny<string>(), out It.Ref<string?>.IsAny),
-                Times.Never);
         }
         finally
         {
@@ -731,6 +773,7 @@ public class ChildWindowViewModelTests
             File.WriteAllText(path, "now exists");
 
             var freshIcon = new System.Windows.Media.DrawingImage();
+            freshIcon.Freeze(); // M-5 insurance (review it.2, C-4): BaseViewModel now requires a Frozen icon to apply it.
             _iconProviderMock.Setup(p => p.GetIcon(path, It.IsAny<int>())).Returns(freshIcon);
 
             sut.RefreshItemsLiveness();
@@ -812,7 +855,9 @@ public class ChildWindowViewModelTests
         var path = NewTempFilePath();
         File.WriteAllText(path, "content");
         var placeholder = new System.Windows.Media.DrawingImage();
+        placeholder.Freeze(); // M-5 insurance (review it.2, C-4): BaseViewModel now requires a Frozen icon to apply it.
         var realIcon = new System.Windows.Media.DrawingImage();
+        realIcon.Freeze();
 
         _iconProviderMock.Setup(p => p.IsPlaceholder(placeholder)).Returns(true);
         _iconProviderMock.Setup(p => p.IsPlaceholder(realIcon)).Returns(false);
@@ -860,6 +905,7 @@ public class ChildWindowViewModelTests
         var path = NewTempFilePath();
         File.WriteAllText(path, "content");
         var placeholder = new System.Windows.Media.DrawingImage();
+        placeholder.Freeze(); // M-5 insurance (review it.2, C-4): BaseViewModel now requires a Frozen icon to apply it.
 
         _iconProviderMock.Setup(p => p.IsPlaceholder(placeholder)).Returns(true);
         _iconProviderMock.Setup(p => p.GetIcon(path, It.IsAny<int>())).Returns(placeholder);
@@ -2711,6 +2757,7 @@ public class ChildWindowViewModelTests
         const string pathA = @"C:\fake\a.txt";
         const string pathB = @"C:\fake\b.txt";
         var largeIcon = new System.Windows.Media.DrawingImage();
+        largeIcon.Freeze(); // M-5 insurance (review it.2, C-4): BaseViewModel now requires a Frozen icon to apply it.
         _iconProviderMock.Setup(p => p.GetIcon(It.IsAny<string>(), 96)).Returns(largeIcon);
 
         var timer = new FakeDebounceTimer();
@@ -2886,6 +2933,221 @@ public class ChildWindowViewModelTests
         }
     }
 
+    // ── M-6 (review it.2): OnProbeResultsApplied debounce — one ApplyFilterAndSort, selection kept ────
+
+    /// <summary>
+    /// Verifies that two SEPARATE directory-flag-flipping liveness passes, both landing within the
+    /// debounce window (ADR-046 §6), collapse into exactly one content-filter re-run
+    /// (<c>ApplyFilterAndSort</c>) that reflects BOTH accumulated flips at once — rather than either firing
+    /// twice or only reflecting the most recent one — and that the current selection survives the rebuild
+    /// (<c>ReplaceFileItems</c>'s own path-based re-selection, ADR-012/013).
+    /// </summary>
+    /// <remarks>
+    /// Deliberately uses TWO separate <see cref="BaseViewModel.RefreshItemsLiveness"/> calls (never
+    /// <c>AddFiles</c>) — <c>AddFiles</c>'s own <c>OnSourceChanged</c> call already rebuilds
+    /// <see cref="BaseViewModel.FileItems"/> synchronously and undebounced on every call, which would mask
+    /// the debounce entirely; <c>RefreshItemsLiveness</c>'s tail only ever goes through the debounced
+    /// <c>OnProbeResultsApplied</c> path.
+    /// </remarks>
+    [Fact]
+    public void OnProbeResultsApplied_SeveralDirectoryFlagFlipsWithinDebounceWindow_OneApplyFilterAndSort_SelectionKept()
+    {
+        var pathA = NewTempFilePath();
+        var pathB = NewTempFilePath();
+        var folderC = Path.Combine(Path.GetTempPath(), $"DOrgVmTest_{Guid.NewGuid():N}");
+        File.WriteAllText(pathA, string.Empty);
+        File.WriteAllText(pathB, string.Empty);
+        Directory.CreateDirectory(folderC);
+
+        try
+        {
+            var timer = new FakeDebounceTimer();
+            using var sut = BuildSut(probeRefilterDebounceTimerProvider: () => timer);
+            sut.LoadFromModel(new ChildWindowModel
+            {
+                FilePaths = [pathA, pathB, folderC],
+                ContentFilter = PanelContentFilter.FoldersOnly,
+            });
+
+            // Only the pre-existing folder passes FoldersOnly at this point — pathA/pathB are still files.
+            var selected = Assert.Single(sut.FileItems);
+            Assert.Equal(folderC, selected.Path);
+            sut.SelectedFile = selected;
+
+            // pathA becomes a directory; one liveness pass catches ONLY this flip (pathB is still a file).
+            File.Delete(pathA);
+            Directory.CreateDirectory(pathA);
+            sut.RefreshItemsLiveness();
+            Assert.Equal(1, timer.StartCount);
+            Assert.Equal(folderC, Assert.Single(sut.FileItems).Path); // not rebuilt yet — still debounced
+
+            // pathB becomes a directory too; a SECOND liveness pass re-arms the SAME timer instead of
+            // firing its own independent rebuild.
+            File.Delete(pathB);
+            Directory.CreateDirectory(pathB);
+            sut.RefreshItemsLiveness();
+            Assert.Equal(2, timer.StartCount);
+            Assert.Equal(folderC, Assert.Single(sut.FileItems).Path); // still not rebuilt
+
+            timer.Fire();
+
+            // Exactly one rebuild reflects BOTH accumulated flips at once, and the selection survives it.
+            Assert.Equal(3, sut.FileItems.Count);
+            Assert.Contains(sut.FileItems, i => i.Path == pathA);
+            Assert.Contains(sut.FileItems, i => i.Path == pathB);
+            Assert.Contains(sut.FileItems, i => i.Path == folderC);
+            Assert.Same(selected, sut.SelectedFile);
+        }
+        finally
+        {
+            Directory.Delete(pathA);
+            Directory.Delete(pathB);
+            Directory.Delete(folderC);
+        }
+    }
+
+    // ── ADR-046: background icon-load queue wiring (priority, Dispose) ───────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="ChildWindowViewModel.LoadFromModel"/> sets this panel's background
+    /// icon-load priority (<see cref="BaseViewModel.IconLoadPriority"/>) from the model's own
+    /// <see cref="ChildWindowModel.IsVisible"/> — <see cref="IconLoadPriority.Visible"/> for a model on
+    /// the current page, <see cref="IconLoadPriority.Background"/> for one on a hidden page.
+    /// </summary>
+    /// <param name="isVisible">The model's <see cref="ChildWindowModel.IsVisible"/> value.</param>
+    /// <param name="expectedPriority">The expected resulting <see cref="IIconLoadGroup.Priority"/>.</param>
+    [Theory]
+    [InlineData(true, IconLoadPriority.Visible)]
+    [InlineData(false, IconLoadPriority.Background)]
+    public void LoadFromModel_SetsIconLoadPriorityFromModelIsVisible(bool isVisible, IconLoadPriority expectedPriority)
+    {
+        using var scope = new SyncContextScope(new CollectingSynchronizationContext());
+        var queue = new FakeIconLoadQueue();
+        using var sut = BuildSut(iconLoadQueue: queue);
+
+        sut.LoadFromModel(new ChildWindowModel { IsVisible = isVisible });
+
+        Assert.Equal(expectedPriority, queue.Group.Priority);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="ChildWindowViewModel.SetIconLoadVisibility"/> (wired to
+    /// <c>ChildWindow.IsVisibleChanged</c>) updates the panel's background icon-load priority without
+    /// going back through <see cref="ChildWindowViewModel.LoadFromModel"/> — the path a page switch
+    /// actually takes (<c>WindowManager</c> toggles window visibility directly).
+    /// </summary>
+    [Fact]
+    public void SetIconLoadVisibility_UpdatesIconLoadPriority()
+    {
+        using var scope = new SyncContextScope(new CollectingSynchronizationContext());
+        var queue = new FakeIconLoadQueue();
+        using var sut = BuildSut(iconLoadQueue: queue);
+        sut.LoadFromModel(new ChildWindowModel { IsVisible = true });
+        Assert.Equal(IconLoadPriority.Visible, queue.Group.Priority);
+
+        sut.SetIconLoadVisibility(false);
+        Assert.Equal(IconLoadPriority.Background, queue.Group.Priority);
+
+        sut.SetIconLoadVisibility(true);
+        Assert.Equal(IconLoadPriority.Visible, queue.Group.Priority);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="ChildWindowViewModel.Dispose"/> disposes this panel's background
+    /// icon-load group (ADR-046) — no further delivery to an about-to-be-unreachable ViewModel.
+    /// </summary>
+    [Fact]
+    public void Dispose_DisposesTheIconLoadGroup()
+    {
+        using var scope = new SyncContextScope(new CollectingSynchronizationContext());
+        var queue = new FakeIconLoadQueue();
+        var sut = BuildSut(iconLoadQueue: queue);
+
+        sut.Dispose();
+
+        Assert.True(queue.Group.IsDisposed);
+    }
+
+    // ── OpenSelectedFileCommand — the Enter shortcut's counterpart to the double-click's OpenFile
+    // (ChildWindow_PreviewKeyDown). ─────────────────────────────────────────────────────────────────
+
+    /// <summary>Nothing selected → cannot execute, and executing anyway launches nothing.</summary>
+    [Fact]
+    public void OpenSelectedFileCommand_NoSelection_CannotExecute()
+    {
+        using var sut = BuildSut();
+
+        Assert.False(sut.OpenSelectedFileCommand.CanExecute(null));
+
+        sut.OpenSelectedFileCommand.Execute(null);
+        _fileLauncherMock.Verify(l => l.Open(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>A selected item is opened through IFileLauncher exactly like a double-click.</summary>
+    [Fact]
+    public void OpenSelectedFileCommand_WithSelection_OpensSelectedPath()
+    {
+        var path = NewTempFilePath();
+        File.WriteAllText(path, "x");
+        using var sut = BuildSut();
+
+        try
+        {
+            sut.AddFiles([path]);
+            var item = Assert.Single(sut.AllItems);
+            sut.SelectedFile = item;
+
+            Assert.True(sut.OpenSelectedFileCommand.CanExecute(null));
+            sut.OpenSelectedFileCommand.Execute(null);
+
+            _fileLauncherMock.Verify(l => l.Open(item.Path), Times.Once);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>While the selected item is being renamed, Enter belongs to the editor — the command is disabled.</summary>
+    [Fact]
+    public void OpenSelectedFileCommand_DuringInlineRename_CannotExecute()
+    {
+        var path = NewTempFilePath();
+        File.WriteAllText(path, "x");
+        using var sut = BuildSut();
+
+        try
+        {
+            sut.AddFiles([path]);
+            var item = Assert.Single(sut.AllItems);
+            sut.SelectedFile = item;
+            sut.BeginRenameCommand.Execute(item);
+
+            Assert.False(sut.OpenSelectedFileCommand.CanExecute(null));
+
+            sut.CancelRenameCommand.Execute(null);
+            Assert.True(sut.OpenSelectedFileCommand.CanExecute(null));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>Sets a <see cref="SynchronizationContext"/> as <see cref="SynchronizationContext.Current"/> for the scope's lifetime, restoring the previous one on <see cref="Dispose"/>.</summary>
+    private sealed class SyncContextScope : IDisposable
+    {
+        private readonly SynchronizationContext? _previous;
+
+        public SyncContextScope(SynchronizationContext context)
+        {
+            _previous = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(context);
+        }
+
+        public void Dispose() => SynchronizationContext.SetSynchronizationContext(_previous);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -2966,7 +3228,11 @@ public class ChildWindowViewModelTests
 
     private ChildWindowViewModel BuildSut(
         IPanelSelectionCoordinator? selectionCoordinator = null,
-        Func<IDebounceTimer?>? iconResizeDebounceTimerProvider = null) => new(
+        Func<IDebounceTimer?>? iconResizeDebounceTimerProvider = null,
+        IWindowManager? windowManager = null,
+        IPageManager? pageManager = null,
+        IIconLoadQueue? iconLoadQueue = null,
+        Func<IDebounceTimer?>? probeRefilterDebounceTimerProvider = null) => new(
         _iconProviderMock.Object,
         _fileLauncherMock.Object,
         _watcherFactoryMock.Object,
@@ -2975,7 +3241,13 @@ public class ChildWindowViewModelTests
         _appSettingsMock.Object,
         selectionCoordinator ?? _selectionCoordinatorMock.Object,
         _diagnosticsMock.Object,
-        iconResizeDebounceTimerProvider);
+        iconResizeDebounceTimerProvider,
+        windowManager,
+        pageManager,
+        iconLoadQueue,
+        itemProbeQueue: null,
+        timeProvider: null,
+        probeRefilterDebounceTimerProvider: probeRefilterDebounceTimerProvider);
 
     /// <summary>
     /// Minimal <see cref="IDebounceTimer"/> test double for the icon-resize debounce (M3, release-polish

@@ -7,8 +7,10 @@
         later merge of this dictionary shadows them in place) with values sourced from SystemColors,
         which already track the user's chosen high-contrast theme.
 
-        MAJOR-A fix: Color.Overlay.*/Color.Selection.*/Color.Sidebar.Background/Color.Settings.* are now
-        ALSO overridden here — they used to be deliberately left out on the theory that "readability
+        MAJOR-A fix: Color.Overlay.*/Color.Selection.*/Color.Sidebar.Background are now ALSO overridden
+        here (the Settings window's own tokens moved to DesktopOrganizer.UI.Theming.ThemeResourceBuilder in
+        phase 6.1, which builds its own Theme.* high-contrast branch straight from SystemColors — see that
+        type's own remarks) — they used to be deliberately left out on the theory that "readability
         comes from SurfaceComposer forcing alpha=255 in high-contrast mode", but SurfaceComposer.ComposeSurface's
         highContrast branch only ever forces the PANEL SURFACE fill (PanelSurfaceBrushConverter's own
         output) to opaque; it has no effect at all on these other brushes. Left un-overridden, Color.Overlay.Hover/
@@ -64,28 +66,9 @@
          instead of a semi-transparent black wash that reads as a dirty grey smear on a white surface. -->
     <x:Static x:Key="Color.Sidebar.Background" Member="sysc:SystemColors.ControlColor"/>
 
-    <!-- Settings window (MAJOR-A, D-9): MainWindow.xaml's chrome. Phase 5 deliberately does not restyle
-         this window's layout, but its fixed light-theme literals still need to give way to the user's
-         chosen high-contrast system colors, the same as every other chrome color in this file. -->
-    <x:Static x:Key="Color.Settings.ChromeBackground" Member="sysc:SystemColors.ControlColor"/>
-    <x:Static x:Key="Color.Settings.ChromeBorder" Member="sysc:SystemColors.ActiveBorderColor"/>
-    <!-- m7 (release-polish-1.0 review round): HighlightColor, not WindowColor — this key doubled as
-         Color.Settings.CardBackground's own HC value (both WindowColor), which made every "selected"
-         state that relies on it (Settings.SegmentedItem's checked segment, the sidebar's selected
-         ListBoxItem/About toggle) render IDENTICAL to its own unselected card background — i.e. no
-         visible selection at all under Windows High Contrast. -->
-    <x:Static x:Key="Color.Settings.TabActiveBackground" Member="sysc:SystemColors.HighlightColor"/>
-    <x:Static x:Key="Color.Settings.IconMuted" Member="sysc:SystemColors.GrayTextColor"/>
-    <x:Static x:Key="Color.Settings.TextMuted" Member="sysc:SystemColors.GrayTextColor"/>
-    <x:Static x:Key="Color.Settings.SwatchBorder" Member="sysc:SystemColors.ActiveBorderColor"/>
-    <x:Static x:Key="Color.Settings.Warning" Member="sysc:SystemColors.HighlightColor"/>
-    <!-- ADR-031 settings-window shell tokens (see Colors.xaml). -->
-    <x:Static x:Key="Color.Settings.TextPrimary" Member="sysc:SystemColors.WindowTextColor"/>
-    <x:Static x:Key="Color.Settings.CardBackground" Member="sysc:SystemColors.WindowColor"/>
-    <x:Static x:Key="Color.Settings.CardBorder" Member="sysc:SystemColors.ActiveBorderColor"/>
-    <x:Static x:Key="Color.Settings.HoverOverlay" Member="sysc:SystemColors.ControlLightColor"/>
-    <x:Static x:Key="Color.Settings.ToggleTrackOff" Member="sysc:SystemColors.GrayTextColor"/>
-    <x:Static x:Key="Color.Settings.ToggleThumb" Member="sysc:SystemColors.WindowColor"/>
+    <!-- Settings window: phase 6.1 moved this window's own high-contrast overrides to
+         DesktopOrganizer.UI.Theming.ThemeResourceBuilder's HighContrast branch (Theme.* keys) — see that
+         type's own remarks for the full SystemColors mapping. -->
 
     <!--
         ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md D-8): the

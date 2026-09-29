@@ -78,6 +78,98 @@ public class DesktopIconsServiceTests
     }
 
     /// <summary>
+    /// Every UI mirror (tray checkmark, settings toggle) is told about a change made through
+    /// SetIconsVisible — raised after the shell call, so a handler re-reading AreIconsVisible sees the
+    /// new state.
+    /// </summary>
+    /// <param name="visible">Requested visibility.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SetIconsVisible_RaisesVisibilityChanged_AfterShellCall(bool visible)
+    {
+        var raised = 0;
+        var showWindowCallsAtRaise = -1;
+        var showWindowCalls = 0;
+        _nativeApi.Setup(api => api.ShowWindow(DefView, It.IsAny<int>())).Callback(() => showWindowCalls++).Returns(true);
+        _sut.VisibilityChanged += (sender, _) =>
+        {
+            raised++;
+            showWindowCallsAtRaise = showWindowCalls;
+            Assert.Same(_sut, sender);
+        };
+
+        _sut.SetIconsVisible(visible);
+
+        Assert.Equal(1, raised);
+        Assert.Equal(1, showWindowCallsAtRaise);
+    }
+
+    /// <summary>Toggle goes through SetIconsVisible and therefore notifies exactly once.</summary>
+    [Fact]
+    public void Toggle_RaisesVisibilityChangedOnce()
+    {
+        _nativeApi.Setup(api => api.IsWindowVisible(DefView)).Returns(true);
+        var raised = 0;
+        _sut.VisibilityChanged += (_, _) => raised++;
+
+        _sut.Toggle();
+
+        Assert.Equal(1, raised);
+    }
+
+    /// <summary>
+    /// The intent is recorded (and the mirrors notified) even while SHELLDLL_DefView is gone: a missed
+    /// notification would leave a checkmark stale, a spurious one costs the mirrors a single lookup.
+    /// </summary>
+    [Fact]
+    public void SetIconsVisible_WithoutDefView_StillRaisesVisibilityChanged()
+    {
+        _defView = IntPtr.Zero;
+        var raised = 0;
+        _sut.VisibilityChanged += (_, _) => raised++;
+
+        _sut.SetIconsVisible(false);
+
+        Assert.Equal(1, raised);
+    }
+
+    /// <summary>
+    /// Re-hiding the new SHELLDLL_DefView after an Explorer restart is a visibility change too — the
+    /// mirrors must learn about it the same way.
+    /// </summary>
+    [Fact]
+    public void ReapplyDesiredVisibility_HiddenIntentApplied_RaisesVisibilityChanged()
+    {
+        _sut.SetIconsVisible(false);
+        _defView = NewDefView;
+        var raised = 0;
+        _sut.VisibilityChanged += (_, _) => raised++;
+
+        Assert.True(_sut.ReapplyDesiredVisibility());
+        Assert.Equal(1, raised);
+    }
+
+    /// <summary>Nothing changed (no intent / "visible" intent / DefView not there yet) → no notification.</summary>
+    /// <param name="setVisibleFirst">Whether a "visible" intent is recorded before reapplying.</param>
+    /// <param name="defViewPresent">Whether SHELLDLL_DefView can be found at reapply time.</param>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void ReapplyDesiredVisibility_NothingToApply_DoesNotRaiseVisibilityChanged(bool setVisibleFirst, bool defViewPresent)
+    {
+        if (setVisibleFirst) _sut.SetIconsVisible(true);
+        _defView = defViewPresent ? DefView : IntPtr.Zero;
+        var raised = 0;
+        _sut.VisibilityChanged += (_, _) => raised++;
+
+        _sut.ReapplyDesiredVisibility();
+
+        Assert.Equal(0, raised);
+    }
+
+    /// <summary>
     /// After an Explorer restart the NEW SHELLDLL_DefView (visible by default) is hidden again when the
     /// session intent is "hidden".
     /// </summary>

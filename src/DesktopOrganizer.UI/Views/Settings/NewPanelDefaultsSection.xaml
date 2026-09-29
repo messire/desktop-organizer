@@ -6,7 +6,7 @@
              xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
              xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
              xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
-             xmlns:theming="clr-namespace:DesktopOrganizer.UI.Theming"
+             xmlns:self="clr-namespace:DesktopOrganizer.UI.Views.Settings"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <StackPanel>
@@ -22,161 +22,82 @@
                                     SurfaceStyle="{Binding DefaultSurfaceStyle}"
                                     SurfaceOpacity="{Binding DefaultOpacity}"
                                     IconSize="{Binding DefaultIconSize}"/>
-        <controls:PanelColorEditor DataContext="{Binding DefaultColors}"/>
+        <!-- Backlog 1.x item 5 (§5.2): Surface style/Opacity used to be this section's own stand-alone
+             "Surface" card (release-polish-1.0 visual review item 5), duplicated near-verbatim in
+             PanelCustomizeWindow.xaml. Both now live inside PanelColorEditor's collapsed-by-default
+             "Advanced" card via AdvancedExtraContent — see that DependencyProperty's own remarks
+             (PanelColorEditor.xaml.cs) for why every binding below targets THIS SECTION's own DataContext
+             (RelativeSource AncestorType=self:NewPanelDefaultsSection — plain AncestorType=UserControl
+             would incorrectly resolve to PanelColorEditor itself, also a UserControl, sitting in between)
+             rather than inheriting PanelColorEditor's own (DefaultColors, which owns no surface state).
+             SetDefaultSurfaceStyleCommand still writes through the EXACT SAME DefaultSurfaceStyle property
+             (and therefore the same IAppSettings.DefaultSurfaceStyle setter) it always did — no new setting,
+             only a different location.
+             Backlog 1.x wave 2 review (M-G): the actual Surface style/Opacity markup is now the shared
+             controls:SurfaceOptionsEditor (Controls/SurfaceOptionsEditor.xaml) — this section and
+             PanelCustomizeWindow.xaml each used to duplicate ~70 lines of it near-verbatim; see that
+             control's own remarks for why it no longer needs the "Path=Children[0]" LabeledBy workaround
+             the inline markup this replaces used to need. -->
+        <controls:PanelColorEditor DataContext="{Binding DefaultColors}">
+            <controls:PanelColorEditor.AdvancedExtraContent>
+                <controls:SurfaceOptionsEditor
+                    SurfaceStyle="{Binding DataContext.DefaultSurfaceStyle, RelativeSource={RelativeSource AncestorType=self:NewPanelDefaultsSection}, Mode=OneWay}"
+                    SurfaceStyleCommand="{Binding DataContext.SetDefaultSurfaceStyleCommand, RelativeSource={RelativeSource AncestorType=self:NewPanelDefaultsSection}}"
+                    SurfaceOpacity="{Binding DataContext.DefaultOpacity, RelativeSource={RelativeSource AncestorType=self:NewPanelDefaultsSection}, Mode=TwoWay}"/>
+            </controls:PanelColorEditor.AdvancedExtraContent>
+        </controls:PanelColorEditor>
 
-        <!-- Surface (style + opacity) — release-polish-1.0 visual review item 5: the same segmented
-             Solid/Ambient/Glass control and single-card grouping PanelCustomizeWindow's own Surface card
-             uses, replacing the ComboBox this section had before. SetDefaultSurfaceStyleCommand writes
-             through the EXACT SAME DefaultSurfaceStyle property (and therefore the same
-             IAppSettings.DefaultSurfaceStyle setter) the ComboBox's SelectedItem binding did — no new
-             setting, only a different control.
-             UX#3: this card now comes BEFORE Icon size (below), matching PanelCustomizeWindow's own
-             Surface-then-Icons card order — this section used to have them reversed. -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <StackPanel>
-                <TextBlock Text="{loc:Loc Common_Surface_Header}" Style="{StaticResource Settings.CardHeader}" Margin="0,0,0,10"/>
-
-                <Grid Margin="0,0,0,10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="SurfaceStyleLabel" Grid.Column="0" Text="{loc:Loc Common_SurfaceStyle_Header}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                    <!-- m2: AutomationProperties.LabeledBy lives on each RadioButton, not the grouping
-                         Border — see PanelColorEditor.xaml's Mode card for the same fix. -->
-                    <Border Grid.Column="1" Style="{StaticResource Settings.SegmentedGroup}">
-                        <UniformGrid Rows="1" Columns="3"
-                                     KeyboardNavigation.TabNavigation="Once"
-                                     KeyboardNavigation.DirectionalNavigation="Contained">
-                            <RadioButton GroupName="NewPanelDefaultsSurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
-                                         AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
-                                         Command="{Binding SetDefaultSurfaceStyleCommand}" CommandParameter="{x:Static models:PanelSurfaceStyle.Solid}"
-                                         Content="{loc:LocBinding Source={x:Static models:PanelSurfaceStyle.Solid}, Converter={StaticResource EnumDisplayName}}">
-                                <RadioButton.IsChecked>
-                                    <Binding Path="DefaultSurfaceStyle" Mode="OneWay"
-                                             Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static models:PanelSurfaceStyle.Solid}"/>
-                                </RadioButton.IsChecked>
-                            </RadioButton>
-                            <RadioButton GroupName="NewPanelDefaultsSurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
-                                         AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
-                                         Command="{Binding SetDefaultSurfaceStyleCommand}" CommandParameter="{x:Static models:PanelSurfaceStyle.Ambient}"
-                                         Content="{loc:LocBinding Source={x:Static models:PanelSurfaceStyle.Ambient}, Converter={StaticResource EnumDisplayName}}">
-                                <RadioButton.IsChecked>
-                                    <Binding Path="DefaultSurfaceStyle" Mode="OneWay"
-                                             Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static models:PanelSurfaceStyle.Ambient}"/>
-                                </RadioButton.IsChecked>
-                            </RadioButton>
-                            <RadioButton GroupName="NewPanelDefaultsSurfaceStyle" Style="{StaticResource Settings.SegmentedItem}"
-                                         AutomationProperties.LabeledBy="{Binding ElementName=SurfaceStyleLabel}"
-                                         Command="{Binding SetDefaultSurfaceStyleCommand}" CommandParameter="{x:Static models:PanelSurfaceStyle.Glass}"
-                                         Content="{loc:LocBinding Source={x:Static models:PanelSurfaceStyle.Glass}, Converter={StaticResource EnumDisplayName}}">
-                                <RadioButton.IsChecked>
-                                    <Binding Path="DefaultSurfaceStyle" Mode="OneWay"
-                                             Converter="{StaticResource EnumEquals}" ConverterParameter="{x:Static models:PanelSurfaceStyle.Glass}"/>
-                                </RadioButton.IsChecked>
-                            </RadioButton>
-                        </UniformGrid>
-                    </Border>
-                </Grid>
-                <TextBlock Text="{loc:Loc Settings_NewPanelDefaults_SurfaceStyle_Description}"
-                           Style="{StaticResource Settings.CardDescription}" Margin="0,0,0,10"/>
-
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="140"/>
-                        <ColumnDefinition Width="40"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="OpacityLabel" Grid.Column="0" Text="{loc:Loc Settings_NewPanelDefaults_Opacity_Label}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                    <!-- UX#2: Minimum bound to SurfaceComposer.MinSurfaceOpacity — see
-                         PanelCustomizeWindow.xaml's own Surface card remarks/OpacitySliderMinimumCoercionTests
-                         for why this is safe (WPF's coercion here never writes back through the binding). -->
-                    <Slider Grid.Column="1" VerticalAlignment="Center" Minimum="{x:Static theming:SurfaceComposer.MinSurfaceOpacity}" Maximum="1"
-                            AutomationProperties.LabeledBy="{Binding ElementName=OpacityLabel}"
-                            Value="{Binding DefaultOpacity, Mode=TwoWay}"/>
-                    <!-- {0:P0} is left to WPF's own culture resolution via FrameworkElement.Language/CultureSync
-                         (docs/PLANS/localization.md §8 inventory note) — no LocBinding needed here. -->
-                    <TextBlock Grid.Column="2" Text="{Binding DefaultOpacity, StringFormat={}{0:P0}}"
-                               VerticalAlignment="Center" TextAlignment="Right"/>
-                </Grid>
-            </StackPanel>
-        </Border>
-
-        <!-- Icon size -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="220"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{loc:Loc Common_IconSize_Header}" Style="{StaticResource Settings.CardHeader}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-                <controls:SteppedValueEditor Grid.Column="1" VerticalAlignment="Center"
+        <!-- Icon size — M-3 fix (6.5 review round): now a real controls:SettingsCard, same as every other
+             card below it. Previously kept as a manual Border+Grid because SettingsCard's Header/
+             Description/ActionContent were plain DependencyProperties, not registered as LOGICAL children —
+             SettingsCard.cs's own M-3 remarks close that gap (Header/Description/ActionContent are now
+             genuine logical children, the same way PanelColorEditor.AdvancedExtraContent already was), so
+             SizeEditorsWiringTests.NewPanelDefaultsSection_SteppedValueEditor_UsesIconSizeRange_AndHostsPanelColorEditor's
+             own LogicalTreeHelper walk still finds this SteppedValueEditor unchanged. -->
+        <controls:SettingsCard Header="{loc:Loc Common_IconSize_Header}">
+            <controls:SettingsCard.ActionContent>
+                <controls:SteppedValueEditor VerticalAlignment="Center"
                                               Minimum="{x:Static models:SizeStepPolicy.IconSizeMinimum}"
                                               Maximum="{x:Static models:SizeStepPolicy.IconSizeMaximum}"
                                               AutomationName="{loc:Loc Common_IconSize_Header}"
                                               Value="{Binding DefaultIconSize, Mode=TwoWay}"/>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
 
-        <!-- Panel geometry -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="190"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Settings_NewPanelDefaults_PanelGeometry_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="{loc:Loc Settings_NewPanelDefaults_PanelGeometry_Description}"/>
-                </StackPanel>
-                <!-- UX#7: 150 -> 190 (RU overflow hardening) — the ru-RU enum labels this ComboBox shows
-                     (Settings.EnumRadioLabel, TextWrapping="Wrap") run noticeably longer than their en-US
-                     counterparts. -->
-                <ComboBox Grid.Column="1" VerticalAlignment="Center"
+        <!-- Panel geometry — UX#7: the ru-RU enum labels this ComboBox shows (Settings.EnumRadioLabel,
+             TextWrapping="Wrap") run noticeably longer than their en-US counterparts, hence MinWidth 190
+             rather than SettingsCard's own Auto ActionContent column sizing to the shorter en-US text. -->
+        <controls:SettingsCard Header="{loc:Loc Settings_NewPanelDefaults_PanelGeometry_Header}"
+                                Description="{loc:Loc Settings_NewPanelDefaults_PanelGeometry_Description}">
+            <controls:SettingsCard.ActionContent>
+                <ComboBox MinWidth="190" VerticalAlignment="Center"
                           AutomationProperties.Name="{loc:Loc Settings_NewPanelDefaults_PanelGeometry_Header}"
                           ItemsSource="{Binding PanelGeometryModeOptions}"
                           SelectedItem="{Binding DefaultPanelGeometryMode, Mode=TwoWay}"
                           ItemTemplate="{StaticResource Settings.EnumRadioLabel}"/>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
 
         <!-- Icon layout -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="190"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Common_IconLayout_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="{loc:Loc Settings_NewPanelDefaults_IconLayout_Description}"/>
-                </StackPanel>
-                <ComboBox Grid.Column="1" VerticalAlignment="Center"
+        <controls:SettingsCard Header="{loc:Loc Common_IconLayout_Header}"
+                                Description="{loc:Loc Settings_NewPanelDefaults_IconLayout_Description}">
+            <controls:SettingsCard.ActionContent>
+                <ComboBox MinWidth="190" VerticalAlignment="Center"
                           AutomationProperties.Name="{loc:Loc Common_IconLayout_Header}"
                           ItemsSource="{Binding IconLayoutPolicyOptions}"
                           SelectedItem="{Binding DefaultIconLayoutPolicy, Mode=TwoWay}"
                           ItemTemplate="{StaticResource Settings.EnumRadioLabel}"/>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
 
         <!-- Take from selected panel -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Settings_NewPanelDefaults_TakeFromSelected_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="{loc:Loc Settings_NewPanelDefaults_TakeFromSelected_Description}"/>
-                </StackPanel>
-                <Button Grid.Column="1" Content="{loc:Loc Settings_NewPanelDefaults_Take_Button}" Padding="12,6" VerticalAlignment="Center"
+        <controls:SettingsCard Header="{loc:Loc Settings_NewPanelDefaults_TakeFromSelected_Header}"
+                                Description="{loc:Loc Settings_NewPanelDefaults_TakeFromSelected_Description}">
+            <controls:SettingsCard.ActionContent>
+                <Button Content="{loc:Loc Settings_NewPanelDefaults_Take_Button}" VerticalAlignment="Center"
                         AutomationProperties.Name="{loc:Loc Settings_NewPanelDefaults_TakeFromSelected_Header}"
                         Command="{Binding TakeDefaultsFromSelectedPanelCommand}"/>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
     </StackPanel>
 </UserControl>

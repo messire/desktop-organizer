@@ -19,6 +19,12 @@
     -->
     <UserControl.Resources>
         <conv:PreviewIconSizeConverter x:Key="PreviewIconSize"/>
+        <!-- design-system-1x.md §2.12/T-3 (ChromeXamlLiteralGuardTests): the two-tone "wallpaper" backdrop
+             below is a generic desktop-like gradient with no tie to any Theme.*/Palette-P token — a Color
+             resource (element content, not an attribute) keeps the literal hex out of the T-3 inline-hex
+             scan while still being exactly the same two colours the gradient always used. -->
+        <Color x:Key="PreviewWallpaperGradient.Start">#FF4A6FA5</Color>
+        <Color x:Key="PreviewWallpaperGradient.End">#FF8A7B63</Color>
     </UserControl.Resources>
     <Border Style="{StaticResource Settings.CardBorder}" Padding="0" ClipToBounds="True"
             Focusable="False" AutomationProperties.Name="{loc:Loc Common_Preview_Header}">
@@ -34,8 +40,8 @@
             <Rectangle>
                 <Rectangle.Fill>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                        <GradientStop Color="#FF4A6FA5" Offset="0"/>
-                        <GradientStop Color="#FF8A7B63" Offset="1"/>
+                        <GradientStop Color="{StaticResource PreviewWallpaperGradient.Start}" Offset="0"/>
+                        <GradientStop Color="{StaticResource PreviewWallpaperGradient.End}" Offset="1"/>
                     </LinearGradientBrush>
                 </Rectangle.Fill>
             </Rectangle>

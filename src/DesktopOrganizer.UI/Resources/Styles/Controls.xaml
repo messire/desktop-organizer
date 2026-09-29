@@ -15,8 +15,8 @@
 
         R-6: PanelTheme.Accent (Theming/PanelTheme.cs, C2) is an inherited attached DependencyProperty
         and does NOT cross into a ContextMenu/Popup's separate visual tree. Any accent-dependent chrome
-        added to Control.ContextMenu/Control.MenuItem/Control.Popup.Chrome below MUST come from a
-        StaticResource token, never from PanelTheme.Accent.
+        added to a menu/popup style below MUST come from a StaticResource/DynamicResource token, never
+        from PanelTheme.Accent.
     -->
     <!-- MAJOR-3 fix (docs/PLANS/workspace-grid-07-visual.md fix-cycle 1): header icon buttons'
          (Sort/View/RollUp/Overflow) hover wash now picks its own lighten/darken direction from the
@@ -86,29 +86,299 @@
         </Setter>
     </Style>
 
-    <Style x:Key="Control.ContextMenu" TargetType="ContextMenu">
-        <Setter Property="Background" Value="{StaticResource Brush.Surface.Elevated}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border.Default}"/>
-        <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
-        <Setter Property="Padding" Value="2"/>
+    <!-- ══════════════════════════════════════════════════════════════════════════════════════════════
+         Focus (design-system-1x.md §2.2/§2.5, ADR-047 D-6, closes H-3): one shared double-ring
+         FocusVisualStyle for every Palette T control (this file's Theme.MenuItem below,
+         Resources/Styles/Theme.Controls.xaml's whole catalogue, and Settings.xaml's Settings.SegmentedItem/
+         .Compact) — replacing each one's former bespoke 1px-border/no-visual focus indicator. A generic (no
+         TargetType) Style targeting Control.Template — the standard WPF "custom FocusVisualStyle" shape:
+         assigned to a control's OWN FocusVisualStyle property, WPF then overlays this ControlTemplate as an
+         adorner automatically whenever that control has keyboard focus — no template trigger/manual
+         IsKeyboardFocused wiring needed in each consumer's own template.
+
+         Declared HERE, not in Theme.Controls.xaml (its natural home, and where every other 6.2a "library"
+         style lives): Settings.xaml's Settings.SegmentedItem/.Compact ALSO reference it via
+         {StaticResource}, and Settings.xaml is merged BEFORE Theme.Controls.xaml (App.xaml.cs
+         LoadResourceDictionaries) — a StaticResource reference to a key that only exists in a LATER-merged
+         sibling dictionary does not resolve (confirmed empirically: it throws
+         "{DependencyProperty.UnsetValue}' is not a valid value" the moment the referencing Style is
+         applied). This file (Controls.xaml) is merged BEFORE both Settings.xaml and Theme.Controls.xaml, so
+         both can reference this key safely. -->
+    <Style x:Key="Theme.FocusVisual">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Grid Margin="-3" SnapsToDevicePixels="True">
+                        <Rectangle Stroke="{DynamicResource Theme.Stroke.Focus}" StrokeThickness="2" RadiusX="4" RadiusY="4"/>
+                        <Rectangle Stroke="{DynamicResource Theme.Stroke.FocusInner}" StrokeThickness="1" Margin="1" RadiusX="3" RadiusY="3"/>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
-    <Style x:Key="Control.MenuItem" TargetType="MenuItem">
-        <Setter Property="Foreground" Value="{StaticResource Brush.Text.Primary}"/>
+    <!--
+        Design-system-1x phase 6.2a (docs/PLANS/design-system-1x.md §2.5/§2.6, ADR-047 D-7) — the "Palette
+        T" (application chrome) replacements for the pre-6.2a Control.ContextMenu/Control.MenuItem/
+        Control.Popup.Chrome styles. Added here (not Theme.Controls.xaml) per the plan's own §4 zone
+        table: this dictionary is already merged app-wide by App.xaml.cs, and Theme.ContextMenu/
+        Theme.MenuItem/Theme.Popup.Chrome/the app-wide Theme.ToolTip style all belong next to the styles
+        they replace. Phase 6.2c migrated ChildWindow.xaml's HeaderContextMenu/MoveHintPopup/
+        RenameErrorPopup onto these keys and removed Control.ContextMenu/Control.MenuItem/
+        Control.Popup.Chrome outright (their only consumer) — see git history for their prior shape.
+
+        H-1 fix (docs/PLANS/design-system-1x.md §1.1 S-18, ChromeContrastAuditTests'
+        KnownGap_H1_SubmenuPopupBackground_DoesNotFollowContextMenuDarkStyle_FailsTextContrast): the stock
+        Aero2 MenuItem template's SubmenuHeader/TopLevelHeader role draws its own Popup->Border
+        ("SubmenuBorder") with a hard-coded system-colour background that never picked up the ContextMenu's
+        OWN styled Background — light text on a light popup. Theme.MenuItem.HeaderTemplate below owns its
+        Popup's Border directly and binds its Background to {DynamicResource Theme.Surface.Flyout} — the
+        SAME token the ContextMenu's own background/Theme.MenuItem.ItemTemplate's row hover use — so a
+        submenu can never again diverge from its parent's theme. ChromeStylesStaTests (T-7) pins this by
+        building a REAL ContextMenu/nested MenuItem against these exact styles, opening the submenu, and
+        asserting the popup Border's Background is Theme.Surface.Flyout with ≥ 4.5:1 text contrast.
+
+        Both TOP-LEVEL and SUBMENU roles share ONE pair of ControlTemplates (Theme.MenuItem.ItemTemplate/
+        HeaderTemplate) rather than four physically distinct ones: every WPF-menu consumer in this app is a
+        ContextMenu (no Menu bar), and a header MenuItem whose ItemsControl parent is a ContextMenu already
+        pops its submenu to the right at EVERY nesting depth — Role only tells top-level vs. nested apart
+        for MenuItem.Role's own IsChecked/keyboard-navigation semantics, not for anything this template
+        needs to render differently. Theme.MenuItem's Style.Triggers below still switch on all 4 Role
+        values explicitly (not e.g. a single "HasItems" check) so a future Menu-bar consumer, or a reviewer
+        auditing role coverage, finds all 4 handled by name.
+    -->
+    <ControlTemplate x:Key="Theme.MenuItem.ItemTemplate" TargetType="MenuItem">
+        <Border x:Name="Bg"
+                Background="{TemplateBinding Background}"
+                CornerRadius="{DynamicResource Theme.Radius.Control}"
+                Padding="{TemplateBinding Padding}"
+                MinHeight="{DynamicResource Theme.MenuItem.MinHeight}"
+                SnapsToDevicePixels="True">
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="24"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="Check" Grid.Column="0"
+                           Text="{StaticResource Icon.Glyph.Checkmark}"
+                           FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons"
+                           VerticalAlignment="Center"
+                           Visibility="Collapsed"/>
+                <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True"
+                                   VerticalAlignment="Center" Margin="4,0,16,0"/>
+                <TextBlock x:Name="Gesture" Grid.Column="2"
+                           Text="{TemplateBinding InputGestureText}"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource Theme.Text.Secondary}"/>
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+            </Trigger>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource Theme.Control.Subtle.Hover}"/>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource Theme.Control.Subtle.Pressed}"/>
+            </Trigger>
+            <!-- D-6 "disabled ≠ Opacity": dims via Theme.Text.Disabled (inherited into Check/Header through
+                 the outer Style's own IsEnabled=False Foreground Setter below) plus this one explicit
+                 Setter for Gesture, which pins its OWN Foreground and would otherwise not inherit it. -->
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Gesture" Property="Foreground" Value="{DynamicResource Theme.Text.Disabled}"/>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <!-- TopLevelHeader/SubmenuHeader role: the SAME row as ItemTemplate above, plus a trailing submenu
+         caret instead of InputGestureText, and this MenuItem's OWN Popup/SubmenuBorder (the H-1 fix — see
+         this dictionary's own remarks above the two templates). -->
+    <ControlTemplate x:Key="Theme.MenuItem.HeaderTemplate" TargetType="MenuItem">
+        <Grid>
+            <Border x:Name="Bg"
+                    Background="{TemplateBinding Background}"
+                    CornerRadius="{DynamicResource Theme.Radius.Control}"
+                    Padding="{TemplateBinding Padding}"
+                    MinHeight="{DynamicResource Theme.MenuItem.MinHeight}"
+                    SnapsToDevicePixels="True">
+                <Grid VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="24"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="Check" Grid.Column="0"
+                               Text="{StaticResource Icon.Glyph.Checkmark}"
+                               FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons"
+                               VerticalAlignment="Center"
+                               Visibility="Collapsed"/>
+                    <ContentPresenter Grid.Column="1" ContentSource="Header" RecognizesAccessKey="True"
+                                       VerticalAlignment="Center" Margin="4,0,16,0"/>
+                    <TextBlock Grid.Column="2"
+                               Text="{StaticResource Icon.Glyph.SubmenuArrow}"
+                               FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource Theme.Text.Secondary}"/>
+                </Grid>
+            </Border>
+            <Popup x:Name="PART_Popup"
+                   Placement="Right"
+                   HorizontalOffset="-4"
+                   VerticalOffset="-6"
+                   IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                   AllowsTransparency="True"
+                   Focusable="False"
+                   PopupAnimation="{DynamicResource {x:Static SystemParameters.MenuPopupAnimationKey}}">
+                <Border x:Name="SubmenuBorder"
+                        Background="{DynamicResource Theme.Surface.Flyout}"
+                        BorderBrush="{DynamicResource Theme.Stroke.Card}"
+                        BorderThickness="1"
+                        CornerRadius="{DynamicResource Theme.Radius.Popup}"
+                        Padding="2"
+                        SnapsToDevicePixels="True">
+                    <ScrollViewer CanContentScroll="True">
+                        <ItemsPresenter Grid.IsSharedSizeScope="True" SnapsToDevicePixels="True"/>
+                    </ScrollViewer>
+                </Border>
+            </Popup>
+        </Grid>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+            </Trigger>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource Theme.Control.Subtle.Hover}"/>
+            </Trigger>
+            <Trigger Property="IsSubmenuOpen" Value="True">
+                <Setter TargetName="Bg" Property="Background" Value="{DynamicResource Theme.Control.Subtle.Hover}"/>
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <!-- The single style every Theme.* menu consumer applies to EVERY MenuItem inside its own ContextMenu
+         (via an implicit, BasedOn={StaticResource Theme.MenuItem} Style keyed by typeof(MenuItem) in that
+         ContextMenu's own Resources — the same pattern ChildWindow.xaml's HeaderContextMenu already uses
+         for Control.MenuItem, since ItemContainerStyle has no effect on MenuItems already declared literally
+         in XAML, only on data-bound, container-generated ones). -->
+    <Style x:Key="Theme.MenuItem" TargetType="MenuItem">
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Primary}"/>
         <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="FontSize" Value="{DynamicResource Font.Size.Caption}"/>
+        <Setter Property="Padding" Value="{DynamicResource Theme.MenuItem.Padding}"/>
+        <Setter Property="Template" Value="{StaticResource Theme.MenuItem.ItemTemplate}"/>
+        <Style.Triggers>
+            <Trigger Property="Role" Value="TopLevelHeader">
+                <Setter Property="Template" Value="{StaticResource Theme.MenuItem.HeaderTemplate}"/>
+            </Trigger>
+            <Trigger Property="Role" Value="TopLevelItem">
+                <Setter Property="Template" Value="{StaticResource Theme.MenuItem.ItemTemplate}"/>
+            </Trigger>
+            <Trigger Property="Role" Value="SubmenuHeader">
+                <Setter Property="Template" Value="{StaticResource Theme.MenuItem.HeaderTemplate}"/>
+            </Trigger>
+            <Trigger Property="Role" Value="SubmenuItem">
+                <Setter Property="Template" Value="{StaticResource Theme.MenuItem.ItemTemplate}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Disabled}"/>
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
-    <!-- Shared chrome for non-blocking Border-in-Popup hints (MoveHintPopup/RenameErrorPopup today;
-         the C6 overflow menu's Border-based affordances later). Values match the popups' current inline
-         Background="#EE1E1E1E" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="4"
-         Padding="10,7" (ChildWindow.xaml) — not yet applied there (no consumers in this commit). -->
-    <Style x:Key="Control.Popup.Chrome" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource Brush.Surface.Elevated}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource Brush.Border.Default}"/>
-        <Setter Property="BorderThickness" Value="{StaticResource Thickness.Hairline}"/>
-        <Setter Property="CornerRadius" Value="{StaticResource Radius.Popup}"/>
-        <Setter Property="Padding" Value="{StaticResource Thickness.PopupPadding}"/>
+    <!-- Group-header fallback (§2.5 catalog): a Focusable=False, IsHitTestVisible=False MenuItem used as a
+         plain section label (e.g. "Содержимое"/"Упорядочить значки" in the panel header menu) — used only
+         if fences-ux-parity-reviewer rejects 6.2c's radio-group-to-submenu conversion (§2.6 item 3's
+         documented fallback); NOT wired into any menu by 6.2a itself. Unlike the pre-6.1
+         IsEnabled=False-as-group-header anti-pattern (ChromeContrastAuditTests'
+         SettingsMenuGroupHeaders_AreDisabledMenuItemsWithNoOwnForegroundOverride, ≈ 3.0:1), this stays fully
+         enabled/legible (Theme.Text.Secondary ≥ 4.5:1) and is merely inert to input.
+    -->
+    <Style x:Key="Theme.MenuItem.GroupHeader" TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}">
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Secondary}"/>
+    </Style>
+
+    <Style x:Key="Theme.Separator" TargetType="Separator">
+        <Setter Property="Background" Value="{DynamicResource Theme.Stroke.Divider}"/>
+        <Setter Property="Margin" Value="4"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1" Background="{TemplateBinding Background}"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="Theme.ContextMenu" TargetType="ContextMenu">
+        <Setter Property="Background" Value="{DynamicResource Theme.Surface.Flyout}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Stroke.Card}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="4"/>
+        <Setter Property="HasDropShadow" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContextMenu">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{DynamicResource Theme.Radius.Popup}"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer CanContentScroll="True">
+                            <ItemsPresenter/>
+                        </ScrollViewer>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Theme.Popup.Chrome replaces Control.Popup.Chrome above for the panel header's own hint popups
+         (MoveHintPopup/RenameErrorPopup, ChildWindow.xaml — migrated in 6.2c) plus any future Palette T
+         non-blocking hint popup: same shape (Border, hairline stroke, popup radius), but on Theme.Surface.
+         Flyout/Theme.Stroke.Card so it stays visually consistent with Theme.ContextMenu/Theme.ToolTip in
+         both Light and Dark, rather than pinned to the always-dark Brush.Surface.Elevated. -->
+    <Style x:Key="Theme.Popup.Chrome" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Theme.Surface.Flyout}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Stroke.Card}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="{DynamicResource Theme.Radius.Popup}"/>
+        <Setter Property="Padding" Value="10,7"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <!-- Theme.ToolTip: the ONE implicit (un-keyed, TargetType-only) style in this whole design system —
+         deliberately app-wide (§2.5 catalog: "единственный неявный стиль, который достаётся и панелям
+         безопасно"), since a ToolTip is always its own separate Popup-hosted visual tree regardless of
+         which window/panel raised it, so there is no risk of it "leaking" into a panel's OWN chrome the
+         way Theme.Implicit.xaml's Button/TextBox/etc. styles would. -->
+    <Style TargetType="{x:Type ToolTip}">
+        <Setter Property="Background" Value="{DynamicResource Theme.Surface.Flyout}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Theme.Text.Primary}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Theme.Stroke.Card}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="FontSize" Value="{DynamicResource Font.Size.Caption}"/>
+        <Setter Property="HasDropShadow" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{DynamicResource Theme.Radius.Control}"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter Margin="0"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!--

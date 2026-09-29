@@ -1,9 +1,11 @@
 using System.ComponentModel;
 using System.Windows;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.UI.Behaviors;
 using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
+using DesktopOrganizer.UI.Theming;
 using DesktopOrganizer.UI.ViewModels;
 
 namespace DesktopOrganizer.UI.Views;
@@ -33,6 +35,10 @@ public partial class PanelCustomizeWindow : Window, IPanelCustomizeDialog
     // bool field.
     private readonly TransitionLatch _pendingInitialDpiCorrection = new();
 
+    // Self-unsubscribes on Window.Closed (see ThemedWindowBehavior's own remarks) — this window IS
+    // genuinely Closed (OnClosed disposes ViewModel below), unlike MainWindow's Hide-instead-of-Close.
+    private readonly ThemedWindowBehavior _themedWindowBehavior;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="PanelCustomizeWindow"/> class.
     /// </summary>
@@ -42,13 +48,21 @@ public partial class PanelCustomizeWindow : Window, IPanelCustomizeDialog
     /// The per-monitor DPI snapshot provider (release-hardening F, ADR-037) — <see cref="PositionForPanel"/>
     /// derives the target monitor's physical-pixel work area from it (<see cref="Interaction.TopLevelPlacement"/>).
     /// </param>
-    public PanelCustomizeWindow(PanelCustomizeViewModel viewModel, IMonitorService monitorService, IDesktopScaleProvider desktopScale)
+    /// <param name="appThemeService">Design system 1.x §3 phase 6.1: follows the resolved chrome theme (<see cref="ThemedWindowBehavior"/>).</param>
+    /// <param name="windowFrameTheming">Applies the DWM immersive dark-mode frame attribute for <paramref name="appThemeService"/>'s theme.</param>
+    public PanelCustomizeWindow(
+        PanelCustomizeViewModel viewModel,
+        IMonitorService monitorService,
+        IDesktopScaleProvider desktopScale,
+        IAppThemeService appThemeService,
+        IWindowFrameTheming windowFrameTheming)
     {
         InitializeComponent();
         ViewModel = viewModel;
         _monitorService = monitorService;
         _desktopScale = desktopScale;
         DataContext = ViewModel;
+        _themedWindowBehavior = new ThemedWindowBehavior(this, appThemeService, windowFrameTheming);
     }
 
     /// <summary>The dialog's ViewModel.</summary>

@@ -25,7 +25,7 @@
                                    Text="{loc:Loc Settings_Layout_SnapToGrid_Description}"/>
                     </StackPanel>
                     <CheckBox Grid.Column="1" VerticalAlignment="Center"
-                              Style="{StaticResource Settings.ToggleCheckBox}"
+                              Style="{StaticResource Theme.ToggleSwitch}"
                               AutomationProperties.Name="{loc:Loc Settings_Layout_SnapToGrid_Header}"
                               IsChecked="{Binding SnapToGridEnabled, Mode=TwoWay}"/>
                 </Grid>
@@ -104,42 +104,26 @@
         </Border>
 
         <!-- Snap panel size to icon grid -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Settings_Layout_SnapResizeToIconGrid_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="{loc:Loc Settings_Layout_SnapResizeToIconGrid_Description}"/>
-                </StackPanel>
-                <CheckBox Grid.Column="1" VerticalAlignment="Center"
-                          Style="{StaticResource Settings.ToggleCheckBox}"
+        <controls:SettingsCard Header="{loc:Loc Settings_Layout_SnapResizeToIconGrid_Header}"
+                                Description="{loc:Loc Settings_Layout_SnapResizeToIconGrid_Description}">
+            <controls:SettingsCard.ActionContent>
+                <CheckBox VerticalAlignment="Center"
+                          Style="{StaticResource Theme.ToggleSwitch}"
                           AutomationProperties.Name="{loc:Loc Settings_Layout_SnapResizeToIconGrid_Header}"
                           IsChecked="{Binding SnapResizeToIconGrid, Mode=TwoWay}"/>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
 
         <!-- Lock layout -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Common_LockLayout}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="{loc:Loc Settings_Layout_LockLayout_Description}"/>
-                </StackPanel>
-                <CheckBox Grid.Column="1" VerticalAlignment="Center"
-                          Style="{StaticResource Settings.ToggleCheckBox}"
+        <controls:SettingsCard Header="{loc:Loc Common_LockLayout}"
+                                Description="{loc:Loc Settings_Layout_LockLayout_Description}">
+            <controls:SettingsCard.ActionContent>
+                <CheckBox VerticalAlignment="Center"
+                          Style="{StaticResource Theme.ToggleSwitch}"
                           AutomationProperties.Name="{loc:Loc Common_LockLayout}"
                           IsChecked="{Binding IsLayoutLocked, Mode=TwoWay}"/>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
 
         <!-- Move/resize outside Edit layout mode — RadioButton group over the 3 NormalModeLayoutGestures values. -->
         <Border Style="{StaticResource Settings.CardBorder}">

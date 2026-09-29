@@ -1,10 +1,13 @@
 using System.Globalization;
 using DesktopOrganizer.UI.Localization;
+using DesktopOrganizer.UI.Models;
 
 namespace DesktopOrganizer.Tests.Unit.Localization;
 
 /// <summary>
-/// Unit tests for <see cref="PageDisplayNameConverter"/> (docs/PLANS/localization.md D-5/L-10, WP-0U).
+/// Unit tests for <see cref="PageDisplayNameConverter"/> (docs/PLANS/localization.md D-5/L-10, WP-0U;
+/// extended for <see cref="PageDisplayInfo"/>/<see cref="PageDescriptor"/> input, ADR-043,
+/// docs/PLANS/page-display-names.md §5.3/§8.5).
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class PageDisplayNameConverterTests
@@ -57,5 +60,46 @@ public class PageDisplayNameConverterTests
         var sut = new PageDisplayNameConverter();
 
         Assert.Throws<NotSupportedException>(() => sut.ConvertBack("default", typeof(string), null, English));
+    }
+
+    // ── ADR-043 §5.3: PageDisplayInfo/PageDescriptor input (the bindings PagesSection/PanelsSection now use) ──
+
+    /// <summary>An unnamed <c>"default"</c> <see cref="PageDisplayInfo"/> resolves to the localized display name, per culture.</summary>
+    [Fact]
+    public void Convert_PageDisplayInfo_DefaultUnnamed_ReturnsLocalizedDisplayName()
+    {
+        var sut = new PageDisplayNameConverter();
+
+        Assert.Equal("Default", sut.Convert(new PageDisplayInfo("default", null), typeof(string), null, English));
+        Assert.Equal("Основная", sut.Convert(new PageDisplayInfo("default", null), typeof(string), null, Russian));
+    }
+
+    /// <summary>A <see cref="PageDisplayInfo"/> with a stored name shows that name as-is, regardless of culture.</summary>
+    [Fact]
+    public void Convert_PageDisplayInfo_WithStoredName_ReturnsStoredNameVerbatim()
+    {
+        var sut = new PageDisplayNameConverter();
+
+        Assert.Equal("Дом", sut.Convert(new PageDisplayInfo("default", "Дом"), typeof(string), null, English));
+        Assert.Equal("Work", sut.Convert(new PageDisplayInfo("x", "Work"), typeof(string), null, English));
+    }
+
+    /// <summary>A non-default <see cref="PageDisplayInfo"/> with no stored name falls back to its own id.</summary>
+    [Fact]
+    public void Convert_PageDisplayInfo_NonDefaultUnnamed_FallsBackToId()
+    {
+        var sut = new PageDisplayNameConverter();
+
+        Assert.Equal("x", sut.Convert(new PageDisplayInfo("x", null), typeof(string), null, English));
+    }
+
+    /// <summary>A <see cref="PageDescriptor"/> resolves the same way a <see cref="PageDisplayInfo"/> with the same Id/Name does.</summary>
+    [Fact]
+    public void Convert_PageDescriptor_ResolvesSameAsPageDisplayInfo()
+    {
+        var sut = new PageDisplayNameConverter();
+
+        Assert.Equal("Default", sut.Convert(new PageDescriptor("default", null), typeof(string), null, English));
+        Assert.Equal("Work", sut.Convert(new PageDescriptor("x", "Work"), typeof(string), null, English));
     }
 }

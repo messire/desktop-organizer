@@ -381,6 +381,7 @@ public class GestureDiagnosticsTests
         sut.PanelClosing(panelId, thumbIsDragging: false);
         sut.SizeMoveEntered(panelId, 1, "Right");
         sut.SizeMoveExited(panelId, 1, MakeRect(0, 0, 1, 1));
+        sut.PanelItemsBuilt(panelId, 10, 500);
         sut.SessionExiting();
 
         Assert.Empty(_writes);
@@ -388,7 +389,7 @@ public class GestureDiagnosticsTests
         // The only member ever touched on the mock is the IsEnabled getter (checked once per method
         // above, before any state is read/allocated) — proves the zero-cost seam actually holds and
         // nothing else (Write/Flush/Dispose) was ever invoked on the sink.
-        _logMock.VerifyGet(l => l.IsEnabled, Times.AtLeast(13));
+        _logMock.VerifyGet(l => l.IsEnabled, Times.AtLeast(14));
         _logMock.VerifyNoOtherCalls();
     }
 
@@ -500,6 +501,27 @@ public class GestureDiagnosticsTests
         Assert.Equal(8, write.Scope!.Length);
         Assert.Equal("Unmeasured", GetPayloadValue<string>(write, "reason"));
         Assert.Single(write.Payload);
+    }
+
+    /// <summary>
+    /// ADR-046 §6 item 10 (M-7.1 manual-verify timing): <see cref="GestureDiagnostics.PanelItemsBuilt"/>
+    /// records the panel-scoped rebuild count/timing payload <c>ChildWindowViewModel.OnItemsBuilt</c> hands
+    /// it, with no path/title ever included (privacy invariant).
+    /// </summary>
+    [Fact]
+    public void PanelItemsBuilt_WritesPanelScopedEventWithCountAndElapsedMicroseconds()
+    {
+        var sut = BuildEnabled();
+        var panelId = Guid.NewGuid();
+
+        sut.PanelItemsBuilt(panelId, 1000, 12345L);
+
+        var write = Assert.Single(_writes, w => w.Name == "PanelItemsBuilt");
+        Assert.Equal("panel", write.Category);
+        Assert.Equal(8, write.Scope!.Length);
+        Assert.Equal(1000, GetPayloadValue<int>(write, "count"));
+        Assert.Equal(12345L, GetPayloadValue<long>(write, "elapsedMicroseconds"));
+        Assert.Equal(2, write.Payload.Length);
     }
 
     /// <summary>

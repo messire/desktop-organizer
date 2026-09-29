@@ -37,6 +37,10 @@ public static class WpfApplicationHost
         "/Resources/Styles/Icons.xaml",
         "/Resources/Styles/Controls.xaml",
         "/Resources/Styles/Settings.xaml",
+
+        // Design-system-1x phase 6.2a: mirrors App.xaml.cs's own LoadResourceDictionaries() order — see
+        // that method's own remarks.
+        "/Resources/Styles/Theme.Controls.xaml",
         "/Resources/Styles/Panels.xaml",
         "/Resources/Templates.xaml",
     ];
@@ -63,6 +67,10 @@ public static class WpfApplicationHost
                 Source = new Uri($"/DesktopOrganizer.UI;component{relativePath}", UriKind.Relative),
             });
         }
+
+        // Phase 6.1 (design-system-1x.md §3): the "Palette T" theme dictionary App.xaml.cs's
+        // AppThemeService.Start() applies in production — see TestThemeResources.AppendTheme's own remarks.
+        TestThemeResources.AppendTheme(app, DesktopOrganizer.UI.Theming.AppTheme.Light);
 
         return app;
     }

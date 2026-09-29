@@ -11,6 +11,7 @@ using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.UI.Commands;
+using DesktopOrganizer.UI.Localization;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 
@@ -44,10 +45,22 @@ public class MainWindowViewModel : INotifyPropertyChanged
     private readonly IPanelCustomizeService _panelCustomizeService;
     private readonly ILocalizationService _localization;
     private readonly CultureInfo _systemUiCulture;
+    private readonly IPanelCloneFlow _panelCloneFlow;
+    private readonly IStatusNotifier _statusNotifier;
+    private readonly IDesktopIconsService _desktopIcons;
     private readonly IAppLog? _appLog;
     private ChildWindowModel? _selectedPanel;
     private SettingsSection _selectedSection = SettingsSection.General;
     private LanguageOption _selectedLanguageOption;
+
+    /// <summary>
+    /// H-1 fix (backlog 1.x wave 1 review): the <see cref="PageItemViewModel.EditingName"/>
+    /// <see cref="BeginRenamePage"/> most recently seeded the editor with — see
+    /// <see cref="TryCommitRenamePage"/>'s remarks. At most one page is ever
+    /// <see cref="PageItemViewModel.IsEditing"/> at a time, so a single field (rather than a per-page
+    /// map) is sufficient.
+    /// </summary>
+    private string? _renameSeed;
 
     /// <summary>
     /// ViewModel for the "Layout snapshots" section.
@@ -121,9 +134,11 @@ public class MainWindowViewModel : INotifyPropertyChanged
     public ObservableCollection<ChildWindowModel> PanelsOnCurrentPage { get; } = [];
 
     /// <summary>
-    /// Ordered collection of page identifiers shown as tabs in the UI.
+    /// Ordered collection of pages shown in the Settings → "Pages" list and the Panels section's page
+    /// selector (ADR-043, docs/PLANS/page-display-names.md §5.2). Kept in sync with
+    /// <see cref="IPageManager.PageDescriptors"/> by <see cref="SyncPages"/>.
     /// </summary>
-    public ObservableCollection<string> Pages { get; } = [];
+    public ObservableCollection<PageItemViewModel> Pages { get; } = [];
 
     /// <summary>The currently active page identifier.</summary>
     public string CurrentPage => _pageManager.CurrentPage;
@@ -149,9 +164,20 @@ public class MainWindowViewModel : INotifyPropertyChanged
         {
             if (_selectedPanel == value) return;
             _selectedPanel = value;
+            _statusNotifier.Dismiss();
             OnPropertyChanged(nameof(SelectedPanel));
         }
     }
+
+    /// <summary>
+    /// The non-blocking status surface (design-system-1x.md §2.8, ADR-047 D-9) <c>MainWindow.xaml</c>'s
+    /// <c>InfoBar</c> host binds against — the same DI-singleton instance <see cref="MovePanelToPage"/>/
+    /// <see cref="CopyPanelToPage"/> call <see cref="IStatusNotifier.Show"/> on. Replaces the pre-6.3
+    /// <c>PanelPageStatusMessage</c> string property (and the MODAL <see cref="IConfirmationService.Notify"/>
+    /// success dialog it had itself already replaced, M-E fix — that dialog now only ever fires for a
+    /// FAILURE, see <see cref="_panelCloneFlow"/>'s own remarks).
+    /// </summary>
+    public IStatusNotifier Status => _statusNotifier;
 
     /// <summary>
     /// Snap-to-grid cell size in pixels. 1 = no snapping, 2–128 = snap.
@@ -318,6 +344,26 @@ public class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Whether the real desktop icons (the shell's <c>SHELLDLL_DefView</c>) are currently visible.
+    /// Session-only, never persisted: the live state is read from <see cref="IDesktopIconsService"/>
+    /// every time, and <see cref="IDesktopIconsService.VisibilityChanged"/> re-raises this property when
+    /// the tray item, the desktop double-click gesture or Explorer-restart recovery changes it.
+    /// </summary>
+    public bool DesktopIconsVisible
+    {
+        get => _desktopIcons.AreIconsVisible;
+        set
+        {
+            if (_desktopIcons.AreIconsVisible == value) return;
+            _desktopIcons.SetIconsVisible(value);
+
+            // Also raised by the VisibilityChanged subscription in the constructor; this explicit raise is
+            // kept on purpose so the setter's contract never depends on the service raising its event.
+            OnPropertyChanged(nameof(DesktopIconsVisible));
+        }
+    }
+
+    /// <summary>
     /// Command to add a new desktop panel.
     /// </summary>
     public ICommand AddPanelCommand { get; }
@@ -352,6 +398,39 @@ public class MainWindowViewModel : INotifyPropertyChanged
     public ICommand RemovePageCommand { get; }
 
     /// <summary>
+    /// Begins inline-renaming a page (ADR-043, docs/PLANS/page-display-names.md §5.1/§5.2). Parameter is
+    /// the <see cref="PageItemViewModel"/> to edit. Committing (or, failing that, cancelling) any other
+    /// page's already-in-progress edit first — at most one page is ever <see cref="PageItemViewModel.IsEditing"/>
+    /// at a time.
+    /// </summary>
+    public ICommand BeginRenamePageCommand { get; }
+
+    /// <summary>
+    /// Commits the in-progress inline rename for the given <see cref="PageItemViewModel"/> (parameter) via
+    /// <see cref="IPageManager.RenamePage"/>. On success, closes the editor; on failure, sets
+    /// <see cref="PageItemViewModel.RenameError"/> and leaves the editor open so the user can correct the
+    /// name. Wired to <c>InlineRenameBehavior</c>'s Enter key handling — see
+    /// <see cref="CommitRenamePageOnLostFocusCommand"/> for the lost-focus counterpart, which reacts
+    /// differently to a failed commit (UX-4 fix, backlog 1.x wave 1 review).
+    /// </summary>
+    public ICommand CommitRenamePageCommand { get; }
+
+    /// <summary>
+    /// The lost-focus counterpart of <see cref="CommitRenamePageCommand"/> (UX-4 fix, backlog 1.x wave 1
+    /// review) — wired to <c>InlineRenameBehavior.CommitOnLostFocusCommand</c> in <c>PagesSection.xaml</c>.
+    /// Behaves identically to <see cref="CommitRenamePageCommand"/> on success; on a failed commit,
+    /// auto-cancels the edit instead of leaving the row open with neither keyboard focus nor a caret —
+    /// see <c>CommitRenamePageOnLostFocus</c>'s remarks.
+    /// </summary>
+    public ICommand CommitRenamePageOnLostFocusCommand { get; }
+
+    /// <summary>
+    /// Cancels the in-progress inline rename for the given <see cref="PageItemViewModel"/> (parameter)
+    /// without touching <see cref="IPageManager"/>.
+    /// </summary>
+    public ICommand CancelRenamePageCommand { get; }
+
+    /// <summary>
     /// Opens the "Customize panel…" dialog (<see cref="IPanelCustomizeService"/>) for the given panel, or
     /// <see cref="SelectedPanel"/> when the parameter is <see langword="null"/> (the Panels section's own
     /// "Customize…" button always passes <see langword="null"/> and relies on this fallback).
@@ -363,6 +442,14 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// identifier (string) — the Panels section's "Move to page ▾" menu.
     /// </summary>
     public ICommand MovePanelToPageCommand { get; }
+
+    /// <summary>
+    /// Creates a fully independent copy of <see cref="SelectedPanel"/> on the destination page (parameter,
+    /// a page id string) — the Panels section's "Copy to page ▾" menu (ADR-045, «Panel clone to page»).
+    /// Unlike <see cref="MovePanelToPageCommand"/>, the CURRENT page is a valid destination (copying a
+    /// panel onto its own page is exactly how a same-page duplicate is made).
+    /// </summary>
+    public ICommand CopyPanelToPageCommand { get; }
 
     /// <summary>
     /// Copies <see cref="SelectedPanel"/>'s appearance/geometry into <see cref="GlobalDefaults"/>
@@ -508,6 +595,13 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// </param>
     /// <param name="about">See <see cref="About"/>.</param>
     /// <param name="colorPicker">Forwarded to <see cref="GlobalDefaults"/>' <see cref="GlobalDefaultsViewModel.DefaultColors"/> (docs/PLANS/color-presets-and-size-step.md §3.7).</param>
+    /// <param name="panelCloneFlow">
+    /// Backs <see cref="CopyPanelToPageCommand"/> (H-1 fix, code review, panel clone to page, backlog 1.x
+    /// wave 3 review) — the shared busy-cursor/failure-notification/stale-page flow, also used by
+    /// <c>ChildWindowViewModel.CopyPanelToPageCommand</c>. See <see cref="IPanelCloneFlow"/>'s own remarks.
+    /// </param>
+    /// <param name="statusNotifier">See <see cref="Status"/>.</param>
+    /// <param name="desktopIcons">Backs <see cref="DesktopIconsVisible"/> (the "Show desktop icons" toggle in General).</param>
     /// <param name="appLog">See <see cref="Log"/>.</param>
     public MainWindowViewModel(
         IWindowManager windowManager,
@@ -524,6 +618,9 @@ public class MainWindowViewModel : INotifyPropertyChanged
         CultureInfo systemUiCulture,
         AboutViewModel about,
         IColorPickerService colorPicker,
+        IPanelCloneFlow panelCloneFlow,
+        IStatusNotifier statusNotifier,
+        IDesktopIconsService desktopIcons,
         IAppLog? appLog = null)
     {
         _windowManager = windowManager;
@@ -536,9 +633,18 @@ public class MainWindowViewModel : INotifyPropertyChanged
         _panelCustomizeService = panelCustomizeService;
         _localization = localization;
         _systemUiCulture = systemUiCulture ?? throw new ArgumentNullException(nameof(systemUiCulture));
+        _panelCloneFlow = panelCloneFlow;
+        _statusNotifier = statusNotifier;
+        _desktopIcons = desktopIcons ?? throw new ArgumentNullException(nameof(desktopIcons));
         _appLog = appLog;
         LayoutSnapshots = layoutSnapshots;
         About = about ?? throw new ArgumentNullException(nameof(about));
+
+        // The desktop icons' real state lives in the shell and is changed from several entry points
+        // (tray item, desktop double-click, Explorer-restart recovery) — mirror every change into the
+        // General section's toggle. Never unsubscribed: this ViewModel is a DI singleton, same rationale
+        // as every other never-unsubscribed subscription in this constructor.
+        _desktopIcons.VisibilityChanged += (_, _) => OnPropertyChanged(nameof(DesktopIconsVisible));
 
         // Language picker (§2.9 C-5): three fixed options, in display order — never rebuilt; each
         // option's own DisplayName is re-resolved in place on CultureChanged below, so the ComboBox's
@@ -577,16 +683,32 @@ public class MainWindowViewModel : INotifyPropertyChanged
         SwitchPageCommand = new RelayCommand<string>(SwitchPage);
         AddPageCommand = new RelayCommand(AddPage);
         RemovePageCommand = new RelayCommand<string>(RemovePage, CanRemovePage);
+        BeginRenamePageCommand = new RelayCommand<PageItemViewModel>(BeginRenamePage);
+        CommitRenamePageCommand = new RelayCommand<PageItemViewModel>(CommitRenamePage);
+        CommitRenamePageOnLostFocusCommand = new RelayCommand<PageItemViewModel>(CommitRenamePageOnLostFocus);
+        CancelRenamePageCommand = new RelayCommand<PageItemViewModel>(CancelRenamePage);
         SelectSectionCommand = new RelayCommand<SettingsSection>(section => SelectedSection = section);
         CustomizePanelCommand = new RelayCommand<ChildWindowModel>(CustomizePanel, CanCustomizePanel);
         MovePanelToPageCommand = new RelayCommand<string>(MovePanelToPage, CanMovePanelToPage);
+        CopyPanelToPageCommand = new RelayCommand<string>(CopyPanelToPage, CanCopyPanelToPage);
         TakeDefaultsFromSelectedPanelCommand = new RelayCommand(TakeDefaultsFromSelectedPanel, () => _selectedPanel is not null);
         ResetOneTimeHintsCommand = new RelayCommand(ResetOneTimeHints, () => _appSettings.HasShownMoveHint);
         OpenStorageFolderCommand = new RelayCommand(OpenStorageFolder);
 
         _windowManager.OnChildWindowAdded += OnPanelAdded;
         _windowManager.OnChildWindowRemoved += OnPanelRemoved;
+
+        // M-D fix (code review, panel clone to page, backlog 1.x wave 3 review): a panel moved via its OWN
+        // header context menu (ChildWindowViewModel.MovePanelToPageCommand) never goes through THIS
+        // ViewModel at all — without this subscription, PanelsOnCurrentPage kept showing it under its
+        // stale page until some unrelated event happened to trigger a refresh.
+        _windowManager.OnChildWindowPageChanged += OnPanelPageChanged;
         _pageManager.PageChanged += OnPageChanged;
+
+        // ADR-043: composition/order/name changes (add/remove/rename) — never fired for a mere active-page
+        // switch (PageChanged, above, covers that). Never unsubscribed: this ViewModel is a DI singleton,
+        // same rationale as every other never-unsubscribed subscription in this constructor.
+        _pageManager.PagesChanged += OnPagesChanged;
 
         SyncPages();
     }
@@ -605,14 +727,19 @@ public class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Synchronizes the Pages collection with IPageManager.
+    /// Synchronizes <see cref="Pages"/> with <see cref="IPageManager.PageDescriptors"/> (ADR-043,
+    /// docs/PLANS/page-display-names.md §5.2) — called once from this constructor, and on every
+    /// subsequent <see cref="IPageManager.PagesChanged"/> (add/remove/rename). Preserves an already-present
+    /// page's own <see cref="PageItemViewModel"/> INSTANCE by <see cref="PageItemViewModel.Id"/> (only its
+    /// <see cref="PageItemViewModel.Name"/> is updated in place) rather than rebuilding the collection from
+    /// scratch, for the same reason <see cref="RefreshPanelsOnCurrentPage"/> preserves
+    /// <see cref="ChildWindowModel"/> instances: a live <c>ListBox</c>/<c>ItemsControl</c> row holding an
+    /// in-progress rename edit (<see cref="PageItemViewModel.IsEditing"/>) or a live selection must not be
+    /// torn down and re-created just because some OTHER page was added/removed/renamed. Repositions
+    /// existing rows via <see cref="ObservableCollection{T}.Move"/> to keep order in sync with
+    /// <see cref="IPageManager.PageDescriptors"/> — never a remove-then-re-add.
     /// </summary>
-    public void SyncPages()
-    {
-        Pages.Clear();
-        foreach (var page in _pageManager.Pages)
-            Pages.Add(page);
-    }
+    public void SyncPages() => PageItemViewModelSync.Sync(Pages, _pageManager.PageDescriptors);
 
     /// <summary>
     /// Re-raises <see cref="PropertyChanged"/> for every property that reads live, externally-mutable
@@ -631,6 +758,45 @@ public class MainWindowViewModel : INotifyPropertyChanged
     public void RefreshTransientState() => OnPropertyChanged(nameof(HasOneTimeHintsToReset));
 
     /// <summary>
+    /// L-9 fix (backlog 1.x wave 1 review): closes whichever <see cref="PageItemViewModel"/> is currently
+    /// <see cref="PageItemViewModel.IsEditing"/> (there is at most one — see <see cref="BeginRenamePage"/>'s
+    /// remarks), and dismisses <see cref="Status"/> (M-E fix, code review, panel clone to page, backlog
+    /// 1.x wave 3 review — a non-blocking "moved/copied to page" status left showing has no reason to
+    /// survive the window going away). Called from <c>MainWindow.xaml.cs</c> whenever this window
+    /// becomes hidden (right-clicking a panel while mid-rename, Alt+Tab away, or the window's own
+    /// close-to-hide, <c>MainWindow.OnClosing</c>). Without the rename half of this, an in-progress rename
+    /// editor stayed <see cref="PageItemViewModel.IsEditing"/> across a hide/show cycle — hiding a window
+    /// does not, by itself, make WPF fire the rename <see cref="System.Windows.Controls.TextBox"/>'s own
+    /// <c>LostKeyboardFocus</c> (there is no "focus" concept for a window that is not visible), and this
+    /// <c>MainWindowViewModel</c> is a DI singleton with no other hook of its own that would notice the
+    /// window went away — so the row reappeared on the NEXT show already open, sometimes still showing a
+    /// stale <see cref="PageItemViewModel.RenameError"/> from before.
+    /// </summary>
+    /// <remarks>
+    /// UX-4b fix (code review, panel clone to page): delegates to <see cref="CommitRenamePageOnLostFocus"/> —
+    /// the SAME commit-on-lost-focus semantics an ordinary blur already applies — rather than the plain,
+    /// always-discarding <see cref="CancelRenamePage"/> this used to call. Losing the window entirely is not
+    /// meaningfully different from losing keyboard focus to any other control: a validly typed name is
+    /// committed exactly as it would be on blur; only a FAILED commit falls back to closing the editor with
+    /// <see cref="PageItemViewModel.RenameError"/> preserved (not cleared, unlike the user's own explicit
+    /// Escape) — the previous behavior silently threw away a valid, already-typed rename just because the
+    /// settings window happened to lose visibility before the user tabbed/clicked away themselves.
+    /// <para>
+    /// LOW-4 fix (code review, panel clone to page, backlog 1.x wave 3 review): renamed from
+    /// <c>CancelAnyOpenRename</c> — the previous name no longer matched what this method actually does
+    /// (commit-on-lost-focus semantics, not a plain cancel) or, now, its full scope (also clears the panel
+    /// page status).
+    /// </para>
+    /// </remarks>
+    public void CloseAnyOpenRename()
+    {
+        var editing = Pages.FirstOrDefault(p => p.IsEditing);
+        if (editing is not null) CommitRenamePageOnLostFocus(editing);
+
+        DismissStatus();
+    }
+
+    /// <summary>
     /// Notifies about property changes.
     /// </summary>
     /// <param name="propertyName">Name of the property that was changed.</param>
@@ -644,6 +810,20 @@ public class MainWindowViewModel : INotifyPropertyChanged
             .InformationalVersion;
         return string.IsNullOrWhiteSpace(infoVersion) ? "unknown" : infoVersion;
     }
+
+    /// <summary>
+    /// Dismisses <see cref="Status"/> (M-E fix, code review, panel clone to page, backlog 1.x wave 3
+    /// review; phase 6.3 renamed from <c>ClearPanelPageStatus</c> once the status moved off a
+    /// Panels-section-specific string property onto the shared <see cref="IStatusNotifier"/>). Called from
+    /// every other Panels-section command's own entry point (<see cref="AddPanel"/>/<see cref="RemovePanel"/>/
+    /// <see cref="CustomizePanel"/>/<see cref="TakeDefaultsFromSelectedPanel"/>/<see cref="AlignAllPanels"/>/
+    /// <see cref="SwitchPage"/>) and from the <see cref="SelectedPanel"/> setter, so a stale "moved/copied
+    /// to page" status never lingers once the user does anything else in the section. <see cref="MovePanelToPage"/>/
+    /// <see cref="CopyPanelToPage"/> themselves overwrite it unconditionally on their own success path —
+    /// this call at their own entry point still matters for their FAILURE path, where nothing else would
+    /// otherwise dismiss a leftover status from an earlier, successful action.
+    /// </summary>
+    private void DismissStatus() => _statusNotifier.Dismiss();
 
     /// <summary>
     /// Rebuilds <see cref="PanelsOnCurrentPage"/> from <see cref="Panels"/>/<see cref="CurrentPage"/>.
@@ -702,6 +882,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
 
     private void AddPanel()
     {
+        DismissStatus();
+
         // PanelDefaults.CreateNew (fix-cycle finding 11, docs/prompts/settings-window-redesign.md) is
         // shared with App.xaml.cs's lasso-gesture creation path: one source of truth for both the page
         // assignment and the appearance/workspace-grid defaults, instead of two independently maintained
@@ -736,11 +918,17 @@ public class MainWindowViewModel : INotifyPropertyChanged
     {
         if (IsLayoutLocked) return;
 
+        DismissStatus();
+
         var panelCount = Panels.Count(p => p.PageId == CurrentPage);
         var panelText = _localization.FormatPlural("Plural_Panels", panelCount);
+
+        // L-5 fix (review round, design-system-1x.md §2.8): a bulk re-layout of every panel on the page
+        // has no single-step undo — Warning (Enter = "No") instead of the Question default's "Yes".
         if (!_confirmation.Confirm(
                 _localization.Format("Settings_Confirm_AlignAll_Message_Format", panelText),
-                _localization.GetString("Settings_Confirm_AlignAll_Title")))
+                _localization.GetString("Settings_Confirm_AlignAll_Title"),
+                MessageBoxImage.Warning))
         {
             return;
         }
@@ -751,23 +939,20 @@ public class MainWindowViewModel : INotifyPropertyChanged
     private void SwitchPage(string? pageId)
     {
         if (string.IsNullOrWhiteSpace(pageId)) return;
+        DismissStatus();
         _pageManager.SwitchTo(pageId);
     }
 
+    /// <summary>
+    /// Adds a new page (<see cref="IPageManager.AddNewPage"/> — GUID id, localized unique name, ADR-043
+    /// §4.3) and switches to it. Does not add to <see cref="Pages"/> itself:
+    /// <see cref="IPageManager.AddNewPage"/> raises <see cref="IPageManager.PagesChanged"/> synchronously
+    /// before returning, and <see cref="OnPagesChanged"/> resyncs <see cref="Pages"/> from
+    /// <see cref="IPageManager.PageDescriptors"/> — adding it here too would double-add it.
+    /// </summary>
     private void AddPage()
     {
-        var newId = $"Page {_pageManager.Pages.Count + 1}";
-
-        // Ensure unique name
-        var counter = _pageManager.Pages.Count + 1;
-        while (_pageManager.Pages.Contains(newId))
-        {
-            counter++;
-            newId = $"Page {counter}";
-        }
-
-        _pageManager.AddPage(newId);
-        Pages.Add(newId);
+        var newId = _pageManager.AddNewPage();
         SwitchPage(newId);
     }
 
@@ -781,12 +966,16 @@ public class MainWindowViewModel : INotifyPropertyChanged
         // regardless of that outcome: on Cancel, the page (and every panel on it) was still fully
         // alive in IPageManager/IWindowManager, yet it vanished from this ViewModel's own Pages
         // collection — and therefore from the page switcher UI bound to it — until the app was
-        // restarted. Resyncing from IPageManager.Pages (the authoritative source) on success, and doing
-        // nothing at all on decline, keeps this collection truthful either way.
-        if (_pageManager.RemovePage(pageId))
-        {
-            SyncPages();
-        }
+        // restarted.
+        //
+        // L-2 fix (backlog 1.x wave 1 review): no explicit SyncPages() call here on success anymore —
+        // PageManagerService.RemovePage already raises PagesChanged synchronously on every successful
+        // removal (see its own remarks), which OnPagesChanged (subscribed in this class's constructor)
+        // already turns into exactly that SyncPages() call. Calling it again here just re-ran the same
+        // no-op diff a second time. The return value still needs consulting, though — SyncPages() (via
+        // the event) must NOT run at all on a declined confirmation, and the discarded call below is
+        // what still gives IPageManager the chance to skip PagesChanged in that case.
+        _ = _pageManager.RemovePage(pageId);
     }
 
     private bool CanRemovePage(string? pageId) => !string.IsNullOrWhiteSpace(pageId) && pageId != "default";
@@ -798,10 +987,135 @@ public class MainWindowViewModel : INotifyPropertyChanged
         RefreshPanelsOnCurrentPage();
     }
 
+    private void OnPagesChanged() => SyncPages();
+
+    /// <summary>
+    /// Begins inline-renaming <paramref name="page"/> (ADR-043 §5.1/§5.2). No-op if <paramref name="page"/>
+    /// is <see langword="null"/> (defensive — the view always passes an explicit
+    /// <see cref="PageItemViewModel"/>) or already <see cref="PageItemViewModel.IsEditing"/> (M-1 fix,
+    /// backlog 1.x wave 1 review: <c>PagesSection.xaml.cs</c>'s <c>F2</c> handler can reach this method
+    /// again for a row that is already mid-edit — without this guard, that silently reset
+    /// <see cref="PageItemViewModel.EditingName"/> back to the seed, discarding whatever the user had
+    /// already typed). Commits (or, if that itself fails, force-cancels) any other page already mid-edit
+    /// first, so at most one page is ever <see cref="PageItemViewModel.IsEditing"/>.
+    /// </summary>
+    /// <param name="page">The page to rename.</param>
+    private void BeginRenamePage(PageItemViewModel? page)
+    {
+        if (page is null || page.IsEditing) return;
+
+        // L-3 fix (backlog 1.x wave 1 review): snapshotted via ToList() — CommitRenamePage below can
+        // itself raise IPageManager.PagesChanged (a Renamed outcome), which OnPagesChanged turns
+        // straight into a SyncPages() call that inserts/removes/reorders this SAME Pages collection out
+        // from under a live foreach, throwing InvalidOperationException.
+        foreach (var other in Pages.Where(p => p.IsEditing && !ReferenceEquals(p, page)).ToList())
+        {
+            CommitRenamePage(other);
+            if (other.IsEditing) CancelRenamePage(other); // Still editing => the commit above failed.
+        }
+
+        page.RenameError = null;
+        page.EditingName = PageDisplayNames.Resolve(page.Id, page.Name, _localization.CurrentCulture);
+        _renameSeed = page.EditingName;
+        page.IsEditing = true;
+    }
+
+    /// <summary>
+    /// Commits <paramref name="page"/>'s in-progress inline rename — the Enter-triggered counterpart of
+    /// <see cref="CommitRenamePageOnLostFocus"/>, both backed by <see cref="TryCommitRenamePage"/>. On a
+    /// failed commit, unlike <see cref="CommitRenamePageOnLostFocus"/>, leaves the editor open (the
+    /// <see cref="PageItemViewModel.RenameError"/> <see cref="TryCommitRenamePage"/> already set) so the
+    /// user, still right there mid-keystroke, can just fix the text and retry.
+    /// </summary>
+    /// <param name="page">The page whose in-progress edit to commit.</param>
+    private void CommitRenamePage(PageItemViewModel? page) => TryCommitRenamePage(page);
+
+    /// <summary>
+    /// UX-4 fix (backlog 1.x wave 1 review): the lost-focus-triggered counterpart of
+    /// <see cref="CommitRenamePage"/> (wired to <see cref="CommitRenamePageOnLostFocusCommand"/>, itself
+    /// bound to <c>InlineRenameBehavior.CommitOnLostFocusCommand</c> in <c>PagesSection.xaml</c>).
+    /// Behaves identically on success; on a FAILED commit, unlike <see cref="CommitRenamePage"/>,
+    /// auto-cancels the edit (<see cref="PageItemViewModel.IsEditing"/> reset to <see langword="false"/>)
+    /// instead of leaving the row open with neither keyboard focus nor a caret — a "stuck" form a user
+    /// could otherwise only escape by clicking back into the very row that just rejected their input.
+    /// Deliberately does NOT clear <see cref="PageItemViewModel.RenameError"/> the way the explicit,
+    /// user-initiated <see cref="CancelRenamePage"/> (Escape) does — <see cref="TryCommitRenamePage"/>'s
+    /// own failure path already set it, and it is left in place (even though the view mode this row is
+    /// about to switch back to has no element bound to it today) until the next
+    /// <see cref="BeginRenamePage"/> on this same row clears it, rather than silently discarding the
+    /// reason for the revert.
+    /// </summary>
+    /// <param name="page">The page whose in-progress edit lost keyboard focus.</param>
+    private void CommitRenamePageOnLostFocus(PageItemViewModel? page)
+    {
+        if (page is null || !page.IsEditing) return;
+        if (TryCommitRenamePage(page)) return;
+
+        page.IsEditing = false;
+    }
+
+    /// <summary>
+    /// Attempts to commit <paramref name="page"/>'s in-progress inline rename via
+    /// <see cref="IPageManager.RenamePage"/>, shared by <see cref="CommitRenamePage"/> and
+    /// <see cref="CommitRenamePageOnLostFocus"/> — the two differ only in what they do once this method
+    /// itself has already updated <paramref name="page"/>'s state and returned.
+    /// A no-op (returns <see langword="false"/>) if <paramref name="page"/> is <see langword="null"/> or
+    /// not currently <see cref="PageItemViewModel.IsEditing"/>.
+    /// </summary>
+    /// <remarks>
+    /// H-1 fix (backlog 1.x wave 1 review): committing the untouched seed text — what
+    /// <see cref="BeginRenamePage"/> pre-filled <see cref="PageItemViewModel.EditingName"/> with, i.e.
+    /// the page's own effective display name, tracked in <see cref="_renameSeed"/> — is always treated as
+    /// unchanged right here, before <see cref="IPageManager.RenamePage"/> is even called. This is defence
+    /// in depth: <c>PageNameRules</c>' own step 7 fix already makes <see cref="IPageManager.RenamePage"/>
+    /// itself return <see cref="PageRenameResult.Unchanged"/> (and skip its own persist) for exactly this
+    /// case, but this VM-level check additionally means the service method is never even invoked for a
+    /// plain "opened the editor, changed nothing (or changed it back)" commit.
+    /// </remarks>
+    /// <param name="page">The page whose in-progress edit to commit.</param>
+    /// <returns><see langword="true"/> if the edit is now closed (an actual rename, or a no-op that was
+    /// already correct); <see langword="false"/> if the commit failed and the editor is still open with
+    /// <see cref="PageItemViewModel.RenameError"/> set.</returns>
+    private bool TryCommitRenamePage(PageItemViewModel? page)
+    {
+        if (page is null || !page.IsEditing) return false;
+
+        var trimmedEditingName = page.EditingName?.Trim() ?? string.Empty;
+        if (string.Equals(trimmedEditingName, _renameSeed, StringComparison.Ordinal))
+        {
+            page.RenameError = null;
+            page.IsEditing = false;
+            return true;
+        }
+
+        var result = _pageManager.RenamePage(page.Id, page.EditingName);
+
+        if (result is PageRenameResult.Renamed or PageRenameResult.Unchanged)
+        {
+            page.RenameError = null;
+            page.IsEditing = false;
+            return true;
+        }
+
+        page.RenameError = result;
+        return false;
+    }
+
+    /// <summary>Cancels <paramref name="page"/>'s in-progress inline rename without touching <see cref="IPageManager"/>.</summary>
+    /// <param name="page">The page whose in-progress edit to cancel. A no-op if <see langword="null"/>.</param>
+    private void CancelRenamePage(PageItemViewModel? page)
+    {
+        if (page is null) return;
+
+        page.RenameError = null;
+        page.IsEditing = false;
+    }
+
     private void CustomizePanel(ChildWindowModel? panel)
     {
         var target = panel ?? _selectedPanel;
         if (target is null) return;
+        DismissStatus();
         _panelCustomizeService.Show(target);
     }
 
@@ -811,16 +1125,106 @@ public class MainWindowViewModel : INotifyPropertyChanged
     {
         if (_selectedPanel is null || string.IsNullOrWhiteSpace(pageId)) return;
 
-        _windowManager.MovePanelToPage(_selectedPanel, pageId);
-        RefreshPanelsOnCurrentPage();
+        DismissStatus();
+
+        var target = _selectedPanel;
+        _windowManager.MovePanelToPage(target, pageId);
+
+        // NEW-1 fix (final review, panel clone to page, backlog 1.x): IWindowManager.MovePanelToPage
+        // silently no-ops for a destination page IPageManager doesn't know about (its own fix-cycle
+        // finding 10 remarks) — target.PageId is then still the OLD page, never pageId. Without this
+        // check, the caller had no way to tell a real move from a rejected one and always announced
+        // "Moved to page X" regardless. Pages is re-synced instead (same defensive move CopyPanelToPage's
+        // own onUnknownPage callback already performs for the sibling clone-to-page flow), in case the
+        // destination looked unknown only because this ViewModel's own Pages had gone stale; no status is
+        // shown for a move that never happened.
+        if (target.PageId != pageId)
+        {
+            SyncPages();
+            return;
+        }
+
+        // NEW-6 fix: no explicit RefreshPanelsOnCurrentPage() here anymore — the successful move above
+        // already raised IWindowManager.OnChildWindowPageChanged synchronously (see its own remarks), and
+        // this ViewModel's OnPanelPageChanged handler already turns that into exactly this same
+        // RefreshPanelsOnCurrentPage() call (same rationale as RemovePage's own L-2 fix, above, for its
+        // sibling PagesChanged/SyncPages pairing).
+
+        // M-E fix (code review, panel clone to page, backlog 1.x wave 3 review); phase 6.3 (design-system-
+        // 1x.md §2.8) moved this off PanelPageStatusMessage onto the shared IStatusNotifier/InfoBar — a
+        // brief, NON-blocking status for the Settings-window-driven move, replacing the previous MODAL
+        // success Notify. Unlike the panel's own header context menu
+        // (ChildWindowViewModel.MovePanelToPageCommand), where the effect is already visible on the
+        // desktop right away (Fences shows no toast for "Send Fence to Page" either), the destination page
+        // here is very likely NOT the one currently shown, so without this the panel just silently
+        // disappears from the "Panels on this page" list with no indication of where it went.
+        _statusNotifier.Show(
+            StatusSeverity.Success,
+            _localization.Format("Panel_MovedToPage_Message_Format", ResolvePageDisplayName(pageId)),
+            _localization.GetString("Panel_MovedToPage_Title"));
     }
 
     private bool CanMovePanelToPage(string? pageId)
         => _selectedPanel is not null && !string.IsNullOrWhiteSpace(pageId) && pageId != _selectedPanel.PageId;
 
+    /// <summary>
+    /// Resolves <paramref name="pageId"/>'s effective display name from <see cref="Pages"/> (ADR-043) —
+    /// backs the "moved/copied to page" success notifications in <see cref="MovePanelToPage"/>/
+    /// <see cref="CopyPanelToPage"/>. Falls back to localizing against an unnamed page if, somehow,
+    /// <paramref name="pageId"/> is not (yet) in <see cref="Pages"/> — mirrors <see cref="BeginRenamePage"/>'s
+    /// own use of <see cref="PageDisplayNames.Resolve"/>.
+    /// </summary>
+    /// <param name="pageId">The destination page identifier.</param>
+    private string ResolvePageDisplayName(string pageId)
+    {
+        var page = Pages.FirstOrDefault(p => p.Id == pageId);
+        return PageDisplayNames.Resolve(pageId, page?.Name, _localization.CurrentCulture);
+    }
+
+    /// <summary>
+    /// Backs <see cref="CopyPanelToPageCommand"/> (ADR-045). Unlike <see cref="MovePanelToPage"/>, a
+    /// same-page destination is expected (that is how a same-page duplicate is requested) so
+    /// <see cref="_panelCloneFlow"/> is asked to clone unconditionally rather than early-returning on
+    /// <c>pageId == _selectedPanel.PageId</c>. A copy onto the CURRENT page selects the clone so the user
+    /// immediately sees what was just created; a copy onto another (currently hidden) page leaves the
+    /// existing selection alone.
+    /// </summary>
+    /// <remarks>
+    /// M-4/LOW-3/H-1 fixes (code review, panel clone to page, backlog 1.x wave 3 review): the busy cursor,
+    /// the failure notification and the stale-destination-page re-sync all moved into the shared
+    /// <see cref="_panelCloneFlow"/> (used by <c>ChildWindowViewModel.CopyPanelToPage</c> too) — see
+    /// <see cref="IPanelCloneFlow"/>'s own remarks, including why no apartment-state gate is needed here
+    /// anymore. This method's own remaining job is exactly the parts that differ per call site: what to do
+    /// with a SUCCESSFUL clone (select it / refresh <see cref="PanelsOnCurrentPage"/> / show the
+    /// non-blocking <see cref="Status"/> (M-E fix — replacing the previous MODAL success Notify;
+    /// phase 6.3 moved it off <c>PanelPageStatusMessage</c> onto <see cref="IStatusNotifier"/>).
+    /// </remarks>
+    /// <param name="pageId">The destination page identifier.</param>
+    private void CopyPanelToPage(string? pageId)
+    {
+        if (_selectedPanel is null || string.IsNullOrWhiteSpace(pageId)) return;
+
+        DismissStatus();
+
+        var result = _panelCloneFlow.CopyToPage(_selectedPanel, pageId, onUnknownPage: SyncPages);
+        if (result.Outcome != PanelCloneOutcome.Cloned) return;
+
+        RefreshPanelsOnCurrentPage();
+        if (result.ClonedPanel is { } clone && clone.PageId == CurrentPage)
+            SelectedPanel = clone;
+
+        _statusNotifier.Show(
+            StatusSeverity.Success,
+            _localization.Format("Panel_CopiedToPage_Message_Format", ResolvePageDisplayName(pageId)),
+            _localization.GetString("Panel_CopiedToPage_Title"));
+    }
+
+    private bool CanCopyPanelToPage(string? pageId) => _selectedPanel is not null && !string.IsNullOrWhiteSpace(pageId);
+
     private void TakeDefaultsFromSelectedPanel()
     {
         if (_selectedPanel is null) return;
+        DismissStatus();
         GlobalDefaults.ApplyFromPanel(_selectedPanel);
     }
 
@@ -886,6 +1290,8 @@ public class MainWindowViewModel : INotifyPropertyChanged
     {
         if (_selectedPanel is null) return;
 
+        DismissStatus();
+
         // CRITICAL C1 fix (P08 fix cycle 1, 2026-09-22): sync every live panel's ViewModel-side state
         // — including any read-time stale-original->managed-copy remap ChildWindowViewModel.LoadFromModel
         // performed (ADR-009 Amendment) — back into its Model BEFORE deciding whether this removal has
@@ -942,4 +1348,14 @@ public class MainWindowViewModel : INotifyPropertyChanged
 
         RefreshPanelsOnCurrentPage();
     }
+
+    /// <summary>
+    /// M-D fix (code review, panel clone to page, backlog 1.x wave 3 review): reacts to
+    /// <see cref="IWindowManager.OnChildWindowPageChanged"/> — <see cref="Panels"/> itself already holds the
+    /// same <see cref="ChildWindowModel"/> instance <paramref name="model"/> is (its <c>PageId</c> was
+    /// mutated in place), so only <see cref="PanelsOnCurrentPage"/> needs recomputing;
+    /// <see cref="RefreshPanelsOnCurrentPage"/> already clears <see cref="SelectedPanel"/> on its own when
+    /// the panel left the current page.
+    /// </summary>
+    private void OnPanelPageChanged(object? sender, ChildWindowModel model) => RefreshPanelsOnCurrentPage();
 }

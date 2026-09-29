@@ -483,3 +483,25 @@ dev-запуск, в свою очередь, ротировал рабочий 
 вручную (одноразово). Инварианты D-1…D-11 не затронуты. Закреплено `AppStorageRootTests` и
 `InstallerAutostartContractTests`.
 
+---
+
+## Amendment 2026-09-29 (ADR-043): schema v6, страницы как `items[{id,name?}]`
+
+[ADR-043](ADR-043-page-display-names.md) вводит **v5→v6** — пятую ступень лестницы миграций
+(`V5ToV6Migration`, `JsonObject`-only, D-1) с явного разрешения пользователя, в объёме, ограниченном
+одной секцией payload: `pages.ids[]` заменяется на `pages.items[{id, name?}]` (стабильный `id` +
+опциональное отображаемое `name`, та же форма, что уже несёт `panels[]` — `Id` + `Title`). Все прочие
+top-level ключи (`panels`, `layoutSnapshots`, `systemIconsPanel`) копируются миграцией побайтно —
+`panels[].pageId`/`layoutSnapshots[].panels[].pageId` не трогаются ни этой, ни какой-либо ещё миграцией.
+
+- **Rung 7 («`NewerSchema`», D-7) подтверждён без изменений** — сборка ≤0.7.0, открыв v6-документ, уходит
+  в read-only режим до чтения любого ключа `pages`; файл не перезаписывается ни при каком последующем
+  `Save()` в рамках той сессии.
+- **Premigration-бэкап именуется по исходной версии, не по целевой** — `StateStorePaths.PreMigrationBackupPath`
+  не менялся, миграция v5→v6 пишет `application-state.premigration-v5.json` (не `-v6.json`, как
+  предполагал первоначальный бриф задачи ADR-043) — расхождение задокументировано в самом ADR-043 как
+  факт поведения существующего механизма, а не как новое решение.
+- Диапазон разрешения — **только** `schemaVersion`/DTO `pages`/маппинг в `ApplicationStateService`.
+  `JsonApplicationStateStore` (атомарная запись, `.bak`, карантин, advisory lock), `StateMigrationRunner`,
+  `StateRestoreCommand`, `LegacySettingsImporter`, `LayoutSnapshotService` — без диффа.
+

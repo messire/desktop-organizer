@@ -138,6 +138,10 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
         var filesChanged = 0;
         sut.FilesChanged += (_, _) => filesChanged++;
         SetupMenu(ShellContextMenuOutcome.Invoked);
+
+        // B-7 (ADR-046 7c): ReconcileAfterShellCommand now skips a non-managed item's ReconcileExternalChange
+        // call entirely (it always returns Unchanged for one anyway) — this test simulates a MANAGED item.
+        _storageMock.Setup(s => s.IsManaged(oldPath)).Returns(true);
         _storageMock.Setup(s => s.ReconcileExternalChange(oldPath))
             .Returns(new ManagedItemReconcileResult(ManagedItemReconcileKind.Renamed, newPath));
 
@@ -147,6 +151,30 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
         Assert.Equal(newPath, item.Path);
         Assert.True(item.Exists, "The existence refresh runs right after the reconcile.");
         Assert.Equal(1, filesChanged);
+    }
+
+    /// <summary>
+    /// M-6 (review it.2), B-7 pin: an invoked command's snapshot-diff reconcile loop never calls
+    /// <see cref="IPanelItemStorageService.ReconcileExternalChange(string)"/> for a NON-managed item — the
+    /// cheap, local, string-only <see cref="IPanelItemStorageService.IsManaged"/> check short-circuits
+    /// before ever reaching it (<c>ReconcileAfterShellCommand</c>'s own <c>continue</c> branch), which is
+    /// what keeps this loop from touching the network for a <c>Z:\</c>/UNC item merely referenced in place.
+    /// </summary>
+    [Fact]
+    public void ShowShellContextMenu_Invoked_NonManagedItem_NeverCallsReconcileExternalChange()
+    {
+        var path = NewFile("referenced-in-place.txt");
+        using var sut = BuildSut();
+        sut.AddFiles([path]);
+        var item = Assert.Single(sut.AllItems);
+        SetupMenu(ShellContextMenuOutcome.Invoked);
+
+        _storageMock.Setup(s => s.IsManaged(path)).Returns(false);
+
+        sut.ShowShellContextMenu(item, OwnerHwnd, 0, 0);
+
+        _storageMock.Verify(s => s.ReconcileExternalChange(It.IsAny<string>()), Times.Never);
+        Assert.Same(item, Assert.Single(sut.AllItems));
     }
 
     /// <summary>
@@ -162,6 +190,9 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
         var filesChanged = 0;
         sut.FilesChanged += (_, _) => filesChanged++;
         SetupMenu(ShellContextMenuOutcome.Invoked);
+
+        // B-7 (ADR-046 7c): see the identical setup in the renamed-item test above.
+        _storageMock.Setup(s => s.IsManaged(path)).Returns(true);
         _storageMock.Setup(s => s.ReconcileExternalChange(path))
             .Returns(new ManagedItemReconcileResult(ManagedItemReconcileKind.Deleted, null));
 
@@ -186,6 +217,10 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
         var filesChanged = 0;
         sut.FilesChanged += (_, _) => filesChanged++;
         SetupMenu(ShellContextMenuOutcome.Invoked);
+
+        // B-7 (ADR-046 7c): `missing` simulates a managed item; `existing` stays non-managed (default
+        // false) — it must never be reconciled anyway, since it still exists.
+        _storageMock.Setup(s => s.IsManaged(missing)).Returns(true);
 
         sut.ShowShellContextMenu(sut.AllItems[0], OwnerHwnd, 0, 0);
 
@@ -375,13 +410,15 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
         var path = NewFile("cut-me.txt");
         _storageMock.Setup(s => s.IsManaged(path)).Returns(true);
         _storageMock.Setup(s => s.ReconcileExternalChange(path)).Returns(new ManagedItemReconcileResult(ManagedItemReconcileKind.Deleted, null));
-        using var sut = BuildSut();
+        var timeProvider = new ManualTimeProvider();
+        using var sut = BuildSut(timeProvider: timeProvider);
         sut.AddFiles([path]);
         var filesChanged = 0;
         sut.FilesChanged += (_, _) => filesChanged++;
         File.Delete(path);
 
-        // First tick: only confirms the transition — never reconciles yet.
+        // First tick: only confirms the transition — never reconciles yet (ADR-046 7c §7.2: the grace
+        // window is 3 s of ManualTimeProvider time, not merely "one more tick", now that liveness is async).
         sut.ProcessPendingVanishedManagedItems();
         sut.RefreshItemsLiveness();
 
@@ -389,7 +426,8 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
         Assert.Single(sut.AllItems);
         Assert.Equal(0, filesChanged);
 
-        // Second tick: still missing — now reconciled and removed.
+        // Second tick, after the grace window elapsed: still missing — now reconciled and removed.
+        timeProvider.Advance(TimeSpan.FromMilliseconds(3000));
         sut.ProcessPendingVanishedManagedItems();
         sut.RefreshItemsLiveness();
 
@@ -460,7 +498,8 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
     {
         var storage = new PanelItemStorageService(Path.Combine(_tempDir, "store"), new Mock<INativeApi>().Object);
         var managed = storage.MoveIn(NewFile("Moved.txt"))!;
-        using var sut = BuildSut(storage);
+        var timeProvider = new ManualTimeProvider();
+        using var sut = BuildSut(storage, timeProvider);
         sut.AddFiles([managed]);
         File.Move(managed, Path.Combine(_tempDir, "Pasted.txt"));
 
@@ -470,6 +509,8 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
         Assert.Single(sut.AllItems);
         Assert.True(Directory.Exists(Path.GetDirectoryName(managed)), "must not release the per-item directory after only one tick.");
 
+        // ADR-046 7c §7.2: the grace window is 3 s of ManualTimeProvider time, not merely "one more tick".
+        timeProvider.Advance(TimeSpan.FromMilliseconds(3000));
         sut.ProcessPendingVanishedManagedItems();
         sut.RefreshItemsLiveness();
 
@@ -801,7 +842,7 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
         return path;
     }
 
-    private ChildWindowViewModel BuildSut(IPanelItemStorageService? storage = null) => new(
+    private ChildWindowViewModel BuildSut(IPanelItemStorageService? storage = null, TimeProvider? timeProvider = null) => new(
         _iconProviderMock.Object,
         _fileLauncherMock.Object,
         _watcherFactoryMock.Object,
@@ -809,5 +850,11 @@ public sealed class ChildWindowViewModelShellMenuTests : IDisposable
         _renameServiceMock.Object,
         _appSettingsMock.Object,
         _selectionCoordinatorMock.Object,
-        _diagnosticsMock.Object);
+        _diagnosticsMock.Object,
+        iconResizeDebounceTimerProvider: null,
+        windowManager: null,
+        pageManager: null,
+        iconLoadQueue: null,
+        itemProbeQueue: null,
+        timeProvider: timeProvider);
 }

@@ -2,9 +2,11 @@
 
 **Цель:** приблизить DesktopOrganizer по функциональности и поведению к Stardock Fences.
 
-**Статус на 2026-09-27.** Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» закрыта; manual verify
-выполнена пользователем на Windows 11 24H2 (сборка 26200), 2026-09-27, признана достаточной — Windows 10
-отдельно не проверяется. Реализованы: встраивание панелей в слой рабочего стола (Progman/WorkerW), убирание из taskbar/Alt+Tab, перетаскивание за заголовок, привязка к сетке, два вида (список/плитка), drag&drop файлов, сохранение состояния в JSON, окно настроек и трей; файловые операции, поведение панелей, внешний вид, десктоп-жесты, Folder Portals, страницы/swipe, снапшоты раскладки, multi-monitor; ресайз кратно сетке иконок, фильтр содержимого панели, кнопка roll-up; скрытие/показ иконок рабочего стола (единый переключатель, без выборочного режима — см. ADR-006); панель системных иконок (SystemIconsPanel) как второй независимый тип desktop-window. Плюс 2026-07-26 (см. `docs/prompts/outstanding-followups.md`, пункты 1–4): one-time Move-хинт, тест кросс-volume `Restore`, очистка managed-копий при удалении панели ([ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md)) и re-clamp панелей при уменьшении рабочей области монитора. Плюс ещё 2026-07-26 (см. `docs/prompts/grid-snap-drag-and-settings-order.md`, [ADR-011](../adr/ADR-011-manual-drag-with-magnetic-grid-snap.md)): магнитное покадровое прилипание к сетке во время перетаскивания панели (не только на drop), новая настройка `GridSnapDistance`, и реорганизация окна настроек (порядок групп + перенос «Привязки к сетке» в «Автозапуск и рабочий стол»). Плюс 2026-08-15 — **Фаза 7 «Производительность, память и отказоустойчивость»** ([docs/PLANS/phase-7-performance-hardening.md](PLANS/phase-7-performance-hardening.md), [ADR-012](../adr/ADR-012-performance-and-resilience-hardening.md)): все 11 находок [docs/PERFORMANCE_AUDIT.md](PERFORMANCE_AUDIT.md) закрыты 6 блоками (A–F) — debounced persistence с синхронным flush для структурных изменений, try/catch вокруг колбэка глобального хука жестов + вынос чистой машины состояний, ограниченный LRU-кеш иконок и замороженные кеш-кисти конвертеров, batch-уведомления и O(1) дедуп коллекций ViewModel, авторитетный in-memory кеш манифеста `PanelItemStorageService` с write-through. Плюс 2026-08-16 — **Фаза 8 «UX-паритет значков: выделение и переименование»** ([docs/PLANS/icon-selection-and-rename.md](PLANS/icon-selection-and-rename.md), [ADR-013](../adr/ADR-013-panel-item-selection-and-rename.md)): визуальное выделение значка в обоих видах панели (`ListBox`-контейнеры, подсветка не зависит от `IsSelectionActive`) и честные имена + inline-переименование значков (F2/контекстное меню, физическое переименование на диске, GUID перенесён из имени файла в имя каталога, синхронизация manifest). Плюс ещё 2026-08-16 — **Фаза 9 «Сортировка и ручной порядок значков панели»** ([docs/PLANS/panel-item-sorting.md](PLANS/panel-item-sorting.md), [ADR-014](../adr/ADR-014-panel-item-sorting-and-manual-order.md)): новая настройка `PanelSortMode` (Manual/Name) в окне настроек и контекстном меню заголовка, немутирующая сортировка по имени (собственный natural-order компаратор, папки вперёд), drag-to-reorder значков мышью в обоих видах панели с трансляцией видимого индекса в полный набор при активном `ContentFilter` и авто-переключением в `Manual`. Остаются сквозные задачи (см. ниже).
+**Статус на 2026-09-30.** Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» закрыта; бэклог 1.x «UX-полировка»
+(все 8 пунктов, см. раздел «Бэклог 1.x» ниже) закрыт целиком; manual verify по Фазам 0–10 выполнена
+пользователем на Windows 11 24H2 (сборка 26200), 2026-09-27, признана достаточной — Windows 10 отдельно не
+проверяется; manual verify по бэклогу 1.x — см. соответствующие ADR (043–047) и сводный список в разделе
+«Бэклог 1.x». Реализованы: встраивание панелей в слой рабочего стола (Progman/WorkerW), убирание из taskbar/Alt+Tab, перетаскивание за заголовок, привязка к сетке, два вида (список/плитка), drag&drop файлов, сохранение состояния в JSON, окно настроек и трей; файловые операции, поведение панелей, внешний вид, десктоп-жесты, Folder Portals, страницы/swipe, снапшоты раскладки, multi-monitor; ресайз кратно сетке иконок, фильтр содержимого панели, кнопка roll-up; скрытие/показ иконок рабочего стола (единый переключатель, без выборочного режима — см. ADR-006); панель системных иконок (SystemIconsPanel) как второй независимый тип desktop-window. Плюс 2026-07-26 (см. `docs/prompts/outstanding-followups.md`, пункты 1–4): one-time Move-хинт, тест кросс-volume `Restore`, очистка managed-копий при удалении панели ([ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md)) и re-clamp панелей при уменьшении рабочей области монитора. Плюс ещё 2026-07-26 (см. `docs/prompts/grid-snap-drag-and-settings-order.md`, [ADR-011](../adr/ADR-011-manual-drag-with-magnetic-grid-snap.md)): магнитное покадровое прилипание к сетке во время перетаскивания панели (не только на drop), новая настройка `GridSnapDistance`, и реорганизация окна настроек (порядок групп + перенос «Привязки к сетке» в «Автозапуск и рабочий стол»). Плюс 2026-08-15 — **Фаза 7 «Производительность, память и отказоустойчивость»** ([docs/PLANS/phase-7-performance-hardening.md](PLANS/phase-7-performance-hardening.md), [ADR-012](../adr/ADR-012-performance-and-resilience-hardening.md)): все 11 находок [docs/PERFORMANCE_AUDIT.md](PERFORMANCE_AUDIT.md) закрыты 6 блоками (A–F) — debounced persistence с синхронным flush для структурных изменений, try/catch вокруг колбэка глобального хука жестов + вынос чистой машины состояний, ограниченный LRU-кеш иконок и замороженные кеш-кисти конвертеров, batch-уведомления и O(1) дедуп коллекций ViewModel, авторитетный in-memory кеш манифеста `PanelItemStorageService` с write-through. Плюс 2026-08-16 — **Фаза 8 «UX-паритет значков: выделение и переименование»** ([docs/PLANS/icon-selection-and-rename.md](PLANS/icon-selection-and-rename.md), [ADR-013](../adr/ADR-013-panel-item-selection-and-rename.md)): визуальное выделение значка в обоих видах панели (`ListBox`-контейнеры, подсветка не зависит от `IsSelectionActive`) и честные имена + inline-переименование значков (F2/контекстное меню, физическое переименование на диске, GUID перенесён из имени файла в имя каталога, синхронизация manifest). Плюс ещё 2026-08-16 — **Фаза 9 «Сортировка и ручной порядок значков панели»** ([docs/PLANS/panel-item-sorting.md](PLANS/panel-item-sorting.md), [ADR-014](../adr/ADR-014-panel-item-sorting-and-manual-order.md)): новая настройка `PanelSortMode` (Manual/Name) в окне настроек и контекстном меню заголовка, немутирующая сортировка по имени (собственный natural-order компаратор, папки вперёд), drag-to-reorder значков мышью в обоих видах панели с трансляцией видимого индекса в полный набор при активном `ContentFilter` и авто-переключением в `Manual`. Остаются сквозные задачи (см. ниже). **2026-09-28** поставлен бэклог 1.x «UX-полировка» (семь пунктов: единый стиль UI, страницы в меню трея, переименование страниц, round-robin страниц по двойному клику трея, упрощение настройки цветов, цвет текста в пресетах, фоновая загрузка иконок вместо UI-потока; 2026-09-29 добавлен восьмой — копирование панели на другую страницу полным клоном) — см. раздел «Бэклог 1.x» ниже. **2026-09-29** пункты 1, 2, 3, 4, 5 и 8 бэклога 1.x закрыты (schema v6 — [ADR-043](../adr/ADR-043-page-display-names.md); навигация по страницам из трея — [ADR-044](../adr/ADR-044-tray-page-navigation.md); копирование панели на страницу — [ADR-045](../adr/ADR-045-panel-clone-to-page.md); пресеты цвета и упрощённый редактор — amendments [ADR-042](../adr/ADR-042-color-presets-rgb-picker-stepped-size.md)). **2026-09-30** пункт 7 (фоновая загрузка иконок) закрыт — [ADR-046](../adr/ADR-046-background-icon-loading.md) (amends ADR-039/ADR-012/ADR-008). **2026-09-30** пункт 6 (единая дизайн-система) тоже закрыт — [ADR-047](../adr/ADR-047-unified-design-system.md) (amends ADR-025/ADR-031/ADR-042/ADR-040/ADR-044/ADR-013/ADR-001/ADR-033/ADR-002). **Бэклог 1.x закрыт целиком** — все 8 пунктов реализованы, покрыты тестами и прошли ревью.
 
 Легенда: `[ ]` — не сделано, `[~]` — частично, `[x]` — готово.
 
@@ -240,6 +242,11 @@ ADR-002 описал роль окна настроек; здесь — напо
 > окна настроек — это сессионная команда, не преференция. «Собрать значки рабочего стола» («Захват
 > иконок» выше) в трей **не вернулся**: Folder Portal на папку Desktop настраивается через диалог
 > «Customize panel…» (Browse…), отдельного пункта трея для него нет.
+>
+> **Уточнено 2026-10-09 (ADR-031 amendment).** Переключатель «Show desktop icons» **возвращён в
+> Settings → General** (по явной просьбе пользователя) — теперь три равноправные точки: пункт трея, этот
+> переключатель и двойной клик по рабочему столу. Они синхронизируются событием
+> `IDesktopIconsService.VisibilityChanged`; состояние по-прежнему только сессионное, не персистится.
 
 **Готово, когда:** панель создаётся жестом, иконки десктопа прячутся, панель умеет показывать реальные иконки рабочего стола.
 
@@ -385,7 +392,10 @@ A–D с явными зависимостями). Архитектурные р
       на `ChildWindowViewModel` (`EditingItem`/`EditingName`), не на `FileItem`; `RenameEditBehavior`
       (новый attached behavior) воспроизводит commit/cancel-дисциплину заголовка панели для
       файлового `TextBox` внутри `DataTemplate`. Переименование в портальной панели разрешено (в
-      отличие от `RemoveFileCommand`).
+      отличие от `RemoveFileCommand`). Клавиатурный паритет (2026-10-09): `Enter` по выделенному значку
+      открывает его, как двойной клик (`ChildWindowViewModel.OpenSelectedFileCommand`; не срабатывает во
+      время правки заголовка/значка и в `TextBox`) — дополнение к ADR-013, там же перечень горячих клавиш
+      панели (F2 / Enter / Escape).
 
 **Готово, когда:** клик подсвечивает значок в обоих видах одинаково и независимо от активности окна;
 файлы/папки, перенесённые в панель, отображаются под оригинальным именем и на диске; «Переименовать»
@@ -947,6 +957,9 @@ MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§1
       видимостью иконок; одноимённый чекбокс убран из окна настроек (сессионная команда, не
       преференция — amendment к [ADR-026](../adr/ADR-026-edit-layout-mode.md) D-9: одна из трёх точек
       переключения режима заменена подсказкой, `Ctrl+E` в окне настроек сохранён).
+      **Обновлено 2026-10-09:** переключатель «Show desktop icons» возвращён в Settings → General по
+      просьбе пользователя ([ADR-031](../adr/ADR-031-settings-window-navigation-and-panel-customize.md)
+      amendment, `IDesktopIconsService.VisibilityChanged`); «Edit layout mode» в настройки не вернулся.
 - [x] **Фикс `PageId` лассо-панели** — панель, созданная правым drag'ом на не-default странице, теперь
       сразу видна на этой странице и остаётся там после рестарта (раньше «перескакивала» на `default`).
 - [x] **Именованные снапшоты и подтверждение удаления** — «Save as…» запрашивает имя
@@ -1126,6 +1139,144 @@ ADR-038 приняты, ROADMAP/README/CHANGELOG синхронизирован�
   ADR-041 Consequences).
 - Однострочное уведомление при удалении о возврате файлов из панелей (опционально — сейчас `--restore-panel-items`
   полностью безмолвен для типичного случая).
+
+---
+
+## Бэклог 1.x: UX-полировка (поставлено 2026-09-28)
+
+Источник — запрос пользователя 2026-09-28 после manual verify Release polish 1.0. Формальной Фазы не
+образует: это восемь независимых пунктов, каждый ведётся отдельной задачей через стандартный конвейер
+(`fences-feature-planner` → реализующие агенты → тесты → ревью → `architecture-documenter`). Порядок
+ниже — рекомендуемый (от «дёшево и заметно» к «крупный редизайн»), не обязательный.
+
+**Статус на 2026-09-30 — все 8 пунктов закрыты, бэклог 1.x закрыт целиком.** Реализованы, покрыты тестами
+и прошли ревью (`code-quality-reviewer` ∥ `fences-ux-parity-reviewer`, несколько review-итераций) —
+[ADR-043](../adr/ADR-043-page-display-names.md) (пункт 3, schema v6),
+[ADR-044](../adr/ADR-044-tray-page-navigation.md) (пункты 1–2),
+[ADR-045](../adr/ADR-045-panel-clone-to-page.md) (пункт 8),
+[ADR-046](../adr/ADR-046-background-icon-loading.md) (пункт 7, фоновая загрузка иконок — дочерний план
+[docs/PLANS/background-icon-loading.md](PLANS/background-icon-loading.md), реализован в отдельном git
+worktree на ветке `feature/background-icon-loading`, смёржен в `rc/0.8.0`),
+[ADR-047](../adr/ADR-047-unified-design-system.md) (пункт 6, единая дизайн-система — дочерний план
+[docs/PLANS/design-system-1x.md](PLANS/design-system-1x.md), фазы 6.0–6.5), amendments
+[ADR-042](../adr/ADR-042-color-presets-rgb-picker-stepped-size.md) (пункты 4–5). Известные follow-up'ы,
+сознательно оставленные вне объёма 1.0 (не блокеры): часть карточек `LayoutSnappingSection` не переведена
+на `SettingsCard` (ADR-047 DO-026), 17/26 RESX-строк длиннее целевого лимита читаемости (ADR-047 T-5),
+повторный вход через трей при открытом модальном диалоге (ADR-047 R-5/R-6), двойной metadata round-trip и
+приоритет по вьюпорту для фоновой загрузки иконок (ADR-046).
+
+- [x] **Двойной клик по иконке трея — round-robin переключение страниц. Закрыто 2026-09-29.**
+      `TrayIconManager.Initialize`'s `DoubleClick` now raises `ITrayIconManager.OnNextPageRequested`
+      instead of the removed `OnToggleMainWindowVisibilityRequested`; the new UI-layer `TrayPagesAdapter`
+      (`src/DesktopOrganizer.UI/Lifecycle/TrayPagesAdapter.cs`) decides the next page via the pure
+      `PageCycling.Next` function and calls `IPageManager.SwitchTo` — last page wraps to the first, a
+      single page is a no-op. Settings still opens from the tray's "Settings" menu item, unchanged. See
+      docs/PLANS/backlog-1x-master-plan.md §1 и [ADR-044](../adr/ADR-044-tray-page-navigation.md)
+      (amendment к [ADR-002](../adr/ADR-002-main-window-as-settings.md) — двойной клик больше не
+      переключает видимость окна настроек).
+- [x] **Отдельный пункт «Страницы» в контекстном меню иконки трея. Закрыто 2026-09-29.** Подменю
+      «Pages ▸» — первый пункт меню трея, с разделителем: `TrayIconManager.SetPages`/`OnPageSelected`,
+      новый примитив `TrayPageEntry(Id, DisplayName, IsCurrent)` (Services.Abstractions, без UI-типов),
+      пункт «Next page» поднимает то же событие, что двойной клик. Список перестраивается на
+      `IPageManager.PageChanged`/`PagesChanged` (ADR-043) и на смену языка UI, через
+      `TrayPagesAdapter.PushPages()`; верхний `ContextMenuStrip` не пересобирается (существующий инвариант
+      сохранён), пересобираются только пункты страниц. См.
+      docs/PLANS/backlog-1x-master-plan.md §2 и [ADR-044](../adr/ADR-044-tray-page-navigation.md).
+- [x] **Переименование страниц. Закрыто 2026-09-29.** Страница получила стабильный `id` + отдельное
+      отображаемое `name` — та же форма, что у панели (`Id`+`Title`). Схема **v5 → v6**
+      (`pages.ids[]` → `pages.items[{id,name?}]`, `V5ToV6Migration` — аддитивная, идемпотентная,
+      `JsonObject`-only, `pageId` панелей/снапшотов не трогается) — явное разрешение пользователя
+      2026-09-29 на расширение замороженного контура persistence, ровно в этом объёме. `PageDescriptor`/
+      `PagesStateMapper`, `IPageManager.RenamePage`/`AddNewPage`/`PagesChanged`, `PageNameRules` (trim,
+      ≤40 символов, без control-символов, уникальность без учёта регистра по эффективным именам, unnamed
+      `default` сравнивается с текущей локализацией). Inline-переименование в разделе «Страницы» (кнопка/
+      двойной клик/F2): Enter с ошибкой — редактор остаётся открытым; потеря фокуса/скрытие окна с
+      ошибкой — редактор закрывается, текст ошибки виден. `PageDisplayNames.Resolve` — единственный
+      источник отображаемого текста везде, где раньше был виден сырой id. Откат на сборку ≤0.7.0 —
+      read-only сессия (существующий rung 7 ADR-024), восстановление вручную из
+      `application-state.premigration-v5.json`. См. [ADR-043](../adr/ADR-043-page-display-names.md)
+      (amends [ADR-024](../adr/ADR-024-versioned-json-persistence.md),
+      [ADR-032](../adr/ADR-032-ui-localization.md) D-5/CN-2).
+- [x] **Пресеты цвета должны задавать и цвет текста. Закрыто 2026-09-29.** Каждый из 10 хроматических
+      пресетов получил собственный тёмный тинт текста (HSL lightness ≈91%, контраст ≥4.5:1 против
+      `SurfaceComposer.ComposeSurface` для всех `PanelSurfaceStyle`×{min,max opacity}) вместо общего
+      `#FFFFFF` — устранена причина «пресет не меняет текст». `ApplyAccent` теперь сравнивает **пару**
+      (accent, ожидаемый текст), а не только accent — повторный клик по пресету с «раздрейфовавшим»
+      текстом снова применяет пару. Свотч показывает текстовую половину пары и маркер «изменено». См.
+      amendment 2026-09-29 в [ADR-042](../adr/ADR-042-color-presets-rgb-picker-stepped-size.md).
+- [x] **Упростить настройку цветов. Закрыто 2026-09-29.** `PanelColorEditor` в обоих местах применения
+      (Customize панели, `Settings → New panel defaults`) сведён к: Preview → карточка «Цвет» (сетка
+      пресетов + компактный переключатель Light/Dark) → свёрнутое по умолчанию «Дополнительно» (hex,
+      свой цвет текста, стиль поверхности/прозрачность через новый слот `PanelColorEditor.AdvancedExtraContent`,
+      Reset). Состояние раскрытия «Дополнительно» хранится только в памяти окна, не персистентно. Ничего
+      не потеряно — весь прежний функционал доступен внутри раскрытия. Формат хранения цветов не изменён.
+      См. amendment 2026-09-29 в [ADR-042](../adr/ADR-042-color-presets-rgb-picker-stepped-size.md)
+      (amends [ADR-031](../adr/ADR-031-settings-window-navigation-and-panel-customize.md)).
+- [x] **Унифицировать интерфейс: меню, настройки, диалоги в одном стиле. Закрыто 2026-09-30.** Новая
+      Palette T (хром приложения — окно настроек, `PanelCustomizeWindow`, все WPF-меню, диалоги, трей),
+      отдельная от неизменной Palette P (панели, Ambient Accent). Источник правды — C#
+      (`ThemePalette`/`ThemeKeys`/`ThemeResourceBuilder`), потребление — `DynamicResource`; тема хрома
+      следует Windows (`AppsUseLightTheme`), трей — `SystemUsesLightTheme`, High Contrast — `SystemColors`,
+      **без новой настройки** (persistence не менялся). Типографика `TypeRamp` — ничего меньше
+      `SystemFonts.MessageFontSize`; один общий стиль для всех WPF-меню (закрывает найденный на
+      инвентаризации контраст подменю ≈1.2:1 — было светлое всплывающее окно со светлым текстом), радио-
+      группы контекстного меню заголовка панели переведены в подменю; ряд из 5 кнопок в разделе «Панели»
+      заменён командной строкой (`DropDownButton «Ещё»`; с 2026-10-09 «Ещё» заменён контекстным меню строки
+      списка — ADR-047 amendment); единый модальный `AppDialogWindow` заменил
+      `MessageBox`/`InputDialog` для подтверждений и ввода (Enter = «Нет» для необратимых предупреждений);
+      новый `InfoBar`/`IStatusNotifier` заменил блокирующие информационные `MessageBox` (крэш/старт/CLI
+      остаются `MessageBox` намеренно); трей остался на WinForms `ContextMenuStrip` с новым
+      `TrayMenuRenderer` по токенам темы; дополнительно реализован **opt-in тёмных классических нативных
+      меню процесса** (shell-меню значка панели, системное меню окна) через недокументированный
+      `SetPreferredAppMode`/`FlushMenuThemes` (`uxtheme.dll`, ординалы 135/136, гейт по билду ≥ Windows 10
+      1903) — единственная нативная поверхность, которую удалось затемнить; `ColorDialog`/
+      `FolderBrowserDialog`/shell-меню сторонних расширений остаются системными по определению.
+      Контраст выбранного пункта сайдбара настроек (было 1.14:1), трека выключенного toggle (2.81:1) и
+      предупреждающего текста (3.25:1) — приведён к порогу WCAG. Известный долг, принятый для 1.0: часть
+      карточек `LayoutSnappingSection` не переведена на новый `SettingsCard`; 17/26 RESX-строк остаются
+      длиннее целевого лимита читаемости. См. [ADR-047](../adr/ADR-047-unified-design-system.md) (amends
+      ADR-025/ADR-031/ADR-042/ADR-040/ADR-044/ADR-013/ADR-001/ADR-033/ADR-002).
+
+- [x] **Загрузка иконок на UI-потоке: большой портал или сетевые ярлыки замораживают интерфейс при
+      старте. Поставлено 2026-09-28, закрыто 2026-09-30.** Известный follow-up ADR-039 («All icon
+      extraction is still synchronous on the UI thread») закрыт: `IIconLoadQueue`
+      (`StaIconLoadQueue`) — две полосы (Local/Remote), каждая со своим STA-воркером на
+      `Dispatcher.Run()`-pump, watchdog (5 с) с абандоном и пересозданием воркера, circuit breaker по
+      сетевому корню (2 с → 60 с открытие, half-open trial). Элемент создаётся сразу с плейсхолдером,
+      затем type-иконкой, затем реальной (`FileItem.CreatePending`/`ApplyProbe`, доставка пачками через
+      `SynchronizationContext.Post`, никогда `Send`); приоритет `Visible`/`Background` по видимости
+      страницы, отмена через поколения при удалении/перестройке панели. Liveness (7c,
+      `BackgroundItemProbeQueue`) вынесен с UI-потока на отдельную очередь на пуле потоков; попутно
+      закрыты три fs-стопора вне исходного объёма (managed-replacement resolution при загрузке,
+      cross-panel resolve стартовых путей, post-shell-command reconcile для не-managed элементов). Кеш
+      `(path, bucket)` и трёхстадийный фолбэк ADR-039 не изменены — только вынесен вызывающий поток;
+      результат по-прежнему `Freeze()`-нут (инвариант ADR-012), граница доставки несёт явную
+      рантайм-проверку вместо `Debug.Assert`. Метрика «не дольше одного кадра» разложена на измеримую
+      часть (`PanelItemsBuilt` — UI-время построения набора элементов и фильтра/сортировки, без
+      fs/shell — manual verify M-7.1) и честно зафиксированный остаток вне объёма (генерация
+      контейнеров невиртуализированной `AdaptiveIconGridPanel`, ADR-018 — follow-up). См.
+      [ADR-046](../adr/ADR-046-background-icon-loading.md) (amends ADR-039, ADR-012 Решение 3, ADR-008).
+
+- [x] **Скопировать панель на другую страницу (полный клон). Поставлено 2026-09-29, закрыто 2026-09-29.**
+      Рядом с существующим «Переместить на страницу» добавлено «Скопировать на страницу»: создаётся
+      **полная независимая копия** панели — новый `Id`, заголовок «{0} — копия»/«(n)» при коллизии, та же
+      геометрия (или смещение на шаг сетки при копировании на ту же страницу), внешний вид, режим
+      содержимого, фильтр, сортировка и все элементы на момент копирования (`IPanelItemStorageService.CopyManaged`
+      дублирует каждый managed-элемент в свой новый `PanelItems\{itemGuid}\`; Folder Portal копирует только
+      привязку к папке). Транзакционно — либо клон целиком, либо откат созданных копий и никакой панели.
+      Два входа: **меню заголовка панели** (расширено этой задачей сверх исходного плана) и раздел
+      «Панели» окна настроек, оба через общий `IPanelCloneFlow`/`IBusyIndicator`. Успех в окне настроек —
+      неблокирующая строка статуса, не модальное подтверждение. Формат состояния не меняется — клон
+      обычный `PanelStateDto`. Удаление клона — через Корзину (ADR-035) только для его собственных
+      managed-файлов; откат неудавшегося клонирования — прямое удаление свежих копий, минуя Корзину
+      (узкое исключение, см. ADR-045). См. [ADR-045](../adr/ADR-045-panel-clone-to-page.md) (amends
+      [ADR-035](../adr/ADR-035-panel-deletion-recycle-bin.md),
+      [ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md),
+      [ADR-009](../adr/ADR-009-drag-drop-move-semantics.md)).
+
+Сквозное для всех пунктов: 0 warnings, тесты на новую логику (переключение страниц по кругу, валидация
+имени страницы, применение пресета в обоих режимах текста, фоновая очередь иконок), manual verify на
+Windows 11 24H2.
 
 ---
 

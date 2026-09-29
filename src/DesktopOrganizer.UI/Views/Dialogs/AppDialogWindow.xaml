@@ -1,0 +1,109 @@
+<Window x:Class="DesktopOrganizer.UI.Views.Dialogs.AppDialogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        Width="440" SizeToContent="Height"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        WindowStyle="SingleBorderWindow"
+        Background="{DynamicResource Theme.Surface.Window}">
+    <!-- Phase 6.3 (design-system-1x.md §2.8, ADR-047 D-9) — the single WPF dialog window behind
+         ConfirmationService.Confirm/Notify and InputDialogService.PromptText (replacing MessageBox.Show
+         and Views/InputDialog.xaml respectively). Never constructed directly by a ViewModel — always via
+         Services/DialogPresenter.cs, the IDialogPresenter seam ConfirmationService/InputDialogService
+         depend on so their own unit tests never need a real Window.
+
+         Theme.Implicit.xaml merged into THIS window's own Window.Resources (never Application.Resources)
+         is the same convention MainWindow.xaml/PanelCustomizeWindow.xaml/the pre-6.3 InputDialog.xaml
+         already used — see those files' own remarks for why the split exists (it is what makes the
+         un-styled stock TextBox/Button below pick up Theme.* automatically). The component-qualified pack
+         URI (rather than MainWindow.xaml/the pre-6.3 InputDialog.xaml's own bare "/Resources/…" form) is
+         PanelCustomizeWindow.xaml's own convention: this window (unlike those two) is constructed directly
+         in an STA unit test (AppDialogWindowTests), where Application.ResourceAssembly resolves to the test
+         host's entry assembly rather than DesktopOrganizer.UI — the bare form only resolves correctly in
+         production, where the real App (defined in DesktopOrganizer.UI) IS the entry assembly. -->
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/DesktopOrganizer.UI;component/Resources/Styles/Theme.Implicit.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <Grid Margin="24,20,24,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Severity glyph + title (Subtitle, HeadingLevel1 in this dialog's own context) — the glyph is
+             Collapsed entirely for MessageBoxImage.None (the input-mode prompt has no severity).
+             H-1 fix (review round): a Grid (Auto glyph column + * title column), not a horizontal
+             StackPanel — a StackPanel gives each child its natural (unconstrained) width, so TitleText's
+             own TextWrapping="Wrap" never actually had anything to wrap AGAINST and long ru-locale
+             headings (e.g. "Применение расположения значков ко всем панелям") simply overflowed/clipped
+             past the window's own 440 DIP width instead of wrapping onto a second line. -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="SeverityGlyphText"
+                       Grid.Column="0"
+                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                       FontSize="{DynamicResource Font.Size.Title}"
+                       Foreground="{DynamicResource Theme.Text.Primary}"
+                       VerticalAlignment="Top"
+                       Margin="0,0,10,0"/>
+            <TextBlock x:Name="TitleText"
+                       Grid.Column="1"
+                       FontSize="{DynamicResource Font.Size.Subtitle}"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource Theme.Text.Primary}"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Top"
+                       AutomationProperties.HeadingLevel="Level1"/>
+        </Grid>
+
+        <TextBlock x:Name="MessageText" Grid.Row="1"
+                   FontSize="{DynamicResource Font.Size.Body}"
+                   Foreground="{DynamicResource Theme.Text.Primary}"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,16"/>
+
+        <!-- Input mode only (InputDialogService.PromptText) — Collapsed for Confirm/Notify.
+             AutomationProperties.LabeledBy=MessageText (M-1): MessageText IS this box's own prompt/label
+             ("Snapshot name:" etc, InputDialogService.PromptText's own "prompt" parameter) — without this,
+             a screen reader announces the raw TextBox with no name at all. -->
+        <StackPanel x:Name="InputRow" Grid.Row="2" Margin="0,0,0,16" Visibility="Collapsed">
+            <TextBox x:Name="InputBox"
+                     TextChanged="InputBox_TextChanged"
+                     AutomationProperties.LabeledBy="{Binding ElementName=MessageText}"/>
+            <TextBlock x:Name="ErrorText"
+                       Foreground="{DynamicResource Theme.Text.Critical}"
+                       FontSize="{DynamicResource Font.Size.Caption}"
+                       TextWrapping="Wrap"
+                       Margin="0,6,0,0"
+                       Visibility="Collapsed"/>
+        </StackPanel>
+
+        <!-- PrimaryButton is always the visually primary (accent-filled) action — which one Enter
+             triggers is IsDefault, set in code-behind per AppDialogRequest.PrimaryIsDefault, independent
+             of this visual styling (ADR-047 D-9, R-12: a Warning confirmation keeps "Да" as this button
+             while Enter still defaults to "Нет"). SecondaryButton is Collapsed for a single-button
+             (Notify) dialog, in which case PrimaryButton itself also carries IsCancel. -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="PrimaryButton"
+                    Style="{StaticResource Theme.Button.Primary}"
+                    MinWidth="88"
+                    Margin="0,0,8,0"
+                    Click="PrimaryButton_Click"/>
+            <Button x:Name="SecondaryButton"
+                    MinWidth="88"
+                    Click="SecondaryButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

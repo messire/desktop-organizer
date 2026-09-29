@@ -34,16 +34,54 @@ public sealed class FileItem : INotifyPropertyChanged
     /// <see cref="Path"/>/<see cref="Name"/> themselves are unaffected.
     /// </param>
     public FileItem(string path, ImageSource? icon, string? displayName = null)
+        : this(path, icon, displayName, ComputeExists(path), System.IO.Directory.Exists(path), isProbePending: false)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FileItem"/> class — the backing constructor shared by
+    /// the public, file-system-probing constructor and <see cref="CreatePending"/> (ADR-046), which
+    /// supplies its optimistic <see cref="Exists"/>/<see cref="IsDirectory"/> values without ever touching
+    /// the file system.
+    /// </summary>
+    private FileItem(string path, ImageSource? icon, string? displayName, bool exists, bool isDirectory, bool isProbePending)
     {
         Path = path;
         Icon = icon;
         _displayName = displayName;
-        _exists = ComputeExists(path);
-        _isDirectory = System.IO.Directory.Exists(path);
+        _exists = exists;
+        _isDirectory = isDirectory;
+        IsProbePending = isProbePending;
     }
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>
+    /// Creates a <see cref="FileItem"/> without any file-system access (ADR-046 D-5): the item appears in
+    /// the panel immediately, optimistically <see cref="Exists"/> <see langword="true"/>, with
+    /// <see cref="IsDirectory"/> guessed from <paramref name="isDirectoryHint"/> (when the caller already
+    /// knows it, e.g. from enumerating the containing folder) or, failing that, the same "no extension
+    /// looks like a folder" heuristic <c>IconProvider</c> already uses for a missing path. The real
+    /// values are applied once an off-thread probe completes — see <see cref="ApplyProbe"/>.
+    /// </summary>
+    /// <param name="path">The file path.</param>
+    /// <param name="icon">
+    /// The item's initial icon — normally a cache hit, a type icon, or <c>IIconProvider.PlaceholderIcon</c>
+    /// (D-5); never resolved here.
+    /// </param>
+    /// <param name="displayName">Optional cosmetic <see cref="DisplayName"/> override — see the constructor's own parameter.</param>
+    /// <param name="isDirectoryHint">
+    /// The item's directory-ness, when already known to the caller without a file-system call (e.g. a
+    /// folder enumeration that returns attributes for free). <see langword="null"/> falls back to the
+    /// extension heuristic.
+    /// </param>
+    /// <returns>A new, probe-pending <see cref="FileItem"/>.</returns>
+    public static FileItem CreatePending(string path, ImageSource? icon, string? displayName = null, bool? isDirectoryHint = null)
+    {
+        var isDirectory = isDirectoryHint ?? string.IsNullOrEmpty(System.IO.Path.GetExtension(path));
+        return new FileItem(path, icon, displayName, exists: true, isDirectory, isProbePending: true);
+    }
 
     /// <summary>
     /// The file path.
@@ -122,6 +160,15 @@ public sealed class FileItem : INotifyPropertyChanged
     public bool IsShortcut => string.Equals(System.IO.Path.GetExtension(Path), ".lnk", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// <see langword="true"/> from construction via <see cref="CreatePending"/> until the first
+    /// <see cref="ApplyProbe"/> call applies a real, off-thread existence/directory-ness observation
+    /// (ADR-046). Not bindable (no <see cref="PropertyChanged"/>) — this is ViewModel bookkeeping only,
+    /// not a UI-facing state. Always <see langword="false"/> for an item built by the regular,
+    /// file-system-probing constructor.
+    /// </summary>
+    public bool IsProbePending { get; private set; }
+
+    /// <summary>
     /// Re-evaluates <see cref="Exists"/> and <see cref="IsDirectory"/> against the current file-system
     /// state, raising <see cref="PropertyChanged"/> only for values that actually flipped. Cheap
     /// (two file-system checks); safe to call periodically from a polling timer.
@@ -155,6 +202,60 @@ public sealed class FileItem : INotifyPropertyChanged
 
         Exists = ComputeExists(newPath);
         IsDirectory = System.IO.Directory.Exists(newPath);
+
+        OnPropertyChanged(nameof(Path));
+        OnPropertyChanged(nameof(Icon));
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(Type));
+        OnPropertyChanged(nameof(IsShortcut));
+    }
+
+    /// <summary>
+    /// Applies an off-thread existence probe (ADR-046 <c>IPathProbe</c>/<c>IconLoadResult</c>) to this
+    /// item, raising <see cref="PropertyChanged"/> only for values that actually flipped, and clears
+    /// <see cref="IsProbePending"/> unconditionally — this is the first real observation for an item
+    /// created via <see cref="CreatePending"/> (or a routine re-confirmation for one that already had
+    /// one).
+    /// </summary>
+    /// <param name="exists">Whether the item existed at probe time.</param>
+    /// <param name="isDirectory">Whether the item is a directory. Meaningless (but still applied as given) when <paramref name="exists"/> is <see langword="false"/>.</param>
+    /// <returns>
+    /// <see langword="true"/> if <see cref="IsDirectory"/> actually changed as a result — the caller may
+    /// need to re-run a directory-dependent filter/sort (e.g. FoldersOnly, "folders first").
+    /// </returns>
+    public bool ApplyProbe(bool exists, bool isDirectory)
+    {
+        IsProbePending = false;
+
+        var directoryChanged = _isDirectory != isDirectory;
+        Exists = exists;
+        IsDirectory = isDirectory;
+
+        return directoryChanged;
+    }
+
+    /// <summary>
+    /// Updates this item in place after a rename whose success (and therefore, existence) is already
+    /// known from the rename service's own outcome (ADR-046) — the fs-touching counterpart of
+    /// <see cref="Relocate"/>. A rename can never change what a path resolves to on disk beyond its name,
+    /// so <see cref="IsDirectory"/> is left untouched and <see cref="Exists"/> is set unconditionally to
+    /// <see langword="true"/> — no <see cref="System.IO.File.Exists(string)"/>/<see cref="System.IO.Directory.Exists(string)"/>
+    /// call is made. Raises the exact same <see cref="PropertyChanged"/> set as <see cref="Relocate"/>.
+    /// </summary>
+    /// <param name="newPath">The item's new full path, as returned by the rename service.</param>
+    /// <param name="icon">
+    /// The item's icon after the rename — normally a cache hit for <paramref name="newPath"/>, or the
+    /// item's previous <see cref="Icon"/> kept as a placeholder-free interim value until a queued fetch
+    /// replaces it (ADR-046 D-5); never resolved here.
+    /// </param>
+    public void RelocateInPlace(string newPath, ImageSource? icon)
+    {
+        Path = newPath;
+        Icon = icon;
+        _displayName = null;
+
+        Exists = true;
 
         OnPropertyChanged(nameof(Path));
         OnPropertyChanged(nameof(Icon));

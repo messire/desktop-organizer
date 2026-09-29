@@ -161,6 +161,19 @@ public interface IGestureDiagnostics
     void ExistenceRefreshFailed(Guid? panelId, string exceptionType);
 
     /// <summary>
+    /// L-4 (review it.2, ADR-046 D-13): recorded when a real <c>IIconLoadQueue</c>/<c>IItemProbeQueue</c>
+    /// was supplied to <c>BaseViewModel</c>'s constructor, but the constructing thread had no live
+    /// <see cref="System.Threading.SynchronizationContext"/> to deliver through — so the instance silently
+    /// fell back to the synchronous legacy pipeline (<c>SynchronousIconLoadQueue</c>/
+    /// <c>SynchronousItemProbeQueue</c>) instead. Expected for a headless/test caller; in a production
+    /// process it usually means a panel ViewModel was constructed before the UI dispatcher's own
+    /// <see cref="System.Threading.SynchronizationContext"/> was installed.
+    /// </summary>
+    /// <param name="panelId">The panel's id, if already known at construction time (often not yet).</param>
+    /// <param name="component">Closed set: <c>"iconLoadQueue"</c> or <c>"itemProbeQueue"</c>.</param>
+    void IconPipelineSynchronousFallbackUsed(Guid? panelId, string component);
+
+    /// <summary>
     /// Recorded when the explicit "Align to workspace grid" command refuses to align a panel
     /// (P03 fix-cycle 1 final verification): no usable monitor, or the panel's size has not been measured
     /// yet. Replaces a <c>Console.Error</c> write nobody reads in a WinExe process.
@@ -226,4 +239,18 @@ public interface IGestureDiagnostics
     /// <c>"HeightResizeCommitted"</c>.
     /// </param>
     void SizingModeChanged(Guid? panelId, PanelSizingMode from, PanelSizingMode to, string reason);
+
+    /// <summary>
+    /// Recorded once per <c>ChildWindowViewModel.LoadFromModel</c>/Folder-Portal-resync rebuild (ADR-046
+    /// §6 item 10, manual-verify M-7.1) with the elapsed UI-thread time of rebuilding the whole item set —
+    /// building every <c>FileItem</c> (no file-system/shell access — D-5) plus the immediately following
+    /// content-filter/sort pass. This is exactly (and only) the UI-thread cost the "not longer than one
+    /// frame" metric cares about; icon loading and liveness probing themselves are asynchronous and never
+    /// block this rebuild (see <c>docs/PLANS/background-icon-loading.md</c> §8.4's "honest caveat" about
+    /// container generation/layout being a SEPARATE, non-ADR-046 cost this event does not capture).
+    /// </summary>
+    /// <param name="panelId">The panel's id.</param>
+    /// <param name="count">The number of items the panel holds after the rebuild.</param>
+    /// <param name="elapsedMicroseconds">Elapsed wall-clock time of the rebuild, in microseconds.</param>
+    void PanelItemsBuilt(Guid panelId, int count, long elapsedMicroseconds);
 }

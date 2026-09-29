@@ -1,11 +1,15 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Tests.Helpers;
+using DesktopOrganizer.UI.Controls;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
+using DesktopOrganizer.UI.Theming;
 using DesktopOrganizer.UI.ViewModels;
 using DesktopOrganizer.UI.Views;
 using Moq;
@@ -173,6 +177,52 @@ public class PanelCustomizeWindowClosingTests
     }
 
     /// <summary>
+    /// Backlog 1.x wave 2 review (M-G): <c>PanelCustomizeWindow</c>'s own Surface style/Opacity controls —
+    /// now the shared <see cref="SurfaceOptionsEditor"/> hosted inside
+    /// <see cref="PanelColorEditor.AdvancedExtraContent"/>, replacing ~70 lines this window used to
+    /// duplicate near-verbatim with <c>NewPanelDefaultsSection.xaml</c> — resolve
+    /// <see cref="AutomationProperties.LabeledByProperty"/> to the right label via ordinary
+    /// <c>ElementName</c> bindings, not the "Path=Children[0]" tree-position workaround the inline markup
+    /// this replaced needed (MC3093 no longer applies: <see cref="SurfaceOptionsEditor"/> has its own
+    /// dedicated compiled NameScope — see its own XAML remarks). Symmetric coverage for
+    /// <c>SizeEditorsWiringTests.NewPanelDefaultsSection_SurfaceControls_LabeledByResolvesToTheCorrectLabel</c>,
+    /// since both hosts wire the identical shared control.
+    /// </summary>
+    [Fact]
+    public void ColorEditor_AdvancedExtraContent_IsSharedSurfaceOptionsEditor_WithLabeledByResolvingCorrectly()
+    {
+        RunOnStaThread(() =>
+        {
+            using var harness = PanelCustomizeWindowHarness.Build();
+            harness.ShowOffscreen();
+
+            var surfaceEditor = Assert.IsType<SurfaceOptionsEditor>(harness.Window.ColorEditor.AdvancedExtraContent);
+
+            // The Advanced card's body only materializes its visual children once expanded (Settings.
+            // CardExpander's own ContentPresenter skips Measure while Collapsed) — same finding as
+            // PanelColorEditorTests/SizeEditorsWiringTests.
+            FindVisualDescendants<Expander>(harness.Window)
+                .Single(e => e.Style == (Style)Application.Current.Resources["Settings.CardExpander"])
+                .IsExpanded = true;
+            harness.Window.UpdateLayout();
+
+            var surfaceRadios = FindVisualDescendants<RadioButton>(surfaceEditor)
+                .Where(r => r.GroupName == "SurfaceOptionsEditor.SurfaceStyle")
+                .ToList();
+            Assert.Equal(3, surfaceRadios.Count);
+            foreach (var radio in surfaceRadios)
+            {
+                var label = Assert.IsType<TextBlock>(AutomationProperties.GetLabeledBy(radio));
+                Assert.Equal("Style", label.Text);
+            }
+
+            var opacitySlider = FindVisualDescendants<Slider>(surfaceEditor).Single(s => s.Minimum.Equals(SurfaceComposer.MinSurfaceOpacity));
+            var opacityLabel = Assert.IsType<TextBlock>(AutomationProperties.GetLabeledBy(opacitySlider));
+            Assert.Equal("Opacity", opacityLabel.Text);
+        });
+    }
+
+    /// <summary>
     /// Simulates typing <paramref name="text"/> into <paramref name="box"/> via a real
     /// <see cref="TextCompositionEventArgs"/> on <see cref="UIElement.PreviewTextInputEvent"/>/
     /// <see cref="UIElement.TextInputEvent"/> — same technique as <c>IntegerInputBoxTests.TypeText</c> and
@@ -202,6 +252,31 @@ public class PanelCustomizeWindowClosingTests
     }
 
     private static void RunOnStaThread(Action action) => StaTestRunner.Run(action);
+
+    /// <summary>
+    /// Recursively enumerates every VISUAL-tree descendant of <paramref name="root"/> assignable to
+    /// <typeparamref name="T"/> — needed here (unlike most of this file's own tests) because
+    /// <see cref="PanelColorEditor.AdvancedExtraContent"/> is a plain <see cref="object"/>
+    /// <see cref="DependencyProperty"/> displayed through a <see cref="ContentPresenter"/>: its content only
+    /// materializes visually once the Advanced <see cref="Expander"/> is expanded and a layout pass has run
+    /// (same finding as <c>PanelColorEditorTests</c>/<c>SizeEditorsWiringTests</c>).
+    /// </summary>
+    /// <typeparam name="T">The descendant type to find.</typeparam>
+    /// <param name="root">The visual-tree root to search from (exclusive of itself).</param>
+    private static IEnumerable<T> FindVisualDescendants<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+
+            if (child is T match) yield return match;
+
+            foreach (var nested in FindVisualDescendants<T>(child))
+                yield return nested;
+        }
+    }
 
     /// <summary>
     /// Owns the swapped-in <see cref="ResourceDictionary"/> for one <see cref="StaTestRunner.Run(Action)"/>
@@ -250,7 +325,12 @@ public class PanelCustomizeWindowClosingTests
                 Mock.Of<IColorPickerService>(),
                 Mock.Of<IAppSettings>());
 
-            var window = new PanelCustomizeWindow(viewModel, Mock.Of<IMonitorService>(), FakeDesktopScale.Uniform().Object);
+            var window = new PanelCustomizeWindow(
+                viewModel,
+                Mock.Of<IMonitorService>(),
+                FakeDesktopScale.Uniform().Object,
+                Mock.Of<IAppThemeService>(),
+                Mock.Of<IWindowFrameTheming>());
 
             return new PanelCustomizeWindowHarness(app, originalResources, ownsApplication, window, viewModel);
         }
@@ -297,10 +377,17 @@ public class PanelCustomizeWindowClosingTests
                          // this fixture's merge list has to include it too, unlike before ADR-042 (see the
                          // stale comment this replaced in PanelCustomizeWindow.xaml's own remarks).
                          "/Resources/Styles/Settings.xaml",
+
+                         // Design-system-1x phase 6.2a: Settings.SegmentedItem/.Compact's FocusVisualStyle
+                         // now resolves Theme.FocusVisual from here (App.xaml.cs mirrors this same order).
+                         "/Resources/Styles/Theme.Controls.xaml",
                      })
             {
                 merged.Add(new ResourceDictionary { Source = new Uri($"/DesktopOrganizer.UI;component{relativePath}", UriKind.Relative) });
             }
+
+            // Phase 6.1 (design-system-1x.md §3): see TestThemeResources.AppendTheme's own remarks.
+            TestThemeResources.AppendTheme(app, AppTheme.Light);
         }
     }
 }

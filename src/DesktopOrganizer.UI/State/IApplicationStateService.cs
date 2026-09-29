@@ -1,6 +1,7 @@
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.UI.Models;
+using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.State.Dto;
 
 namespace DesktopOrganizer.UI.State;
@@ -15,7 +16,7 @@ namespace DesktopOrganizer.UI.State;
 /// <remarks>
 /// <b>Single load, uniform pull on save (ADR-024 D-11/D-12).</b> <see cref="Load"/> is called exactly
 /// once, in <c>Program.Main</c>, before any of the four consumers exist (see the ordering on
-/// <see cref="IApplicationStateStore.Load"/>). <see cref="Panels"/>/<see cref="PageIds"/>/
+/// <see cref="IApplicationStateStore.Load"/>). <see cref="Panels"/>/<see cref="Pages"/>/
 /// <see cref="CurrentPageId"/>/<see cref="Snapshots"/>/<see cref="SystemIconsPanel"/> are that single
 /// load's result — each consumer reads its own slice once (at construction or its own <c>Load()</c>)
 /// and becomes the live in-memory owner of it from then on. <see cref="RequestSave"/>/
@@ -29,7 +30,7 @@ public interface IApplicationStateService
 {
     /// <summary>
     /// Loads and migrates the whole application-state document (ADR-024 D-7/D-9) exactly once,
-    /// populating <see cref="Panels"/>/<see cref="PageIds"/>/<see cref="CurrentPageId"/>/
+    /// populating <see cref="Panels"/>/<see cref="Pages"/>/<see cref="CurrentPageId"/>/
     /// <see cref="Snapshots"/>/<see cref="SystemIconsPanel"/>. Must be called, and complete, before
     /// <c>new App(...)</c> is constructed (ADR-024 D-11) and before any call to
     /// <see cref="RequestSave"/>/<see cref="SaveNow"/>. Never throws (fix-cycle 1,
@@ -58,8 +59,14 @@ public interface IApplicationStateService
     /// <summary>Every panel from the just-loaded document, already mapped to <see cref="ChildWindowModel"/>.</summary>
     IReadOnlyList<ChildWindowModel> Panels { get; }
 
-    /// <summary>Every page identifier from the just-loaded document. Always contains at least <c>"default"</c>.</summary>
-    IReadOnlyList<string> PageIds { get; }
+    /// <summary>
+    /// Every page from the just-loaded document — stable id plus optional stored display name
+    /// (ADR-043, docs/PLANS/page-display-names.md §3.4) — in on-disk order. Always contains at least
+    /// <c>"default"</c>. Replaces the pre-schema-v6 <c>PageIds</c> (<see cref="IReadOnlyList{T}"/> of
+    /// bare id strings); <see cref="IPageManager.Pages"/> still exposes the bare ids for
+    /// callers that only need those.
+    /// </summary>
+    IReadOnlyList<PageDescriptor> Pages { get; }
 
     /// <summary>The active page identifier from the just-loaded document. Always non-blank.</summary>
     string CurrentPageId { get; }

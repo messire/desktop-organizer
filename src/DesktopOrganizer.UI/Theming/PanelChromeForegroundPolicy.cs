@@ -83,14 +83,16 @@ public static class PanelChromeForegroundPolicy
     // ── Light-surface tokens (Q-1 variant B) — only reached when the panel's accent resolves to
     // SurfaceComposer.LightNeutralBase. ─────────────────────────────────────────────────────────────────
 
-    /// <summary>Light-surface "Primary" — byte-identical to <c>Color.Settings.TextPrimary</c> (<c>#1B1B1B</c>).</summary>
+    /// <summary>Light-surface "Primary" — byte-identical to the Settings window's own <c>Theme.Text.Primary</c> (<c>#1B1B1B</c>).</summary>
     public static readonly Color LightPrimary = Color.FromRgb(0x1B, 0x1B, 0x1B);
 
     /// <summary>
-    /// Light-surface "Secondary"/"Muted" — byte-identical to <c>Color.Settings.TextMuted</c> (<c>#666666</c>).
-    /// The Settings window's own light palette has no separate "secondary" vs. "muted" weight (only
-    /// <c>TextPrimary</c>/<c>TextMuted</c>), so both dark-surface weights collapse onto this single light
-    /// token rather than inventing an unreviewed third one.
+    /// Light-surface "Secondary"/"Muted" — byte-identical to the pre-6.1 Settings window's muted text
+    /// colour (<c>#666666</c>; superseded there by <c>Theme.Text.Secondary</c>, <c>#5F5F5F</c>, see
+    /// docs/PLANS/design-system-1x.md §2.2 — this Palette P token is unaffected and keeps the original
+    /// value). The Settings window's own light palette has no separate "secondary" vs. "muted" weight
+    /// (only <c>Primary</c>/<c>Secondary</c>), so both dark-surface weights collapse onto this single
+    /// light token rather than inventing an unreviewed third one.
     /// </summary>
     public static readonly Color LightSecondary = Color.FromRgb(0x66, 0x66, 0x66);
 

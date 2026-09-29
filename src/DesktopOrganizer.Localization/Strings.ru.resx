@@ -149,14 +149,32 @@
   <data name="Common_AccentColor_Label" xml:space="preserve">
     <value>Цвет акцента</value>
   </data>
-  <data name="Common_Advanced_Description" xml:space="preserve">
-    <value>Hex-значения и сброс</value>
+  <data name="Common_Color_Description" xml:space="preserve">
+    <value>Выберите пресет — цвет фона и текста задаются вместе.</value>
   </data>
-  <data name="Common_Advanced_Header" xml:space="preserve">
+  <data name="Common_Color_Header" xml:space="preserve">
+    <value>Цвет</value>
+  </data>
+  <data name="Common_ColorAdvanced_Description" xml:space="preserve">
+    <value>Свои цвета, поверхность и прозрачность</value>
+  </data>
+  <data name="Common_ColorAdvanced_Header" xml:space="preserve">
     <value>Дополнительно</value>
   </data>
   <data name="Common_Cancel_Button" xml:space="preserve">
     <value>Отмена</value>
+  </data>
+  <data name="Common_Close_A11y" xml:space="preserve">
+    <value>Закрыть</value>
+  </data>
+  <data name="Common_ColorPreset_Modified_A11y" xml:space="preserve">
+    <value>Цвет текста отличается от пресета — щёлкните, чтобы применить заново</value>
+  </data>
+  <data name="Common_ColorPreset_Swatch_A11y_Format" xml:space="preserve">
+    <value>{0}: цвет фона и текста</value>
+  </data>
+  <data name="Common_ColorPreset_TextSample_Label" xml:space="preserve">
+    <value>Аа</value>
   </data>
   <data name="Common_CustomColor_Button" xml:space="preserve">
     <value>Другой цвет…</value>
@@ -181,9 +199,6 @@
   </data>
   <data name="Common_LockedReason" xml:space="preserve">
     <value>Недоступно, пока расположение закреплено.</value>
-  </data>
-  <data name="Common_Mode_Description" xml:space="preserve">
-    <value>При смене режима подбирается подходящий цвет текста для этого акцента.</value>
   </data>
   <data name="Common_Mode_Header" xml:space="preserve">
     <value>Режим</value>
@@ -215,6 +230,18 @@
   <data name="Common_ResetToDefaults_Tooltip" xml:space="preserve">
     <value>Сбросить к значениям по умолчанию</value>
   </data>
+  <data name="Common_Severity_Error_A11y" xml:space="preserve">
+    <value>Ошибка</value>
+  </data>
+  <data name="Common_Severity_Info_A11y" xml:space="preserve">
+    <value>Сведения</value>
+  </data>
+  <data name="Common_Severity_Question_A11y" xml:space="preserve">
+    <value>Вопрос</value>
+  </data>
+  <data name="Common_Severity_Warning_A11y" xml:space="preserve">
+    <value>Предупреждение</value>
+  </data>
   <data name="Common_Surface_Header" xml:space="preserve">
     <value>Поверхность</value>
   </data>
@@ -226,6 +253,12 @@
   </data>
   <data name="Common_ValuePx_Format" xml:space="preserve">
     <value>{0} пкс</value>
+  </data>
+  <data name="Common_Yes_Button" xml:space="preserve">
+    <value>Да</value>
+  </data>
+  <data name="Common_No_Button" xml:space="preserve">
+    <value>Нет</value>
   </data>
   <data name="Enum_IconLayoutPolicy_FixedGap" xml:space="preserve">
     <value>Фиксированный интервал</value>
@@ -326,6 +359,21 @@
   <data name="Page_Default_DisplayName" xml:space="preserve">
     <value>Основная</value>
   </data>
+  <data name="Page_NewName_Format" xml:space="preserve">
+    <value>Страница {0}</value>
+  </data>
+  <data name="Page_Rename_Error_Duplicate" xml:space="preserve">
+    <value>Страница с таким именем уже есть.</value>
+  </data>
+  <data name="Page_Rename_Error_Empty" xml:space="preserve">
+    <value>Имя страницы не может быть пустым.</value>
+  </data>
+  <data name="Page_Rename_Error_InvalidCharacters" xml:space="preserve">
+    <value>Имя страницы не может содержать переносы строк и управляющие символы.</value>
+  </data>
+  <data name="Page_Rename_Error_TooLong_Format" xml:space="preserve">
+    <value>Имя страницы — не длиннее {0} символов.</value>
+  </data>
   <data name="Panel_NewTitle" xml:space="preserve">
     <value>Новая панель</value>
   </data>
@@ -421,6 +469,12 @@
   <data name="Tray_LayoutLockedTooltip" xml:space="preserve">
     <value>Расположение закреплено</value>
   </data>
+  <data name="Tray_NextPage" xml:space="preserve">
+    <value>Следующая страница</value>
+  </data>
+  <data name="Tray_Pages" xml:space="preserve">
+    <value>Страницы</value>
+  </data>
   <data name="Tray_Settings" xml:space="preserve">
     <value>Параметры</value>
   </data>
@@ -485,6 +539,30 @@
   <data name="Panel_Confirm_ApplySizingMode_Title" xml:space="preserve">
     <value>Применение режима размера ко всем панелям</value>
   </data>
+  <data name="Panel_CopiedToPage_Title" xml:space="preserve">
+    <value>Панель скопирована</value>
+  </data>
+  <data name="Panel_CopiedToPage_Message_Format" xml:space="preserve">
+    <value>Скопировано на страницу «{0}».</value>
+  </data>
+  <data name="Panel_Copy_Failed_Message" xml:space="preserve">
+    <value>Не удалось скопировать часть элементов. Ничего не изменено.</value>
+  </data>
+  <data name="Panel_Copy_Failed_Title" xml:space="preserve">
+    <value>Не удалось скопировать панель</value>
+  </data>
+  <data name="Panel_Copy_NoSpace_Message" xml:space="preserve">
+    <value>Недостаточно места на диске, чтобы скопировать панель.</value>
+  </data>
+  <data name="Panel_Copy_TooLarge_Message" xml:space="preserve">
+    <value>Элементы панели слишком велики для копирования.</value>
+  </data>
+  <data name="Panel_CopyTitle_Format" xml:space="preserve">
+    <value>{0} — копия</value>
+  </data>
+  <data name="Panel_CopyTitle_Numbered_Format" xml:space="preserve">
+    <value>{0} — копия ({1})</value>
+  </data>
   <data name="Panel_Header_More" xml:space="preserve">
     <value>Ещё</value>
   </data>
@@ -506,6 +584,9 @@
   <data name="Panel_Menu_ContentHeader" xml:space="preserve">
     <value>Содержимое</value>
   </data>
+  <data name="Panel_Menu_CopyToPage" xml:space="preserve">
+    <value>Копировать на страницу</value>
+  </data>
   <data name="Panel_Menu_Customize" xml:space="preserve">
     <value>Настроить панель…</value>
   </data>
@@ -514,6 +595,9 @@
   </data>
   <data name="Panel_Menu_FitToContent_Tooltip" xml:space="preserve">
     <value>Изменяет высоту панели, чтобы вместить текущие значки (только вид «Сетка»).</value>
+  </data>
+  <data name="Panel_Menu_MoveToPage" xml:space="preserve">
+    <value>Переместить на страницу</value>
   </data>
   <data name="Panel_Menu_PanelSizing" xml:space="preserve">
     <value>Размер панели</value>
@@ -532,6 +616,12 @@
   </data>
   <data name="Panel_Menu_Size_Tooltip" xml:space="preserve">
     <value>Изменяет размер панели на заданный. Отключает «Автоподбор по содержимому». Недоступно, пока панель свёрнута. Удерживайте Alt при перетаскивании края для изменения размера вне сетки; при отпускании панель привязывается к сетке рабочей области.</value>
+  </data>
+  <data name="Panel_MovedToPage_Title" xml:space="preserve">
+    <value>Панель перемещена</value>
+  </data>
+  <data name="Panel_MovedToPage_Message_Format" xml:space="preserve">
+    <value>Перемещено на страницу «{0}».</value>
   </data>
   <data name="Panel_SystemIcons_Title" xml:space="preserve">
     <value>Панель системных значков</value>
@@ -612,8 +702,8 @@
   <data name="Settings_Backup_Delete_Button" xml:space="preserve">
     <value>Удалить</value>
   </data>
-  <data name="Settings_Backup_Delete_Format" xml:space="preserve">
-    <value>Удалить «{0}»</value>
+  <data name="Settings_Backup_More_A11y_Format" xml:space="preserve">
+    <value>Другие действия со снапшотом {0}</value>
   </data>
   <data name="Settings_Backup_LayoutSnapshots_Description" xml:space="preserve">
     <value>Сохраняет положение, размер и оформление каждой панели, чтобы позже восстановить именно это расположение.</value>
@@ -641,6 +731,12 @@
   </data>
   <data name="Settings_General_Autostart_Header" xml:space="preserve">
     <value>Запускать при старте Windows</value>
+  </data>
+  <data name="Settings_General_DesktopIcons_Description" xml:space="preserve">
+    <value>Показывает или скрывает значки рабочего стола Windows. При закрытии приложения они возвращаются.</value>
+  </data>
+  <data name="Settings_General_DesktopIcons_Header" xml:space="preserve">
+    <value>Показывать значки рабочего стола</value>
   </data>
   <data name="Settings_General_NativeResize_Description" xml:space="preserve">
     <value>Изменяет размер панелей через системный цикл изменения размера вместо встроенных маркеров. Действует только на панели, созданные после перезапуска приложения.</value>
@@ -723,9 +819,6 @@
   <data name="Settings_NewPanelDefaults_IconLayout_Description" xml:space="preserve">
     <value>Используют ли новые панели фиксированный интервал между значками или растягивают ряд на всю ширину панели.</value>
   </data>
-  <data name="Settings_NewPanelDefaults_Opacity_Label" xml:space="preserve">
-    <value>Непрозрачность</value>
-  </data>
   <data name="Settings_NewPanelDefaults_PanelGeometry_Description" xml:space="preserve">
     <value>Привязываются ли новые панели к сетке рабочей области (По сетке) или изменяют размер и перемещаются свободно (Произвольная).</value>
   </data>
@@ -734,9 +827,6 @@
   </data>
   <data name="Settings_NewPanelDefaults_ResetColors_Description" xml:space="preserve">
     <value>Вернуть встроенные цвета</value>
-  </data>
-  <data name="Settings_NewPanelDefaults_SurfaceStyle_Description" xml:space="preserve">
-    <value>Стекло лучше смотрится на тёмных обоях; для светлых обоев более читаемы Сплошной или Акцентный стиль.</value>
   </data>
   <data name="Settings_NewPanelDefaults_TakeFromSelected_Description" xml:space="preserve">
     <value>Копирует панель, выбранную в разделе «Панели», во все параметры выше. Сначала выберите там панель.</value>
@@ -753,14 +843,20 @@
   <data name="Settings_Pages_CurrentBadge" xml:space="preserve">
     <value>(текущая)</value>
   </data>
+  <data name="Settings_Pages_Description" xml:space="preserve">
+    <value>Чтобы переименовать страницу, дважды щёлкните имя или нажмите F2.</value>
+  </data>
   <data name="Settings_Pages_MakeCurrent_Button" xml:space="preserve">
     <value>Сделать текущей</value>
   </data>
   <data name="Settings_Pages_MakeCurrent_Format" xml:space="preserve">
     <value>Сделать «{0}» текущей</value>
   </data>
-  <data name="Settings_Pages_Remove_Format" xml:space="preserve">
-    <value>Удалить «{0}»</value>
+  <data name="Settings_Pages_NameBox_AutomationName" xml:space="preserve">
+    <value>Имя страницы</value>
+  </data>
+  <data name="Settings_Pages_More_A11y_Format" xml:space="preserve">
+    <value>Другие действия со страницей {0}</value>
   </data>
   <data name="Settings_Panels_AddPanel_Button" xml:space="preserve">
     <value>Добавить панель</value>
@@ -774,6 +870,9 @@
   <data name="Settings_Panels_AlignAll_Header" xml:space="preserve">
     <value>Выровнять все панели по сетке</value>
   </data>
+  <data name="Settings_Panels_CopyToPage_Button" xml:space="preserve">
+    <value>Копировать на страницу</value>
+  </data>
   <data name="Settings_Panels_Customize_Button" xml:space="preserve">
     <value>Настроить…</value>
   </data>
@@ -781,7 +880,13 @@
     <value>На этой странице пока нет панелей. Нажмите «Добавить панель» или проведите правой кнопкой мыши по рабочему столу, чтобы нарисовать одну.</value>
   </data>
   <data name="Settings_Panels_MoveToPage_Button" xml:space="preserve">
-    <value>Переместить на страницу ▾</value>
+    <value>Переместить на страницу</value>
+  </data>
+  <data name="Settings_Panels_Remove_MenuItem" xml:space="preserve">
+    <value>Удалить панель…</value>
+  </data>
+  <data name="Settings_Panels_OnThisPage_Description" xml:space="preserve">
+    <value>Правый клик по панели: настроить, переместить или скопировать на другую страницу, удалить.</value>
   </data>
   <data name="Settings_Panels_OnThisPage_Header" xml:space="preserve">
     <value>Панели на этой странице</value>
@@ -881,10 +986,10 @@
   <data name="Customize_SortMode_Manual_Description" xml:space="preserve">
     <value>Вручную сохраняет порядок, который вы задали сами; По имени сортирует по алфавиту.</value>
   </data>
-  <data name="Customize_SurfaceOpacity_Header" xml:space="preserve">
+  <data name="Common_SurfaceOpacity_Header" xml:space="preserve">
     <value>Непрозрачность</value>
   </data>
-  <data name="Customize_SurfaceStyle_GlassHint_Description" xml:space="preserve">
+  <data name="Common_SurfaceStyle_GlassHint_Description" xml:space="preserve">
     <value>Стекло лучше смотрится на тёмных обоях; для светлых обоев более читаемы Сплошной или Акцентный стиль.</value>
   </data>
   <data name="Customize_Title_Header" xml:space="preserve">

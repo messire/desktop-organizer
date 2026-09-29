@@ -10,6 +10,92 @@ tracked — `0.1.0` is the first tagged history point.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.8.0] — 2026-09-30
+
+Backlog 1.x, unified design system (ADR-047), 2026-09-30:
+
+- **Changed:** the app now follows Windows' own light/dark app mode for its own chrome — Settings, the
+  "Customize panel…" window, every right-click menu (a panel's own header menu, the tray), confirmation and
+  input dialogs, and window title bars all switch between light and dark together with Windows, live,
+  without restarting. Individual panels' own colours (set per-panel or as defaults for new panels) are
+  unchanged — this only affects the app's own interface chrome. High Contrast themes are also supported,
+  built directly from Windows' own high-contrast colours.
+- **Changed:** a single, consistent visual style now applies everywhere across the interface — Settings and
+  its eight sections, the "Customize panel…" window, every context menu (including a panel's own
+  right-click menu, previously always dark regardless of Windows' theme), tooltips, and the confirmation/
+  input dialogs described below. Text size, spacing, colours, and hover/pressed/disabled/selected states are
+  now the same system throughout, and text is never smaller than Windows' own system text size.
+- **Changed:** confirmation dialogs (deleting a panel or page, "Align all panels to grid", "Apply to all
+  panels…") and the "Save snapshot as…" text prompt now use a new, themed dialog window instead of a plain
+  system message box; for a warning about something that can't be undone, pressing Enter now safely
+  cancels (answers "No") instead of confirming — the visually highlighted button is still the one that
+  confirms, so mouse users see no change. Successful "move/copy panel to page" no longer interrupts you
+  with a pop-up window at all — it's now a small, non-blocking status message inside the Settings window
+  that fades on its own.
+- **Changed:** the "Panels" list in Settings replaces its row of five buttons (which used to wrap to two
+  lines in Russian) with three: Add, Customize…, and a "More" button holding Move/Copy to page and Remove.
+  The tray's own right-click menu now follows Windows' light/dark app mode too, drawn by the app itself
+  instead of the previous fixed light look.
+- **Fixed:** a submenu inside a panel's own right-click menu ("Move to page ▸", etc.) used to render with
+  barely-readable light-on-light text; several other low-contrast spots (the selected item in the Settings
+  sidebar, a toggle's "off" track, warning text on a couple of Settings pages) are also corrected.
+- **Added:** a panel's own shortcut-icon right-click menu, and a window's system menu, can now also render
+  in Windows' dark classic menu style when the app itself is in dark mode (Windows 10 1903+/Windows 11);
+  this is the one native, Explorer-owned menu surface the app could reach — the "Open with"/"Send to"/
+  third-party entries inside it are unaffected, and menus drawn by a shell extension itself may still be
+  light, the same limitation Explorer's own equivalent menu has.
+- Known, accepted gap for this release: a handful of longer help/description texts have not yet been
+  shortened to the new, shorter length guideline, and a few settings cards have not yet been moved onto the
+  new shared card style — tracked as follow-up, not a blocker.
+
+Backlog 1.x, background icon loading (ADR-046), 2026-09-30:
+
+- **Changed:** panel icons now load in the background instead of on the UI thread — panels and the tray
+  stay responsive immediately, even at startup with a large Folder Portal or a panel full of shortcuts
+  pointing at an unreachable network share. Each item shows a generic placeholder, then (usually within a
+  frame or two) a type icon, then its real icon once fetched; nothing about how icons look or are cached
+  changed.
+- **Fixed:** a shortcut whose target lives on an unreachable network share, a disconnected mapped drive
+  letter, or a slow third-party shell extension (archiver, cloud-sync client) no longer stalls the whole
+  panel or the app's startup — only that network location is temporarily skipped, and it recovers
+  automatically once reachable again.
+- **Changed:** the background "does this file still exist" check (every ~3 seconds) now runs off the UI
+  thread too, so it no longer causes a brief stutter on a panel with many items or a slow network location.
+- **Fixed:** two startup/edit paths that could briefly touch a network share while resolving panel item
+  paths (loading a panel, reconciling after a shell command) now check the app's own managed-file list
+  first and only touch the network when genuinely necessary.
+
+Backlog 1.x, UX polish wave 1 (ADR-043/044/045, ADR-042 amendments), 2026-09-29:
+
+- **Added:** pages now have their own editable display name, separate from their internal id (Settings →
+  Pages: rename via button, double-click, or F2). An unnamed default page still shows a localized name
+  that follows the interface language; a renamed page keeps its own name regardless of language.
+- **Added:** a "Pages" submenu at the top of the tray's right-click menu, listing every page by its
+  display name with a checkmark on the current one, plus a "Next page" entry; it stays in sync as pages
+  are added, removed, renamed, or the interface language changes.
+- **Added:** "Copy to page" next to "Move to page" (in both a panel's own header menu and the Settings
+  Panels list) — creates a fully independent duplicate of a panel, including its own copies of any files
+  you had dragged into it, on any page (including its own page, offset so it doesn't land exactly on top
+  of the original). Deleting one copy never affects the other.
+- **Changed:** double-clicking the tray icon now cycles to the next page (wrapping back to the first)
+  instead of opening/closing the Settings window; Settings still opens from the tray's "Settings" menu
+  item.
+- **Changed:** a colour preset now sets the panel's text colour together with its background colour —
+  each of the 10 coloured presets carries its own readable text tint instead of the same white for all of
+  them; clicking a preset again re-applies its own text colour even if it had drifted.
+- **Changed:** the panel colour editor (Customize panel… and Settings → New panel defaults) is simplified
+  to a colour-preset grid plus a light/dark switch as the main, one-click path; custom hex colours,
+  surface style, opacity, and reset are still there, just tucked under a collapsed "More options" section.
+- **Upgrade notes:** this release raises the internal settings file format to schema version 6 (adds
+  per-page display names). **Downgrading to 0.7.0 or earlier after running this version is not supported
+  without manual recovery** — an older build will start with an empty, read-only session instead of your
+  panels (nothing is deleted; the file itself is left untouched). To go back: close the app, and manually
+  restore the automatic pre-upgrade snapshot at `%LOCALAPPDATA%\DesktopOrganizer\State\application-state.premigration-v5.json`
+  over `application-state.json` (this captures everything as it was right before upgrading to this
+  version, not anything changed afterwards).
+
 Release polish, colour and size controls (ADR-042, redesigned same day), 2026-09-28:
 
 - The panel Customize window and Settings → New panel defaults now use an explicit Light/Dark mode switch,
@@ -168,7 +254,8 @@ and inline title rename for panels; file launching and a file context menu; grid
 embedding via the `WorkerW` technique; a dynamic settings window with add/remove panel; centralized NuGet
 package version management.
 
-[Unreleased]: https://github.com/messire/DesktopOrganizer/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/messire/DesktopOrganizer/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/messire/DesktopOrganizer/releases/tag/v0.8.0
 [0.6.1]: https://github.com/messire/DesktopOrganizer/releases/tag/v0.6.1
 [0.6.0]: https://github.com/messire/DesktopOrganizer/releases/tag/v0.6.0
 [0.5.1]: https://github.com/messire/DesktopOrganizer/releases/tag/v0.5.1

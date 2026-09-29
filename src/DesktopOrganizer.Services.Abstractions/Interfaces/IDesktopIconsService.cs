@@ -6,6 +6,19 @@ namespace DesktopOrganizer.Services.Abstractions;
 public interface IDesktopIconsService
 {
     /// <summary>
+    /// Raised after this service changed the desktop icons' visibility through
+    /// <see cref="SetIconsVisible"/>, <see cref="Toggle"/> or a successful
+    /// <see cref="ReapplyDesiredVisibility"/>.
+    /// </summary>
+    /// <remarks>
+    /// Lets every UI mirror of the state (the tray's "Show desktop icons" checkmark, the settings
+    /// window's toggle) stay in sync no matter which entry point changed it — tray, settings, the
+    /// desktop double-click gesture or Explorer-restart recovery. Raised on the caller's thread.
+    /// Not raised for changes made outside this application (Explorer's own "Show desktop icons").
+    /// </remarks>
+    event EventHandler? VisibilityChanged;
+
+    /// <summary>
     /// Whether the desktop icons are currently visible.
     /// </summary>
     /// <remarks>

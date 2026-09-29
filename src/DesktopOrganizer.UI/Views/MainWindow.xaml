@@ -6,31 +6,56 @@
         xmlns:models="clr-namespace:DesktopOrganizer.UI.Models"
         xmlns:settings="clr-namespace:DesktopOrganizer.UI.Views.Settings"
         xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+        xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
+        xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
         mc:Ignorable="d"
         Title="{loc:Loc Settings_Window_Title}"
         Icon="/Resources/app.ico"
-        Height="560" Width="720"
+        Height="560" Width="760"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="CanMinimize">
+        ResizeMode="CanMinimize"
+        Background="{DynamicResource Theme.Surface.Window}">
     <!--
         Settings-window redesign (docs/prompts/settings-window-redesign.md, D-2): two-column shell —
         a sidebar ListBox of SettingsSectionInfo entries (Models/SettingsSection.cs) on the left, and a
         ContentControl on the right that switches which Views/Settings/*.xaml UserControl is shown based
         on MainWindowViewModel.SelectedSection. Every section UserControl inherits this Window's own
         DataContext (MainWindowViewModel) — Content="{Binding}" below passes it straight through.
+
+        Phase 6.2b (design-system-1x.md §2.5/§3, ADR-047 D-1): Theme.Implicit.xaml merged into THIS
+        window's own Window.Resources (never Application.Resources — see that file's own remarks) is what
+        makes every un-styled stock Button/CheckBox/ComboBox/TextBox/Slider/ScrollBar/ListBox/ListView in
+        every Views/Settings/*.xaml section pick up Theme.* automatically, without each occurrence needing
+        an explicit Style="{StaticResource Theme.…}". Window width 720→760 / sidebar column 190→220 (H-4):
+        the sidebar's own nav text moved from a fixed 12 DIP literal to Font.Size.Body (M+2) as part of
+        this phase's inline-literal cleanup (Settings.xaml), and ru-RU nav labels plus the Panels command
+        row's 3 buttons needed the extra room at that size — neither dimension is persisted (not in
+        IAppSettings), so this is a pure XAML default, freely adjustable.
     -->
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/Resources/Styles/Theme.Implicit.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Phase 6.3 (design-system-1x.md §2.8, ADR-047 D-9): only this window's own InfoBar host
+                 (below) needs this bridge — same "consumer declares its own instance" convention
+                 PanelCustomizeWindow.xaml's own local EnumDisplayName converter already uses. -->
+            <conv:StatusSeverityToInfoBarSeverityConverter x:Key="StatusSeverityToInfoBarSeverity"/>
+        </ResourceDictionary>
+    </Window.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="190"/>
+            <ColumnDefinition Width="220"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
         <!-- Sidebar -->
-        <DockPanel Grid.Column="0" Background="{StaticResource Brush.Settings.ChromeBackground}">
+        <DockPanel Grid.Column="0" Background="{DynamicResource Theme.Surface.Window}">
             <!-- "About" is pinned to the bottom as a standalone ToggleButton, not a second ListBox item
                  (see Settings.xaml's remarks on Settings.SidebarAboutToggle for why). -->
             <Border DockPanel.Dock="Bottom"
-                    BorderBrush="{StaticResource Brush.Settings.ChromeBorder}"
+                    BorderBrush="{DynamicResource Theme.Stroke.Divider}"
                     BorderThickness="0,1,0,0">
                 <ToggleButton Style="{StaticResource Settings.SidebarAboutToggle}"
                               Content="{Binding AboutSectionInfo}"
@@ -54,9 +79,40 @@
         </DockPanel>
 
         <!-- Content — switches by SelectedSection via DataTriggers (D-2). Content="{Binding}" hands the
-             same MainWindowViewModel down to whichever section UserControl is shown. -->
-        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
-            <ContentControl Content="{Binding}" Margin="20" Focusable="False">
+             same MainWindowViewModel down to whichever section UserControl is shown.
+
+             Phase 6.3 (design-system-1x.md §2.8, ADR-047 D-9): the InfoBar host sits ABOVE the
+             ScrollViewer (its own row, not inside it) so a non-blocking status — MainWindowViewModel.Status,
+             set by MovePanelToPage/CopyPanelToPage — stays visible regardless of how far the section below
+             is scrolled. Collapsed whenever Status.Current is null (nothing to show); the DataTrigger
+             checks the record itself (not one of its properties) so a binding chain through a null Current
+             never needs a null-safe converter of its own — same "compare against {x:Null}" convention
+             PanelsSection.xaml's own pre-6.3 status line used. -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <controls:InfoBar Grid.Row="0"
+                               Margin="20,20,20,0"
+                               Severity="{Binding Status.Current.Severity, Converter={StaticResource StatusSeverityToInfoBarSeverity}}"
+                               Title="{Binding Status.Current.Title}"
+                               Message="{Binding Status.Current.Message}"
+                               CloseCommand="{Binding Status.DismissCommand}">
+                <controls:InfoBar.Style>
+                    <Style TargetType="controls:InfoBar" BasedOn="{StaticResource {x:Type controls:InfoBar}}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Status.Current}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </controls:InfoBar.Style>
+            </controls:InfoBar>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <ContentControl Content="{Binding}" Margin="20" Focusable="False">
                 <ContentControl.Style>
                     <Style TargetType="ContentControl">
                         <Style.Triggers>
@@ -119,7 +175,8 @@
                         </Style.Triggers>
                     </Style>
                 </ContentControl.Style>
-            </ContentControl>
-        </ScrollViewer>
+                </ContentControl>
+            </ScrollViewer>
+        </Grid>
     </Grid>
 </Window>

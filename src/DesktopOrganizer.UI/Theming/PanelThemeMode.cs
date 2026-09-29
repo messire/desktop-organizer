@@ -37,7 +37,7 @@ public enum PanelThemeMode
 /// </summary>
 public static class PanelThemeRules
 {
-    /// <summary>Default text colour for <see cref="PanelThemeMode.Dark"/> — byte-identical to this app's long-standing default (<c>Color.Text.Primary</c>/<c>PanelSurfaceBrushConverter.DefaultTextColor</c>'s own hex form, just fully opaque white here rather than <c>#DDDDDD</c>, matching every <see cref="PanelColorPreset.DarkModeTextHex"/>).</summary>
+    /// <summary>Default text colour for <see cref="PanelThemeMode.Dark"/> — byte-identical to this app's long-standing default (<c>Color.Text.Primary</c>/<c>PanelSurfaceBrushConverter.DefaultTextColor</c>'s own hex form, just fully opaque white here rather than <c>#DDDDDD</c>) — used for a CUSTOM (non-preset) accent's Dark-mode text; each preset's own <see cref="PanelColorPreset.DarkModeTextHex"/> is its own tint since backlog 1.x item 4 (§4.2a), not necessarily this value.</summary>
     public const string DefaultDarkModeText = "#FFFFFF";
 
     /// <summary>Default text colour for <see cref="PanelThemeMode.Light"/>.</summary>

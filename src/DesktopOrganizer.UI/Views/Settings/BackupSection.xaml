@@ -4,69 +4,86 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
              mc:Ignorable="d"
              d:DesignWidth="460">
+    <UserControl.Resources>
+        <!-- Per-row DropDownButton lives inside the per-snapshot GridViewColumn.CellTemplate, so — same
+             reason as PagesSection.xaml's own Pages.RowMoreButton — its Command bindings need the
+             Tag-bridge pattern rather than RelativeSource AncestorType=UserControl. -->
+        <!-- UX-MEDIUM fix (6.5 review round) — see PagesSection.xaml's identical Pages.RowMoreButton
+             remarks: this row's Content is already the "⋯" overflow glyph, so Theme.Button.Overflow
+             (ShowChevron="False") drops the redundant second chevron the plain DropDownButton style drew
+             next to it. -->
+        <Style x:Key="Backup.RowMoreButton" TargetType="controls:DropDownButton" BasedOn="{StaticResource Theme.Button.Overflow}"/>
+    </UserControl.Resources>
     <StackPanel>
         <TextBlock Text="{loc:Loc Settings_Nav_Backup}" Style="{StaticResource Settings.PageHeader}"/>
 
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <StackPanel>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                        <TextBlock Text="{loc:Loc Settings_Backup_LayoutSnapshots_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                        <TextBlock Style="{StaticResource Settings.CardDescription}"
-                                   Text="{loc:Loc Settings_Backup_LayoutSnapshots_Description}"/>
-                    </StackPanel>
-                    <Button Grid.Column="1" Content="{loc:Loc Settings_Backup_SaveSnapshot_Button}" Padding="12,6" VerticalAlignment="Center"
-                            Command="{Binding LayoutSnapshots.CaptureSnapshotCommand}"/>
-                </Grid>
-
-                <Border BorderBrush="{StaticResource Brush.Settings.CardBorder}" BorderThickness="1"
-                        CornerRadius="{StaticResource Radius.Control}" Height="200" Margin="0,10,0,0">
-                    <ListView ItemsSource="{Binding LayoutSnapshots.Snapshots}" BorderThickness="0" SelectionMode="Single"
-                              AutomationProperties.Name="{loc:Loc Settings_Backup_LayoutSnapshots_Header}">
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="{loc:Loc Settings_Backup_NameColumn_Header}" Width="190">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                                <GridViewColumn Header="{loc:Loc Settings_Backup_DateColumn_Header}" Width="120">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{loc:LocBinding CreatedAt, FormatKey=Settings_Backup_CreatedAt_Format}"
-                                                       VerticalAlignment="Center" Foreground="{StaticResource Brush.Settings.TextMuted}"/>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                                <GridViewColumn Header="" Width="140">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Orientation="Horizontal">
-                                                <Button Content="{loc:Loc Settings_Backup_Restore_Button}" Padding="6,3" Margin="0,0,4,0" FontSize="11"
-                                                        AutomationProperties.Name="{loc:LocBinding Name, FormatKey=Settings_Backup_Restore_Format}"
-                                                        Command="{Binding DataContext.LayoutSnapshots.RestoreSnapshotCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                        CommandParameter="{Binding Id}"/>
-                                                <Button Content="{loc:Loc Settings_Backup_Delete_Button}" Padding="6,3" FontSize="11"
-                                                        AutomationProperties.Name="{loc:LocBinding Name, FormatKey=Settings_Backup_Delete_Format}"
-                                                        Command="{Binding DataContext.LayoutSnapshots.DeleteSnapshotCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                        CommandParameter="{Binding Id}"/>
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
-                </Border>
-            </StackPanel>
-        </Border>
+        <controls:SettingsCard Header="{loc:Loc Settings_Backup_LayoutSnapshots_Header}"
+                                Description="{loc:Loc Settings_Backup_LayoutSnapshots_Description}">
+            <controls:SettingsCard.ActionContent>
+                <Button Content="{loc:Loc Settings_Backup_SaveSnapshot_Button}" VerticalAlignment="Center"
+                        Command="{Binding LayoutSnapshots.CaptureSnapshotCommand}"/>
+            </controls:SettingsCard.ActionContent>
+            <Border BorderBrush="{DynamicResource Theme.Stroke.Card}" BorderThickness="1"
+                    CornerRadius="{StaticResource Radius.Control}" Height="200">
+                <ListView Style="{StaticResource Theme.ListView}"
+                          ItemsSource="{Binding LayoutSnapshots.Snapshots}" BorderThickness="0" SelectionMode="Single"
+                          AutomationProperties.Name="{loc:Loc Settings_Backup_LayoutSnapshots_Header}">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="{loc:Loc Settings_Backup_NameColumn_Header}" Width="190">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="{loc:Loc Settings_Backup_DateColumn_Header}" Width="120">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{loc:LocBinding CreatedAt, FormatKey=Settings_Backup_CreatedAt_Format}"
+                                                   VerticalAlignment="Center" Foreground="{DynamicResource Theme.Text.Secondary}"/>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                            <GridViewColumn Header="" Width="110">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <!-- Variant A language (§2.7 D-8): a subtle "Restore" (the
+                                             non-destructive, most-used action) + "⋯" for Delete, matching
+                                             PagesSection's row shape. -->
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button Content="{loc:Loc Settings_Backup_Restore_Button}" Margin="0,0,4,0"
+                                                    Style="{StaticResource Theme.Button.Subtle}"
+                                                    AutomationProperties.Name="{loc:LocBinding Name, FormatKey=Settings_Backup_Restore_Format}"
+                                                    Command="{Binding DataContext.LayoutSnapshots.RestoreSnapshotCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding Id}"/>
+                                            <controls:DropDownButton Style="{StaticResource Backup.RowMoreButton}"
+                                                                      Content="{StaticResource Icon.Glyph.Overflow}"
+                                                                      FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons"
+                                                                      AutomationProperties.Name="{loc:LocBinding Name, FormatKey=Settings_Backup_More_A11y_Format}"
+                                                                      Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                                <controls:DropDownButton.Menu>
+                                                    <ContextMenu Style="{StaticResource Theme.ContextMenu}">
+                                                        <ContextMenu.Resources>
+                                                            <Style TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}"/>
+                                                        </ContextMenu.Resources>
+                                                        <MenuItem Header="{loc:Loc Settings_Backup_Delete_Button}"
+                                                                  Command="{Binding PlacementTarget.Tag.LayoutSnapshots.DeleteSnapshotCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                  CommandParameter="{Binding Id}"/>
+                                                    </ContextMenu>
+                                                </controls:DropDownButton.Menu>
+                                            </controls:DropDownButton>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </Border>
+        </controls:SettingsCard>
     </StackPanel>
 </UserControl>

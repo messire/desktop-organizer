@@ -118,7 +118,7 @@ public class ApplicationStateServiceTests
     }
 
     /// <summary>
-    /// Verifies that when the store's payload has no pages section, <see cref="ApplicationStateService.PageIds"/>
+    /// Verifies that when the store's payload has no pages section, <see cref="ApplicationStateService.Pages"/>
     /// and <see cref="ApplicationStateService.CurrentPageId"/> fall back to the single "default" page.
     /// </summary>
     [Fact]
@@ -129,27 +129,34 @@ public class ApplicationStateServiceTests
 
         sut.Load();
 
-        Assert.Equal(["default"], sut.PageIds);
+        Assert.Equal([new PageDescriptor("default", null)], sut.Pages);
         Assert.Equal("default", sut.CurrentPageId);
     }
 
     /// <summary>
-    /// Verifies that a pages section with explicit ids and a current page id is applied verbatim to
-    /// <see cref="ApplicationStateService.PageIds"/> and <see cref="ApplicationStateService.CurrentPageId"/>.
+    /// Verifies that a schema-v6 pages section (<c>items</c>) with explicit ids/names and a current page
+    /// id is applied verbatim to <see cref="ApplicationStateService.Pages"/> and
+    /// <see cref="ApplicationStateService.CurrentPageId"/>.
     /// </summary>
     [Fact]
     public void Load_PopulatesPageIdsAndCurrentPageId()
     {
         var payload = new JsonObject
         {
-            ["pages"] = new JsonObject { ["ids"] = new JsonArray("default", "work"), ["currentPageId"] = "work" },
+            ["pages"] = new JsonObject
+            {
+                ["items"] = new JsonArray(
+                    new JsonObject { ["id"] = "default" },
+                    new JsonObject { ["id"] = "work", ["name"] = "work" }),
+                ["currentPageId"] = "work",
+            },
         };
         _storeMock.Setup(s => s.Load()).Returns(MakeLoadResult(StateLoadStatus.Loaded, payload));
         var sut = BuildSut();
 
         sut.Load();
 
-        Assert.Equal(["default", "work"], sut.PageIds);
+        Assert.Equal([new PageDescriptor("default", null), new PageDescriptor("work", "work")], sut.Pages);
         Assert.Equal("work", sut.CurrentPageId);
     }
 
@@ -366,7 +373,7 @@ public class ApplicationStateServiceTests
         var exception = Record.Exception(() => sut.Load());
 
         Assert.Null(exception);
-        Assert.Equal(["default"], sut.PageIds);
+        Assert.Equal([new PageDescriptor("default", null)], sut.Pages);
         Assert.Equal("default", sut.CurrentPageId);
     }
 
@@ -588,7 +595,7 @@ public class ApplicationStateServiceTests
         sut.Load();
         sut.MarkConsumersReady();
 
-        _pageManagerMock.SetupGet(p => p.Pages).Returns(["default", "work"]);
+        _pageManagerMock.SetupGet(p => p.PageDescriptors).Returns([new PageDescriptor("default", null), new PageDescriptor("work", "work")]);
         _pageManagerMock.SetupGet(p => p.CurrentPage).Returns("work");
         _layoutSnapshotServiceMock.SetupGet(l => l.Snapshots).Returns([new LayoutSnapshot { Id = "snap-1" }]);
         var iconsModel = new SystemIconsPanelModel { IsEnabled = true };
@@ -803,7 +810,7 @@ public class ApplicationStateServiceTests
     {
         _windowManagerMock.Setup(w => w.SyncAllWindowsToModels());
         _windowManagerMock.Setup(w => w.GetAllChildWindows()).Returns([]);
-        _pageManagerMock.SetupGet(p => p.Pages).Returns(["default"]);
+        _pageManagerMock.SetupGet(p => p.PageDescriptors).Returns([new PageDescriptor("default", null)]);
         _pageManagerMock.SetupGet(p => p.CurrentPage).Returns("default");
         _layoutSnapshotServiceMock.SetupGet(l => l.Snapshots).Returns([]);
         _systemIconsPanelManagerMock.SetupGet(s => s.Model).Returns(new SystemIconsPanelModel());

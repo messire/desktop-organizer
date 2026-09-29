@@ -1,3 +1,4 @@
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using DesktopOrganizer.Core;
@@ -64,6 +65,14 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// </summary>
     private static readonly TimeSpan IconResizeDebounceWindow = TimeSpan.FromMilliseconds(200);
 
+    /// <summary>
+    /// Debounce window for <see cref="OnProbeResultsApplied"/>'s content-filter re-run (ADR-046 §6):
+    /// a batch of background icon-load results carrying a directory-flag flip can arrive several times in
+    /// quick succession while a large portal keeps loading, and each one would otherwise trigger its own
+    /// full <see cref="ApplyFilterAndSort"/>.
+    /// </summary>
+    private static readonly TimeSpan ProbeRefilterDebounceWindow = TimeSpan.FromMilliseconds(100);
+
     private readonly IFileLauncher _fileLauncher;
     private readonly IFolderWatcherFactory _folderWatcherFactory;
     private readonly IPanelItemStorageService _itemStorage;
@@ -71,6 +80,48 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private readonly IAppSettings _appSettings;
     private readonly IPanelSelectionCoordinator _selectionCoordinator;
     private readonly IGestureDiagnostics _diagnostics;
+
+    /// <summary>
+    /// Backs <see cref="LivenessTimeProvider"/> and the M-C vanish-confirmation grace window
+    /// (<see cref="_pendingVanishedManagedItems"/>'s timestamps) — see the constructor's own remarks.
+    /// </summary>
+    private readonly TimeProvider _timeProvider;
+
+    /// <summary>
+    /// M-1 fix (code review, panel clone to page): see the constructor's own remarks. <see langword="null"/>
+    /// when not supplied — <see cref="ResolveManagedReplacements"/> then falls back to its pre-fix behavior.
+    /// Also backs <see cref="MovePanelToPageCommand"/>'s routing into <see cref="IWindowManager.MovePanelToPage"/>
+    /// (ADR-045) — <see cref="CopyPanelToPageCommand"/> instead goes through <see cref="_panelCloneFlow"/>,
+    /// which owns its own <see cref="IWindowManager"/> reference (LOW-8, ADR-045).
+    /// </summary>
+    private readonly IWindowManager? _windowManager;
+
+    /// <summary>
+    /// UX review, backlog 1.x item 8 ("panel clone to page" parity pass): backs <see cref="Pages"/> — the
+    /// panel's own header context menu's "Move/Copy to page ▸" submenus (<c>ChildWindow.xaml</c>'s
+    /// <c>HeaderContextMenu</c>), mirroring the Settings window's "Panels" section (<see cref="MainWindowViewModel.Pages"/>).
+    /// <see langword="null"/> only for the handful of tests that construct this type directly without
+    /// supplying one — <see cref="Pages"/> then stays permanently empty and <see cref="MovePanelToPageCommand"/>/
+    /// <see cref="CopyPanelToPageCommand"/> simply never have anything to execute against, same
+    /// degrade-gracefully shape as <see cref="_windowManager"/> being <see langword="null"/>.
+    /// </summary>
+    private readonly IPageManager? _pageManager;
+
+    /// <summary>
+    /// H-1 fix (code review, panel clone to page, backlog 1.x wave 3 review): backs
+    /// <see cref="CopyPanelToPageCommand"/> — before this fix, <see cref="CopyPanelToPage"/> called
+    /// <see cref="IWindowManager.ClonePanelToPage"/> directly and discarded its result outright, so a
+    /// failure (too large, no disk space, copy failed) never reached the user from this panel's own header
+    /// menu, unlike the Settings window's identically-named command. This shared flow (also used by
+    /// <c>MainWindowViewModel.CopyPanelToPage</c>) owns the busy-cursor bracket, the localized failure
+    /// notification and the stale-destination-page silent re-sync — see <see cref="IPanelCloneFlow"/>'s own
+    /// remarks. <see langword="null"/> only for the handful of tests that construct this type directly
+    /// without supplying one — <see cref="CopyPanelToPageCommand"/> then simply never has anything to
+    /// execute against, same degrade-gracefully shape as <see cref="_windowManager"/>/<see cref="_pageManager"/>
+    /// being <see langword="null"/>.
+    /// </summary>
+    private readonly IPanelCloneFlow? _panelCloneFlow;
+
     private readonly DataTemplate _listTemplate;
     private readonly DataTemplate _gridTemplate;
     private readonly System.Threading.Timer _existenceTimer;
@@ -95,11 +146,30 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private readonly bool _usesDefaultIconResizeDebounceTimerProvider;
 
     /// <summary>
-    /// Managed items <see cref="OnItemsVanished"/> saw go missing on some PRIOR liveness tick, still
-    /// awaiting a second consecutive tick's confirmation before <see cref="ProcessPendingVanishedManagedItems"/>
-    /// actually reconciles them (M-C, release-polish 1.0 final review) — see that method's remarks.
+    /// M-6 (review it.2): resolves the <see cref="IDebounceTimer"/> backing <see cref="OnProbeResultsApplied"/>'s
+    /// content-filter re-run — same lazily-resolved, degrade-to-immediate-when-unavailable pattern as
+    /// <see cref="_iconResizeDebounceTimerProvider"/>, added for the exact same reason: production always
+    /// uses the real, <see cref="System.Windows.Application.Current"/>-bound <see cref="DispatcherDebounceTimer"/>
+    /// (<see cref="ResolveProbeRefilterDebounceTimer"/>), but a test needs a fake it can fire deterministically
+    /// to prove "exactly one <c>ApplyFilterAndSort</c> per debounce window, selection preserved" without a
+    /// real <see cref="System.Windows.Threading.DispatcherTimer"/> tick.
     /// </summary>
-    private readonly HashSet<FileItem> _pendingVanishedManagedItems = [];
+    private readonly Func<IDebounceTimer?> _probeRefilterDebounceTimerProvider;
+
+    /// <summary>
+    /// M-6 (review it.2): the <see cref="OnProbeResultsApplied"/> counterpart of
+    /// <see cref="_usesDefaultIconResizeDebounceTimerProvider"/> — see that field's own remarks.
+    /// </summary>
+    private readonly bool _usesDefaultProbeRefilterDebounceTimerProvider;
+
+    /// <summary>
+    /// Managed items <see cref="OnItemsVanished"/> saw go missing, keyed to the <see cref="_timeProvider"/>
+    /// timestamp of that observation — still awaiting <see cref="ProcessPendingVanishedManagedItems"/>'s
+    /// <see cref="ExistenceCheckIntervalMs"/> grace window before it actually reconciles them (M-C,
+    /// release-polish 1.0 final review; ADR-046 7c §7.2 amendment — see that method's remarks for why a
+    /// fixed time window replaced the original "one tick" rule once liveness became asynchronous).
+    /// </summary>
+    private readonly Dictionary<FileItem, DateTimeOffset> _pendingVanishedManagedItems = [];
 
     private DataTemplate _currentViewTemplate;
     private ChildWindowModel _model = new();
@@ -107,6 +177,15 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private IFolderWatcher? _watcher;
     private string? _sourceFolderPath;
     private DispatcherDebounceTimer? _defaultIconResizeDebounceTimer;
+
+    /// <summary>
+    /// Lazily created, production-only debounce timer backing <see cref="OnProbeResultsApplied"/>'s
+    /// content-filter re-run (ADR-046 §6) — same lazily-creating, degrade-to-immediate-when-no-Application
+    /// pattern as <see cref="ResolveDefaultIconResizeDebounceTimer"/>, but a separate instance: the two
+    /// debounced actions (icon re-fetch vs. content re-filter) are independent and must not cancel one
+    /// another out.
+    /// </summary>
+    private DispatcherDebounceTimer? _probeRefilterDebounceTimer;
 
     /// <summary>
     /// The raw, non-blank <see cref="ChildWindowModel.SourceFolderPath"/> value this ViewModel last saw
@@ -386,6 +465,42 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     public ICommand CancelRenameCommand { get; }
 
     /// <summary>
+    /// Opens <see cref="BaseViewModel.SelectedFile"/> with its default shell action — the <c>Enter</c>
+    /// keyboard shortcut's counterpart to the double-click's <see cref="OpenFile"/>. Cannot execute while
+    /// nothing is selected or while an inline rename is in progress (<see cref="EditingItem"/>): Enter
+    /// means "commit" to the rename editor, never "launch".
+    /// </summary>
+    public ICommand OpenSelectedFileCommand { get; }
+
+    /// <summary>
+    /// Ordered list of pages backing this panel's own header context menu's "Move to page ▸"/"Copy to
+    /// page ▸" submenus (<c>ChildWindow.xaml</c>'s <c>HeaderContextMenu</c>) — UX review, backlog 1.x item
+    /// 8 ("panel clone to page" parity pass). Kept in sync with <see cref="IPageManager.PageDescriptors"/>
+    /// by <see cref="SyncPages"/>, the same shape as <see cref="MainWindowViewModel.Pages"/> (extracted
+    /// into the shared <see cref="PageItemViewModelSync"/> helper so the two never drift apart). This
+    /// panel's own <see cref="PageItemViewModel.IsEditing"/>/<see cref="PageItemViewModel.EditingName"/>
+    /// fields are never used here — there is no inline-rename UI in this menu — only <see cref="PageItemViewModel.Id"/>/
+    /// <see cref="PageItemViewModel.Display"/> are bound.
+    /// </summary>
+    public ObservableCollection<PageItemViewModel> Pages { get; } = [];
+
+    /// <summary>
+    /// Moves this panel to a different page — the header context menu's "Move to page ▸" submenu.
+    /// Parameter is the destination page identifier (string). Disabled (see <see cref="CanMovePanelToPage"/>)
+    /// for the panel's own current page, matching the Settings window's identically-named
+    /// <see cref="MainWindowViewModel.MovePanelToPageCommand"/>.
+    /// </summary>
+    public ICommand MovePanelToPageCommand { get; }
+
+    /// <summary>
+    /// Creates a fully independent copy of this panel on the destination page (parameter, a page id
+    /// string) — the header context menu's "Copy to page ▸" submenu (ADR-045). Unlike
+    /// <see cref="MovePanelToPageCommand"/>, the CURRENT page is a valid destination — see
+    /// <see cref="MainWindowViewModel.CopyPanelToPageCommand"/>'s own remarks.
+    /// </summary>
+    public ICommand CopyPanelToPageCommand { get; }
+
+    /// <summary>
     /// Raised when the user changes the panel state (removes a file, switches view),
     /// so the view layer can persist it.
     /// </summary>
@@ -438,6 +553,46 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// pattern as <c>ApplicationStateService.ResolveDebounceTimer</c>. Tests supply a fake timer here
     /// instead, to trigger the deferred re-fetch deterministically.
     /// </param>
+    /// <param name="windowManager">
+    /// M-1 fix (code review, panel clone to page): lets <see cref="ResolveManagedReplacements"/> exclude a
+    /// candidate already directly referenced by a DIFFERENT live panel (<see cref="IWindowManager.GetManagedPathsClaimedByOtherPanels"/>)
+    /// before healing this panel's own stale entry onto it. <see langword="null"/> falls back to the
+    /// pre-fix behavior (no cross-panel claim check) — production DI always supplies the real singleton;
+    /// tests that don't exercise this specific cross-panel scenario can omit it. Deliberately appended AFTER
+    /// <paramref name="iconResizeDebounceTimerProvider"/> (rather than next to the other collaborators
+    /// above) so every existing positional-argument call site that already supplies it keeps compiling
+    /// unchanged.
+    /// </param>
+    /// <param name="pageManager">See <see cref="_pageManager"/>. Deliberately appended AFTER
+    /// <paramref name="windowManager"/>, for the same "keep existing positional call sites compiling"
+    /// reason.</param>
+    /// <param name="iconLoadQueue">
+    /// The background icon-load queue (ADR-046) — see <see cref="BaseViewModel"/>'s own constructor
+    /// parameter. Deliberately appended AFTER <paramref name="pageManager"/>, for the same reason as
+    /// <paramref name="windowManager"/>/<paramref name="pageManager"/> themselves.
+    /// </param>
+    /// <param name="itemProbeQueue">
+    /// The background existence/directory-ness probe queue (ADR-046 7c) — see <see cref="BaseViewModel"/>'s
+    /// own constructor parameter. Deliberately AFTER <paramref name="iconLoadQueue"/>, for the same
+    /// "keep existing positional call sites compiling" reason as <paramref name="windowManager"/>.
+    /// </param>
+    /// <param name="timeProvider">
+    /// Clock <see cref="LivenessTimeProvider"/> exposes and this panel's M-C vanish-confirmation grace
+    /// window (<see cref="_pendingVanishedManagedItems"/>) is measured against. <see langword="null"/>
+    /// (production DI) resolves to <see cref="TimeProvider.System"/>; tests supply a fake to drive both
+    /// deterministically (C-7).
+    /// </param>
+    /// <param name="probeRefilterDebounceTimerProvider">
+    /// M-6 (review it.2): resolves the <see cref="IDebounceTimer"/> backing <see cref="OnProbeResultsApplied"/>'s
+    /// debounced content-filter re-run (ADR-046 §6). <see langword="null"/> (the production default)
+    /// resolves lazily against <see cref="System.Windows.Application.Current"/>'s dispatcher, same
+    /// degrade-to-immediate pattern as <paramref name="iconResizeDebounceTimerProvider"/>. Deliberately
+    /// appended AFTER <paramref name="timeProvider"/>, for the same "keep existing positional call sites
+    /// compiling" reason as <paramref name="windowManager"/>.
+    /// </param>
+    /// <param name="panelCloneFlow">See <see cref="_panelCloneFlow"/>. Deliberately the LAST constructor
+    /// parameter (after the ADR-046 queue parameters), for the same "keep existing positional call sites
+    /// compiling" reason as <paramref name="windowManager"/>/<paramref name="pageManager"/>.</param>
     public ChildWindowViewModel(
         IIconProvider iconProvider,
         IFileLauncher fileLauncher,
@@ -447,9 +602,17 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         IAppSettings appSettings,
         IPanelSelectionCoordinator selectionCoordinator,
         IGestureDiagnostics diagnostics,
-        Func<IDebounceTimer?>? iconResizeDebounceTimerProvider = null)
-        : base(iconProvider)
+        Func<IDebounceTimer?>? iconResizeDebounceTimerProvider = null,
+        IWindowManager? windowManager = null,
+        IPageManager? pageManager = null,
+        IIconLoadQueue? iconLoadQueue = null,
+        IItemProbeQueue? itemProbeQueue = null,
+        TimeProvider? timeProvider = null,
+        Func<IDebounceTimer?>? probeRefilterDebounceTimerProvider = null,
+        IPanelCloneFlow? panelCloneFlow = null)
+        : base(iconProvider, iconLoadQueue, itemProbeQueue)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _fileLauncher = fileLauncher;
         _folderWatcherFactory = folderWatcherFactory;
         _itemStorage = itemStorage;
@@ -457,6 +620,18 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         _appSettings = appSettings;
         _selectionCoordinator = selectionCoordinator;
         _diagnostics = diagnostics;
+
+        // L-4 (review it.2, ADR-046 D-13): a real queue was passed in (iconLoadQueue/itemProbeQueue), but
+        // this constructing thread had no live SynchronizationContext — base's own D-13 rule already
+        // degraded to the synchronous legacy pipeline; this is the diagnostic for that otherwise-silent
+        // degradation (see BaseViewModel's constructor remarks and the two flags' own remarks). panelId is
+        // unknown this early (Model isn't set until LoadFromModel) — null, same as other early diagnostics.
+        if (UsedSynchronousIconLoadQueueFallbackDespiteSupplied) _diagnostics.IconPipelineSynchronousFallbackUsed(null, "iconLoadQueue");
+        if (UsedSynchronousItemProbeQueueFallbackDespiteSupplied) _diagnostics.IconPipelineSynchronousFallbackUsed(null, "itemProbeQueue");
+
+        _windowManager = windowManager;
+        _pageManager = pageManager;
+        _panelCloneFlow = panelCloneFlow;
         _iconResizeDebounceTimerProvider = iconResizeDebounceTimerProvider ?? ResolveDefaultIconResizeDebounceTimer;
 
         // MINOR 8 (release-polish 1.0 final review): remembered so Dispose() can stop the PRODUCTION
@@ -464,6 +639,8 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         // lazily-CREATING provider — a test-supplied provider never lazily creates (it always returns the
         // same already-constructed fake), so Dispose keeps calling it as before for that case.
         _usesDefaultIconResizeDebounceTimerProvider = iconResizeDebounceTimerProvider is null;
+        _probeRefilterDebounceTimerProvider = probeRefilterDebounceTimerProvider ?? ResolveProbeRefilterDebounceTimer;
+        _usesDefaultProbeRefilterDebounceTimerProvider = probeRefilterDebounceTimerProvider is null;
         _selectionCoordinator.SelectionClaimed += OnSelectionClaimed;
         _listTemplate = GetTemplate(ListViewTemplate);
         _gridTemplate = GetTemplate(GridViewTemplate);
@@ -477,6 +654,15 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         BeginRenameCommand = new RelayCommand<FileItem>(BeginRename);
         CommitRenameCommand = new RelayCommand(CommitRename);
         CancelRenameCommand = new RelayCommand(CancelRename);
+        OpenSelectedFileCommand = new RelayCommand(() => OpenFile(SelectedFile), () => SelectedFile is not null && EditingItem is null);
+        MovePanelToPageCommand = new RelayCommand<string>(MovePanelToPage, CanMovePanelToPage);
+        CopyPanelToPageCommand = new RelayCommand<string>(CopyPanelToPage, CanCopyPanelToPage);
+
+        if (_pageManager is not null)
+        {
+            _pageManager.PagesChanged += OnPagesChanged;
+            SyncPages();
+        }
 
         // Folder Portals already get live deletion events from the FileSystemWatcher (OnFolderChanged).
         // Items added via manual drag-drop have no such watcher, so a deleted/restored file (e.g. a
@@ -682,6 +868,12 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     {
         Model = model; // subscribes to Model.PropertyChanged; unsubscribes any previous model first
 
+        // ADR-046 D-6: the panel's background icon-load priority follows the model's own visibility
+        // (current page vs. hidden) — set BEFORE ReplaceAll below submits every item's icon request, so
+        // the very first submit already lands in the right priority level instead of a second
+        // re-prioritization once ChildWindow.IsVisibleChanged fires.
+        IconLoadPriority = model.IsVisible ? IconLoadPriority.Visible : IconLoadPriority.Background;
+
         // Icon pixel size of the NEW model (view mode/IconSize) before ReplaceAll fetches every icon —
         // without refreshing the outgoing items, which ReplaceAll is about to discard anyway.
         UpdateRequestedIconPixelSize(refreshExisting: false);
@@ -726,6 +918,21 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
+    /// Updates this panel's background icon-load priority (ADR-046 D-6) to reflect whether its window is
+    /// currently shown. Called from <c>ChildWindow.IsVisibleChanged</c> — a page switch hides every panel
+    /// not on the destination page (and shows those that are) without going through
+    /// <see cref="LoadFromModel"/> again. Becoming visible also gives any item whose placeholder-retry
+    /// budget was exhausted while this panel was in the background one more chance (UX-MINOR, review it.2,
+    /// M-1 follow-up) — see <see cref="BaseViewModel.ResetExhaustedPlaceholderRetries"/>.
+    /// </summary>
+    /// <param name="isVisible"><see langword="true"/> when this panel's window just became visible.</param>
+    internal void SetIconLoadVisibility(bool isVisible)
+    {
+        IconLoadPriority = isVisible ? IconLoadPriority.Visible : IconLoadPriority.Background;
+        if (isVisible) ResetExhaustedPlaceholderRetries();
+    }
+
+    /// <summary>
     /// Re-aligns this panel with whatever a shell command just did to its files, synchronously, on the UI
     /// thread, when the command's target is not known (see the three-argument overload for the details).
     /// </summary>
@@ -747,6 +954,11 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// </remarks>
     internal void ProcessPendingSiblingAdoption()
     {
+        // M-3 (review it.2): this is reached through RefreshExistence's dispatched, asynchronous tick —
+        // Dispose may have run while this tick's own liveness pass was still in flight. Never touch the
+        // watch state (or AddFiles/CompleteReconcile below) on an already-torn-down panel.
+        if (_disposed) return;
+
         // M-A guard (release-polish 1.0 final review): see _shellOperationDepth's remarks — never touch the
         // watch state while a shell operation's own modal loop is mid-flight on this panel.
         if (_shellOperationDepth > 0) return;
@@ -774,35 +986,52 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
-    /// M-C fix (release-polish 1.0 final review): confirms, before ever releasing a managed item's per-item
-    /// directory, that an item <see cref="OnItemsVanished"/> reported missing is STILL missing a full
-    /// liveness tick later — see that method's remarks for why. Must run BEFORE
+    /// M-C fix (release-polish 1.0 final review; ADR-046 7c §7.2 amendment): confirms, before ever
+    /// releasing a managed item's per-item directory, that an item <see cref="OnItemsVanished"/> reported
+    /// missing is STILL missing at least <see cref="ExistenceCheckIntervalMs"/> after that first
+    /// observation — see <see cref="_pendingVanishedManagedItems"/>'s own remarks for why. Must run BEFORE
     /// <see cref="BaseViewModel.RefreshItemsLiveness"/> on every tick: an item <see cref="OnItemsVanished"/>
-    /// adds to <see cref="_pendingVanishedManagedItems"/> during THIS tick's own
-    /// <see cref="BaseViewModel.RefreshItemsLiveness"/> call is deliberately left untouched here — it is
-    /// only ever swept starting on the NEXT tick's call to this method, after a full tick has had the
-    /// chance to observe it reappear (or stay gone). The snapshot-based post-shell-command path
-    /// (<see cref="ReconcileAfterShellCommand(FileItem?, IReadOnlyList{string}?, string?)"/>'s own reconcile loop) is
-    /// entirely unaffected — it never touches this set.
+    /// adds to <see cref="_pendingVanishedManagedItems"/> during THIS tick's own (asynchronous)
+    /// <see cref="BaseViewModel.RefreshItemsLiveness"/> call cannot possibly have aged past the grace
+    /// window yet (its timestamp IS roughly "now"), so it is naturally left untouched here regardless —
+    /// no separate "skip this tick's own additions" bookkeeping is needed. The snapshot-based
+    /// post-shell-command path
+    /// (<see cref="ReconcileAfterShellCommand(FileItem?, IReadOnlyList{string}?, string?)"/>'s own reconcile
+    /// loop) is entirely unaffected — it never touches this set.
     /// </summary>
+    /// <remarks>
+    /// <b>Why a fixed time window, not "one tick" (ADR-046 7c):</b> liveness became asynchronous in 7c —
+    /// a probe pass may complete anywhere from well under a tick to (bounded by
+    /// <c>BaseViewModel.LivenessPassTimeout</c>) several ticks later, depending on how busy the probe
+    /// queue or a slow network root is. Confirming "still missing" the moment the NEXT tick happens to be
+    /// dispatched — rather than after a fixed <see cref="ExistenceCheckIntervalMs"/> has actually
+    /// elapsed since the original observation — could shrink an editor's brief delete/recreate-on-save
+    /// window to a few milliseconds if two passes happen to land close together, defeating the whole
+    /// point of the grace period. Checking <see cref="FileItem.Exists"/> (already kept fresh by every
+    /// completed liveness pass) instead of re-probing the file system directly here is also what keeps
+    /// this method itself off the UI-thread-fs-access list (ADR-046 C-3).
+    /// </remarks>
     internal void ProcessPendingVanishedManagedItems()
     {
         if (_pendingVanishedManagedItems.Count == 0) return;
 
+        var now = _timeProvider.GetUtcNow();
         var change = ReconcileChange.None;
         List<FileItem>? resolved = null;
 
-        foreach (var item in _pendingVanishedManagedItems)
+        foreach (var (item, observedAt) in _pendingVanishedManagedItems)
         {
-            if (!AllItems.Contains(item) || PathExists(item.Path))
+            if (!AllItems.Contains(item) || item.Exists)
             {
-                // Reappeared (a fast external save-by-recreate landed within one tick) or already left the
-                // panel some other way — nothing to reconcile; just stop watching it.
+                // Reappeared (a later liveness pass already confirmed it, e.g. an external save-by-recreate)
+                // or already left the panel some other way — nothing to reconcile; just stop watching it.
                 (resolved ??= []).Add(item);
                 continue;
             }
 
-            // Still missing a full tick later — confirmed, not a race with a recreate.
+            if (now - observedAt < TimeSpan.FromMilliseconds(ExistenceCheckIntervalMs)) continue; // grace window not elapsed yet
+
+            // Still missing after the grace window — confirmed, not a race with a recreate.
             change |= ApplyReconcileResult(item, _itemStorage.ReconcileExternalChange(item.Path));
             (resolved ??= []).Add(item);
         }
@@ -817,15 +1046,16 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
     /// <summary>
     /// Re-validates <see cref="FileItem.Exists"/>/<see cref="FileItem.IsDirectory"/> for every item in
-    /// this panel against the current file-system state, and re-resolves the icon for any item that
-    /// just reappeared (see <see cref="BaseViewModel.RefreshItemsLiveness"/>). Runs on a thread-pool
-    /// timer; marshals to the UI thread before touching <see cref="FileItem"/> instances (they're bound
-    /// to the live UI) and must never throw — an exception escaping a <see cref="System.Threading.Timer"/>
-    /// callback is an UNHANDLED exception on a thread-pool thread, which terminates the whole process.
+    /// this panel against the current file-system state — off the UI thread, via
+    /// <see cref="BaseViewModel.RefreshItemsLivenessAsync"/> (ADR-046 7c) — and re-resolves the icon for
+    /// any item that just reappeared. Runs on a thread-pool timer; marshals to the UI thread before
+    /// touching <see cref="FileItem"/> instances (they're bound to the live UI) and must never throw — an
+    /// exception escaping a <see cref="System.Threading.Timer"/> callback is an UNHANDLED exception on a
+    /// thread-pool thread, which terminates the whole process.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The <see langword="try"/>/<see langword="catch"/> around <see cref="BaseViewModel.RefreshItemsLiveness"/>
+    /// The <see langword="try"/>/<see langword="catch"/> around <see cref="BaseViewModel.RefreshItemsLivenessAsync"/>
     /// below is a SEPARATE concern from the marshalling itself: a bare <c>Dispatcher.Invoke</c> onto an
     /// already-shut-down dispatcher rethrows <see cref="System.Threading.Tasks.TaskCanceledException"/> at
     /// this thread-pool timer thread and kills the process (intermittent, order-dependent
@@ -857,7 +1087,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         if (System.Threading.Interlocked.CompareExchange(ref _existenceRefreshPending, 1, 0) != 0)
             return;
 
-        var queued = UiDispatch.TryBeginInvoke(Application.Current?.Dispatcher, () =>
+        var queued = UiDispatch.TryBeginInvoke(Application.Current?.Dispatcher, async () =>
         {
             try
             {
@@ -865,8 +1095,8 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
                 // operation's own modal loop (the context menu or RecycleManagedItem's SHFileOperation) is
                 // still pumping messages on this panel's UI thread RIGHT NOW — this dispatched tick reached
                 // us through that same nested pump. Skip the whole pass rather than just OnItemsVanished
-                // below: RefreshItemsLiveness would otherwise flip a temporarily-vanished item's Exists to
-                // false without ever reporting the transition (a transition is only ever reported once —
+                // below: RefreshItemsLivenessAsync would otherwise flip a temporarily-vanished item's Exists
+                // to false without ever reporting the transition (a transition is only ever reported once —
                 // the very next tick would see it as "already missing", not a new one), permanently losing
                 // the M5b reconcile for it. Deferred entirely to the first tick after the shell operation
                 // finishes instead.
@@ -874,10 +1104,20 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
                 try
                 {
-                    // M-C fix: must run BEFORE RefreshItemsLiveness — see ProcessPendingVanishedManagedItems's
-                    // own remarks for why the ordering is load-bearing.
+                    // M-C fix: must run BEFORE RefreshItemsLivenessAsync — see ProcessPendingVanishedManagedItems's
+                    // own remarks for why the ordering is load-bearing. ADR-046 7c: the single-flight slot
+                    // below is held for the ENTIRE async pass (icon queue's own generation/CanApplyLivenessResults
+                    // guards handle a Dispose/shell-operation race mid-await), not just the synchronous prefix.
                     ProcessPendingVanishedManagedItems();
-                    RefreshItemsLiveness();
+                    await RefreshItemsLivenessAsync();
+
+                    // M-3 (review it.2): re-check after the await, not just before it — Dispose or a new
+                    // shell operation may have started while this tick's liveness pass was in flight.
+                    // ProcessPendingSiblingAdoption already re-checks _shellOperationDepth itself, but not
+                    // _disposed; skip the whole call here rather than let it touch a torn-down panel's
+                    // watch state.
+                    if (_disposed || _shellOperationDepth > 0) return;
+
                     ProcessPendingSiblingAdoption();
                 }
                 catch (Exception ex)
@@ -892,7 +1132,8 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
             finally
             {
                 // Frees the slot for the NEXT tick only once this one has actually run — not merely been
-                // queued. Runs even if RefreshItemsLiveness() itself was skipped (_disposed) or failed.
+                // queued — and only once the awaited pass above has actually completed (or been discarded/
+                // faulted), never merely been dispatched (ADR-046 7c).
                 System.Threading.Volatile.Write(ref _existenceRefreshPending, 0);
             }
         });
@@ -996,6 +1237,16 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
                 {
                     // Also for a target that still exists: that is exactly when created siblings are adopted.
                     result = _itemStorage.ReconcileExternalChange(item.Path, targetEntriesBefore!);
+                }
+                else if (!_itemStorage.IsManaged(item.Path))
+                {
+                    // B-7 (ADR-046 7c): a non-managed item's ReconcileExternalChange always returns Unchanged
+                    // anyway (PanelItemStorageService.TryGetPerItemLayout rejects a non-managed path up
+                    // front) — checking IsManaged first (a cheap, local, string-only prefix check) instead of
+                    // PathExists below is what keeps this loop from touching the network for a Z:\ or UNC
+                    // item merely referenced in place, which was never a candidate for reconcile to begin
+                    // with.
+                    continue;
                 }
                 else if (PathExists(item.Path))
                 {
@@ -1406,6 +1657,65 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
+    /// Synchronizes <see cref="Pages"/> with <see cref="IPageManager.PageDescriptors"/> — called once from
+    /// the constructor (when <see cref="_pageManager"/> is supplied) and on every subsequent
+    /// <see cref="IPageManager.PagesChanged"/>. Delegates to <see cref="PageItemViewModelSync"/> — the
+    /// exact same add/remove/reorder/rename-in-place logic <see cref="MainWindowViewModel.SyncPages"/> uses
+    /// for its own, larger <c>Pages</c> collection.
+    /// </summary>
+    private void SyncPages()
+    {
+        if (_pageManager is null) return;
+        PageItemViewModelSync.Sync(Pages, _pageManager.PageDescriptors);
+    }
+
+    private void OnPagesChanged() => SyncPages();
+
+    /// <summary>
+    /// Backs <see cref="MovePanelToPageCommand"/> — the header context menu's "Move to page ▸" submenu.
+    /// Mirrors <c>MainWindowViewModel.MovePanelToPage</c>, acting on THIS panel's own <see cref="Model"/>
+    /// instead of a <c>SelectedPanel</c>. No confirmation/notification here (UX review, backlog 1.x item
+    /// 8): unlike the Settings window's "Panels" section, the effect — this panel disappearing from the
+    /// desktop — is immediately visible where the user just clicked, the same as Fences' own "Send Fence to
+    /// Page" gives no toast either.
+    /// </summary>
+    /// <param name="pageId">The destination page identifier.</param>
+    private void MovePanelToPage(string? pageId)
+    {
+        if (_windowManager is null || string.IsNullOrWhiteSpace(pageId)) return;
+        _windowManager.MovePanelToPage(Model, pageId);
+    }
+
+    private bool CanMovePanelToPage(string? pageId)
+        => _windowManager is not null && !string.IsNullOrWhiteSpace(pageId) && pageId != Model.PageId;
+
+    /// <summary>
+    /// Backs <see cref="CopyPanelToPageCommand"/> — the header context menu's "Copy to page ▸" submenu
+    /// (ADR-045). Mirrors <c>MainWindowViewModel.CopyPanelToPage</c>, acting on THIS panel's own
+    /// <see cref="Model"/>; unlike <see cref="MovePanelToPage"/>, a same-page destination is expected (that
+    /// is how a same-page duplicate is requested).
+    /// </summary>
+    /// <remarks>
+    /// H-1 fix (code review, panel clone to page, backlog 1.x wave 3 review): this used to call
+    /// <see cref="IWindowManager.ClonePanelToPage"/> directly and discard its result outright — a failure
+    /// (too large, no disk space, copy failed) never reached the user from this menu, unlike the Settings
+    /// window's identically-named command. Delegating to the shared <see cref="_panelCloneFlow"/> instead
+    /// gives this call site the exact same busy cursor, localized failure notification and stale-page
+    /// silent re-sync as <c>MainWindowViewModel.CopyPanelToPage</c> — see <see cref="IPanelCloneFlow"/>'s
+    /// own remarks. A successful clone's own selection/refresh (only meaningful for the Settings window's
+    /// panel LIST) is still not this method's concern: the effect here is immediately visible on the
+    /// desktop, same no-extra-feedback rationale as <see cref="MovePanelToPage"/>.
+    /// </remarks>
+    /// <param name="pageId">The destination page identifier.</param>
+    private void CopyPanelToPage(string? pageId)
+    {
+        if (_panelCloneFlow is null || string.IsNullOrWhiteSpace(pageId)) return;
+        _panelCloneFlow.CopyToPage(Model, pageId, onUnknownPage: SyncPages);
+    }
+
+    private bool CanCopyPanelToPage(string? pageId) => _panelCloneFlow is not null && !string.IsNullOrWhiteSpace(pageId);
+
+    /// <summary>
     /// Test seam only (MAJOR M-1 regression coverage, P08 fix cycle 2): observes whether a dispatched
     /// <see cref="RefreshExistence"/> tick is still waiting to be serviced by the UI thread. Never read by
     /// production code.
@@ -1420,6 +1730,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
         _model.PropertyChanged -= OnModelPropertyChanged;
         _selectionCoordinator.SelectionClaimed -= OnSelectionClaimed;
+        if (_pageManager is not null) _pageManager.PagesChanged -= OnPagesChanged;
 
         // Releases this panel's claim on the coordinator's single, process-wide _currentOwner slot, if
         // it still holds it — otherwise a closed panel (and its whole FileItems/watcher graph) stays
@@ -1447,6 +1758,24 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         {
             _iconResizeDebounceTimerProvider()?.Stop();
         }
+
+        // ADR-046: cancels a pending debounced content-filter re-run the same way — see
+        // OnProbeResultsApplied/ResolveProbeRefilterDebounceTimer. M-6 (review it.2): now mirrors the icon
+        // resize timer's own provider/default split above — a test-supplied provider never lazily creates,
+        // so it's safe to just call it; the production default is read directly to avoid constructing one
+        // from scratch just to immediately stop it.
+        if (_usesDefaultProbeRefilterDebounceTimerProvider)
+        {
+            _probeRefilterDebounceTimer?.Stop();
+        }
+        else
+        {
+            _probeRefilterDebounceTimerProvider()?.Stop();
+        }
+
+        // ADR-046: releases this panel's background icon-load group — cancels anything still pending and
+        // guarantees no further delivery to an about-to-be-unreachable ViewModel.
+        DisposeIconLoading();
 
         _existenceTimer.Dispose();
         DetachWatcher();
@@ -1540,17 +1869,101 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     protected override void OnItemsVanished(IReadOnlyList<FileItem> items)
     {
         // M-A guard (release-polish 1.0 final review): see _shellOperationDepth's remarks — defense in
-        // depth for any future caller of RefreshItemsLiveness while a shell operation's own modal loop is
-        // mid-flight on this panel; the current callers (RefreshExistence's dispatched tick,
-        // DeleteManagedItem/ReconcileAfterShellCommand's own trailing calls) already never reach here with
-        // the guard held.
+        // depth (ADR-046 7c's CanApplyLivenessResults override already refuses to call this at all while
+        // a shell operation's own modal loop is mid-flight on this panel, but kept here too for any other
+        // future caller).
         if (IsPortal || _shellOperationDepth > 0) return;
 
+        // ADR-046 7c §7.2: the timestamp marks the moment this present→missing transition was first
+        // observed (this call) — ProcessPendingVanishedManagedItems' grace window starts here, not at
+        // whatever later tick happens to dispatch next.
+        //
+        // L-6 (review it.2, left as-is by design): under the async pipeline, "this call" happens at RESULT
+        // APPLICATION time — after RunSingleLivenessPassAsync's off-thread IItemProbeQueue.ProbeAsync call
+        // already returned — not at the moment the probe itself actually read the file system (which could
+        // be anywhere from sub-millisecond to, bounded, just under LivenessPassTimeout earlier). This is
+        // intentionally NOT "corrected" to the probe's own read time: doing so would only ever SHRINK the
+        // effective M-C grace window an external editor's delete/recreate-on-save gets (the apply-time
+        // stamp is always >= the true observation time), which is the safe direction for what this window
+        // protects against. The window is measured from when THIS ViewModel found out, not from an
+        // unknowable-to-it exact file-system-read instant.
+        var observedAt = _timeProvider.GetUtcNow();
         foreach (var item in items)
         {
-            if (_itemStorage.IsManaged(item.Path)) _pendingVanishedManagedItems.Add(item);
+            if (_itemStorage.IsManaged(item.Path)) _pendingVanishedManagedItems.TryAdd(item, observedAt);
         }
     }
+
+    /// <summary>
+    /// ADR-046 7c: refuses to apply a just-completed liveness pass while this panel is disposed or a
+    /// shell operation's own modal loop (<see cref="ShowShellContextMenu"/>/<see cref="DeleteManagedItem"/>)
+    /// is mid-flight — the same two conditions the pre-7c synchronous pipeline checked BEFORE starting a
+    /// pass at all (see <see cref="_shellOperationDepth"/>'s remarks), now checked at apply time instead,
+    /// since an asynchronous pass may have already started probing before either condition became true.
+    /// </summary>
+    protected override bool CanApplyLivenessResults => !_disposed && _shellOperationDepth == 0;
+
+    /// <summary>
+    /// L-1 (review it.2): routes an otherwise-unobserved <see cref="BaseViewModel.RefreshItemsLiveness"/>
+    /// task fault to the same structured diagnostics log/event <see cref="RefreshExistence"/>'s own
+    /// dispatched tick already uses for the identical failure mode — privacy invariant unchanged
+    /// (exception TYPE NAME only, never <see cref="Exception.Message"/>, which may embed a file path).
+    /// </summary>
+    /// <param name="exception">The exception the faulted pass completed with.</param>
+    protected override void OnLivenessPassFaulted(Exception exception)
+        => _diagnostics.ExistenceRefreshFailed(Model.Id, exception.GetType().Name);
+
+    /// <inheritdoc />
+    protected override TimeProvider LivenessTimeProvider => _timeProvider;
+
+    /// <summary>
+    /// ADR-046 §6 item 10 (M-7.1): records the elapsed UI-thread rebuild time for this panel.
+    /// </summary>
+    /// <param name="count">The number of items <see cref="BaseViewModel.AllItems"/> holds after the rebuild.</param>
+    /// <param name="elapsedMicroseconds">Elapsed wall-clock time of the rebuild, in microseconds.</param>
+    protected override void OnItemsBuilt(int count, long elapsedMicroseconds) =>
+        _diagnostics.PanelItemsBuilt(Model.Id, count, elapsedMicroseconds);
+
+    /// <summary>
+    /// Debounces this panel's content-filter re-run after a batch of background icon-load results flips
+    /// at least one item's <see cref="FileItem.IsDirectory"/> (ADR-046 §6) — a large portal's items are
+    /// probed in many small batches as the queue drains them, and each one flipping a directory flag would
+    /// otherwise re-run <see cref="ApplyFilterAndSort"/> (and disturb the FoldersOnly/"folders first"
+    /// projection) on its own. Degrades to an immediate re-filter when no
+    /// <see cref="System.Windows.Application.Current"/> exists yet (headless/test host), same as
+    /// <see cref="ScheduleIconRefetch"/>.
+    /// </summary>
+    /// <param name="directoryFlagsChanged">See <see cref="BaseViewModel.OnProbeResultsApplied"/>.</param>
+    protected override void OnProbeResultsApplied(bool directoryFlagsChanged)
+    {
+        if (!directoryFlagsChanged) return;
+
+        var timer = _probeRefilterDebounceTimerProvider();
+        if (timer is null)
+        {
+            ApplyFilterAndSort();
+            return;
+        }
+
+        timer.Start(ProbeRefilterDebounceWindow, ApplyFilterAndSort);
+    }
+
+    /// <summary>
+    /// ADR-046 D-6: a candidate is "currently visible" when it would survive this panel's own content
+    /// filter — <see cref="BaseViewModel"/> uses this to submit the icon requests of items the user can
+    /// actually see before the ones a filter is hiding.
+    /// </summary>
+    /// <param name="item">The candidate item, already added to <see cref="BaseViewModel.AllItems"/>.</param>
+    protected override bool IsItemCurrentlyVisible(FileItem item) => BuildFilterPredicate(Model.ContentFilter)(item);
+
+    /// <summary>
+    /// L-5 (review it.2): builds this panel's content-filter predicate ONCE per <c>AddFilesCore</c> batch
+    /// instead of <see cref="IsItemCurrentlyVisible"/>'s own per-item <see cref="BuildFilterPredicate"/>
+    /// call — a Folder Portal adding a thousand files at once otherwise re-switches on
+    /// <see cref="ChildWindowModel.ContentFilter"/> a thousand times for what is, within a single batch,
+    /// always the same answer.
+    /// </summary>
+    protected override Func<FileItem, bool> CreateVisibilityPredicate() => BuildFilterPredicate(Model.ContentFilter);
 
     /// <inheritdoc />
     protected override void OnSourceChanged() => ApplyFilterAndSort();
@@ -1634,16 +2047,45 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// it was (still shown, still greyed out via <c>Exists == false</c>), never invented or dropped.
     /// </remarks>
     /// <param name="paths">The panel's raw source paths, as returned by <see cref="GetSourceFiles"/>.</param>
+    /// <remarks>
+    /// M-1 fix (code review, panel clone to page): <see cref="IPanelItemStorageService.TryFindManagedPath"/>
+    /// only guarantees the candidate is unambiguous in the MANIFEST — it has no visibility into whether some
+    /// OTHER live panel already directly references that exact same managed path (e.g. after
+    /// <see cref="IWindowManager.ClonePanelToPage"/> gave a second panel its own live copy of this stale
+    /// entry's original path). Without this check, this panel's OWN, unrelated stale entry could be healed
+    /// onto a path that in fact belongs to that other panel — silently making two panels reference the same
+    /// managed item, defeating <see cref="WindowManager.ResolveStalePanelPaths"/>'s cross-panel "claimed"
+    /// guard (which only ever runs once, up front, at startup — this heal runs on every model
+    /// load/reload). A candidate already claimed by another panel is treated exactly like "no live
+    /// candidate" — the entry is left stale rather than silently pointed at the wrong panel's copy.
+    /// </remarks>
     private string[] ResolveManagedReplacements(string[] paths)
     {
         string[]? resolved = null;
+        IReadOnlySet<string>? claimedByOtherPanels = null;
 
         for (var i = 0; i < paths.Length; i++)
         {
             var path = paths[i];
             if (string.IsNullOrWhiteSpace(path)) continue;
-            if (System.IO.File.Exists(path) || System.IO.Directory.Exists(path)) continue;
+
+            // B-5 (ADR-046 7c): manifest lookup FIRST — TryFindManagedPath is a purely in-memory dictionary
+            // scan (its own File.Exists/Directory.Exists calls, if any, only ever touch LOCAL managed
+            // candidates under %LOCALAPPDATA%, never `path` itself) — and only THEN check whether the
+            // original `path` still exists. The remap condition itself is unchanged (original missing AND
+            // exactly one unclaimed candidate — an AND of two checks, whose result cannot depend on the
+            // order they're evaluated in), but a path with no managed candidate at all (the common case for
+            // a plain, never-moved-in item, and the ONLY case for a `Z:\`/UNC item referenced in place) no
+            // longer pays for a network round-trip it was always going to discard the result of.
             if (!_itemStorage.TryFindManagedPath(path, out var managedPath) || managedPath is null) continue;
+
+            if (_windowManager is not null)
+            {
+                claimedByOtherPanels ??= _windowManager.GetManagedPathsClaimedByOtherPanels(Model.Id);
+                if (claimedByOtherPanels.Contains(managedPath)) continue;
+            }
+
+            if (System.IO.File.Exists(path) || System.IO.Directory.Exists(path)) continue; // original still valid — nothing to remap
 
             resolved ??= (string[])paths.Clone();
             resolved[i] = managedPath;
@@ -1753,6 +2195,18 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     {
         if (Application.Current is not { } app) return null;
         return _defaultIconResizeDebounceTimer ??= new DispatcherDebounceTimer(app.Dispatcher);
+    }
+
+    /// <summary>
+    /// Lazily creates — and reuses for the rest of this ViewModel's lifetime — the
+    /// <see cref="DispatcherDebounceTimer"/> backing <see cref="OnProbeResultsApplied"/>. Returns
+    /// <see langword="null"/> when no <see cref="System.Windows.Application"/> exists yet, same
+    /// degrade-to-immediate contract as <see cref="ResolveDefaultIconResizeDebounceTimer"/>.
+    /// </summary>
+    private IDebounceTimer? ResolveProbeRefilterDebounceTimer()
+    {
+        if (Application.Current is not { } app) return null;
+        return _probeRefilterDebounceTimer ??= new DispatcherDebounceTimer(app.Dispatcher);
     }
 
     /// <summary>

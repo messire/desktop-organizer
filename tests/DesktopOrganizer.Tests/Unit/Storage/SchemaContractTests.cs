@@ -34,9 +34,9 @@ public class SchemaContractTests
     public void MigratedV1Document_KeyShape_MatchesApplicationStateDocumentDtoSerialization()
     {
         var v1Document = LoadFixture("v1-full.json");
-        var runner = new StateMigrationRunner(new ISettingsMigration[] { new V1ToV2Migration(), new V2ToV3Migration(), new V3ToV4Migration(), new V4ToV5Migration() });
+        var runner = new StateMigrationRunner(new ISettingsMigration[] { new V1ToV2Migration(), new V2ToV3Migration(), new V3ToV4Migration(), new V4ToV5Migration(), new V5ToV6Migration() });
         var (migrated, applied) = runner.MigrateToCurrent(v1Document, StateEnvelope.CurrentSchemaVersion);
-        Assert.Equal(4, applied);
+        Assert.Equal(5, applied);
 
         var migratedPayload = StateEnvelope.StripEnvelope(migrated);
         var migratedKeyPaths = CollectKeyPaths(migratedPayload);
@@ -105,6 +105,21 @@ public class SchemaContractTests
         var v5Payload = new V4ToV5Migration().Migrate(v4Payload);
 
         Assert.All(v5Payload.Select(kv => kv.Key), key => Assert.False(StateEnvelope.IsReservedKey(key)));
+    }
+
+    /// <summary>
+    /// Verifies that migrating a fully-populated v5 fixture through <see cref="V5ToV6Migration"/> never
+    /// produces a reserved envelope key.
+    /// </summary>
+    [Fact]
+    public void V5ToV6Migration_NeverProducesAReservedEnvelopeKey()
+    {
+        var v5Document = LoadFixture("v5-full.json");
+        var v5Payload = StateEnvelope.StripEnvelope(v5Document);
+
+        var v6Payload = new V5ToV6Migration().Migrate(v5Payload);
+
+        Assert.All(v6Payload.Select(kv => kv.Key), key => Assert.False(StateEnvelope.IsReservedKey(key)));
     }
 
     /// <summary>
@@ -196,7 +211,13 @@ public class SchemaContractTests
     private static ApplicationStateDocumentDto BuildFullyPopulatedDocument() => new()
     {
         Panels = [BuildFullyPopulatedPanel()],
-        Pages = new PagesStateDto { Ids = ["default"], CurrentPageId = "default" },
+
+        // A non-empty Name (rather than the unnamed "default" page) so the "pages.items[].name" key
+        // path actually appears on the DTO side too — the migrated-v1 side (§8.2, ADR-043) has one:
+        // v1-full.json's "work" page migrates all the way to {"id":"work","name":"work"}. WhenWritingNull
+        // would otherwise omit that path here, only on the DTO side, and make the two sides silently
+        // disagree on which paths are compared (this test's own central point).
+        Pages = new PagesStateDto { Items = [new PageStateDto { Id = "work", Name = "Work" }], CurrentPageId = "default" },
         LayoutSnapshots =
         [
             new LayoutSnapshotStateDto

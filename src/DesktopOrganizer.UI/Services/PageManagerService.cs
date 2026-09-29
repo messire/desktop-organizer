@@ -1,4 +1,5 @@
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.State;
 
 namespace DesktopOrganizer.UI.Services;
@@ -10,19 +11,37 @@ namespace DesktopOrganizer.UI.Services;
 /// </summary>
 public class PageManagerService : IPageManager
 {
+    private const string DefaultPageId = "default";
+    private const string DefaultDisplayNameKey = "Page_Default_DisplayName";
+    private const string NewPageNameFormatKey = "Page_NewName_Format";
+
     private readonly IWindowManager _windowManager;
     private readonly IApplicationStateService _applicationStateService;
     private readonly IConfirmationService _confirmation;
     private readonly IPanelItemStorageService _itemStorage;
     private readonly ILocalizationService _localization;
-    private readonly List<string> _pages;
+    private readonly List<PageDescriptor> _pages;
     private string _currentPage;
 
     /// <inheritdoc />
     public event Action<string>? PageChanged;
 
     /// <inheritdoc />
-    public IReadOnlyList<string> Pages => _pages;
+    public event Action? PagesChanged;
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> Pages => [.. _pages.Select(p => p.Id)];
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// L-1 fix (backlog 1.x wave 1 review): <see cref="List{T}.AsReadOnly"/>, not the raw <see cref="_pages"/>
+    /// field — the latter, while typed <see cref="IReadOnlyList{T}"/> here, is castable back to
+    /// <see cref="List{T}"/> by any caller, defeating the read-only contract. Matches <see cref="Pages"/>'
+    /// own snapshot-per-call behavior in spirit (a caller can't mutate this service's internal state
+    /// through either property), though this one wraps rather than copies — cheaper, and sufficient since
+    /// <see cref="PageDescriptor"/> is itself an immutable <see langword="record"/>.
+    /// </remarks>
+    public IReadOnlyList<PageDescriptor> PageDescriptors => _pages.AsReadOnly();
 
     /// <inheritdoc />
     public string CurrentPage => _currentPage;
@@ -30,7 +49,7 @@ public class PageManagerService : IPageManager
     /// <summary>
     /// Initializes a new instance of the <see cref="PageManagerService"/> class.
     /// Pages and the active page are read from the already-loaded in-memory application-state
-    /// document (<see cref="IApplicationStateService.PageIds"/>/<see cref="IApplicationStateService.CurrentPageId"/>,
+    /// document (<see cref="IApplicationStateService.Pages"/>/<see cref="IApplicationStateService.CurrentPageId"/>,
     /// ADR-024 C6) rather than parsed from settings directly — <c>ApplicationStateService.Load()</c>
     /// has already run, once, in <c>Program.Main</c> before this constructor ever gets called.
     /// </summary>
@@ -60,9 +79,9 @@ public class PageManagerService : IPageManager
         _itemStorage = itemStorage;
         _localization = localization;
 
-        _pages = [.. applicationStateService.PageIds];
+        _pages = [.. applicationStateService.Pages];
         _currentPage = string.IsNullOrWhiteSpace(applicationStateService.CurrentPageId)
-            ? "default"
+            ? DefaultPageId
             : applicationStateService.CurrentPageId;
 
         EnsureDefaultPage();
@@ -72,7 +91,7 @@ public class PageManagerService : IPageManager
     public void SwitchTo(string pageId)
     {
         if (pageId == _currentPage) return;
-        if (!_pages.Contains(pageId)) return;
+        if (!_pages.Any(p => p.Id == pageId)) return;
 
         // Hide panels of the current page, show panels of the new page
         foreach (var model in _windowManager.GetAllChildWindows())
@@ -100,10 +119,70 @@ public class PageManagerService : IPageManager
     public void AddPage(string pageId)
     {
         if (string.IsNullOrWhiteSpace(pageId)) return;
-        if (_pages.Contains(pageId)) return;
+        if (_pages.Any(p => p.Id == pageId)) return;
 
-        _pages.Add(pageId);
+        // Legacy semantics (kept for existing callers/tests): the stored name equals the id itself —
+        // new UI-driven creation should use AddNewPage() instead (ADR-043, docs/PLANS/page-display-names.md §4.3).
+        _pages.Add(new PageDescriptor(pageId, pageId));
         Save();
+        PagesChanged?.Invoke();
+    }
+
+    /// <inheritdoc />
+    public string AddNewPage()
+    {
+        string id;
+        do
+        {
+            id = Guid.NewGuid().ToString("N");
+        }
+        while (_pages.Any(p => p.Id == id));
+
+        var localizedDefaultName = LocalizedDefaultName();
+        var counter = _pages.Count + 1;
+        string name;
+        while (true)
+        {
+            name = _localization.Format(NewPageNameFormatKey, counter);
+            if (!_pages.Any(p => string.Equals(PageNameRules.EffectiveName(p, localizedDefaultName), name, StringComparison.OrdinalIgnoreCase)))
+            {
+                break;
+            }
+
+            counter++;
+        }
+
+        _pages.Add(new PageDescriptor(id, name));
+        Save();
+        PagesChanged?.Invoke();
+
+        return id;
+    }
+
+    /// <inheritdoc />
+    public string? GetPageName(string pageId) => _pages.FirstOrDefault(p => p.Id == pageId)?.Name;
+
+    /// <inheritdoc />
+    public PageRenameResult ValidatePageName(string pageId, string? newName) =>
+        PageNameRules.Validate(pageId, newName, _pages, LocalizedDefaultName());
+
+    /// <inheritdoc />
+    public PageRenameResult RenamePage(string pageId, string? newName)
+    {
+        var result = PageNameRules.Validate(pageId, newName, _pages, LocalizedDefaultName());
+        if (result != PageRenameResult.Renamed)
+        {
+            return result;
+        }
+
+        var index = _pages.FindIndex(p => p.Id == pageId);
+        var trimmed = newName?.Trim() ?? string.Empty;
+        _pages[index] = _pages[index] with { Name = trimmed.Length == 0 ? null : trimmed };
+
+        Save();
+        PagesChanged?.Invoke();
+
+        return PageRenameResult.Renamed;
     }
 
     /// <inheritdoc />
@@ -133,8 +212,8 @@ public class PageManagerService : IPageManager
     /// </remarks>
     public bool RemovePage(string pageId)
     {
-        if (pageId == "default") return false;
-        if (!_pages.Contains(pageId)) return false;
+        if (pageId == DefaultPageId) return false;
+        if (!_pages.Any(p => p.Id == pageId)) return false;
 
         _windowManager.SyncAllWindowsToModels();
 
@@ -195,15 +274,16 @@ public class PageManagerService : IPageManager
             _windowManager.SaveWindowsStateNow();
         }
 
-        _pages.Remove(pageId);
+        _pages.RemoveAll(p => p.Id == pageId);
 
         // If we removed the current page, switch to default
         if (_currentPage == pageId)
         {
-            SwitchTo("default");
+            SwitchTo(DefaultPageId);
         }
 
         Save();
+        PagesChanged?.Invoke();
 
         return true;
     }
@@ -226,7 +306,9 @@ public class PageManagerService : IPageManager
 
     private void EnsureDefaultPage()
     {
-        if (!_pages.Contains("default"))
-            _pages.Insert(0, "default");
+        if (!_pages.Any(p => p.Id == DefaultPageId))
+            _pages.Insert(0, new PageDescriptor(DefaultPageId, null));
     }
+
+    private string LocalizedDefaultName() => _localization.GetString(DefaultDisplayNameKey);
 }

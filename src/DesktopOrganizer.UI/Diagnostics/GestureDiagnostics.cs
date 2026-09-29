@@ -341,6 +341,18 @@ public sealed class GestureDiagnostics : IGestureDiagnostics
     }
 
     /// <inheritdoc />
+    public void IconPipelineSynchronousFallbackUsed(Guid? panelId, string component)
+    {
+        if (!_log.IsEnabled) return;
+
+        _log.Write(
+            "panel",
+            "IconPipelineSynchronousFallbackUsed",
+            Scope(panelId),
+            new KeyValuePair<string, object?>("component", component));
+    }
+
+    /// <inheritdoc />
     public void AlignToWorkspaceGridRefused(Guid? panelId, string reason)
     {
         if (!_log.IsEnabled) return;
@@ -408,6 +420,19 @@ public sealed class GestureDiagnostics : IGestureDiagnostics
             new KeyValuePair<string, object?>("from", from.ToString()),
             new KeyValuePair<string, object?>("to", to.ToString()),
             new KeyValuePair<string, object?>("reason", reason));
+    }
+
+    /// <inheritdoc />
+    public void PanelItemsBuilt(Guid panelId, int count, long elapsedMicroseconds)
+    {
+        if (!_log.IsEnabled) return;
+
+        _log.Write(
+            "panel",
+            "PanelItemsBuilt",
+            Scope(panelId),
+            new KeyValuePair<string, object?>("count", count),
+            new KeyValuePair<string, object?>("elapsedMicroseconds", elapsedMicroseconds));
     }
 
     /// <summary>

@@ -23,6 +23,11 @@
                                       Icon.Glyph.ChevronUp (U+E70E) — the SAME codepoint
                                       Converters/BoolToGlyphConverter.cs's RollUpGlyph renders for a panel
                                       that is NOT currently rolled up (the default/preview state).
+          - Icon.Glyph.SubmenuArrow <- design-system-1x.md §2.6 phase 6.2a (U+E76C, the standard Segoe
+                                      MDL2 "ChevronRight"/submenu-caret glyph) — Theme.MenuItem's
+                                      SubmenuHeader/TopLevelHeader templates (Resources/Styles/Controls.xaml).
+          - Icon.Glyph.Close        <- design-system-1x.md §2.5 phase 6.2a (U+E711, the standard Segoe
+                                      MDL2 "Cancel"/close glyph) — Controls/InfoBar.cs's dismiss button.
 
         The FontFamily string itself ("Segoe MDL2 Assets") stays a literal Setter in Controls.xaml /
         Templates.xaml, not here — this dictionary is <sys:String> codepoints only, per D-1.
@@ -35,8 +40,23 @@
     <sys:String x:Key="Icon.Glyph.Overflow">&#xE712;</sys:String>
     <sys:String x:Key="Icon.Glyph.Checkmark">&#xE73E;</sys:String>
     <sys:String x:Key="Icon.Glyph.RollUp">&#xE70E;</sys:String>
+    <sys:String x:Key="Icon.Glyph.SubmenuArrow">&#xE76C;</sys:String>
+    <sys:String x:Key="Icon.Glyph.Close">&#xE711;</sys:String>
 
     <!-- ADR-042: PanelColorEditor's swatch grid "Custom…" cell (a dashed ring + "+" glyph) — the standard
          Segoe MDL2 "Add" glyph (U+E710), no prior consumer to copy from. -->
     <sys:String x:Key="Icon.Glyph.Add">&#xE710;</sys:String>
+
+    <!-- Phase 6.3 (design-system-1x.md §2.8, ADR-047 D-9): AppDialogWindow's severity glyphs — the
+         standard Segoe MDL2/Fluent codepoints for each MessageBoxImage this dialog can show (no prior
+         consumer to copy from; MessageBoxImage.None hides the glyph entirely, see AppDialogWindow.xaml.cs). -->
+    <sys:String x:Key="Icon.Glyph.Info">&#xE946;</sys:String>
+    <sys:String x:Key="Icon.Glyph.Warning">&#xE7BA;</sys:String>
+    <sys:String x:Key="Icon.Glyph.Error">&#xEA39;</sys:String>
+    <sys:String x:Key="Icon.Glyph.Question">&#xE9CE;</sys:String>
+
+    <!-- Design system 1.x wave-4 review (Theme.Controls.xaml's InfoBar template): the one severity
+         AppDialogWindow's own set above has no counterpart for — the standard Segoe MDL2/Fluent
+         "Completed" glyph (U+E930, a checkmark-in-circle), reused for InfoBarSeverity.Success. -->
+    <sys:String x:Key="Icon.Glyph.Success">&#xE930;</sys:String>
 </ResourceDictionary>

@@ -11,19 +11,27 @@ public class PanelColorPresetsTests
 {
     private static readonly (string Id, string AccentHex, string DarkModeTextHex, string LightModeTextHex)[] Expected =
     {
-        ("Red", "#D9534F", "#FFFFFF", "#4A1F1E"),
-        ("Orange", "#E0812F", "#FFFFFF", "#4B2A0C"),
-        ("Amber", "#D6A324", "#FFFFFF", "#453309"),
-        ("Lime", "#8FB43A", "#FFFFFF", "#2F3D11"),
-        ("Green", "#3F9A5A", "#FFFFFF", "#173A24"),
-        ("Teal", "#2F9C93", "#FFFFFF", "#12403C"),
-        ("Cyan", "#2E98C8", "#FFFFFF", "#123B4E"),
-        ("Blue", "#3F7FD9", "#FFFFFF", "#172F4B"),
-        ("Violet", "#7A5BE7", "#FFFFFF", "#2B2350"),
-        ("Magenta", "#C8559E", "#FFFFFF", "#4A1F3B"),
+        ("Red", "#D9534F", "#EFE1E1", "#4A1F1E"),
+        ("Orange", "#E0812F", "#EFE8E1", "#4B2A0C"),
+        ("Amber", "#D6A324", "#EFEBE1", "#453309"),
+        ("Lime", "#8FB43A", "#EBEFE1", "#2F3D11"),
+        ("Green", "#3F9A5A", "#E1EFE5", "#173A24"),
+        ("Teal", "#2F9C93", "#E1EFEE", "#12403C"),
+        ("Cyan", "#2E98C8", "#E1EBEF", "#123B4E"),
+        ("Blue", "#3F7FD9", "#E1E7EF", "#172F4B"),
+        ("Violet", "#7A5BE7", "#E4E1EF", "#2B2350"),
+        ("Magenta", "#C8559E", "#EFE1EA", "#4A1F3B"),
         ("Graphite", "#596273", "#FFFFFF", "#22262E"),
         ("Stone", "#7D7468", "#FFFFFF", "#2E2A26"),
     };
+
+    /// <summary>The <see cref="Expected"/> preset ids that are NOT one of the two neutral presets (Graphite, Stone) — every OTHER preset's <see cref="PanelColorPreset.DarkModeTextHex"/> must be its own distinct tint (backlog 1.x item 4).</summary>
+    private static readonly string[] ChromaticIds =
+        Expected.Select(e => e.Id).Where(id => id is not "Graphite" and not "Stone").ToArray();
+
+    /// <summary>Every preset's (Id, DarkModeTextHex, LightModeTextHex), read straight from <see cref="PanelColorPresets.All"/> — theory data for <see cref="TextFor_EachModesOwnText_ResolvesToThatMode"/>.</summary>
+    public static IEnumerable<object[]> AllPresetModeTexts() =>
+        PanelColorPresets.All.Select(p => new object[] { p.Id, p.DarkModeTextHex, p.LightModeTextHex });
 
     /// <summary>Verifies <see cref="PanelColorPresets.All"/> has exactly the twelve presets, in spec order, with the exact hex values and <see cref="PanelColorPreset.NameKey"/>.</summary>
     [Fact]
@@ -69,11 +77,46 @@ public class PanelColorPresetsTests
         Assert.Same(PanelColorPresets.Blue, PanelColorPresets.Default);
     }
 
-    /// <summary>Verifies every preset shares the same <see cref="PanelColorPreset.DarkModeTextHex"/> (<c>#FFFFFF</c>).</summary>
+    /// <summary>
+    /// Backlog 1.x item 4 (§4.2a) regression guard: every CHROMATIC preset's <see cref="PanelColorPreset.DarkModeTextHex"/>
+    /// is now its own distinct tint — not the single shared <c>#FFFFFF</c> every preset used before this
+    /// change (the root cause of "the preset doesn't seem to change the text" in Dark mode).
+    /// </summary>
     [Fact]
-    public void All_ShareTheSameDarkModeText()
+    public void ChromaticPresets_HaveDistinctDarkModeText()
     {
-        Assert.All(PanelColorPresets.All, p => Assert.Equal("#FFFFFF", p.DarkModeTextHex));
+        var chromaticDarkTexts = PanelColorPresets.All
+            .Where(p => ChromaticIds.Contains(p.Id, StringComparer.Ordinal))
+            .Select(p => p.DarkModeTextHex)
+            .ToList();
+
+        Assert.Equal(ChromaticIds.Length, chromaticDarkTexts.Count);
+        Assert.Equal(chromaticDarkTexts.Count, chromaticDarkTexts.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.DoesNotContain("#FFFFFF", chromaticDarkTexts, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Verifies the two NEUTRAL presets (Graphite, Stone) deliberately keep plain white for <see cref="PanelColorPreset.DarkModeTextHex"/> (§4.2a: "Нейтральные пресеты допустимо оставить белыми").</summary>
+    [Fact]
+    public void NeutralPresets_KeepPlainWhiteDarkModeText()
+    {
+        Assert.Equal("#FFFFFF", PanelColorPresets.Graphite.DarkModeTextHex);
+        Assert.Equal("#FFFFFF", PanelColorPresets.Stone.DarkModeTextHex);
+    }
+
+    /// <summary>
+    /// Backlog 1.x item 4 (§4.2a) DoD 1: every preset's own paired text, for EITHER mode, resolves back to
+    /// THAT mode via <see cref="PanelThemeRules.FromTextColor(string?)"/> — a tinted dark-mode text must
+    /// never be light enough to make the panel's surface "jump" to <see cref="PanelThemeMode.Light"/>.
+    /// </summary>
+    /// <param name="id">The preset's <see cref="PanelColorPreset.Id"/>.</param>
+    /// <param name="darkModeTextHex">The preset's dark-mode text hex value.</param>
+    /// <param name="lightModeTextHex">The preset's light-mode text hex value.</param>
+    [Theory]
+    [MemberData(nameof(AllPresetModeTexts))]
+    public void TextFor_EachModesOwnText_ResolvesToThatMode(string id, string darkModeTextHex, string lightModeTextHex)
+    {
+        Assert.True(PanelThemeRules.FromTextColor(darkModeTextHex) == PanelThemeMode.Dark, $"{id}: dark-mode text {darkModeTextHex} should resolve to PanelThemeMode.Dark.");
+        Assert.True(PanelThemeRules.FromTextColor(lightModeTextHex) == PanelThemeMode.Light, $"{id}: light-mode text {lightModeTextHex} should resolve to PanelThemeMode.Light.");
     }
 
     /// <summary>Verifies <see cref="PanelColorPreset.TextFor"/> returns <see cref="PanelColorPreset.DarkModeTextHex"/>/<see cref="PanelColorPreset.LightModeTextHex"/> for the corresponding mode.</summary>
@@ -90,12 +133,14 @@ public class PanelColorPresetsTests
     /// Verifies <see cref="PanelColorPresets.CustomDialogSeed"/> is exactly the twelve accents (in
     /// <see cref="PanelColorPresets.All"/> order) followed by the four distinct text colours collected by
     /// scanning Dark-then-Light per preset, first-seen order (see the production doc comment for the
-    /// algorithm this pins).
+    /// algorithm this pins). Backlog 1.x item 4: since <see cref="PanelColorPreset.DarkModeTextHex"/> is no
+    /// longer a single shared value, the four collected texts are now Red's own (dark, light) pair followed
+    /// by Orange's own (dark, light) pair, rather than the pre-#4 shared white plus three presets' light text.
     /// </summary>
     [Fact]
     public void CustomDialogSeed_Has16Entries_TwelveAccentsThenFourDistinctTexts()
     {
-        var expectedTexts = new[] { "#FFFFFF", "#4A1F1E", "#4B2A0C", "#453309" };
+        var expectedTexts = new[] { "#EFE1E1", "#4A1F1E", "#EFE8E1", "#4B2A0C" };
         var expectedSeed = PanelColorPresets.All.Select(p => p.AccentHex).Concat(expectedTexts).ToList();
 
         Assert.Equal(16, PanelColorPresets.CustomDialogSeed.Count);

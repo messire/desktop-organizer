@@ -134,21 +134,21 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "old"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
 
             var firstStore = BuildStore(paths, migrationRunner: runner);
             var firstResult = firstStore.Load();
 
             Assert.Equal(StateLoadStatus.Loaded, firstResult.Status);
             Assert.Equal(2, firstResult.SchemaVersionOnDisk);
-            Assert.Equal(3, firstResult.MigrationsApplied);
+            Assert.Equal(4, firstResult.MigrationsApplied);
 
             // S-4 (manual matrix analogue): the migrated document must have been written back to
             // primary, so a second, independent Load() sees it already at the current version.
             var onDisk = JsonNode.Parse(File.ReadAllText(paths.PrimaryFilePath)) as JsonObject;
             Assert.Equal(StateEnvelope.CurrentSchemaVersion, onDisk!["schemaVersion"]!.GetValue<int>());
 
-            var secondStore = BuildStore(paths, migrationRunner: new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5) }));
+            var secondStore = BuildStore(paths, migrationRunner: new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) }));
             var secondResult = secondStore.Load();
 
             Assert.Equal(StateLoadStatus.Loaded, secondResult.Status);
@@ -177,7 +177,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "old"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
             var store = BuildStore(paths, migrationRunner: runner);
 
             store.Load();
@@ -210,7 +210,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "old"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
             var store = BuildStore(paths, migrationRunner: runner);
             store.Load();
 
@@ -239,7 +239,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "first-upgrade"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
             BuildStore(paths, migrationRunner: runner).Load();
 
             // Simulate a second, independent v2 document later reaching the same on-disk slot (e.g. an
@@ -289,7 +289,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.BackupFilePath, FullDocument(2, "old-backup"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
             var store = BuildStore(paths, migrationRunner: runner);
 
             store.Load();
@@ -320,7 +320,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "old"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
             var store = BuildStore(paths, storageLock: new FakeStorageLock { IsHeld = false }, migrationRunner: runner);
 
             store.Load();
@@ -355,7 +355,7 @@ public class JsonApplicationStateStoreTests
             var orphanedTemp = paths.NewTempFilePath();
             File.WriteAllText(orphanedTemp, "{\"truncat"); // deliberately incomplete/invalid JSON
 
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
             var store = BuildStore(paths, migrationRunner: runner);
 
             store.Load();
@@ -620,14 +620,14 @@ public class JsonApplicationStateStoreTests
         try
         {
             var legacy = new FakeLegacyImporter { Result = FullDocument(1, "legacy") };
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(1, 2), new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(1, 2), new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
             var store = BuildStore(paths, legacyImporter: legacy, migrationRunner: runner);
 
             var result = store.Load();
 
             Assert.Equal(StateLoadStatus.ImportedFromLegacy, result.Status);
             Assert.Equal(1, result.SchemaVersionOnDisk);
-            Assert.Equal(4, result.MigrationsApplied);
+            Assert.Equal(5, result.MigrationsApplied);
             Assert.Equal("legacy", result.Payload["marker"]!.GetValue<string>());
             Assert.True(File.Exists(paths.PrimaryFilePath));
 

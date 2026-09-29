@@ -1,6 +1,7 @@
 # ADR-035: Panel/Page Deletion Goes to the Recycle Bin
 
-Status: Accepted (2026-09-27) — amends ADR-010; amended 2026-09-27 by ADR-040
+Status: Accepted (2026-09-27) — amends ADR-010; amended 2026-09-27 by ADR-040; amended 2026-09-29 by
+ADR-045 (clone-rollback exception — see bottom of document)
 
 ## Context
 
@@ -132,3 +133,15 @@ restores to a **visible** location on Explorer "Restore", not into `PanelItems\<
 originally documented — panel-/page-level deletion (`ReleaseToRecycleBin`, `PageManagerService.RemovePage`)
 still recycles content from inside managed storage — remains open and is not addressed by this amendment;
 `ReleaseToRecycleBin`/`RecycleOutcome`/the all-or-kept page semantics are otherwise unchanged.
+
+## Amendment (2026-09-29, backlog 1.x item 8 — ADR-045)
+
+[ADR-045](ADR-045-panel-clone-to-page.md) ("Copy panel to page") adds one narrow, explicit exception to
+this ADR's core rule ("user content is only ever destroyed through the Recycle Bin, never a direct
+delete"): rolling back a clone operation that failed partway through
+(`IPanelItemStorageService.DiscardCopies`) deletes the clone's own, brand-new managed-item copies
+**directly**, bypassing the Recycle Bin. This does not reopen the rule itself — `DiscardCopies` is scoped
+strictly to copies `CopyManaged` created inside the *same, still-in-flight* clone operation (verified by
+path shape and manifest provenance), which were never shown to the user as part of any panel; they exist
+for, at most, a fraction of a second inside a transaction this ADR's own author never sees complete. Every
+other deletion path this ADR governs (`ReleaseToRecycleBin`, `PageManagerService.RemovePage`) is unchanged.

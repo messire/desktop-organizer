@@ -36,6 +36,9 @@ public class MainWindowViewModelTests
     private readonly Mock<IUpdateCheckService> _updateCheckServiceMock = new();
     private readonly Mock<IExternalLinkLauncher> _linkLauncherMock = new();
     private readonly Mock<IColorPickerService> _colorPickerMock = new();
+    private readonly Mock<IPanelCloneFlow> _panelCloneFlowMock = new();
+    private readonly Mock<IStatusNotifier> _statusNotifierMock = new();
+    private readonly Mock<IDesktopIconsService> _desktopIconsMock = new();
 
     // A real LocalizationService (English) rather than a mock: several tests below assert actual
     // confirmation-dialog text (e.g. "moved to the Recycle Bin", plural panel counts) — the same pattern the
@@ -464,27 +467,40 @@ public class MainWindowViewModelTests
     /// <see cref="MainWindowViewModel.RemovePageCommand"/> resyncs <see cref="MainWindowViewModel.Pages"/>
     /// from <see cref="IPageManager.Pages"/>.
     /// </summary>
+    /// <remarks>
+    /// L-2 fix (backlog 1.x wave 1 review): the resync now happens purely via
+    /// <see cref="IPageManager.PagesChanged"/> (<c>MainWindowViewModel.OnPagesChanged</c>) — matching
+    /// <c>PageManagerService.RemovePage</c>'s real contract of always raising that event on a successful
+    /// removal — rather than an extra, explicit <c>SyncPages()</c> call
+    /// <see cref="MainWindowViewModel.RemovePageCommand"/> itself used to make. The mock below raises the
+    /// event from the same <c>Returns(true)</c> setup's callback to mirror that real contract.
+    /// </remarks>
     [Fact]
     public void RemovePage_PageManagerRemoves_ResyncsPagesFromPageManager()
     {
-        // Arrange — BuildSut() itself seeds _pageManagerMock.Pages with [] (consumed once by the
-        // constructor's own SyncPages() call), so "work" is seeded afterwards via the ViewModel's own
+        // Arrange — BuildSut() itself seeds _pageManagerMock.PageDescriptors with [] (consumed once by
+        // the constructor's own SyncPages() call), so "work" is seeded afterwards via the ViewModel's own
         // public SyncPages(), the same API RemovePage itself must call on success.
         var sut = BuildSut();
-        _pageManagerMock.Setup(p => p.Pages).Returns(["default", "work"]);
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("default", null), new PageDescriptor("work", "work")]);
         sut.SyncPages();
-        Assert.Contains("work", sut.Pages);
+        Assert.Contains(sut.Pages, p => p.Id == "work");
 
-        _pageManagerMock.Setup(p => p.RemovePage("work")).Returns(true);
-        _pageManagerMock.Setup(p => p.Pages).Returns(["default"]);
+        _pageManagerMock.Setup(p => p.RemovePage("work"))
+            .Callback(() =>
+            {
+                _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("default", null)]);
+                _pageManagerMock.Raise(p => p.PagesChanged += null);
+            })
+            .Returns(true);
 
         // Act
         sut.RemovePageCommand.Execute("work");
 
         // Assert
         _pageManagerMock.Verify(p => p.RemovePage("work"), Times.Once);
-        Assert.DoesNotContain("work", sut.Pages);
-        Assert.Contains("default", sut.Pages);
+        Assert.DoesNotContain(sut.Pages, p => p.Id == "work");
+        Assert.Contains(sut.Pages, p => p.Id == "default");
     }
 
     /// <summary>
@@ -497,7 +513,7 @@ public class MainWindowViewModelTests
     {
         // Arrange
         var sut = BuildSut();
-        _pageManagerMock.Setup(p => p.Pages).Returns(["default", "work"]);
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("default", null), new PageDescriptor("work", "work")]);
         sut.SyncPages();
 
         _pageManagerMock.Setup(p => p.RemovePage("work")).Returns(false);
@@ -507,7 +523,7 @@ public class MainWindowViewModelTests
 
         // Assert
         _pageManagerMock.Verify(p => p.RemovePage("work"), Times.Once);
-        Assert.Contains("work", sut.Pages);
+        Assert.Contains(sut.Pages, p => p.Id == "work");
         Assert.Equal(2, sut.Pages.Count);
     }
 
@@ -615,6 +631,136 @@ public class MainWindowViewModelTests
         Assert.True(sut.MovePanelToPageCommand.CanExecute("default"));
     }
 
+    /// <summary>
+    /// M-E fix (code review, panel clone to page, backlog 1.x wave 3 review); phase 6.3 (design-system-1x.md
+    /// §2.8) moved this off <c>PanelPageStatusMessage</c> onto <see cref="IStatusNotifier"/>: a successful
+    /// move via the Settings window's "Panels" section shows a brief, NON-blocking
+    /// <see cref="StatusSeverity.Success"/> status naming the destination page — replacing the previous
+    /// MODAL success <see cref="IConfirmationService.Notify"/> — the panel just silently left
+    /// <see cref="MainWindowViewModel.PanelsOnCurrentPage"/> with nothing else on screen to indicate where
+    /// it went (unlike moving it from the panel's own header context menu, where the effect is immediately
+    /// visible where the user clicked).
+    /// </summary>
+    [Fact]
+    public void MovePanelToPageCommand_Execute_ShowsSuccessStatusWithDestinationPageDisplayName()
+    {
+        // NEW-1 fix (final review, panel clone to page, backlog 1.x): the status message is now
+        // conditioned on the panel's PageId actually having changed, so this mock must behave like the
+        // real IWindowManager.MovePanelToPage and perform the assignment — a bare (no-op) mock would make
+        // this look like a rejected/unknown-page move instead of a successful one.
+        _windowManagerMock
+            .Setup(w => w.MovePanelToPage(It.IsAny<ChildWindowModel>(), It.IsAny<string>()))
+            .Callback<ChildWindowModel, string>((model, pid) => model.PageId = pid);
+
+        var sut = BuildSut();
+        sut.SelectedPanel = new ChildWindowModel { PageId = "default" };
+
+        // BuildSut() itself wires PageDescriptors to an empty list — overwrite AFTER construction, then
+        // force the same resync IPageManager.PagesChanged would normally drive, so
+        // MainWindowViewModel.Pages (which MovePanelToPage's own display-name lookup reads) picks it up.
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        _pageManagerMock.Raise(p => p.PagesChanged += null);
+
+        sut.MovePanelToPageCommand.Execute("work");
+
+        _statusNotifierMock.Verify(
+            n => n.Show(
+                StatusSeverity.Success,
+                _localization.Format("Panel_MovedToPage_Message_Format", "Work"),
+                _localization.GetString("Panel_MovedToPage_Title")),
+            Times.Once);
+        _confirmationMock.Verify(
+            c => c.Notify(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// NEW-1 fix (final review, panel clone to page, backlog 1.x): <see cref="IWindowManager.MovePanelToPage"/>
+    /// silently no-ops for a destination page id <see cref="IPageManager"/> doesn't know about (its own
+    /// fix-cycle finding 10). A bare mock (no <c>Callback</c> wired) reproduces exactly that — the
+    /// panel's <see cref="ChildWindowModel.PageId"/> never changes — so <see cref="MainWindowViewModel"/>
+    /// must notice the move never happened and must NOT announce a success it didn't perform.
+    /// </summary>
+    [Fact]
+    public void MovePanelToPageCommand_Execute_UnknownDestinationPage_DoesNotShowStatus()
+    {
+        var sut = BuildSut();
+        var panel = new ChildWindowModel { PageId = "default" };
+        sut.SelectedPanel = panel;
+
+        sut.MovePanelToPageCommand.Execute("ghost-page");
+
+        Assert.Equal("default", panel.PageId);
+        _statusNotifierMock.Verify(
+            n => n.Show(It.IsAny<StatusSeverity>(), It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// NEW-1 fix: a rejected (unknown-page) move still re-syncs <see cref="MainWindowViewModel.Pages"/> —
+    /// the same defensive re-sync <see cref="MainWindowViewModel.CopyPanelToPageCommand"/>'s own
+    /// <c>onUnknownPage</c> callback performs for the sibling clone-to-page flow — in case the destination
+    /// only looked unknown because <see cref="IPageManager.PageDescriptors"/> itself had gone stale.
+    /// </summary>
+    [Fact]
+    public void MovePanelToPageCommand_Execute_UnknownDestinationPage_ResyncsPages()
+    {
+        var sut = BuildSut();
+        sut.SelectedPanel = new ChildWindowModel { PageId = "default" };
+
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+
+        sut.MovePanelToPageCommand.Execute("ghost-page");
+
+        Assert.Contains(sut.Pages, p => p.Id == "work");
+    }
+
+    /// <summary>
+    /// M-D fix (code review, panel clone to page, backlog 1.x wave 3 review): a panel moved via its OWN
+    /// header context menu (<c>ChildWindowViewModel.MovePanelToPageCommand</c>) never goes through this
+    /// ViewModel at all — <see cref="IWindowManager.OnChildWindowPageChanged"/> is this ViewModel's only
+    /// way to notice, and it must refresh <see cref="MainWindowViewModel.PanelsOnCurrentPage"/> just like
+    /// its OWN <see cref="MainWindowViewModel.MovePanelToPageCommand"/> already does.
+    /// </summary>
+    [Fact]
+    public void OnChildWindowPageChanged_RebuildsPanelsOnCurrentPage()
+    {
+        _pageManagerMock.SetupGet(p => p.CurrentPage).Returns("default");
+        var panel = new ChildWindowModel { PageId = "default" };
+        _windowManagerMock.Setup(w => w.GetAllChildWindows()).Returns([panel]);
+        var sut = BuildSut();
+        sut.SyncPanels();
+        Assert.Equal([panel], sut.PanelsOnCurrentPage);
+
+        // Simulates ChildWindowViewModel.MovePanelToPageCommand having already reassigned the panel's page
+        // directly via IWindowManager.MovePanelToPage, bypassing this ViewModel entirely.
+        panel.PageId = "work";
+        _windowManagerMock.Raise(w => w.OnChildWindowPageChanged += null, _windowManagerMock.Object, panel);
+
+        Assert.Empty(sut.PanelsOnCurrentPage);
+    }
+
+    /// <summary>
+    /// M-D fix: when the panel that changed page was also <see cref="MainWindowViewModel.SelectedPanel"/>,
+    /// it is cleared too — the same behavior <see cref="MainWindowViewModel.MovePanelToPageCommand"/>'s own
+    /// call to <c>RefreshPanelsOnCurrentPage</c> already produces.
+    /// </summary>
+    [Fact]
+    public void OnChildWindowPageChanged_SelectedPanelLeftCurrentPage_ClearsSelectedPanel()
+    {
+        _pageManagerMock.SetupGet(p => p.CurrentPage).Returns("default");
+        var panel = new ChildWindowModel { PageId = "default" };
+        _windowManagerMock.Setup(w => w.GetAllChildWindows()).Returns([panel]);
+        var sut = BuildSut();
+        sut.SyncPanels();
+        sut.SelectedPanel = panel;
+
+        panel.PageId = "work";
+        _windowManagerMock.Raise(w => w.OnChildWindowPageChanged += null, _windowManagerMock.Object, panel);
+
+        Assert.Null(sut.SelectedPanel);
+    }
+
     // ── PanelsOnCurrentPage (docs/PLANS/settings-window-redesign.md §2.3): the Panels section's actual
     // list source, rebuilt from Panels/CurrentPage since ChildWindowModel.PageId isn't itself INPC. ──
 
@@ -705,9 +851,20 @@ public class MainWindowViewModelTests
     public void PanelsOnCurrentPage_RebuiltAfterMovePanelToPageCommand()
     {
         _pageManagerMock.SetupGet(p => p.CurrentPage).Returns("default");
+
+        // NEW-6 fix (final review, panel clone to page, backlog 1.x): MainWindowViewModel.MovePanelToPage
+        // no longer calls RefreshPanelsOnCurrentPage() itself on a successful move — it now relies on the
+        // real IWindowManager.MovePanelToPage raising OnChildWindowPageChanged synchronously (see its own
+        // remarks), which this ViewModel's OnPanelPageChanged handler already turns into that same
+        // refresh. The mock must reproduce that same synchronous raise for this to still exercise the
+        // ViewModel's actual wiring, not the removed direct call.
         _windowManagerMock
             .Setup(w => w.MovePanelToPage(It.IsAny<ChildWindowModel>(), It.IsAny<string>()))
-            .Callback<ChildWindowModel, string>((model, pageId) => model.PageId = pageId);
+            .Callback<ChildWindowModel, string>((model, pageId) =>
+            {
+                model.PageId = pageId;
+                _windowManagerMock.Raise(w => w.OnChildWindowPageChanged += null, _windowManagerMock.Object, model);
+            });
         var panel = new ChildWindowModel { PageId = "default" };
         _windowManagerMock.Setup(w => w.GetAllChildWindows()).Returns([panel]);
         var sut = BuildSut();
@@ -781,9 +938,18 @@ public class MainWindowViewModelTests
     public void PanelsOnCurrentPage_PanelMovedAwayAndBack_ReappearsAtPanelsOrderPosition()
     {
         _pageManagerMock.SetupGet(p => p.CurrentPage).Returns("default");
+
+        // NEW-6 fix (final review, panel clone to page, backlog 1.x): see the sibling
+        // PanelsOnCurrentPage_RebuiltAfterMovePanelToPageCommand test's own remarks — the mock must
+        // reproduce the real IWindowManager.MovePanelToPage's synchronous OnChildWindowPageChanged raise
+        // for RefreshPanelsOnCurrentPage() to still run now that the ViewModel no longer calls it directly.
         _windowManagerMock
             .Setup(w => w.MovePanelToPage(It.IsAny<ChildWindowModel>(), It.IsAny<string>()))
-            .Callback<ChildWindowModel, string>((model, pageId) => model.PageId = pageId);
+            .Callback<ChildWindowModel, string>((model, pageId) =>
+            {
+                model.PageId = pageId;
+                _windowManagerMock.Raise(w => w.OnChildWindowPageChanged += null, _windowManagerMock.Object, model);
+            });
         var panelA = new ChildWindowModel { PageId = "default" };
         var panelB = new ChildWindowModel { PageId = "default" };
         var panelC = new ChildWindowModel { PageId = "default" };
@@ -1239,6 +1405,24 @@ public class MainWindowViewModelTests
     }
 
     /// <summary>
+    /// L-5 fix (review round, design-system-1x.md §2.8): a bulk re-layout of every panel has no
+    /// single-step undo — the confirmation must use the Warning icon (Enter defaults to "No"), not the
+    /// Question default.
+    /// </summary>
+    [Fact]
+    public void AlignAllPanels_Confirms_WithWarningIcon()
+    {
+        _confirmationMock
+            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
+            .Returns(true);
+        var sut = BuildSut();
+
+        sut.AlignAllPanelsCommand.Execute(null);
+
+        _confirmationMock.Verify(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), MessageBoxImage.Warning), Times.Once);
+    }
+
+    /// <summary>
     /// Verifies that when the user declines confirmation, <see cref="MainWindowViewModel.AlignAllPanelsCommand"/>
     /// does nothing.
     /// </summary>
@@ -1501,6 +1685,519 @@ public class MainWindowViewModelTests
         Assert.Same(sut.GlobalDefaults.DefaultColors, sut.DefaultColors);
     }
 
+    // ── ADR-043 (docs/PLANS/page-display-names.md §5.2/§8.4): SyncPages/AddPage/inline rename ─────────
+
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel.SyncPages"/> preserves an already-present page's own
+    /// <see cref="PageItemViewModel"/> instance (by <see cref="PageItemViewModel.Id"/>) across a resync —
+    /// only its <see cref="PageItemViewModel.Name"/> is updated in place — rather than rebuilding the row
+    /// from scratch, which would drop a live selection/in-progress edit bound to it.
+    /// </summary>
+    [Fact]
+    public void SyncPages_PageRenamedElsewhere_PreservesSameInstanceAndUpdatesName()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var original = sut.Pages.Single();
+
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Renamed")]);
+        sut.SyncPages();
+
+        Assert.Same(original, sut.Pages.Single());
+        Assert.Equal("Renamed", original.Name);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel.AddPageCommand"/> (<c>AddPage</c>) calls
+    /// <see cref="IPageManager.AddNewPage"/> and switches to the new page, without double-adding it to
+    /// <see cref="MainWindowViewModel.Pages"/> — <see cref="IPageManager.AddNewPage"/> itself raises
+    /// <see cref="IPageManager.PagesChanged"/> synchronously (simulated here via the mock's own
+    /// <c>Callback</c>), which resyncs <see cref="MainWindowViewModel.Pages"/> on its own.
+    /// </summary>
+    [Fact]
+    public void AddPage_Execute_SwitchesToNewPageWithoutDuplicatingPagesEntry()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.AddNewPage())
+            .Callback(() =>
+            {
+                _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("default", null), new PageDescriptor("new-id", "Page 2")]);
+                _pageManagerMock.Raise(p => p.PagesChanged += null);
+            })
+            .Returns("new-id");
+
+        sut.AddPageCommand.Execute(null);
+
+        Assert.Single(sut.Pages, p => p.Id == "new-id");
+        _pageManagerMock.Verify(p => p.SwitchTo("new-id"), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel.BeginRenamePageCommand"/> puts the given page into
+    /// edit mode, clears any stale <see cref="PageItemViewModel.RenameError"/>, and seeds
+    /// <see cref="PageItemViewModel.EditingName"/> with the page's current EFFECTIVE display name (the
+    /// localized fallback for an unnamed <c>"default"</c> page, not a blank box).
+    /// </summary>
+    [Fact]
+    public void BeginRenamePageCommand_Execute_EntersEditModeSeededWithEffectiveDisplayName()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("default", null)]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+
+        sut.BeginRenamePageCommand.Execute(page);
+
+        Assert.True(page.IsEditing);
+        Assert.Equal("Default", page.EditingName);
+        Assert.Null(page.RenameError);
+    }
+
+    /// <summary>
+    /// M-1 fix (backlog 1.x wave 1 review): calling <see cref="MainWindowViewModel.BeginRenamePageCommand"/>
+    /// again on a page that is ALREADY <see cref="PageItemViewModel.IsEditing"/> (e.g. <c>F2</c> pressed a
+    /// second time while typing) must not reset <see cref="PageItemViewModel.EditingName"/> back to the
+    /// seed, discarding whatever the user had already typed.
+    /// </summary>
+    [Fact]
+    public void BeginRenamePageCommand_Execute_PageAlreadyEditing_DoesNotResetEditingName()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+        page.EditingName = "Already typed something";
+
+        sut.BeginRenamePageCommand.Execute(page);
+
+        Assert.True(page.IsEditing);
+        Assert.Equal("Already typed something", page.EditingName);
+    }
+
+    /// <summary>
+    /// H-1 fix (backlog 1.x wave 1 review): committing the untouched seed text — what
+    /// <see cref="MainWindowViewModel.BeginRenamePageCommand"/> pre-filled the editor with, the unnamed
+    /// <c>"default"</c> page's localized fallback display name — must close the editor as a no-op
+    /// WITHOUT ever calling <see cref="IPageManager.RenamePage"/>, and must leave the page's stored
+    /// <see cref="PageItemViewModel.Name"/> at <see langword="null"/> (not persisted as the literal
+    /// fallback text).
+    /// </summary>
+    [Fact]
+    public void CommitRenamePageCommand_Execute_UnnamedDefaultUntouchedSeed_ClosesEditor_NeverCallsRenamePage()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("default", null)]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+
+        sut.CommitRenamePageCommand.Execute(page);
+
+        Assert.False(page.IsEditing);
+        Assert.Null(page.RenameError);
+        Assert.Null(page.Name);
+        _pageManagerMock.Verify(p => p.RenamePage(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel.CommitRenamePageCommand"/>, on
+    /// <see cref="PageRenameResult.Renamed"/>, closes the editor and that the page's
+    /// <see cref="PageItemViewModel.Name"/> reflects the new stored name — refreshed by
+    /// <see cref="MainWindowViewModel.SyncPages"/> reacting to <see cref="IPageManager.PagesChanged"/>,
+    /// which the mock raises synchronously here, matching <c>PageManagerService.RenamePage</c>'s own contract.
+    /// </summary>
+    [Fact]
+    public void CommitRenamePageCommand_Execute_Renamed_ClosesEditorAndRefreshesName()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+        page.EditingName = "Renamed";
+        _pageManagerMock.Setup(p => p.RenamePage("work", "Renamed"))
+            .Callback(() =>
+            {
+                _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Renamed")]);
+                _pageManagerMock.Raise(p => p.PagesChanged += null);
+            })
+            .Returns(PageRenameResult.Renamed);
+
+        sut.CommitRenamePageCommand.Execute(page);
+
+        Assert.False(page.IsEditing);
+        Assert.Null(page.RenameError);
+        Assert.Equal("Renamed", page.Name);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel.CommitRenamePageCommand"/>, on any outcome other than
+    /// <see cref="PageRenameResult.Renamed"/>/<see cref="PageRenameResult.Unchanged"/>, leaves the editor
+    /// open and sets <see cref="PageItemViewModel.RenameError"/> — never a <see cref="MessageBox"/>.
+    /// </summary>
+    [Fact]
+    public void CommitRenamePageCommand_Execute_Duplicate_KeepsEditorOpenAndSetsRenameError()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+        page.EditingName = "Taken";
+        _pageManagerMock.Setup(p => p.RenamePage("work", "Taken")).Returns(PageRenameResult.Duplicate);
+
+        sut.CommitRenamePageCommand.Execute(page);
+
+        Assert.True(page.IsEditing);
+        Assert.Equal(PageRenameResult.Duplicate, page.RenameError);
+    }
+
+    /// <summary>
+    /// UX-4 fix (backlog 1.x wave 1 review): unlike <see cref="MainWindowViewModel.CommitRenamePageCommand"/>
+    /// (Enter), a FAILED commit via <see cref="MainWindowViewModel.CommitRenamePageOnLostFocusCommand"/>
+    /// (focus loss) auto-cancels the edit — <see cref="PageItemViewModel.IsEditing"/> goes back to
+    /// <see langword="false"/> instead of leaving the row "stuck" open with no keyboard focus — while still
+    /// setting <see cref="PageItemViewModel.RenameError"/> (not silently discarding why it failed).
+    /// </summary>
+    [Fact]
+    public void CommitRenamePageOnLostFocusCommand_Execute_Duplicate_AutoCancelsButKeepsRenameError()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+        page.EditingName = "Taken";
+        _pageManagerMock.Setup(p => p.RenamePage("work", "Taken")).Returns(PageRenameResult.Duplicate);
+
+        sut.CommitRenamePageOnLostFocusCommand.Execute(page);
+
+        Assert.False(page.IsEditing);
+        Assert.Equal(PageRenameResult.Duplicate, page.RenameError);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel.CommitRenamePageOnLostFocusCommand"/> behaves exactly
+    /// like <see cref="MainWindowViewModel.CommitRenamePageCommand"/> on a SUCCESSFUL commit.
+    /// </summary>
+    [Fact]
+    public void CommitRenamePageOnLostFocusCommand_Execute_Renamed_ClosesEditorAndRefreshesName()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+        page.EditingName = "Renamed";
+        _pageManagerMock.Setup(p => p.RenamePage("work", "Renamed"))
+            .Callback(() =>
+            {
+                _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Renamed")]);
+                _pageManagerMock.Raise(p => p.PagesChanged += null);
+            })
+            .Returns(PageRenameResult.Renamed);
+
+        sut.CommitRenamePageOnLostFocusCommand.Execute(page);
+
+        Assert.False(page.IsEditing);
+        Assert.Null(page.RenameError);
+        Assert.Equal("Renamed", page.Name);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="MainWindowViewModel.CancelRenamePageCommand"/> closes the editor and never
+    /// calls <see cref="IPageManager.RenamePage"/>.
+    /// </summary>
+    [Fact]
+    public void CancelRenamePageCommand_Execute_ClosesEditorWithoutCallingRenamePage()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+        page.EditingName = "Whatever";
+
+        sut.CancelRenamePageCommand.Execute(page);
+
+        Assert.False(page.IsEditing);
+        Assert.Null(page.RenameError);
+        _pageManagerMock.Verify(p => p.RenamePage(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// UX-4b fix (code review, panel clone to page): <see cref="MainWindowViewModel.CloseAnyOpenRename"/>
+    /// (called from <c>MainWindow.xaml.cs</c> whenever the settings window is hidden; renamed from
+    /// <c>CancelAnyOpenRename</c>, LOW-4 fix, code review, panel clone to page, backlog 1.x wave 3 review)
+    /// now behaves like an ordinary lost-focus commit for whichever page is currently
+    /// <see cref="PageItemViewModel.IsEditing"/> — a validly typed name is COMMITTED via
+    /// <see cref="IPageManager.RenamePage"/>, not silently discarded, the same as tabbing/clicking away from
+    /// the row would already do.
+    /// </summary>
+    [Fact]
+    public void CloseAnyOpenRename_ValidTypedName_CommitsRenameLikeLostFocus()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+        page.EditingName = "Renamed";
+        _pageManagerMock.Setup(p => p.RenamePage("work", "Renamed")).Returns(PageRenameResult.Renamed);
+
+        sut.CloseAnyOpenRename();
+
+        Assert.False(page.IsEditing);
+        Assert.Null(page.RenameError);
+        _pageManagerMock.Verify(p => p.RenamePage("work", "Renamed"), Times.Once);
+    }
+
+    /// <summary>
+    /// UX-4b fix (code review, panel clone to page): a FAILED commit (e.g. a duplicate name) still closes
+    /// the editor — <see cref="MainWindowViewModel.CloseAnyOpenRename"/> must not leave a "stuck" row open
+    /// with no keyboard focus just because the window is being hidden — but preserves
+    /// <see cref="PageItemViewModel.RenameError"/> instead of clearing it, exactly like an ordinary
+    /// lost-focus commit failure.
+    /// </summary>
+    [Fact]
+    public void CloseAnyOpenRename_InvalidTypedName_ClosesEditorButKeepsRenameError()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+        page.EditingName = "Taken";
+        _pageManagerMock.Setup(p => p.RenamePage("work", "Taken")).Returns(PageRenameResult.Duplicate);
+
+        sut.CloseAnyOpenRename();
+
+        Assert.False(page.IsEditing);
+        Assert.Equal(PageRenameResult.Duplicate, page.RenameError);
+    }
+
+    /// <summary>Verifies that <see cref="MainWindowViewModel.CloseAnyOpenRename"/> is a no-op when no page is editing.</summary>
+    [Fact]
+    public void CloseAnyOpenRename_NoPageEditing_DoesNotThrow()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+
+        var exception = Record.Exception(() => sut.CloseAnyOpenRename());
+
+        Assert.Null(exception);
+    }
+
+    /// <summary>
+    /// M-E fix (code review, panel clone to page, backlog 1.x wave 3 review); phase 6.3 moved this off
+    /// <c>PanelPageStatusMessage</c> onto <see cref="IStatusNotifier"/>: <see cref="MainWindowViewModel.CloseAnyOpenRename"/>
+    /// also dismisses a leftover status — a non-blocking "moved/copied to page" status has no reason to
+    /// survive the settings window being hidden.
+    /// </summary>
+    [Fact]
+    public void CloseAnyOpenRename_DismissesStatus()
+    {
+        // NEW-1 fix (final review, panel clone to page, backlog 1.x): the status is only shown for a move
+        // that actually changed the panel's PageId — see
+        // MovePanelToPageCommand_Execute_ShowsSuccessStatusWithDestinationPageDisplayName's own remarks on
+        // why this mock must perform the assignment itself.
+        _windowManagerMock
+            .Setup(w => w.MovePanelToPage(It.IsAny<ChildWindowModel>(), It.IsAny<string>()))
+            .Callback<ChildWindowModel, string>((model, pid) => model.PageId = pid);
+
+        var sut = BuildSut();
+        _windowManagerMock.Setup(w => w.GetAllChildWindows()).Returns([]);
+        var panel = new ChildWindowModel { PageId = "default" };
+        _windowManagerMock.Setup(w => w.GetAllChildWindows()).Returns([panel]);
+        sut.SyncPanels();
+        sut.SelectedPanel = panel;
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.MovePanelToPageCommand.Execute("work");
+        _statusNotifierMock.Verify(n => n.Show(StatusSeverity.Success, It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+
+        sut.CloseAnyOpenRename();
+
+        // CloseAnyOpenRename itself calls CommitRenamePageOnLostFocus (a no-op here, nothing is being
+        // renamed) THEN DismissStatus — two Dismiss() calls total across this test's two SelectedPanel
+        // assignments/command executions above would also be fine; what matters is that closing the
+        // window dismisses whatever is currently showing.
+        _statusNotifierMock.Verify(n => n.Dismiss(), Times.AtLeastOnce);
+    }
+
+    /// <summary>
+    /// Verifies that beginning a rename on one page first commits another page's already-in-progress
+    /// edit — at most one <see cref="PageItemViewModel"/> is ever <see cref="PageItemViewModel.IsEditing"/>.
+    /// </summary>
+    [Fact]
+    public void BeginRenamePageCommand_Execute_AnotherPageAlreadyEditing_CommitsPreviousPageFirst()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("a", "A"), new PageDescriptor("b", "B")]);
+        sut.SyncPages();
+        var pageA = sut.Pages.Single(p => p.Id == "a");
+        var pageB = sut.Pages.Single(p => p.Id == "b");
+        sut.BeginRenamePageCommand.Execute(pageA);
+        pageA.EditingName = "Renamed A";
+        _pageManagerMock.Setup(p => p.RenamePage("a", "Renamed A")).Returns(PageRenameResult.Renamed);
+
+        sut.BeginRenamePageCommand.Execute(pageB);
+
+        _pageManagerMock.Verify(p => p.RenamePage("a", "Renamed A"), Times.Once);
+        Assert.False(pageA.IsEditing);
+        Assert.True(pageB.IsEditing);
+    }
+
+    /// <summary>
+    /// L-3 fix (backlog 1.x wave 1 review): the previous page's auto-commit inside
+    /// <see cref="MainWindowViewModel.BeginRenamePageCommand"/> can itself raise
+    /// <see cref="IPageManager.PagesChanged"/> (a real <see cref="PageRenameResult.Renamed"/>, as set up
+    /// here), which <see cref="MainWindowViewModel.SyncPages"/> turns into <c>Move</c>/insert/remove calls
+    /// against the very <see cref="MainWindowViewModel.Pages"/> collection <see cref="MainWindowViewModel.BeginRenamePageCommand"/>
+    /// is (or was) enumerating live — this must not throw <see cref="InvalidOperationException"/>.
+    /// </summary>
+    [Fact]
+    public void BeginRenamePageCommand_Execute_PreviousPageCommitMutatesPagesCollection_DoesNotThrow()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("a", "A"), new PageDescriptor("b", "B")]);
+        sut.SyncPages();
+        var pageA = sut.Pages.Single(p => p.Id == "a");
+        var pageB = sut.Pages.Single(p => p.Id == "b");
+        sut.BeginRenamePageCommand.Execute(pageA);
+        pageA.EditingName = "Renamed A";
+        _pageManagerMock.Setup(p => p.RenamePage("a", "Renamed A"))
+            .Callback(() =>
+            {
+                _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("a", "Renamed A"), new PageDescriptor("b", "B")]);
+                _pageManagerMock.Raise(p => p.PagesChanged += null);
+            })
+            .Returns(PageRenameResult.Renamed);
+
+        var exception = Record.Exception(() => sut.BeginRenamePageCommand.Execute(pageB));
+
+        Assert.Null(exception);
+        Assert.False(pageA.IsEditing);
+        Assert.True(pageB.IsEditing);
+    }
+
+    /// <summary>
+    /// Verifies that if the previous page's auto-commit (above) itself fails validation, beginning a
+    /// rename on a different page force-cancels the stuck editor instead of leaving two pages
+    /// simultaneously <see cref="PageItemViewModel.IsEditing"/>.
+    /// </summary>
+    [Fact]
+    public void BeginRenamePageCommand_Execute_PreviousPageCommitFails_ForceCancelsItInstead()
+    {
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("a", "A"), new PageDescriptor("b", "B")]);
+        sut.SyncPages();
+        var pageA = sut.Pages.Single(p => p.Id == "a");
+        var pageB = sut.Pages.Single(p => p.Id == "b");
+        sut.BeginRenamePageCommand.Execute(pageA);
+        pageA.EditingName = string.Empty;
+        _pageManagerMock.Setup(p => p.RenamePage("a", string.Empty)).Returns(PageRenameResult.Empty);
+
+        sut.BeginRenamePageCommand.Execute(pageB);
+
+        Assert.False(pageA.IsEditing);
+        Assert.Null(pageA.RenameError);
+        Assert.True(pageB.IsEditing);
+    }
+
+    /// <summary>
+    /// Verifies that renaming the currently-selected page does not disturb
+    /// <see cref="MainWindowViewModel.SelectedPage"/>/<see cref="MainWindowViewModel.CurrentPage"/> — both
+    /// are the page's stable <see cref="PageItemViewModel.Id"/>, which a rename never changes (R-5,
+    /// docs/PLANS/page-display-names.md §5.4: the Panels section's page selector binds
+    /// <c>SelectedValuePath="Id"</c>).
+    /// </summary>
+    [Fact]
+    public void CommitRenamePageCommand_RenamingCurrentPage_SelectedPageStillReferencesSameId()
+    {
+        _pageManagerMock.SetupGet(p => p.CurrentPage).Returns("work");
+        var sut = BuildSut();
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Work")]);
+        sut.SyncPages();
+        var page = sut.Pages.Single();
+        sut.BeginRenamePageCommand.Execute(page);
+        page.EditingName = "Renamed";
+        _pageManagerMock.Setup(p => p.RenamePage("work", "Renamed"))
+            .Callback(() => _pageManagerMock.Setup(p => p.PageDescriptors).Returns([new PageDescriptor("work", "Renamed")]))
+            .Returns(PageRenameResult.Renamed);
+
+        sut.CommitRenamePageCommand.Execute(page);
+
+        Assert.Equal("work", sut.SelectedPage);
+        Assert.Equal("work", sut.CurrentPage);
+    }
+
+    // ── "Show desktop icons" toggle (General section) — restored after the settings-window redesign
+    // (ADR-031 D-6) had moved it to the tray only. Session-only shell state: the ViewModel reads the live
+    // value from IDesktopIconsService and mirrors every change made elsewhere via VisibilityChanged. ──
+
+    /// <summary>The getter is a live read of the service, never a cached copy.</summary>
+    /// <param name="visible">What the service currently reports.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void DesktopIconsVisible_Get_ReadsLiveServiceState(bool visible)
+    {
+        _desktopIconsMock.Setup(d => d.AreIconsVisible).Returns(visible);
+        var sut = BuildSut();
+
+        Assert.Equal(visible, sut.DesktopIconsVisible);
+    }
+
+    /// <summary>Flipping the toggle forwards to the service and raises PropertyChanged for the binding.</summary>
+    [Fact]
+    public void DesktopIconsVisible_Set_DifferentValue_CallsServiceAndRaisesPropertyChanged()
+    {
+        _desktopIconsMock.Setup(d => d.AreIconsVisible).Returns(true);
+        var sut = BuildSut();
+        var raised = new List<string?>();
+        sut.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        sut.DesktopIconsVisible = false;
+
+        _desktopIconsMock.Verify(d => d.SetIconsVisible(false), Times.Once);
+        Assert.Contains(nameof(MainWindowViewModel.DesktopIconsVisible), raised);
+    }
+
+    /// <summary>Setting the value the shell already has is a no-op — no shell call, no notification.</summary>
+    [Fact]
+    public void DesktopIconsVisible_Set_SameValue_DoesNothing()
+    {
+        _desktopIconsMock.Setup(d => d.AreIconsVisible).Returns(true);
+        var sut = BuildSut();
+        var raised = 0;
+        sut.PropertyChanged += (_, _) => raised++;
+
+        sut.DesktopIconsVisible = true;
+
+        _desktopIconsMock.Verify(d => d.SetIconsVisible(It.IsAny<bool>()), Times.Never);
+        Assert.Equal(0, raised);
+    }
+
+    /// <summary>
+    /// A change made from another entry point (tray item, desktop double-click, Explorer-restart
+    /// recovery) reaches the settings toggle through the service's VisibilityChanged event.
+    /// </summary>
+    [Fact]
+    public void DesktopIconsVisible_ServiceVisibilityChanged_RaisesPropertyChanged()
+    {
+        var sut = BuildSut();
+        var raised = new List<string?>();
+        sut.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        _desktopIconsMock.Raise(d => d.VisibilityChanged += null, EventArgs.Empty);
+
+        var single = Assert.Single(raised);
+        Assert.Equal(nameof(MainWindowViewModel.DesktopIconsVisible), single);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <param name="systemUiCulture">
@@ -1519,6 +2216,7 @@ public class MainWindowViewModelTests
     private MainWindowViewModel BuildSut(CultureInfo? systemUiCulture = null, ILocalizationService? localization = null)
     {
         _pageManagerMock.Setup(p => p.Pages).Returns([]);
+        _pageManagerMock.Setup(p => p.PageDescriptors).Returns([]);
         _layoutSnapshotServiceMock.Setup(s => s.Snapshots).Returns([]);
 
         // MainWindowViewModel's constructor subscribes to Model.PropertyChanged (finalization MAJOR
@@ -1555,6 +2253,9 @@ public class MainWindowViewModelTests
             localization ?? _localization,
             systemUiCulture ?? CultureInfo.GetCultureInfo("en"),
             about,
-            _colorPickerMock.Object);
+            _colorPickerMock.Object,
+            _panelCloneFlowMock.Object,
+            _statusNotifierMock.Object,
+            _desktopIconsMock.Object);
     }
 }

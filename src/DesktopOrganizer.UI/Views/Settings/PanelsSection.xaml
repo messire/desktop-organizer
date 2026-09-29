@@ -5,6 +5,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:conv="clr-namespace:DesktopOrganizer.UI.Converters"
              xmlns:loc="clr-namespace:DesktopOrganizer.UI.Localization"
+             xmlns:controls="clr-namespace:DesktopOrganizer.UI.Controls"
              mc:Ignorable="d"
              d:DesignWidth="460">
     <UserControl.Resources>
@@ -15,44 +16,107 @@
 
         <!-- Page selector — replaces the old top page-tab strip; selecting a page switches the active
              application page (MainWindowViewModel.SelectedPage -> SwitchPageCommand). -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Settings_Panels_Page_Label}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="{loc:Loc Settings_Panels_PageSelector_Description}"/>
-                </StackPanel>
-                <!-- Page IDs are DATA, never re-translated (D-5/L-10) — only "default" resolves to a
-                     localized display name via PageDisplayNameConverter. -->
-                <ComboBox Grid.Column="1" MinWidth="140" VerticalAlignment="Center"
+        <controls:SettingsCard Header="{loc:Loc Settings_Panels_Page_Label}"
+                                Description="{loc:Loc Settings_Panels_PageSelector_Description}">
+            <controls:SettingsCard.ActionContent>
+                <!-- Page names are DATA (ADR-043, docs/PLANS/page-display-names.md) — only an unnamed
+                     "default" page resolves to a localized display name via PageDisplayNameConverter;
+                     every other page's name is stored as typed. SelectedValuePath/SelectedValue read and
+                     write MainWindowViewModel.SelectedPage (a page id string) even though ItemsSource now
+                     holds PageItemViewModel rows, not bare ids. -->
+                <ComboBox MinWidth="140" VerticalAlignment="Center"
                           AutomationProperties.Name="{loc:Loc Settings_Panels_Page_Label}"
                           ItemsSource="{Binding Pages}"
-                          SelectedItem="{Binding SelectedPage, Mode=TwoWay}">
+                          SelectedValuePath="Id"
+                          SelectedValue="{Binding SelectedPage, Mode=TwoWay}">
                     <ComboBox.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{loc:LocBinding Converter={StaticResource PageDisplayName}}"/>
+                            <TextBlock Text="{loc:LocBinding Display, Converter={StaticResource PageDisplayName}}"/>
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
 
         <!-- Panel list for the current page. -->
-        <Border Style="{StaticResource Settings.CardBorder}">
+        <controls:SettingsCard Header="{loc:Loc Settings_Panels_OnThisPage_Header}"
+                                Description="{loc:Loc Settings_Panels_OnThisPage_Description}">
             <StackPanel>
-                <TextBlock Text="{loc:Loc Settings_Panels_OnThisPage_Header}" Style="{StaticResource Settings.CardHeader}"/>
-
-                <Border BorderBrush="{StaticResource Brush.Settings.CardBorder}" BorderThickness="1"
+                <Border BorderBrush="{DynamicResource Theme.Stroke.Card}" BorderThickness="1"
                         CornerRadius="{StaticResource Radius.Control}" Height="180" Margin="0,8,0,0">
                     <Grid>
                         <ListBox ItemsSource="{Binding PanelsOnCurrentPage}"
                                  SelectedItem="{Binding SelectedPanel}"
                                  AutomationProperties.Name="{loc:Loc Settings_Panels_OnThisPage_Header}"
                                  BorderThickness="0">
+                            <!-- Per-row context menu (right-click / Shift+F10 / Menu key): the panel's own
+                                 actions sit on the panel's own row, the way its header menu works on the
+                                 desktop (ChildWindow.xaml HeaderContextMenu), instead of a separate "More"
+                                 drop-down next to the list. The row is selected first
+                                 (PanelRow_ContextMenuOpening — fires for mouse AND keyboard opens) because
+                                 Move/Copy/Remove below act on MainWindowViewModel.SelectedPanel, and a
+                                 focused-but-unselected row (Tab in, Ctrl+Arrow) would otherwise open a menu
+                                 acting on a different panel. Tag bridges the section's DataContext
+                                 (the ViewModel) into the menu — the ContextMenu's own DataContext is the
+                                 row's ChildWindowModel, so PlacementTarget.Tag.<Command> is the ViewModel
+                                 path, PlacementTarget.DataContext the row's (same pattern as
+                                 BackupSection's Backup.RowMoreButton). -->
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem" BasedOn="{StaticResource Theme.ListBoxItem}">
+                                    <EventSetter Event="ContextMenuOpening" Handler="PanelRow_ContextMenuOpening"/>
+                                    <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                                    <Setter Property="ContextMenu">
+                                        <Setter.Value>
+                                            <ContextMenu Style="{StaticResource Theme.ContextMenu}">
+                                                <ContextMenu.Resources>
+                                                    <Style TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}"/>
+                                                </ContextMenu.Resources>
+                                                <MenuItem Header="{loc:Loc Settings_Panels_Customize_Button}"
+                                                          Command="{Binding PlacementTarget.Tag.CustomizePanelCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding}"/>
+                                                <Separator Style="{StaticResource Theme.Separator}"/>
+                                                <MenuItem Header="{loc:Loc Settings_Panels_MoveToPage_Button}"
+                                                          ItemsSource="{Binding PlacementTarget.Tag.Pages, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.ItemContainerStyle>
+                                                        <Style TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}">
+                                                            <Setter Property="Header" Value="{loc:LocBinding Display, Converter={StaticResource PageDisplayName}}"/>
+                                                            <!-- M-F fix (backlog 1.x wave 2 review): a plain string Header would
+                                                                 otherwise run through WPF's default access-key-aware
+                                                                 presentation and silently eat a "_" in the page's own name — see
+                                                                 ChildWindow.xaml's identical "Move to page ▸" remarks and
+                                                                 Resources/Templates.xaml's own PlainTextHeaderTemplate remarks. -->
+                                                            <Setter Property="HeaderTemplate" Value="{StaticResource PlainTextHeaderTemplate}"/>
+                                                            <Setter Property="Command"
+                                                                    Value="{Binding PlacementTarget.Tag.MovePanelToPageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                            <Setter Property="CommandParameter" Value="{Binding Id}"/>
+                                                        </Style>
+                                                    </MenuItem.ItemContainerStyle>
+                                                </MenuItem>
+                                                <!-- Same submenu shape as "Move to page" above, bound to CopyPanelToPageCommand
+                                                     (ADR-045). Unlike Move, the CURRENT page is a valid destination here — a
+                                                     copy onto the current page duplicates the panel in place — so every page,
+                                                     including the selected one, is offered. -->
+                                                <MenuItem Header="{loc:Loc Settings_Panels_CopyToPage_Button}"
+                                                          ItemsSource="{Binding PlacementTarget.Tag.Pages, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                                    <MenuItem.ItemContainerStyle>
+                                                        <Style TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}">
+                                                            <Setter Property="Header" Value="{loc:LocBinding Display, Converter={StaticResource PageDisplayName}}"/>
+                                                            <Setter Property="HeaderTemplate" Value="{StaticResource PlainTextHeaderTemplate}"/>
+                                                            <Setter Property="Command"
+                                                                    Value="{Binding PlacementTarget.Tag.CopyPanelToPageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                            <Setter Property="CommandParameter" Value="{Binding Id}"/>
+                                                        </Style>
+                                                    </MenuItem.ItemContainerStyle>
+                                                </MenuItem>
+                                                <Separator Style="{StaticResource Theme.Separator}"/>
+                                                <!-- Destructive action last, after a separator (§2.7 D-8). -->
+                                                <MenuItem Header="{loc:Loc Settings_Panels_Remove_MenuItem}"
+                                                          Command="{Binding PlacementTarget.Tag.RemovePanelCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            </ContextMenu>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
                                     <StackPanel Margin="4,4">
@@ -92,65 +156,47 @@
                     </Grid>
                 </Border>
 
-                <WrapPanel Orientation="Horizontal" Margin="0,10,0,0">
-                    <Button Content="{loc:Loc Settings_Panels_AddPanel_Button}" Padding="12,6" Margin="0,0,8,8"
+                <!-- Variant A (design-system-1x.md §2.7 D-8): a single primary + one secondary command on
+                     the button row; Move/Copy-to-page and the destructive Remove moved from the former
+                     "Ещё" drop-down onto each row's own right-click context menu (ItemContainerStyle
+                     above), so they are contextual to the panel they act on — the same place the panel's
+                     header menu offers them on the desktop. Two visible controls fit one row at every
+                     supported culture's widths (SettingsWindowLayoutWidthTests). -->
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <Button Content="{loc:Loc Settings_Panels_AddPanel_Button}" Style="{StaticResource Theme.Button.Primary}" Margin="0,0,8,0"
                             Command="{Binding AddPanelCommand}"/>
-                    <Button Content="{loc:Loc Settings_Panels_Customize_Button}" Padding="12,6" Margin="0,0,8,8"
+                    <Button Content="{loc:Loc Settings_Panels_Customize_Button}"
                             Command="{Binding CustomizePanelCommand}"/>
-                    <!-- Opened on left-click via the code-behind Click handler (a pure view mechanic —
-                         ContextMenu otherwise only opens on right-click). Each item's Command/
-                         CommandParameter route through PlacementTarget.DataContext, the same pattern
-                         ChildWindow.xaml's own header context menus already use, since a ContextMenu
-                         is a separate visual-tree root and does not inherit DataContext. -->
-                    <Button Content="{loc:Loc Settings_Panels_MoveToPage_Button}" Padding="12,6" Margin="0,0,8,8"
-                            Click="MoveToPageButton_Click">
-                        <Button.ContextMenu>
-                            <ContextMenu ItemsSource="{Binding Pages}" Placement="Bottom">
-                                <ContextMenu.ItemContainerStyle>
-                                    <Style TargetType="MenuItem">
-                                        <Setter Property="Header" Value="{loc:LocBinding Converter={StaticResource PageDisplayName}}"/>
-                                        <Setter Property="Command"
-                                                Value="{Binding PlacementTarget.DataContext.MovePanelToPageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                                        <Setter Property="CommandParameter" Value="{Binding}"/>
-                                    </Style>
-                                </ContextMenu.ItemContainerStyle>
-                            </ContextMenu>
-                        </Button.ContextMenu>
-                    </Button>
-                    <Button Content="{loc:Loc Common_Remove_Button}" Padding="12,6" Margin="0,0,8,8"
-                            Command="{Binding RemovePanelCommand}"/>
-                </WrapPanel>
+                </StackPanel>
+
+                <!-- Phase 6.3 (design-system-1x.md §2.8, ADR-047 D-9): the "Moved/Copied to page «X»"
+                     status after a Move/Copy-to-page action no longer lives here — it moved to the
+                     app-wide InfoBar host in MainWindow.xaml (MainWindowViewModel.Status), which stays
+                     visible even if this section is scrolled out of view or the user switches to another
+                     section. See that file's own remarks. -->
             </StackPanel>
-        </Border>
+        </controls:SettingsCard>
 
         <!-- Align all panels to grid — disabled while the layout is locked (ADR-026 gating), with the
-             reason spelled out in the description rather than left to a tooltip (D-9/finding 5). -->
-        <Border Style="{StaticResource Settings.CardBorder}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                    <TextBlock Text="{loc:Loc Settings_Panels_AlignAll_Header}" Style="{StaticResource Settings.CardHeader}"/>
-                    <TextBlock Style="{StaticResource Settings.CardDescription}"
-                               Text="{loc:Loc Settings_Panels_AlignAll_Description}"/>
-                    <TextBlock Text="{loc:Loc Common_LockedReason}" Margin="0,4,0,0">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsLayoutLocked}" Value="True">
-                                        <Setter Property="Visibility" Value="Visible"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </StackPanel>
-                <Button Grid.Column="1" Content="{loc:Loc Settings_Panels_AlignAll_Button}" Padding="12,6" VerticalAlignment="Center"
+             reason spelled out below the row rather than left to a tooltip (D-9/finding 5). -->
+        <controls:SettingsCard Header="{loc:Loc Settings_Panels_AlignAll_Header}"
+                                Description="{loc:Loc Settings_Panels_AlignAll_Description}">
+            <controls:SettingsCard.ActionContent>
+                <Button Content="{loc:Loc Settings_Panels_AlignAll_Button}" VerticalAlignment="Center"
                         Command="{Binding AlignAllPanelsCommand}"/>
-            </Grid>
-        </Border>
+            </controls:SettingsCard.ActionContent>
+            <TextBlock Text="{loc:Loc Common_LockedReason}">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource Settings.CardDescription}">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsLayoutLocked}" Value="True">
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </controls:SettingsCard>
     </StackPanel>
 </UserControl>

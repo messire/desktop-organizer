@@ -1,4 +1,6 @@
-﻿using DesktopOrganizer.Services.Abstractions;
+﻿using System.Diagnostics.CodeAnalysis;
+using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Enums;
 
 namespace DesktopOrganizer.Services.Interfaces;
 
@@ -547,6 +549,77 @@ internal interface INativeApi
     /// <returns><see langword="true"/> when a timer was stopped.</returns>
     bool KillTimer(IntPtr hwnd, IntPtr timerId);
 
+    // ── System theme and window frame (design system 1.x, phase 6.1, ADR-047 D-2) ────────────────
+
+    /// <summary>
+    /// Reads a <c>REG_DWORD</c> value under <c>HKEY_CURRENT_USER</c> (read-only access; managed
+    /// <c>Microsoft.Win32.Registry</c>, no P/Invoke).
+    /// </summary>
+    /// <param name="keyPath">Sub-key path below <c>HKCU</c>, e.g. <c>Software\Microsoft\Windows\CurrentVersion\Themes\Personalize</c>.</param>
+    /// <param name="valueName">Value name.</param>
+    /// <returns>The value, or <see langword="null"/> when the key/value is absent, of another type, or unreadable. Never throws.</returns>
+    int? ReadCurrentUserDword(string keyPath, string valueName);
+
+    /// <summary>
+    /// Returns whether a high-contrast theme is currently active (<c>SPI_GETHIGHCONTRAST</c>,
+    /// <c>HCF_HIGHCONTRASTON</c>), queried live — not a value cached at startup.
+    /// </summary>
+    /// <returns><see langword="true"/> when high contrast is on; <see langword="false"/> when it is off or the query failed. Never throws.</returns>
+    bool IsHighContrastOn();
+
+    /// <summary>
+    /// Returns the current value of a Win32 system colour (<c>GetSysColor</c>), queried live — after a
+    /// <c>WM_SYSCOLORCHANGE</c> (e.g. switching one high-contrast theme to another) the new value is
+    /// returned, unlike WPF's cached <c>SystemColors</c>.
+    /// </summary>
+    /// <param name="index">The <c>COLOR_*</c> index, e.g. <c>COLOR_WINDOW</c> (5).</param>
+    /// <returns>The colour as a <c>COLORREF</c> (<c>0x00BBGGRR</c>); 0 when the query failed. Never throws.</returns>
+    int GetSystemColor(int index);
+
+    /// <summary>
+    /// Returns the size of the system message font (<c>SPI_GETNONCLIENTMETRICS</c>,
+    /// <c>lfMessageFont.lfHeight</c>) converted to device-independent units (1/96 inch) at the system DPI —
+    /// the same quantity WPF exposes as <c>SystemFonts.MessageFontSize</c>, but queried live rather than
+    /// from WPF's cache.
+    /// </summary>
+    /// <returns>The font size in DIPs; 0 when the query failed. Never throws.</returns>
+    double GetMessageFontSize();
+
+    /// <summary>
+    /// Sets a 4-byte (<c>BOOL</c>/<c>DWORD</c>/enum-valued) DWM window attribute
+    /// (<c>DwmSetWindowAttribute</c>), e.g. <c>DWMWA_USE_IMMERSIVE_DARK_MODE</c>. Which attribute id is
+    /// valid on which Windows build is the caller's decision — this is a thin wrapper.
+    /// </summary>
+    /// <param name="hwnd">Top-level window handle.</param>
+    /// <param name="attribute">The <c>DWMWINDOWATTRIBUTE</c> id.</param>
+    /// <param name="value">The 4-byte value to set.</param>
+    /// <returns>
+    /// The <c>HRESULT</c> (≥ 0 = success). A missing <c>dwmapi.dll</c>/export or any marshalling failure is
+    /// reported as a failure <c>HRESULT</c>, never as an exception.
+    /// </returns>
+    int SetDwmWindowAttribute(IntPtr hwnd, int attribute, int value);
+
+    /// <summary>
+    /// Calls the undocumented <c>uxtheme.dll</c> export ordinal 135 — <c>SetPreferredAppMode</c> on
+    /// Windows 10 1903 (build 18362) and later — which selects whether the classic Win32 popup menus
+    /// (<c>TrackPopupMenuEx</c>: the shell context menu of an icon, a window's system menu) of THIS process
+    /// are drawn light or dark (design system 1.x, phase 6.4b, ADR-047 D-11). Which build the ordinal is
+    /// valid on is the caller's decision (<c>NativeMenuTheming</c> gates it) — this is a thin wrapper. The
+    /// export is resolved by ordinal through <c>GetProcAddress</c> from the System32 copy of the DLL; it is
+    /// never called when it cannot be resolved.
+    /// </summary>
+    /// <param name="mode">The <c>PreferredAppMode</c> value: 0 = Default, 1 = AllowDark, 2 = ForceDark, 3 = ForceLight.</param>
+    /// <returns><see langword="true"/> when the export was found and called; <see langword="false"/> otherwise. Never throws.</returns>
+    bool TrySetPreferredAppMode(int mode);
+
+    /// <summary>
+    /// Calls the undocumented <c>uxtheme.dll</c> export ordinal 136 — <c>FlushMenuThemes</c> — so menus
+    /// opened after a <see cref="TrySetPreferredAppMode"/> change pick the new light/dark menu theme up
+    /// instead of the cached one. Same gating/resolution rules as <see cref="TrySetPreferredAppMode"/>.
+    /// </summary>
+    /// <returns><see langword="true"/> when the export was found and called; <see langword="false"/> otherwise. Never throws.</returns>
+    bool TryFlushMenuThemes();
+
     // ── Native panel sizing primitives (ADR-022 / Phase 2) ──────────────────────────────────────
 
     /// <summary>
@@ -601,8 +674,9 @@ internal interface INativeApi
     /// <c>desktop.ini</c> custom icon — at the requested size instead of the 32 px shell icon.
     /// </summary>
     /// <remarks>
-    /// Expected on the UI (STA) thread: some third-party icon handlers are apartment-threaded. Works on
-    /// an MTA thread for the built-in handlers. Never throws — a COM/marshalling exception is reported
+    /// Expected on an STA thread — since ADR-046 the background icon worker's, previously the UI thread:
+    /// some third-party icon handlers are apartment-threaded. Works on an MTA thread for the built-in
+    /// handlers. Never throws — a COM/marshalling exception is reported
     /// as its <see cref="Exception.HResult"/>.
     /// </remarks>
     /// <param name="path">Full path of an existing file or folder.</param>
@@ -648,6 +722,28 @@ internal interface INativeApi
     /// <see cref="IntPtr.Zero"/> on failure.
     /// </returns>
     IntPtr GetSystemImageListIcon(int imageList, int iconIndex);
+
+    // ── Background icon loading (ADR-046, 7a-N) ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reads a <c>.lnk</c>'s RAW stored target path — <c>IShellLinkW::GetPath(SLGP_RAWPATH)</c> after
+    /// <c>IPersistFile::Load(STGM_READ)</c> — WITHOUT resolving the shortcut (<c>IShellLinkW::Resolve</c>
+    /// is never called): no network access, no "fix broken shortcut" shell UI. Environment variables in
+    /// the stored target are expanded. COM objects (RCWs) are released deterministically
+    /// (<c>Marshal.ReleaseComObject</c> in a <c>finally</c>) on the calling thread.
+    /// </summary>
+    /// <remarks>Must run on an STA thread. Never throws — any failure is reported as a <see langword="false"/> return.</remarks>
+    /// <param name="shortcutPath">Full path of an existing <c>.lnk</c> file.</param>
+    /// <param name="targetPath">The raw target path on success.</param>
+    /// <returns><see langword="true"/> when a path-based target was read; <see langword="false"/> for a PIDL-only link or any failure.</returns>
+    bool TryGetShortcutRawTarget(string shortcutPath, [NotNullWhen(true)] out string? targetPath);
+
+    /// <summary>
+    /// Maps <c>GetDriveTypeW</c> for <paramref name="rootPath"/> to <see cref="DriveKind"/>.
+    /// </summary>
+    /// <param name="rootPath">Drive root, e.g. <c>"Z:\\"</c>.</param>
+    /// <returns>The drive's kind, or <see cref="DriveKind.Unknown"/> on failure. Never throws.</returns>
+    DriveKind GetDriveKind(string rootPath);
 }
 
 /// <summary>

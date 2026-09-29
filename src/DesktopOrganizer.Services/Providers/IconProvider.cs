@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Threading;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Diagnostics;
 using static DesktopOrganizer.Services.Enums.FileAttribute;
@@ -37,6 +40,11 @@ internal class IconProvider : IIconProvider
     private const string ImageListStage = "imageList";
     private const string FileAttributesStage = "fileAttributes";
 
+    // ADR-046 D-5: _typeIconCache key for a directory (an actual directory NAME can legally contain a
+    // dot, so this must be a token distinct from any real lower-cased extension, not e.g. string.Empty —
+    // which is itself the legitimate key for an extension-less FILE).
+    private const string DirectoryTypeKey = "<dir>";
+
     // FILE_ATTRIBUTE_RECALL_ON_OPEN / FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS (cloud-files placeholders:
     // OneDrive "online-only" and friends). Not members of System.IO.FileAttributes, hence the raw values.
     private const IoFileAttributes RecallOnOpen = (IoFileAttributes)0x00040000;
@@ -64,7 +72,15 @@ internal class IconProvider : IIconProvider
     private readonly Dictionary<CacheKey, LinkedListNode<CacheEntry>> _cacheMap = new(CacheKeyComparer.Instance);
     private readonly LinkedList<CacheEntry> _lruList = new();
 
+    // Separate cache: IIconProvider.GetTypeIcon (ADR-046 D-5) is stage 3 ONLY, keyed by lower-case
+    // extension or the closed "<dir>" token — never touches the file system, so a ConcurrentDictionary
+    // (no LRU/eviction policy needed) is enough. Distinct from _cacheMap: keeping GetIcon's own
+    // (path, size) cache and its byte-for-byte-unchanged body untouched is CLAUDE.md/plan C-2.
+    private readonly ConcurrentDictionary<string, ImageSource> _typeIconCache = new(StringComparer.Ordinal);
+
     private ImageSource? _placeholderIcon;
+    private bool _placeholderIconInitialized;
+    private object? _placeholderIconLock;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IconProvider"/> class with the default cache capacity.
@@ -99,9 +115,13 @@ internal class IconProvider : IIconProvider
         _maxCachedIcons = maxCachedIcons;
     }
 
-    // Created lazily and cached for the lifetime of the provider — avoids allocating a new
-    // placeholder bitmap on every cache miss for a missing/inaccessible file.
-    private ImageSource PlaceholderIcon => _placeholderIcon ??= _iconFactory.CreateBitmap();
+    // Created lazily and cached for the lifetime of the provider — avoids allocating a new placeholder
+    // bitmap on every cache miss for a missing/inaccessible file. Thread-safe (ADR-046 C-2): the
+    // background icon-load queue's worker threads and the UI thread can both reach this concurrently.
+    // LazyInitializer's ref-bool overload guarantees exactly one CreateBitmap() result is ever published,
+    // even if two threads race into this property before the first call has finished.
+    private ImageSource PlaceholderIcon =>
+        LazyInitializer.EnsureInitialized(ref _placeholderIcon, ref _placeholderIconInitialized, ref _placeholderIconLock, () => _iconFactory.CreateBitmap())!;
 
     /// <inheritdoc />
     /// <remarks>
@@ -114,6 +134,13 @@ internal class IconProvider : IIconProvider
     /// produced, so <paramref name="icon"/> trivially cannot be one.
     /// </remarks>
     public bool IsPlaceholder(ImageSource? icon) => icon is not null && _placeholderIcon is not null && ReferenceEquals(icon, _placeholderIcon);
+
+    /// <summary>
+    /// Explicit interface implementation so it does not collide with the pre-existing private
+    /// <see cref="PlaceholderIcon"/> property above, which every <see cref="GetIcon(string, int)"/> call
+    /// site keeps using directly.
+    /// </summary>
+    ImageSource IIconProvider.PlaceholderIcon => PlaceholderIcon;
 
     /// <inheritdoc />
     public ImageSource GetIcon(string filePath) => GetIcon(filePath, IconPixelSize.Default);
@@ -207,6 +234,56 @@ internal class IconProvider : IIconProvider
         return icon;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ADR-046: cache-only, no freshness check — unlike <see cref="GetIcon(string, int)"/>'s own lookup,
+    /// a hit here is returned even if the file has since changed; the queued <see cref="GetIcon(string, int)"/>
+    /// call re-validates once it actually runs. Safe from any thread: reuses <see cref="GetIcon(string, int)"/>'s
+    /// own <see cref="_cacheLock"/>.
+    /// </remarks>
+    public bool TryPeekCachedIcon(string filePath, int pixelSize, [NotNullWhen(true)] out ImageSource? icon)
+    {
+        var key = new CacheKey(filePath, IconPixelSize.Snap(pixelSize));
+
+        lock (_cacheLock)
+        {
+            if (_cacheMap.TryGetValue(key, out var node))
+            {
+                _lruList.Remove(node);
+                _lruList.AddFirst(node);
+                icon = node.Value.Icon;
+                return true;
+            }
+        }
+
+        icon = null;
+        return false;
+    }
+
+    /// <inheritdoc />
+    public ImageSource? TryPeekTypeIcon(string filePath, bool isDirectory)
+        => _typeIconCache.TryGetValue(TypeIconKey(filePath, isDirectory), out var icon) ? icon : null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Reuses <see cref="TryRetrieveIcon"/> — the exact stage-3 <c>SHGFI_USEFILEATTRIBUTES</c> lookup
+    /// <see cref="GetIcon(string, int)"/> itself falls back to — but stores the result in the SEPARATE
+    /// <see cref="_typeIconCache"/> instead of the <c>(path, size)</c> cache (ADR-046 C-2). A failure is
+    /// NOT cached, matching <see cref="GetIcon(string, int)"/>'s own MINOR-1 rationale: a transient failure
+    /// must not permanently stick a whole extension with the placeholder.
+    /// </remarks>
+    public ImageSource GetTypeIcon(string filePath, bool isDirectory)
+    {
+        var key = TypeIconKey(filePath, isDirectory);
+        if (_typeIconCache.TryGetValue(key, out var cached)) return cached;
+
+        var icon = TryRetrieveIcon(filePath, isFile: !isDirectory);
+        if (icon is null) return PlaceholderIcon;
+
+        _typeIconCache[key] = icon;
+        return icon;
+    }
+
     /// <summary>
     /// Decides whether the two item-opening stages (<see cref="TryShellItemImage"/>, <see cref="TrySystemImageList"/>)
     /// must be skipped for an EXISTING item because they could block the UI thread (M4, release-polish 1.0 review):
@@ -294,6 +371,9 @@ internal class IconProvider : IIconProvider
     /// </summary>
     private static bool NeedsFreshnessCheck(string filePath, bool isFile)
         => isFile && FreshnessSensitiveExtensions.Contains(Path.GetExtension(filePath));
+
+    /// <summary>Cache key for <see cref="TryPeekTypeIcon"/>/<see cref="GetTypeIcon"/>: <see cref="DirectoryTypeKey"/> for a directory, else the lower-case extension.</summary>
+    private static string TypeIconKey(string filePath, bool isDirectory) => isDirectory ? DirectoryTypeKey : Path.GetExtension(filePath).ToLowerInvariant();
 
     /// <summary>
     /// Reads the last-write timestamp used as a freshness check for cache entries. Failures (e.g.

@@ -1,6 +1,6 @@
 # ADR-036: Drag-Out of Panel Items
 
-Status: Accepted (2026-09-27) — amends ADR-009, ADR-014
+**Статус:** Accepted (2026-09-27) — amends ADR-009, ADR-014. **Current consolidated release rules for managed items: [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md).**
 
 ## Context
 

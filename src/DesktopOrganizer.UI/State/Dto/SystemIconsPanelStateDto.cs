@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using DesktopOrganizer.Core;
 
 namespace DesktopOrganizer.UI.State.Dto;
@@ -56,6 +58,13 @@ public sealed class SystemIconsPanelStateDto
 
     /// <summary>The panel's system-icon items, in display order.</summary>
     public List<SystemIconsPanelItemStateDto> Items { get; set; } = [];
+
+    /// <summary>
+    /// Unknown JSON keys of this object, captured on load and written back verbatim on save (ADR-024
+    /// Amendment "Additive revisions"). Keys are written exactly as read. <see langword="null"/> when there are none.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extras { get; set; }
 }
 
 /// <summary>
@@ -64,12 +73,23 @@ public sealed class SystemIconsPanelStateDto
 /// </summary>
 public sealed class SystemIconsPanelItemStateDto
 {
-    /// <summary>Which well-known system icon this entry represents.</summary>
-    public SystemIconKind Kind { get; set; }
+    /// <summary>
+    /// Member name of the <see cref="SystemIconKind"/> this entry represents. Plain <see cref="string"/> — not the
+    /// enum — so an entry whose kind a newer build added degrades to "unknown item" (kept verbatim and written back)
+    /// instead of failing the whole document. Absent means <c>ThisPc</c>, as the enum default always did.
+    /// </summary>
+    public string Kind { get; set; } = nameof(SystemIconKind.ThisPc);
 
     /// <summary>Whether this icon is currently shown.</summary>
     public bool IsVisible { get; set; }
 
     /// <summary>The icon's display order, relative to its siblings.</summary>
     public int Order { get; set; }
+
+    /// <summary>
+    /// Unknown JSON keys of this object, captured on load and written back verbatim on save (ADR-024
+    /// Amendment "Additive revisions"). Keys are written exactly as read. <see langword="null"/> when there are none.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extras { get; set; }
 }

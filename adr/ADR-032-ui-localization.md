@@ -1,6 +1,6 @@
 # ADR-032: UI Localization (ru/en) with Hot Language Switch
 
-Status: Accepted (2026-09-27) — Amended 2026-09-29 (ADR-043: D-5/CN-2 уточнены — страница получила
+**Статус:** Accepted (2026-09-27) — Amended 2026-09-29 (ADR-043: D-5/CN-2 уточнены — страница получила
 отдельное поле-имя; unnamed `default` по-прежнему выводится из кода, новое имя страницы — данные)
 
 Ветка `feature/localization` (от `rc/0.6.1`, база `d5312ec`). Источник решения — бриф

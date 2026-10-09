@@ -1,6 +1,6 @@
 # ADR-039: Sized Shell Icons via IShellItemImageFactory
 
-Status: Accepted (2026-09-27) — Amended 2026-09-30 ([ADR-046](ADR-046-background-icon-loading.md): the
+**Статус:** Accepted (2026-09-27) — Amended 2026-09-28 (ADR-042: icon-size slider 16–96 step 4 → 16–128 step 8, `SizeStepPolicy`); Amended 2026-09-30 ([ADR-046](ADR-046-background-icon-loading.md): the
 "Known follow-up" below is closed — every `GetIcon` call now runs on a dedicated background STA worker
 thread, not the UI thread; the three-stage fallback, the `(path, bucket)` cache, and the UNC/offline skip
 described in this ADR are unchanged)
@@ -156,3 +156,10 @@ does not visibly stall the panel; a OneDrive online-only file's icon does not fo
 - [ADR-046](ADR-046-background-icon-loading.md) — closes the "known follow-up" above: moves every `GetIcon`
   call off the UI thread onto a background STA worker queue, without changing this ADR's fallback chain,
   cache key, or UNC/offline skip.
+
+## Amendments
+
+| Date | Source | What changed | Which sections/decisions no longer apply |
+|---|---|---|---|
+| 2026-09-28 | [ADR-042](ADR-042-color-presets-rgb-picker-stepped-size.md) | The icon-size slider range/step is now 16–128 DIP, step 8 (`SizeStepPolicy`); the debounce and the buckets are unchanged | "`ChildWindowViewModel`'s icon-size slider (16–96 DIP, step 4)" (Context, debounce paragraph) |
+| 2026-09-30 | [ADR-046](ADR-046-background-icon-loading.md) | Every `GetIcon`/`GetTypeIcon` runs on a dedicated background STA worker (two lanes Local/Remote, circuit breaker); results swap in via `FileItem.UpdateIcon` | "All icon extraction is still synchronous on the UI thread" (Negative / known follow-up — already struck through above); "The complete fix is a dedicated background STA fetch thread (see "Known follow-up" below)" (UNC paragraph) |

@@ -706,7 +706,7 @@
     <value>More actions for snapshot {0}</value>
   </data>
   <data name="Settings_Backup_LayoutSnapshots_Description" xml:space="preserve">
-    <value>Captures every panel's position, size, and appearance so you can restore this exact layout later.</value>
+    <value>Captures each panel's position, size, look and files so you can restore this exact layout later.</value>
   </data>
   <data name="Settings_Backup_LayoutSnapshots_Header" xml:space="preserve">
     <value>Layout snapshots</value>
@@ -737,12 +737,6 @@
   </data>
   <data name="Settings_General_DesktopIcons_Header" xml:space="preserve">
     <value>Show desktop icons</value>
-  </data>
-  <data name="Settings_General_NativeResize_Description" xml:space="preserve">
-    <value>Resizes panels via the OS native sizing loop instead of the built-in resize handles. Applies only to panels created after the app restarts.</value>
-  </data>
-  <data name="Settings_General_NativeResize_Header" xml:space="preserve">
-    <value>Native resize (experimental)</value>
   </data>
   <data name="Settings_General_ResetHints_Button" xml:space="preserve">
     <value>Reset</value>
@@ -778,7 +772,7 @@
     <value>Move/resize outside Edit layout mode</value>
   </data>
   <data name="Settings_Layout_SnapResizeToIconGrid_Description" xml:space="preserve">
-    <value>Resizing a panel snaps its dimensions to the icon-grid cell size in real time.</value>
+    <value>Snaps panel size to the icon-grid cell. No effect while “Snap panel position to grid” is on.</value>
   </data>
   <data name="Settings_Layout_SnapResizeToIconGrid_Header" xml:space="preserve">
     <value>Snap panel size to icon grid</value>
@@ -1054,10 +1048,115 @@
     <value>this snapshot</value>
   </data>
   <data name="Snapshot_Restore_Message" xml:space="preserve">
-    <value>The current layout will be replaced by this snapshot. Continue?</value>
+    <value>Panels that are not in this snapshot will be closed.</value>
+  </data>
+  <data name="Snapshot_Restore_Files_Message" xml:space="preserve">
+    <value>Their files return to their original location (for example, the desktop). Continue?</value>
   </data>
   <data name="Snapshot_Restore_Title" xml:space="preserve">
     <value>Restore Layout</value>
   </data>
   <!-- ==== END WP-5 ==== -->
+  <data name="Snapshot_Restore_ItemsNotReturned_Title" xml:space="preserve">
+    <value>Some items could not be returned</value>
+  </data>
+  <data name="Snapshot_Restore_ItemsNotReturned_Format" xml:space="preserve">
+    <value>Could not return {0} file(s). They stay in panels — drag them out of the panel manually.</value>
+  </data>
+  <data name="Snapshot_Restore_ItemsReturned_Format" xml:space="preserve">
+    <value>Returned to their original location: {0} file(s)</value>
+  </data>
+  <data name="ReadOnlySession_Notice_Title" xml:space="preserve">
+    <value>Read-only mode</value>
+  </data>
+  <data name="ReadOnlySession_Notice_Hint" xml:space="preserve">
+    <value>Files added to panels stay where they are.</value>
+  </data>
+  <data name="Hint_ReadOnlyDrop_Message" xml:space="preserve">
+    <value>Read-only mode: the file stayed in place and the panel will not be saved.</value>
+  </data>
+  <data name="Tray_Tooltip_ReadOnly_Format" xml:space="preserve">
+    <value>{0} (read-only)</value>
+  </data>
+  <data name="Hint_CloudDrop_Message" xml:space="preserve">
+    <value>A file or folder from OneDrive was moved into panel storage and is no longer synced.</value>
+  </data>
+  <data name="Hint_CloudDrop_Hint" xml:space="preserve">
+    <value>To return it, drag it out of the panel back into its folder.</value>
+  </data>
+  <data name="Settings_Backup_Orphans_Header" xml:space="preserve">
+    <value>Files without a panel</value>
+  </data>
+  <data name="Settings_Backup_Orphans_Description" xml:space="preserve">
+    <value>Files in panel storage that no panel uses any more. Nothing is deleted or moved automatically.</value>
+  </data>
+  <data name="Settings_Backup_Orphans_Scan_Button" xml:space="preserve">
+    <value>Find files without a panel</value>
+  </data>
+  <data name="Settings_Backup_Orphans_Scanning" xml:space="preserve">
+    <value>Searching…</value>
+  </data>
+  <data name="Settings_Backup_Orphans_None" xml:space="preserve">
+    <value>No files without a panel were found.</value>
+  </data>
+  <data name="Settings_Backup_Orphans_Found_Format" xml:space="preserve">
+    <value>Found: {0}</value>
+  </data>
+  <data name="Settings_Backup_Orphans_ReadOnly" xml:space="preserve">
+    <value>Not available in read-only mode.</value>
+  </data>
+  <data name="Settings_Backup_Orphans_ScanFailed" xml:space="preserve">
+    <value>Could not scan the storage. Details are in the log.</value>
+  </data>
+  <data name="Settings_Backup_Orphans_OriginalColumn_Header" xml:space="preserve">
+    <value>Original location</value>
+  </data>
+  <data name="Settings_Backup_Orphans_Return_Button" xml:space="preserve">
+    <value>Return</value>
+  </data>
+  <data name="Settings_Backup_Orphans_Return_Format" xml:space="preserve">
+    <value>Return “{0}” to its original location</value>
+  </data>
+  <data name="Settings_Backup_Orphans_OpenFolder_Button" xml:space="preserve">
+    <value>Open folder</value>
+  </data>
+  <data name="Settings_Backup_Orphans_OpenFolder_Format" xml:space="preserve">
+    <value>Open the storage folder of “{0}”</value>
+  </data>
+  <data name="Settings_Backup_Orphans_Returned_Format" xml:space="preserve">
+    <value>“{0}” returned to “{1}”</value>
+  </data>
+  <data name="Settings_Backup_Orphans_ReturnFailed_Format" xml:space="preserve">
+    <value>Could not return “{0}”. The file stays in storage.</value>
+  </data>
+  <data name="Settings_Backup_Orphans_ReturnUnknown_Format" xml:space="preserve">
+    <value>The original location of “{0}” is unknown.</value>
+  </data>
+  <data name="Settings_Backup_Orphans_NowUsed_Format" xml:space="preserve">
+    <value>“{0}” is used by a panel again.</value>
+  </data>
+  <data name="ReadOnlySession_Notice_NewerSchema_Message" xml:space="preserve">
+    <value>The panels file was created by a newer version of the app.</value>
+  </data>
+  <data name="ReadOnlySession_Notice_NewerSchema_Detail" xml:space="preserve">
+    <value>Your panels are not deleted, but this version does not show them.</value>
+  </data>
+  <data name="ReadOnlySession_Notice_NewerSchema_Action" xml:space="preserve">
+    <value>Run the latest version.</value>
+  </data>
+  <data name="ReadOnlySession_Notice_Locked_Message" xml:space="preserve">
+    <value>Another instance is already working with the panels.</value>
+  </data>
+  <data name="ReadOnlySession_Notice_Locked_Detail" xml:space="preserve">
+    <value>Changes made in this session will not be saved.</value>
+  </data>
+  <data name="ReadOnlySession_Notice_Locked_Action" xml:space="preserve">
+    <value>Close the other instance.</value>
+  </data>
+  <data name="Settings_Backup_Orphans_Moved_Format" xml:space="preserve">
+    <value>Moved: {0:g}</value>
+  </data>
+  <data name="Settings_Backup_Orphans_More_A11y_Format" xml:space="preserve">
+    <value>More actions for “{0}”</value>
+  </data>
 </root>

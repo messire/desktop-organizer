@@ -82,10 +82,14 @@ public static class DiConfig
             sp.GetRequiredService<IColorPickerService>(),
             sp.GetRequiredService<IPanelCloneFlow>(),
             sp.GetRequiredService<IStatusNotifier>(),
-            sp.GetRequiredService<IDesktopIconsService>()));
+            sp.GetRequiredService<IDesktopIconsService>(),
+            appLog: null,
+            storageOrphans: sp.GetRequiredService<ManagedStorageOrphansViewModel>()));
         services.AddTransient<ChildWindowViewModel>();       // Per-panel VM — has file state
         services.AddSingleton<LayoutSnapshotsViewModel>();  // Snapshots section VM
         services.AddSingleton<AboutViewModel>();            // About section VM (release-hardening-1.0.md §G2)
+        services.AddSingleton<ManagedStorageOrphansViewModel>(); // Backup "Files without a panel" card (ADR-009 amendment 2026-10-10)
+        services.AddSingleton<ICloudDropHintGate, CloudDropHintGate>(); // once-per-session cloud drop hint latch (same amendment)
 
         // Design system 1.x §3 phase 6.3 (docs/PLANS/design-system-1x.md §2.8, ADR-047 D-9): the
         // AppDialogWindow seam ConfirmationService/InputDialogService depend on instead of showing a real
@@ -166,6 +170,9 @@ public static class DiConfig
         services.AddSingleton<IPageManager, PageManagerService>();
         services.AddSingleton<ILayoutSnapshotService, LayoutSnapshotService>();
 
+        // ADR-audit WP-B (B1): one-shot "this session is read-only" InfoBar notice, shown from App.StartApp.
+        services.AddSingleton<ReadOnlySessionNotice>();
+
         // backlog-1x-master-plan.md §1/§2: round-robin page switching for the tray icon's double-click
         // and the tray context menu's "Pages" submenu (ADR-044). Singleton, IDisposable — constructed
         // once, Start()-ed from App.InitTrayIcon, and disposed implicitly with every other IDisposable
@@ -195,7 +202,8 @@ public static class DiConfig
             new SystemIconsPanelViewModel(
                 sp.GetRequiredService<ISystemIconsPanelManager>().Model,
                 sp.GetRequiredService<ISystemShellService>(),
-                sp.GetRequiredService<IPanelSelectionCoordinator>()));
+                sp.GetRequiredService<IPanelSelectionCoordinator>(),
+                sp.GetRequiredService<IWindowManager>()));
         services.AddTransient<SystemIconsPanelWindow>();
     }
 }

@@ -121,7 +121,7 @@ public class PanelInteractionTrackerTests
     }
 
     // T-TRK-08: Hover/Editing are not dead states — TryEnter succeeds for both from Idle — but no
-    // Phase 1 production code path (PanelDragMoveBehavior/PanelResizeController/ResizeGestureSession)
+    // Phase 1 production code path (PanelDragMoveBehavior/NativePanelResizeController/ResizeGestureSession)
     // ever calls TryEnter with either value; they are reserved for Phase 6 (ADR-021 Consequences/Negative).
 
     /// <summary>Verifies that entering <see cref="PanelInteractionState.Hover"/> or <see cref="PanelInteractionState.Editing"/> from <see cref="PanelInteractionState.Idle"/> succeeds — neither is a dead state.</summary>

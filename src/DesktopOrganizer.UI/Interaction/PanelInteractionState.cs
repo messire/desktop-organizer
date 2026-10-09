@@ -33,6 +33,6 @@ public enum PanelInteractionState
     /// <summary>A title-bar drag-to-move gesture owns the panel (<see cref="Behaviors.PanelDragMoveBehavior"/>).</summary>
     Dragging,
 
-    /// <summary>A resize-thumb gesture owns the panel (<see cref="Behaviors.PanelResizeController"/>/<see cref="ResizeGestureSession"/>).</summary>
+    /// <summary>A resize gesture owns the panel (<see cref="Behaviors.NativePanelResizeController"/>/<see cref="ResizeGestureSession"/>).</summary>
     Resizing,
 }

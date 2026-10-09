@@ -126,5 +126,6 @@
 кроме `NativeApi.cs`, где вообще был `DllImport` — прямое нарушение инварианта и источник тройного
 дублирования сигнатур одних и тех же Win32 API (см. `docs/REFACTORING_PLAN.md` §6.5).
 
-**Статус:** Accepted, применено к коду. Manual verify (Win10/Win11) не выполнен — см. общий список
-`docs/REFACTORING_PLAN.md` §5.4/раздел 7.8.
+**Статус дополнения:** Accepted, применено к коду. Manual verify выполнена на Windows 11 24H2 2026-09-27
+(признана достаточной; Windows 10 не проверяется) — см. [docs/ROADMAP.md](../docs/ROADMAP.md) (строки 6–8,
+253–254); исторический общий список — `docs/REFACTORING_PLAN.md` §5.4/раздел 7.8.

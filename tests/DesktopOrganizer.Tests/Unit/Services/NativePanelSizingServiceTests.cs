@@ -31,7 +31,15 @@ public class NativePanelSizingServiceTests
     private const int WmCaptureChanged = 0x0215;
     private const int WmDpiChanged = 0x02E0;
     private const int WmDpiChangedAfterParent = 0x02E3;
+    private const int WmNcLButtonDblClk = 0x00A3;
+    private const int WmLButtonDown = 0x0201;
     private const int WmszRight = 2;
+    private const int HtError = -2;
+    private const int HtNowhere = 0;
+    private const int HtClient = 1;
+    private const int HtCaption = 2;
+    private const int HtMaxButton = 9;
+    private const int HtBorder = 18;
     private const int HtLeft = 10;
     private const int HtRight = 11;
     private const int HtTop = 12;
@@ -61,6 +69,7 @@ public class NativePanelSizingServiceTests
             .Setup(api => api.GetWindowRect(Hwnd, out windowRect))
             .Returns(true);
         _nativeApiMock.Setup(api => api.GetDpiScaleForWindow(Hwnd)).Returns(1.0);
+        _clientMock.SetupGet(c => c.IsHitTestEnabled).Returns(true);
     }
 
     // ── Attach / Dispose lifecycle ──────────────────────────────────────────────
@@ -141,11 +150,12 @@ public class NativePanelSizingServiceTests
     }
 
     /// <summary>
-    /// Verifies that <c>WM_NCHITTEST</c> is left unhandled when the client reports
-    /// <see cref="NativeSizingEdge.None"/>, so WPF/<c>DefWindowProc</c> keep their own hit testing.
+    /// Verifies that <c>WM_NCHITTEST</c> is answered with an explicit <c>HTCLIENT</c> when the client reports
+    /// <see cref="NativeSizingEdge.None"/> for a point inside the window — the window's own area never depends
+    /// on <c>DefWindowProc</c> resolving it to <c>HTCLIENT</c> (ADR-022 phase 1 review, N1).
     /// </summary>
     [Fact]
-    public void WmNcHitTest_LeavesMessageUnhandled_WhenClientReportsNoEdge()
+    public void WmNcHitTest_AnswersHtClient_WhenClientReportsNoEdgeInsideWindow()
     {
         // Arrange
         var service = CreateService();
@@ -158,9 +168,127 @@ public class NativePanelSizingServiceTests
         // Act
         var result = _hook!(Hwnd, WmNcHitTest, IntPtr.Zero, MakePoint(300, 400), ref handled);
 
-        // Assert — WPF/DefWindowProc keep their own hit testing (HTCLIENT).
+        // Assert
+        Assert.True(handled);
+        Assert.Equal(HtClient, result.ToInt32());
+    }
+
+    /// <summary>
+    /// Verifies that a point outside the window rectangle (right/bottom exclusive) for which the client reports
+    /// <see cref="NativeSizingEdge.None"/> is still left unhandled for <c>DefWindowProc</c>.
+    /// </summary>
+    /// <param name="x">Screen X of the hit point (window rect is 100,200 – 500,600).</param>
+    /// <param name="y">Screen Y of the hit point.</param>
+    [Theory]
+    [InlineData(99, 400)]
+    [InlineData(500, 400)]
+    [InlineData(300, 199)]
+    [InlineData(300, 600)]
+    public void WmNcHitTest_LeavesMessageUnhandled_WhenClientReportsNoEdgeOutsideWindow(int x, int y)
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        _clientMock
+            .Setup(c => c.HitTest(It.IsAny<NativePointPx>(), It.IsAny<NativeRectPx>(), It.IsAny<double>()))
+            .Returns(NativeSizingEdge.None);
+        var handled = false;
+
+        // Act
+        var result = _hook!(Hwnd, WmNcHitTest, IntPtr.Zero, MakePoint(x, y), ref handled);
+
+        // Assert
         Assert.False(handled);
         Assert.Equal(IntPtr.Zero, result);
+    }
+
+    /// <summary>
+    /// Verifies the resize-gate-off path of <c>WM_NCHITTEST</c> (ADR-022 phase 1 review, N1 + N2): for a point
+    /// inside the window the service answers <c>HTCLIENT</c> explicitly, and it does so WITHOUT the DPI query
+    /// and WITHOUT the client's geometric hit-test — the gate is read before either, and the window rectangle
+    /// is the only native read left (needed to keep a point outside the window unhandled).
+    /// </summary>
+    /// <param name="x">Screen X of the hit point — on the right border, a corner, and the interior.</param>
+    /// <param name="y">Screen Y of the hit point.</param>
+    [Theory]
+    [InlineData(499, 400)]
+    [InlineData(100, 200)]
+    [InlineData(300, 400)]
+    public void WmNcHitTest_GateOff_AnswersHtClientInsideWindow_WithoutDpiQueryOrClientHitTest(int x, int y)
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        _clientMock.SetupGet(c => c.IsHitTestEnabled).Returns(false);
+        var handled = false;
+
+        // Act
+        var result = _hook!(Hwnd, WmNcHitTest, IntPtr.Zero, MakePoint(x, y), ref handled);
+
+        // Assert
+        Assert.True(handled);
+        Assert.Equal(HtClient, result.ToInt32());
+        _nativeApiMock.Verify(api => api.GetDpiScaleForWindow(It.IsAny<IntPtr>()), Times.Never);
+        _clientMock.Verify(
+            c => c.HitTest(It.IsAny<NativePointPx>(), It.IsAny<NativeRectPx>(), It.IsAny<double>()),
+            Times.Never);
+        var ignored = default(NativeRectPx);
+        _nativeApiMock.Verify(api => api.GetWindowRect(Hwnd, out ignored), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that with the resize gate off a point outside the window, or a failed <c>GetWindowRect</c>,
+    /// leaves <c>WM_NCHITTEST</c> unhandled — exactly the pre-fix behaviour — and never consults the client's
+    /// hit-test or the DPI query.
+    /// </summary>
+    [Fact]
+    public void WmNcHitTest_GateOff_LeavesMessageUnhandled_OutsideWindowOrWhenWindowRectFails()
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        _clientMock.SetupGet(c => c.IsHitTestEnabled).Returns(false);
+        var outsideHandled = false;
+        var failedHandled = false;
+
+        // Act — outside the 100,200 – 500,600 window, then with GetWindowRect failing.
+        var outside = _hook!(Hwnd, WmNcHitTest, IntPtr.Zero, MakePoint(500, 400), ref outsideHandled);
+        var failedRect = default(NativeRectPx);
+        _nativeApiMock.Setup(api => api.GetWindowRect(Hwnd, out failedRect)).Returns(false);
+        var failed = _hook!(Hwnd, WmNcHitTest, IntPtr.Zero, MakePoint(300, 400), ref failedHandled);
+
+        // Assert
+        Assert.False(outsideHandled);
+        Assert.Equal(IntPtr.Zero, outside);
+        Assert.False(failedHandled);
+        Assert.Equal(IntPtr.Zero, failed);
+        _nativeApiMock.Verify(api => api.GetDpiScaleForWindow(It.IsAny<IntPtr>()), Times.Never);
+        _clientMock.Verify(
+            c => c.HitTest(It.IsAny<NativePointPx>(), It.IsAny<NativeRectPx>(), It.IsAny<double>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that an exception thrown by the client's gate never escapes the window procedure and leaves
+    /// <c>WM_NCHITTEST</c> unhandled, before any native call is made.
+    /// </summary>
+    [Fact]
+    public void WmNcHitTest_DoesNotThrow_WhenClientGateThrows()
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        _clientMock.SetupGet(c => c.IsHitTestEnabled).Throws(new InvalidOperationException("boom"));
+        var handled = false;
+
+        // Act
+        var result = _hook!(Hwnd, WmNcHitTest, IntPtr.Zero, MakePoint(300, 400), ref handled);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(IntPtr.Zero, result);
+        var ignored = default(NativeRectPx);
+        _nativeApiMock.Verify(api => api.GetWindowRect(It.IsAny<IntPtr>(), out ignored), Times.Never);
     }
 
     /// <summary>
@@ -189,10 +317,20 @@ public class NativePanelSizingServiceTests
     // ── WM_MOUSEACTIVATE (R-2) ──────────────────────────────────────────────────
 
     /// <summary>
-    /// Verifies that <c>WM_MOUSEACTIVATE</c> is always answered with <c>MA_NOACTIVATE</c>, per R-2.
+    /// Verifies that <c>WM_MOUSEACTIVATE</c> for a click on any of the eight sizing edges/corners is
+    /// answered with <c>MA_NOACTIVATE</c> (R-2) — G-5, ADR-022 phase 0-B.
     /// </summary>
-    [Fact]
-    public void WmMouseActivate_AlwaysAnswersNoActivate()
+    /// <param name="hitTestCode">The hit-test code in LOWORD(lParam).</param>
+    [Theory]
+    [InlineData(HtLeft)]
+    [InlineData(HtRight)]
+    [InlineData(HtTop)]
+    [InlineData(HtTopLeft)]
+    [InlineData(HtTopRight)]
+    [InlineData(HtBottom)]
+    [InlineData(HtBottomLeft)]
+    [InlineData(HtBottomRight)]
+    public void WmMouseActivate_OnSizingHitCode_NoActivate(int hitTestCode)
     {
         // Arrange
         var service = CreateService();
@@ -200,11 +338,252 @@ public class NativePanelSizingServiceTests
         var handled = false;
 
         // Act
-        var result = _hook!(Hwnd, WmMouseActivate, IntPtr.Zero, IntPtr.Zero, ref handled);
+        var result = _hook!(Hwnd, WmMouseActivate, Hwnd, MakeMouseActivateLParam(hitTestCode), ref handled);
 
         // Assert
         Assert.True(handled);
         Assert.Equal(MaNoActivate, result.ToInt32());
+    }
+
+    /// <summary>
+    /// Verifies that <c>WM_MOUSEACTIVATE</c> for any non-sizing hit (client area, caption, nowhere, error,
+    /// plain border, …) is left unhandled, so activation behaves exactly as without the hook — G-5.
+    /// </summary>
+    /// <param name="hitTestCode">The hit-test code in LOWORD(lParam).</param>
+    [Theory]
+    [InlineData(HtNowhere)]
+    [InlineData(HtClient)]
+    [InlineData(HtCaption)]
+    [InlineData(HtError)]
+    [InlineData(HtMaxButton)]
+    [InlineData(HtBorder)]
+    public void WmMouseActivate_OnClientHitCode_NotHandled(int hitTestCode)
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        var handled = false;
+
+        // Act
+        var result = _hook!(Hwnd, WmMouseActivate, Hwnd, MakeMouseActivateLParam(hitTestCode), ref handled);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(IntPtr.Zero, result);
+    }
+
+    // ── WM_NCLBUTTONDBLCLK (G-6) ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that a non-client double click on a sizing edge/corner — in particular the top/bottom edge,
+    /// whose default action is the vertical maximize (Aero Snap) — is swallowed — G-6, ADR-022 phase 0-B.
+    /// </summary>
+    /// <param name="hitTestCode">The hit-test code in wParam.</param>
+    [Theory]
+    [InlineData(HtTop)]
+    [InlineData(HtBottom)]
+    [InlineData(HtLeft)]
+    [InlineData(HtRight)]
+    [InlineData(HtTopLeft)]
+    [InlineData(HtTopRight)]
+    [InlineData(HtBottomLeft)]
+    [InlineData(HtBottomRight)]
+    public void WmNcLButtonDblClk_OnSizingEdge_Swallowed(int hitTestCode)
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        var handled = false;
+
+        // Act
+        var result = _hook!(Hwnd, WmNcLButtonDblClk, new IntPtr(hitTestCode), MakePoint(300, 200), ref handled);
+
+        // Assert
+        Assert.True(handled);
+        Assert.Equal(IntPtr.Zero, result);
+    }
+
+    /// <summary>
+    /// Verifies that a non-client double click anywhere other than a sizing edge is left to
+    /// <c>DefWindowProc</c>/WPF — G-6.
+    /// </summary>
+    /// <param name="hitTestCode">The hit-test code in wParam.</param>
+    [Theory]
+    [InlineData(HtNowhere)]
+    [InlineData(HtClient)]
+    [InlineData(HtCaption)]
+    [InlineData(HtBorder)]
+    public void WmNcLButtonDblClk_OnClient_NotHandled(int hitTestCode)
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        var handled = false;
+
+        // Act
+        var result = _hook!(Hwnd, WmNcLButtonDblClk, new IntPtr(hitTestCode), MakePoint(300, 400), ref handled);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(IntPtr.Zero, result);
+    }
+
+    // ── CancelActiveSizing (G-2) ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that <see cref="NativePanelSizingService.CancelActiveSizing"/> calls
+    /// <see cref="INativeApi.CancelSizingLoop"/> only while a client-accepted cycle runs, and is idempotent
+    /// — a second call (the cycle is already closed) does nothing — G-2, ADR-022 phase 0-B.
+    /// </summary>
+    [Fact]
+    public void CancelActiveSizing_CallsNativeApi_OnlyWhileCycleActive()
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        _nativeApiMock.Setup(api => api.CancelSizingLoop(Hwnd)).Returns(true);
+
+        // Act + Assert — no cycle yet.
+        Assert.False(service.CancelActiveSizing(Hwnd));
+        _nativeApiMock.Verify(api => api.CancelSizingLoop(It.IsAny<IntPtr>()), Times.Never);
+
+        BeginAcceptedCycle(NativeSizingEdge.Right, 499, 400);
+
+        Assert.True(service.CancelActiveSizing(Hwnd));
+        Assert.False(service.CancelActiveSizing(Hwnd)); // idempotent
+
+        _nativeApiMock.Verify(api => api.CancelSizingLoop(Hwnd), Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies that <see cref="NativePanelSizingService.TryGetWindowRect"/> forwards to
+    /// <see cref="INativeApi.GetWindowRect"/>, returns its rectangle on success and reports failure
+    /// (default rectangle) when the native read fails or throws — review cycle 1 (S3).
+    /// </summary>
+    [Fact]
+    public void TryGetWindowRect_ForwardsToNativeApi_AndFailsClosedOnError()
+    {
+        // Arrange
+        var service = CreateService();
+        var otherHwnd = new IntPtr(0x5678);
+        var failing = default(NativeRectPx);
+        _nativeApiMock.Setup(api => api.GetWindowRect(otherHwnd, out failing)).Returns(false);
+        var throwingHwnd = new IntPtr(0x9ABC);
+        _nativeApiMock.Setup(api => api.GetWindowRect(throwingHwnd, out failing)).Throws<InvalidOperationException>();
+
+        // Act + Assert
+        Assert.True(service.TryGetWindowRect(Hwnd, out var rect));
+        Assert.Equal(new NativeRectPx(100, 200, 500, 600), rect);
+
+        Assert.False(service.TryGetWindowRect(otherHwnd, out var failed));
+        Assert.Equal(default, failed);
+
+        Assert.False(service.TryGetWindowRect(throwingHwnd, out var thrown));
+        Assert.Equal(default, thrown);
+    }
+
+    /// <summary>
+    /// Verifies that a cycle the client rejected, or an HWND that was never attached, is never cancelled
+    /// natively — G-2.
+    /// </summary>
+    [Fact]
+    public void CancelActiveSizing_RejectedCycleOrUnknownHwnd_DoesNotCallNativeApi()
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        BeginRejectedCycle(NativeSizingEdge.Right, 499, 400);
+
+        // Act + Assert
+        Assert.False(service.CancelActiveSizing(Hwnd));
+        Assert.False(service.CancelActiveSizing(new IntPtr(0x7777)));
+        _nativeApiMock.Verify(api => api.CancelSizingLoop(It.IsAny<IntPtr>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that once the client cancelled the cycle, the messages the unwinding loop still delivers
+    /// (<c>WM_SIZING</c>, a foreign <c>WM_CAPTURECHANGED</c>, <c>WM_EXITSIZEMOVE</c>) never reach the client —
+    /// no second terminal notification — G-2.
+    /// </summary>
+    [Fact]
+    public void CancelActiveSizing_ThenLoopUnwinds_ClientGetsNoFurtherCallbacks()
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        _nativeApiMock.Setup(api => api.CancelSizingLoop(Hwnd)).Returns(true);
+        BeginAcceptedCycle(NativeSizingEdge.Right, 499, 400);
+        var handled = false;
+
+        // Act
+        service.CancelActiveSizing(Hwnd);
+        var sizingResult = _hook!(Hwnd, WmSizing, new IntPtr(WmszRight), new IntPtr(0x1000), ref handled);
+        _hook!(Hwnd, WmCaptureChanged, IntPtr.Zero, new IntPtr(0x9999), ref handled);
+        _hook!(Hwnd, WmExitSizeMove, IntPtr.Zero, IntPtr.Zero, ref handled);
+
+        // Assert
+        Assert.False(handled);
+        Assert.Equal(IntPtr.Zero, sizingResult);
+        _clientMock.Verify(c => c.ProposeBounds(It.IsAny<NativeSizingEdge>(), It.IsAny<NativeRectPx>()), Times.Never);
+        _clientMock.Verify(c => c.SizeMoveExited(It.IsAny<NativeRectPx>()), Times.Never);
+        _clientMock.Verify(c => c.SizeMoveAborted(), Times.Never);
+    }
+
+    /// <summary>
+    /// Verifies that a throwing <see cref="INativeApi.CancelSizingLoop"/> never escapes
+    /// <see cref="NativePanelSizingService.CancelActiveSizing"/> (it runs from dispatcher operations nested
+    /// inside the sizing loop) — G-2.
+    /// </summary>
+    [Fact]
+    public void CancelActiveSizing_NativeApiThrows_DoesNotThrow()
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        _nativeApiMock.Setup(api => api.CancelSizingLoop(Hwnd)).Throws(new InvalidOperationException("boom"));
+        BeginAcceptedCycle(NativeSizingEdge.Right, 499, 400);
+
+        // Act
+        var exception = Record.Exception(() => service.CancelActiveSizing(Hwnd));
+
+        // Assert
+        Assert.Null(exception);
+    }
+
+    // ── WM_DPICHANGED mid-cycle (G-1) ───────────────────────────────────────────
+
+    /// <summary>
+    /// Verifies that a <c>WM_DPICHANGED</c> in the middle of an accepted cycle leaves the cycle running: it
+    /// stays unhandled, later <c>WM_SIZING</c> still reach the client and <c>WM_EXITSIZEMOVE</c> still ends
+    /// it with <c>SizeMoveExited</c> — G-1, ADR-022 phase 0-B.
+    /// </summary>
+    [Fact]
+    public void WmDpiChanged_MidCycle_LeavesTheCycleRunning()
+    {
+        // Arrange
+        var service = CreateService();
+        service.Attach(Hwnd, _clientMock.Object);
+        BeginAcceptedCycle(NativeSizingEdge.Right, 499, 400);
+        var dpiLParam = new IntPtr(0x4000);
+        _nativeApiMock.Setup(api => api.ReadRect(dpiLParam)).Returns(new NativeRectPx(150, 300, 750, 900));
+        var sizingLParam = new IntPtr(0x5000);
+        var proposed = new NativeRectPx(100, 200, 550, 600);
+        _nativeApiMock.Setup(api => api.ReadRect(sizingLParam)).Returns(proposed);
+        _clientMock.Setup(c => c.ProposeBounds(NativeSizingEdge.Right, proposed)).Returns(proposed);
+        var handled = false;
+
+        // Act
+        _hook!(Hwnd, WmDpiChanged, new IntPtr((144 << 16) | 144), dpiLParam, ref handled);
+        var dpiHandled = handled;
+        _hook!(Hwnd, WmSizing, new IntPtr(WmszRight), sizingLParam, ref handled);
+        _hook!(Hwnd, WmExitSizeMove, IntPtr.Zero, IntPtr.Zero, ref handled);
+
+        // Assert
+        Assert.False(dpiHandled);
+        _clientMock.Verify(c => c.DpiChanged(1.5, new NativeRectPx(150, 300, 750, 900)), Times.Once);
+        _clientMock.Verify(c => c.ProposeBounds(NativeSizingEdge.Right, proposed), Times.Once);
+        _clientMock.Verify(c => c.SizeMoveExited(It.IsAny<NativeRectPx>()), Times.Once);
+        _clientMock.Verify(c => c.SizeMoveAborted(), Times.Never);
     }
 
     // ── WM_SIZING outside a gesture ─────────────────────────────────────────────
@@ -642,6 +1021,9 @@ public class NativePanelSizingServiceTests
     }
 
     private static IntPtr MakePoint(int x, int y) => new((y << 16) | (x & 0xFFFF));
+
+    /// <summary>Packs <c>WM_MOUSEACTIVATE</c>'s lParam: LOWORD = hit-test code, HIWORD = <c>WM_LBUTTONDOWN</c>.</summary>
+    private static IntPtr MakeMouseActivateLParam(int hitTestCode) => new((WmLButtonDown << 16) | (hitTestCode & 0xFFFF));
 
     private NativePanelSizingService CreateService() =>
         new(_nativeApiMock.Object, (_, hook) =>

@@ -138,11 +138,12 @@ left off. Delete `%LocalAppData%\DesktopOrganizer` yourself if you want a truly 
   back onto any panel — the panel it belonged to is gone by the time you restore it.
 - Very long file paths (beyond `MAX_PATH`) are not supported by the underlying Recycle Bin/shell
   operations the app relies on for some file actions.
-- Downgrading to a version older than 0.8.0 after running 0.8.0 or newer is not supported automatically:
+- Downgrading to 0.8.0 or older after running 0.9.0 or newer is not supported automatically:
   the older build sees a settings-file format it doesn't recognize and starts with an empty, read-only
-  session (your data is not deleted — the file itself is left untouched, and going back to 0.8.0+ picks
-  it right back up). Manual recovery on an older version requires restoring the automatic pre-upgrade
-  snapshot by hand — see the Upgrade notes in `CHANGELOG.md`.
+  session, without any notice (your data is not deleted — the file itself is left untouched, and going
+  back to 0.9.0+ picks it right back up). Manual recovery on an older version requires restoring the
+  automatic pre-upgrade snapshot (`application-state.premigration-v6.json`) by hand — see the Upgrade
+  notes in `CHANGELOG.md`.
 
 ## License
 
@@ -281,11 +282,12 @@ JSON Lines, до 10 файлов по 10 МБ) в `%LOCALAPPDATA%\DesktopOrganiz
   элемента), а не обратно на панель — панель, которой он принадлежал, к моменту восстановления уже удалена.
 - Очень длинные пути (больше `MAX_PATH`) не поддерживаются операциями Корзины/shell, на которые опирается
   часть файловых действий приложения.
-- Откат на версию старше 0.8.0 после запуска 0.8.0 или новее не поддерживается автоматически: старая
+- Откат на 0.8.0 или старше после запуска 0.9.0 или новее не поддерживается автоматически: старая
   сборка видит незнакомый ей формат файла настроек и стартует с пустой, недоступной для записи сессией
-  (данные не удаляются — сам файл остаётся нетронутым, и возврат на 0.8.0+ сразу возвращает всё на место).
-  Ручное восстановление на старой версии требует вручную восстановить автоматический снимок,
-  сделанный перед апгрейдом, — см. раздел Upgrade notes в `CHANGELOG.md`.
+  без какого-либо уведомления (данные не удаляются — сам файл остаётся нетронутым, и возврат на 0.9.0+
+  сразу возвращает всё на место). Ручное восстановление на старой версии требует вручную восстановить
+  автоматический снимок, сделанный перед апгрейдом (`application-state.premigration-v6.json`), — см.
+  раздел Upgrade notes в `CHANGELOG.md`.
 
 ## Лицензия
 

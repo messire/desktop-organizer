@@ -23,6 +23,12 @@ public interface INotifyIconAdapter : IDisposable
     public void SetIcon(string iconPath);
 
     /// <summary>
+    /// Sets the tooltip text Windows shows when the pointer rests on the tray icon.
+    /// </summary>
+    /// <param name="text">The tooltip text (truncated to 127 characters, the Win32 limit, if longer).</param>
+    void SetToolTip(string text);
+
+    /// <summary>
     /// Sets the context menu shown when the user right-clicks the tray icon. The adapter does not take
     /// ownership of the menu and does not dispose it.
     /// </summary>

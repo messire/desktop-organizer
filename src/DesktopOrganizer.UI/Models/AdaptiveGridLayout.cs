@@ -39,7 +39,7 @@ public static class AdaptiveGridLayout
     /// (within-row) AND vertical (between-row) layout (see its doc comment: "the same value is used for
     /// both axes"). This is a deliberate visual change, not a regression.
     /// <para>
-    /// Consequence for <see cref="SnapExtent"/>/resize-snap (<c>ChildWindow.Resize_DragDelta</c>,
+    /// Consequence for <see cref="SnapExtent"/>/resize-snap (<c>NativePanelResizeController</c>,
     /// <c>SnapWidthToGrid</c>): see the note on <see cref="DefaultEdgePaddingRatio"/> — snap points for
     /// 2+ columns/rows are no longer the same values they were when this constant was <c>0</c>.
     /// </para>

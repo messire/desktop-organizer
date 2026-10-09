@@ -1242,6 +1242,26 @@ public class MainWindowViewModelTests
         Assert.Equal(16, sut.GridSize);
     }
 
+    /// <summary>
+    /// ADR-audit review cycle 1 (H1): <see cref="MainWindowViewModel.IsSnapResizeToIconGridAvailable"/>
+    /// forwards the global-defaults availability (disabled while position snapping is on) and the root
+    /// view model re-raises its change notification.
+    /// </summary>
+    [Fact]
+    public void IsSnapResizeToIconGridAvailable_FollowsSnapToGridEnabled_AndRaisesOnRoot()
+    {
+        _appSettingsMock.SetupProperty(a => a.GridSize, 1);
+        var sut = BuildSut();
+        var raised = new List<string?>();
+        sut.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        Assert.True(sut.IsSnapResizeToIconGridAvailable);
+
+        sut.SnapToGridEnabled = true;
+
+        Assert.False(sut.IsSnapResizeToIconGridAvailable);
+        Assert.Contains(nameof(MainWindowViewModel.IsSnapResizeToIconGridAvailable), raised);
+    }
+
     // ── docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #3: Edit Layout toggle + Lock layout forwarding ──
     // Per-panel appearance/sort tests (SelectedPanelSortMode/SelectedPanelSupportsManualOrder/
     // SelectedPanelAccentColor/SelectedPanelSurfaceOpacity/SelectedPanelSurfaceStyle/SurfaceStyles) moved
@@ -1383,6 +1403,35 @@ public class MainWindowViewModelTests
 
         Assert.Equal("None", _appSettingsMock.Object.NormalModeLayoutGestures);
         _appSettingsMock.Verify(a => a.Save(), Times.Once);
+    }
+
+    /// <summary>
+    /// ADR-audit WP-C / C1: changing the Normal-mode gesture preference must be relayed over the shared
+    /// <see cref="ILayoutEditModeService"/> so every open panel re-applies its resize gate (ADR-026 D-5).
+    /// </summary>
+    [Fact]
+    public void NormalModeLayoutGestures_Set_NotifiesTheLayoutEditModeService()
+    {
+        _appSettingsMock.SetupProperty(a => a.NormalModeLayoutGestures, "MoveOnly");
+        var sut = BuildSut();
+
+        sut.NormalModeLayoutGestures = NormalModeLayoutGestures.MoveAndResize;
+
+        _layoutEditModeMock.Verify(s => s.NotifyNormalModeGesturesChanged(), Times.Once);
+    }
+
+    /// <summary>
+    /// ADR-audit WP-C / C1: an unrelated global default must not trigger the gesture-policy relay.
+    /// </summary>
+    [Fact]
+    public void GridSize_Set_DoesNotNotifyTheLayoutEditModeService()
+    {
+        _appSettingsMock.SetupProperty(a => a.GridSize, 1);
+        var sut = BuildSut();
+
+        sut.GridSize = 16;
+
+        _layoutEditModeMock.Verify(s => s.NotifyNormalModeGesturesChanged(), Times.Never);
     }
 
     // ── P03 §2.5: "Align all panels to workspace grid" (ADR-028 «Явная команда») ──────────────────
@@ -2232,7 +2281,8 @@ public class MainWindowViewModelTests
             _layoutSnapshotServiceMock.Object,
             _confirmationMock.Object,
             _inputDialogServiceMock.Object,
-            _localization);
+            _localization,
+            Mock.Of<DesktopOrganizer.Services.Abstractions.Storage.IApplicationStateStore>(st => st.IsWritable));
 
         // Package G2 wiring fixup only (release-hardening-1.0.md §G2): MainWindowViewModel's constructor
         // gained an AboutViewModel parameter, same category as WP-C's own IInputDialogService fixup above

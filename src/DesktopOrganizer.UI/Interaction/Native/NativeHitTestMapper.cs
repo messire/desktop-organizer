@@ -5,7 +5,7 @@ namespace DesktopOrganizer.UI.Interaction.Native;
 /// <summary>
 /// Pure <c>WM_NCHITTEST</c> zone classifier for a native panel resize — zero WPF dependencies beyond
 /// <see cref="NativeRectPx"/>/<see cref="NativePointPx"/> (both in Abstractions), zero mutable state.
-/// Border/corner geometry mirrors <c>ChildWindow.xaml</c>'s <c>ResizeOverlay</c> exactly: a
+/// Border/corner geometry mirrors <c>ChildWindow.xaml</c>'s <c>ResizeGripVisuals</c> exactly: a
 /// <c>cornerDip x cornerDip</c> square at each of the four corners, overlaid on top of an
 /// <c>edgeDip</c>-wide straight-edge strip along the rest of each side (docs/PLANS/
 /// phase-2-native-panel-sizing.md §1.4, widened to two independent thicknesses in docs/PLANS/
@@ -32,10 +32,10 @@ public static class NativeHitTestMapper
     /// <paramref name="edgeDip"/>/<paramref name="cornerDip"/> to pixels.</param>
     /// <param name="edgeDip">The straight-edge strip thickness, in DIP —
     /// <see cref="DesktopOrganizer.UI.Models.PanelMetrics.ResizeEdgeThickness"/> in production, to match
-    /// <c>ResizeOverlay</c>'s Grid columns/rows.</param>
+    /// <c>ResizeGripVisuals</c>'s Grid columns/rows.</param>
     /// <param name="cornerDip">
     /// The corner square width/height, in DIP — <see cref="DesktopOrganizer.UI.Models.PanelMetrics.ResizeCornerThickness"/>
-    /// in production, to match <c>ResizeOverlay</c>'s corner <c>Thumb</c>s. Must be <c>&gt;= edgeDip</c>
+    /// in production, to match <c>ResizeGripVisuals</c>'s corner cells. Must be <c>&gt;= edgeDip</c>
     /// for the corner-priority classification below to behave sensibly (production always has
     /// <c>cornerDip &gt; edgeDip</c> — see <c>PanelMetricsTests</c>); a caller passing a SMALLER
     /// <paramref name="cornerDip"/> than <paramref name="edgeDip"/> gets a mathematically well-defined but
@@ -50,8 +50,8 @@ public static class NativeHitTestMapper
     /// point is outside <paramref name="windowRect"/>, in the non-resizable center area, or resizing is
     /// disabled. A point within <paramref name="cornerDip"/> of BOTH edges meeting at a corner always
     /// resolves to that corner, even where it is also within <paramref name="edgeDip"/> of just one of
-    /// them — this mirrors <c>ResizeOverlay</c>'s own corner <c>Thumb</c>s being declared after (so
-    /// visually/hit-test on top of) the straight-edge ones in <c>ChildWindow.xaml</c>. This also
+    /// them — this mirrors <c>ResizeGripVisuals</c>'s corner cells being declared after (so
+    /// visually on top of) the straight-edge ones in <c>ChildWindow.xaml</c>. This also
     /// naturally covers windows narrower/shorter than twice <paramref name="cornerDip"/>, where the
     /// left/right (or top/bottom) corner bands overlap across the whole window.
     /// </returns>

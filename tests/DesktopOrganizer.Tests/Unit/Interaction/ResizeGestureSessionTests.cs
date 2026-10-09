@@ -328,7 +328,7 @@ public class ResizeGestureSessionTests
     // SAME edge — it never actually exercises "End on edge A, then immediately TryBegin on that same
     // edge A again", which is the exact shape of the M-3 stale-drag-recovery scenario (the same Thumb
     // being re-clicked). At the ResizeGestureSession level this is expected to be trivially true — the
-    // session keeps no "this edge was just used" state; only PanelResizeController's _activeThumb needed
+    // session keeps no "this edge was just used" state; only the former Thumb controller's _activeThumb needed
     // the M-3 fix (nulling it before EndResize in the self-heal branch) precisely because the session
     // itself never blocks same-edge reuse. This test makes that guarantee explicit instead of leaving it
     // as an untested implication of T-SES-01/T-SES-18.
@@ -364,7 +364,7 @@ public class ResizeGestureSessionTests
     // idempotency), this test calls End() a second time FROM INSIDE the first call's own unwind: End's
     // `finally` block sets `_isActive = false` and then calls `_tracker.Exit(...)`, which synchronously
     // raises `PanelInteractionTracker.StateChanged` BEFORE the first End() call has actually returned to
-    // PanelResizeController. Subscribing to StateChanged and calling `session.End(...)` again from inside
+    // the resize controller. Subscribing to StateChanged and calling `session.End(...)` again from inside
     // that handler reproduces the real shape of `Thumb.CancelDrag()` synchronously re-raising
     // `DragCompleted` into the same call stack as an in-progress `EndResize`. The `_ending` guard (and,
     // by then, `_isActive` already being false) must make the nested call a no-op: no recursion, no

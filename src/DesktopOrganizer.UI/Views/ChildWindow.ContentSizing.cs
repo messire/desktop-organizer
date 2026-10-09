@@ -374,7 +374,7 @@ public partial class ChildWindow
     /// <summary>
     /// MAJOR M-4 (P06 fix-cycle, adr/ADR-029-icon-layout-policy.md "Fix-цикл P06"): called via
     /// <see cref="Behaviors.IPanelSizingGridHost.NotifyHeightResizeCommitted"/> once a completed user
-    /// resize gesture (Thumb OR native <c>WM_SIZING</c>) that affected the panel's HEIGHT has been
+    /// native <c>WM_SIZING</c> resize gesture that affected the panel's HEIGHT has been
     /// committed. Fences-like: an explicit, deliberate vertical resize is a stronger signal than the
     /// passive <see cref="PanelSizingMode.AutoContent"/> auto-fit, so it demotes the panel back to
     /// <see cref="PanelSizingMode.Manual"/> — the same "manual wins" rule <see cref="MaybeAutoFit"/>
@@ -417,7 +417,10 @@ public partial class ChildWindow
                 .Select(m => (m.DeviceName, m.Bounds, m.WorkArea))
                 .ToList();
             var expandedHeight = _model.IsRolledUp ? _rollUpBehavior.ExpandedHeight : Height;
-            var currentBounds = new Rect(Left, Top, Width, expandedHeight);
+
+            // ADR-audit WP-C / C2 (ADR-037): PanelGridStateResolver and PanelGeometryWriter work in desktop-DIP —
+            // Left/Top go through the adapter, never raw (identity on a uniform snapshot).
+            var currentBounds = PanelWindowCoordinates.ToDesktopBounds(this, new Rect(Left, Top, Width, expandedHeight), _desktopScale.Current);
 
             // Инвариант В1 (docs/PLANS/workspace-grid-03-04-integration.md §0.1): the single point that
             // reads ChildWindowModel.GeometryMode to decide grid participation for THIS frame — also
@@ -486,7 +489,9 @@ public partial class ChildWindow
             return;
         }
 
-        _geometryWriter.Apply(new Rect(Left, Top, Width, newHeight), span, monitorDeviceId: null);
+        // ADR-audit WP-C / C2: the writer takes desktop-DIP bounds (it converts back to window space itself).
+        var desktopBounds = PanelWindowCoordinates.ToDesktopBounds(this, new Rect(Left, Top, Width, newHeight), _desktopScale.Current);
+        _geometryWriter.Apply(desktopBounds, span, monitorDeviceId: null);
         _windowManager.SaveWindowsState();
     }
 }

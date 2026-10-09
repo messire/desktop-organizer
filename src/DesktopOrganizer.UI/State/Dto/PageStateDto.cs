@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace DesktopOrganizer.UI.State.Dto;
 
 /// <summary>
@@ -20,4 +23,13 @@ internal sealed class PageStateDto
     /// <see langword="null"/>, rather than writing an explicit JSON <c>null</c>.
     /// </summary>
     public string? Name { get; set; }
+
+    /// <summary>
+    /// Unknown JSON keys of this object, captured on load and written back verbatim on save (ADR-024
+    /// Amendment "Additive revisions"): a field added by a newer additive schema revision survives an edit
+    /// by this build. Keys are written exactly as read (no naming policy). <see langword="null"/> when there
+    /// are none.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extras { get; set; }
 }

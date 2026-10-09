@@ -32,7 +32,7 @@ So the thread that constructs it must stay a usable UI thread forever:
   can never hold the process open, **with an `UnhandledException` absorber attached before it starts
   pumping** (see rule 2). Use `StaTestRunner.Run`/`StaTestRunner.Run<T>` — every fixture that used to
   hand-roll this itself (`ResourceDictionaryMergeTests`, `ChildWindowInitializeTests`,
-  `ChildWindowContentSizingTests`, `ChildWindowSizingGridTests`, `ResizeOverlayGeometryTests`) now
+  `ChildWindowContentSizingTests`, `ChildWindowSizingGridTests`, `ResizeGripVisualsTests` — formerly `ResizeOverlayGeometryTests`, renamed in ADR-022 phase 1) now
   delegates to it (P08 fix cycle 2, M-2) specifically because every one of those hand-rolled copies
   pumped forever WITHOUT the absorber — a real, reproduced abort (see the case study's "Update"
   below).
@@ -172,7 +172,7 @@ is not cargo cult) and `Unit/Helpers/StaTestRunnerTests.cs`.
 **Update (P08 fix cycle 2) — a second, structurally identical abort, found while adding this
 file's own absorbed-exception counter:** a new `StaTestRunnerTests` regression test deliberately
 threw a leaked-callback exception on whatever thread happened to own `Application.Current`. On a
-run where `ResourceDictionaryMergeTests`/`ChildWindow*Tests`/`ResizeOverlayGeometryTests` (each of
+run where `ResourceDictionaryMergeTests`/`ChildWindow*Tests`/`ResizeGripVisualsTests` (formerly `ResizeOverlayGeometryTests`; each of
 which used to hand-roll its own STA-thread/ownership machinery, duplicated independently per class)
 won the race to construct `Application.Current` first, that thread pumped
 (`Dispatcher.Run()`) forever exactly per rule 1 — but WITHOUT ever attaching an

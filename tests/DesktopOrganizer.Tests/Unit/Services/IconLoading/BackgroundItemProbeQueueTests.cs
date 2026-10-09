@@ -1,4 +1,6 @@
+using System.IO;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.Services.Tools.IconLoading;
 using Moq;
@@ -168,5 +170,33 @@ public class BackgroundItemProbeQueueTests
 
         gateB.Set();
         await taskB;
+    }
+
+    /// <summary>
+    /// G4 (ADR-audit review cycle 1): a probe that throws for every path reaches the always-on app log only
+    /// <see cref="AppLogEventThrottle.DefaultLimitPerEvent"/> times (each Error carries a stack trace), followed by
+    /// exactly one suppression notice — every path still degrades to <c>Unknown</c>.
+    /// </summary>
+    /// <returns>A task that completes when the batch has been probed.</returns>
+    [Fact]
+    public async Task ProbeAsync_ProbeKeepsThrowing_AppLogErrorsAreThrottled()
+    {
+        var paths = Enumerable.Range(0, AppLogEventThrottle.DefaultLimitPerEvent + 4).Select(i => $@"C:\f{i}.txt").ToArray();
+        _pathProbeMock.Setup(p => p.Probe(It.IsAny<string>())).Throws(new IOException("boom"));
+        var appLog = new Mock<IAppLog>();
+        var sut = new BackgroundItemProbeQueue(_pathProbeMock.Object, _diagnosticsLogMock.Object, appLog.Object);
+
+        var results = await sut.ProbeAsync(paths, CancellationToken.None);
+
+        Assert.All(results, r => Assert.False(r.IsKnown));
+        appLog.Verify(
+            l => l.Error("BackgroundItemProbeQueue", "ItemProbeFailed", It.IsAny<IOException>(), It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Exactly(AppLogEventThrottle.DefaultLimitPerEvent));
+        appLog.Verify(
+            l => l.Warn(
+                "BackgroundItemProbeQueue",
+                AppLogEventThrottle.SuppressedEvent,
+                It.Is<KeyValuePair<string, object?>[]>(d => d.Any(kv => kv.Key == "event" && Equals(kv.Value, "ItemProbeFailed")))),
+            Times.Once);
     }
 }

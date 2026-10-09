@@ -50,7 +50,7 @@ public class GestureDiagnosticsTests
     {
         var sut = BuildEnabled();
         var panelId = Guid.NewGuid();
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
 
         _clock = 5; // well inside the throttle window, but it's the very first delta
         sut.ResizeDelta(panelId, "Right", 5, 0, 105, 100, MakeRect(0, 0, 105, 100));
@@ -86,7 +86,7 @@ public class GestureDiagnosticsTests
     {
         var sut = BuildEnabled();
         var panelId = Guid.NewGuid();
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
 
         _clock = 0;
         sut.ResizeDelta(panelId, "Right", 1, 0, 101, 100, MakeRect(0, 0, 101, 100)); // emitted (first)
@@ -126,7 +126,7 @@ public class GestureDiagnosticsTests
     {
         var sut = BuildEnabled();
         var panelId = Guid.NewGuid();
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
 
         _clock = 0;
         sut.ResizeDelta(panelId, "Right", 1, 0, 101, 100, MakeRect(0, 0, 101, 100)); // emitted (first)
@@ -170,7 +170,7 @@ public class GestureDiagnosticsTests
     {
         var sut = BuildEnabled();
         var panelId = Guid.NewGuid();
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
 
         _clock = 0;
         sut.ResizeDelta(panelId, "Right", 1, 0, 101, 100, MakeRect(0, 0, 101, 100)); // emitted
@@ -221,7 +221,7 @@ public class GestureDiagnosticsTests
         var panelId = Guid.NewGuid();
 
         _clock = 1000;
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
 
         _clock = 1000;
         sut.ResizeDelta(panelId, "Right", 1, 0, 101, 100, MakeRect(0, 0, 101, 100)); // emitted #1 (first)
@@ -281,12 +281,12 @@ public class GestureDiagnosticsTests
         var panelId = Guid.NewGuid();
 
         _clock = 0;
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
         sut.ResizeDelta(panelId, "Right", 1, 0, 101, 100, MakeRect(0, 0, 101, 100));
         sut.ResizeCompleted(panelId, "Right", canceled: false, MakeRect(0, 0, 101, 100), endReason: "Completed", exceptionType: null);
 
         _clock = 100;
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 200, 200), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 200, 200), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
         _clock = 150;
         sut.ResizeCompleted(panelId, "Right", canceled: false, MakeRect(0, 0, 200, 200), endReason: "Completed", exceptionType: null);
 
@@ -370,15 +370,13 @@ public class GestureDiagnosticsTests
         var panelId = Guid.NewGuid();
 
         sut.SessionStarted("1.0.0", "Windows 11", 1.5, 2, 3);
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
         sut.ResizeDelta(panelId, "Right", 1, 0, 101, 100, MakeRect(0, 0, 101, 100));
         sut.ResizeCompleted(panelId, "Right", canceled: false, MakeRect(0, 0, 101, 100), endReason: "Completed", exceptionType: null);
         sut.DragStarted(panelId, new Point(0, 0), MakeRect(0, 0, 100, 100));
         sut.DragDelta(panelId, MakeRect(1, 0, 100, 100));
         sut.DragCompleted(panelId, MakeRect(1, 0, 100, 100));
-        sut.CaptureGot(panelId, "Thumb", "Thumb");
-        sut.CaptureLost(panelId, "Thumb", null, thumbIsDragging: false);
-        sut.PanelClosing(panelId, thumbIsDragging: false);
+        sut.PanelClosing(panelId, resizeActive: false);
         sut.SizeMoveEntered(panelId, 1, "Right");
         sut.SizeMoveExited(panelId, 1, MakeRect(0, 0, 1, 1));
         sut.PanelItemsBuilt(panelId, 10, 500);
@@ -389,7 +387,7 @@ public class GestureDiagnosticsTests
         // The only member ever touched on the mock is the IsEnabled getter (checked once per method
         // above, before any state is read/allocated) — proves the zero-cost seam actually holds and
         // nothing else (Write/Flush/Dispose) was ever invoked on the sink.
-        _logMock.VerifyGet(l => l.IsEnabled, Times.AtLeast(14));
+        _logMock.VerifyGet(l => l.IsEnabled, Times.AtLeast(12));
         _logMock.VerifyNoOtherCalls();
     }
 
@@ -405,7 +403,7 @@ public class GestureDiagnosticsTests
         var sut = BuildEnabled();
         var panelId = Guid.NewGuid();
 
-        sut.ResizeStarted(panelId, "Right", MakeRect(1, 2, 3, 4), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(1, 2, 3, 4), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
 
         var write = Assert.Single(_writes, w => w.Name == "ResizeStarted");
         Assert.Equal(
@@ -426,7 +424,7 @@ public class GestureDiagnosticsTests
     {
         var sut = BuildEnabled();
         var panelId = Guid.NewGuid();
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
 
         sut.ResizeCompleted(panelId, "Right", canceled: false, MakeRect(0, 0, 100, 100), endReason: "Completed", exceptionType: null);
 
@@ -450,7 +448,7 @@ public class GestureDiagnosticsTests
     {
         var sut = BuildEnabled();
         var panelId = Guid.NewGuid();
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
 
         sut.ResizeCompleted(panelId, "Right", canceled: false, MakeRect(0, 0, 100, 100), endReason: "Completed", exceptionType: null);
 
@@ -462,7 +460,7 @@ public class GestureDiagnosticsTests
     /// <summary>
     /// C8 privacy invariant: when a gesture ends with <c>Failed</c>, <c>exceptionType</c> carries only
     /// the exception's type name — never anything resembling its <c>Message</c> (which may contain a
-    /// file path). This mirrors <see cref="DesktopOrganizer.UI.Behaviors.PanelResizeController"/>'s own
+    /// file path). This mirrors <see cref="DesktopOrganizer.UI.Behaviors.NativePanelResizeController"/>'s own
     /// contract (it only ever passes <c>ex.GetType().Name</c>), verified here at the diagnostics boundary.
     /// </summary>
     [Fact]
@@ -470,7 +468,7 @@ public class GestureDiagnosticsTests
     {
         var sut = BuildEnabled();
         var panelId = Guid.NewGuid();
-        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "Right", MakeRect(0, 0, 100, 100), PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
 
         var exceptionType = typeof(InvalidOperationException).Name;
         sut.ResizeCompleted(panelId, "Right", canceled: false, MakeRect(0, 0, 100, 100), endReason: "Failed", exceptionType: exceptionType);
@@ -525,6 +523,25 @@ public class GestureDiagnosticsTests
     }
 
     /// <summary>
+    /// ADR-022 phase 1: <c>PanelClosing</c> reports whether a resize gesture was still active as the panel
+    /// closed under the payload key <c>resizeActive</c> (the former <c>thumbIsDragging</c>).
+    /// </summary>
+    /// <param name="resizeActive">Whether a resize gesture is reported as still active.</param>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void PanelClosing_Payload_CarriesResizeActive(bool resizeActive)
+    {
+        var sut = BuildEnabled();
+
+        sut.PanelClosing(Guid.NewGuid(), resizeActive);
+
+        var write = Assert.Single(_writes, w => w.Name == "PanelClosing");
+        Assert.Equal(resizeActive, GetPayloadValue<bool>(write, "resizeActive"));
+        Assert.DoesNotContain(write.Payload, p => p.Key == "thumbIsDragging");
+    }
+
+    /// <summary>
     /// Verifies that a panel-scoped event's <c>Scope</c> is always an opaque eight-character prefix,
     /// never the panel id's full GUID.
     /// </summary>
@@ -534,7 +551,7 @@ public class GestureDiagnosticsTests
         var sut = BuildEnabled();
         var panelId = Guid.NewGuid();
 
-        sut.PanelClosing(panelId, thumbIsDragging: false);
+        sut.PanelClosing(panelId, resizeActive: false);
 
         var write = Assert.Single(_writes, w => w.Name == "PanelClosing");
         Assert.NotNull(write.Scope);
@@ -572,15 +589,13 @@ public class GestureDiagnosticsTests
         var bounds = MakeRect(0, 0, 100, 100);
 
         sut.SessionStarted("1.0.0", "Windows 11", 1.5, 2, 3);
-        sut.ResizeStarted(panelId, "BottomRight", bounds, PanelViewMode.Grid, 32, true, 8, 8, "Thumb");
+        sut.ResizeStarted(panelId, "BottomRight", bounds, PanelViewMode.Grid, 32, true, 8, 8, "NativeSizingLoop");
         sut.ResizeDelta(panelId, "BottomRight", 1, 1, 101, 101, bounds);
         sut.ResizeCompleted(panelId, "BottomRight", canceled: false, bounds, endReason: "Completed", exceptionType: null);
         sut.DragStarted(panelId, new Point(10, 10), bounds);
         sut.DragDelta(panelId, bounds);
         sut.DragCompleted(panelId, bounds);
-        sut.CaptureGot(panelId, "Thumb", "Thumb");
-        sut.CaptureLost(panelId, "Thumb", null, thumbIsDragging: false);
-        sut.PanelClosing(panelId, thumbIsDragging: false);
+        sut.PanelClosing(panelId, resizeActive: false);
         sut.SizeMoveEntered(panelId, 0x1234, "BottomRight");
         sut.SizeMoveExited(panelId, 0x1234, bounds);
         sut.SessionExiting();

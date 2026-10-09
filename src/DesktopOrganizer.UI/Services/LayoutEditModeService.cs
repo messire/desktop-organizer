@@ -79,6 +79,10 @@ public sealed class LayoutEditModeService : ILayoutEditModeService
     public bool IsEditing => _mode == LayoutInteractionMode.EditLayout;
 
     /// <inheritdoc />
+    public void NotifyNormalModeGesturesChanged() =>
+        OnPropertyChanged(ILayoutEditModeService.NormalModeGesturesPropertyName);
+
+    /// <inheritdoc />
     public bool TryEnterEditLayout(LayoutModeChangeSource source)
     {
         if (IsLayoutLocked) return false;

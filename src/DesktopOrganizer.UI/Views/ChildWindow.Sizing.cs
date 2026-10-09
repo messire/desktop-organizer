@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Windows.Controls;
 using DesktopOrganizer.UI.Behaviors;
+using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 
@@ -65,9 +66,8 @@ public partial class ChildWindow : IPanelSizingGridHost
 
     /// <summary>
     /// <c>HeaderContextMenu</c>'s "Size" preset submenu items (<c>ChildWindow.xaml</c>) — the clicked
-    /// item's <c>Tag</c> names a <see cref="PanelSizePreset"/> member (the same
-    /// <c>Tag</c>-plus-<c>Enum.TryParse</c> convention the <c>ResizeOverlay</c> thumbs already use for
-    /// <see cref="Interaction.ResizeEdge"/>). §3.5/P04-P1.
+    /// item's <c>Tag</c> names a <see cref="PanelSizePreset"/> member (a <c>Tag</c>-plus-<c>Enum.TryParse</c>
+    /// convention). §3.5/P04-P1.
     /// </summary>
     /// <remarks>
     /// <b>Gating (ADR-026 "Gating").</b> An explicit menu command, so it is blocked by
@@ -95,7 +95,7 @@ public partial class ChildWindow : IPanelSizingGridHost
         if (sender is not MenuItem { Tag: string tag } || !Enum.TryParse<PanelSizePreset>(tag, ignoreCase: false, out var preset)) return;
         if (_model is null || _model.IsRolledUp) return;
 
-        var current = CurrentBoundsWindowSpace();
+        var current = CurrentBoundsDesktop();
         if (!double.IsFinite(current.X) || !double.IsFinite(current.Y) || current.Width <= 0d || current.Height <= 0d) return;
 
         var state = ResolveSizingGridState(current);
@@ -126,17 +126,21 @@ public partial class ChildWindow : IPanelSizingGridHost
     }
 
     /// <summary>
-    /// The panel's live bounds in <c>Window.Left</c>/<c>Top</c> space, preferring the measured
+    /// The panel's live bounds in desktop-DIP (ADR-037 — <c>Left</c>/<c>Top</c> converted through
+    /// <see cref="PanelWindowCoordinates"/>, identity on a uniform snapshot), preferring the measured
     /// <see cref="FrameworkElement.ActualWidth"/>/<see cref="FrameworkElement.ActualHeight"/> (the same
     /// "live geometry, never the model" rule <c>WindowManager.CollectOtherPanelBounds</c> follows) and
     /// falling back to <see cref="FrameworkElement.Width"/>/<see cref="FrameworkElement.Height"/> before
     /// the first layout pass.
     /// </summary>
-    private Rect CurrentBoundsWindowSpace() => new(
-        Left,
-        Top,
-        ActualWidth > 0d ? ActualWidth : Width,
-        ActualHeight > 0d ? ActualHeight : Height);
+    private Rect CurrentBoundsDesktop() => PanelWindowCoordinates.ToDesktopBounds(
+        this,
+        new Rect(
+            Left,
+            Top,
+            ActualWidth > 0d ? ActualWidth : Width,
+            ActualHeight > 0d ? ActualHeight : Height),
+        _desktopScale.Current);
 
     /// <summary>
     /// The work area of the monitor this panel is on, in window space — the
@@ -145,12 +149,14 @@ public partial class ChildWindow : IPanelSizingGridHost
     /// rule <see cref="PanelGridStateResolver.Resolve"/> uses, rather than <c>MonitorService.FindMonitorAt</c>'s
     /// top-left heuristic, which misfires when the top-left corner is outside every monitor.
     /// </summary>
-    private Rect ResolveWorkAreaWindowSpace(Rect boundsWindowSpace)
+    /// <param name="boundsDesktop">The panel's live bounds in desktop DIP (<c>CurrentBoundsDesktop</c>), not <c>Window.Left</c>/<c>Top</c> space.</param>
+    /// <returns>The work area in window space, or <see cref="Rect.Empty"/> when no monitor is known.</returns>
+    private Rect ResolveWorkAreaWindowSpace(Rect boundsDesktop)
     {
         var monitors = _monitorService.GetMonitors();
         if (monitors is null || monitors.Count == 0) return Rect.Empty;
 
-        var screen = DesktopCoordinateSpace.ToScreenSpace(boundsWindowSpace);
+        var screen = DesktopCoordinateSpace.ToScreenSpace(boundsDesktop);
         var center = new Point(screen.X + (screen.Width / 2d), screen.Y + (screen.Height / 2d));
 
         var monitor = monitors.FirstOrDefault(m => m.Bounds.Contains(center))
@@ -168,7 +174,9 @@ public partial class ChildWindow : IPanelSizingGridHost
     /// no-match/primary fallback and the <c>(DeviceName, Bounds, WorkArea)</c> tuple it takes cannot
     /// carry <c>IsPrimary</c> itself.
     /// </summary>
-    private PanelGridState ResolveSizingGridState(Rect boundsWindowSpace)
+    /// <param name="boundsDesktop">The panel's live bounds in desktop DIP (<c>CurrentBoundsDesktop</c>), not <c>Window.Left</c>/<c>Top</c> space.</param>
+    /// <returns>The resolved grid state, or <see cref="PanelGridState.Legacy"/> when no monitor is known.</returns>
+    private PanelGridState ResolveSizingGridState(Rect boundsDesktop)
     {
         // IMonitorService.GetMonitors already swallows native failures and returns an empty list, but a
         // test double (or a future implementation) can still hand back null — treat both exactly like
@@ -182,6 +190,6 @@ public partial class ChildWindow : IPanelSizingGridHost
             .Select(m => (m.DeviceName, m.Bounds, m.WorkArea))
             .ToList();
 
-        return PanelGridStateResolver.Resolve(_model, boundsWindowSpace, snapshot, _model?.IsRolledUp ?? false);
+        return PanelGridStateResolver.Resolve(_model, boundsDesktop, snapshot, _model?.IsRolledUp ?? false);
     }
 }

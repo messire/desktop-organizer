@@ -426,25 +426,25 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         }
     }
 
+    /// <summary>
+    /// The <c>FOF_*</c> flags of <see cref="RecycleItems"/> and <see cref="SendToRecycleBin"/> (ADR-035):
+    /// no FOF_SILENT on purpose — the progress dialog lets the user cancel a long operation, and
+    /// <c>FOF_WANTNUKEWARNING</c> must be able to ask before anything is destroyed for good (a file too
+    /// large for the Recycle Bin, a drive without one). An ordinary recycle still shows no confirmation
+    /// (<c>FOF_NOCONFIRMATION</c>) and no error UI (<c>FOF_NOERRORUI</c>).
+    /// </summary>
+    internal const ushort RecycleFlags = NativeMethods.FofAllowUndo
+        | NativeMethods.FofNoConfirmation
+        | NativeMethods.FofNoErrorUi
+        | NativeMethods.FofWantNukeWarning;
+
     /// <inheritdoc />
     public bool SendToRecycleBin(string[] paths, IntPtr ownerHwnd)
-        => RunShFileDelete(
-            paths,
-            ownerHwnd,
-            NativeMethods.FofAllowUndo | NativeMethods.FofNoConfirmation | NativeMethods.FofNoErrorUi | NativeMethods.FofSilent);
+        => RunShFileDelete(paths, ownerHwnd, RecycleFlags);
 
     /// <inheritdoc />
     public bool RecycleItems(string[] paths, IntPtr ownerHwnd)
-    {
-        // No FOF_SILENT on purpose: the progress dialog lets the user cancel a long operation,
-        // and FOF_WANTNUKEWARNING must be able to ask before anything is destroyed for good.
-        const ushort flags = NativeMethods.FofAllowUndo
-            | NativeMethods.FofNoConfirmation
-            | NativeMethods.FofNoErrorUi
-            | NativeMethods.FofWantNukeWarning;
-
-        return RunShFileDelete(paths, ownerHwnd, flags);
-    }
+        => RunShFileDelete(paths, ownerHwnd, RecycleFlags);
 
     // ── Low-level mouse hook (WH_MOUSE_LL), see ADR-003 / ADR-012 ───────────────────────────────
 
@@ -694,6 +694,41 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         => hwnd == IntPtr.Zero ? IntPtr.Zero : NativeMethods.GetAncestor(hwnd, NativeMethods.GaRoot);
 
     /// <inheritdoc />
+    public uint GetWindowProcessId(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return 0;
+
+        NativeMethods.GetWindowThreadProcessId(hwnd, out var processId);
+        return processId;
+    }
+
+    /// <inheritdoc />
+    public bool TryReadWindowPosZOrder(IntPtr windowPos, out IntPtr insertAfter, out uint flags)
+    {
+        insertAfter = IntPtr.Zero;
+        flags = 0;
+        if (windowPos == IntPtr.Zero) return false;
+
+        // No try/catch on purpose (ADR-audit review cycle 1, G3): the pointer is valid by the contract of
+        // WM_WINDOWPOSCHANGING, and a genuinely bad pointer would raise a hardware access violation, which the
+        // .NET 8 runtime never delivers to a managed catch (corrupted-state exception) — a filter for it would
+        // only pretend to protect.
+        insertAfter = Marshal.ReadIntPtr(windowPos, NativeMethods.WindowPosInsertAfterOffset);
+        flags = unchecked((uint)Marshal.ReadInt32(windowPos, NativeMethods.WindowPosFlagsOffset));
+        return true;
+    }
+
+    /// <inheritdoc />
+    public void WriteWindowPosZOrder(IntPtr windowPos, IntPtr insertAfter, uint flags)
+    {
+        if (windowPos == IntPtr.Zero) return;
+
+        // No try/catch — see TryReadWindowPosZOrder: the pointer is valid by the WM_WINDOWPOSCHANGING contract.
+        Marshal.WriteIntPtr(windowPos, NativeMethods.WindowPosInsertAfterOffset, insertAfter);
+        Marshal.WriteInt32(windowPos, NativeMethods.WindowPosFlagsOffset, unchecked((int)flags));
+    }
+
+    /// <inheritdoc />
     public bool SetTimer(IntPtr hwnd, IntPtr timerId, uint intervalMs)
         => hwnd != IntPtr.Zero
            && timerId != IntPtr.Zero
@@ -918,6 +953,35 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         }
 
         return GetSystemDpiScale();
+    }
+
+    /// <inheritdoc />
+    public bool CancelSizingLoop(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+
+        try
+        {
+            // The modal move/size loop runs on the window's capture: no capture on this thread means no
+            // loop to cancel (or a foreign one), and nothing must be sent.
+            if (NativeMethods.GetCapture() != hwnd) return false;
+
+            // WM_CANCELMODE is the documented "abort any modal state" request; DefWindowProc answers it
+            // by releasing the capture (WinUser.h, MSDN WM_CANCELMODE). Same-thread SendMessage is a direct
+            // call into the window procedure, so this cannot block on another process.
+            NativeMethods.SendMessageW(hwnd, NativeMethods.WmCancelMode, IntPtr.Zero, IntPtr.Zero);
+
+            // Belt and braces: a window procedure that swallowed WM_CANCELMODE would leave the loop running.
+            if (NativeMethods.GetCapture() == hwnd) NativeMethods.ReleaseCapture();
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Called from a dispatcher operation that may be nested inside the sizing loop — never throw.
+            Log.Warn("NativeApi", "CancelSizingLoopFailed", new KeyValuePair<string, object?>("hresult", ex.HResult));
+            return false;
+        }
     }
 
     // ── High-resolution panel item icons (IShellItemImageFactory / system image list) ───────────
@@ -1736,6 +1800,7 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         public const int VkShift = 0x10;
         public const int VkControl = 0x11;
         public const int WmNull = 0x0000;
+        public const int WmCancelMode = 0x001F;
         public const int WmDrawItem = 0x002B;
         public const int WmMeasureItem = 0x002C;
         public const int WmInitMenuPopup = 0x0117;
@@ -1869,6 +1934,31 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         [DllImport("Shell32.dll", EntryPoint = "ShellExecuteExW", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool ShellExecuteExW(ref ShellExecuteInfo lpExecInfo);
+
+        /// <summary>
+        /// Byte offset of <c>WINDOWPOS.hwndInsertAfter</c> (read/written in place inside
+        /// <c>WM_WINDOWPOSCHANGING</c>; ADR-034 amendment 2026-10-09).
+        /// </summary>
+        public static readonly int WindowPosInsertAfterOffset = (int)Marshal.OffsetOf<WINDOWPOS>(nameof(WINDOWPOS.HwndInsertAfter));
+
+        /// <summary>Byte offset of <c>WINDOWPOS.flags</c>.</summary>
+        public static readonly int WindowPosFlagsOffset = (int)Marshal.OffsetOf<WINDOWPOS>(nameof(WINDOWPOS.Flags));
+
+        /// <summary>
+        /// Native <c>WINDOWPOS</c> layout. Only used to compute field offsets — the structure itself always
+        /// lives in the sender's memory and is edited in place.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct WINDOWPOS
+        {
+            public IntPtr Hwnd;
+            public IntPtr HwndInsertAfter;
+            public int X;
+            public int Y;
+            public int Cx;
+            public int Cy;
+            public uint Flags;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         public struct POINT
@@ -2366,6 +2456,18 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         // EntryPointNotFoundException at the call site (handled there with a system-DPI fallback).
         [LibraryImport("User32.dll", EntryPoint = "GetDpiForWindow")]
         public static partial uint GetDpiForWindow(IntPtr hWnd);
+
+        // G-2 (ADR-022 phase 0-B): cancelling the modal sizing loop (WM_CANCELMODE is declared with the
+        // other window messages at the top of this class).
+        [LibraryImport("User32.dll", EntryPoint = "GetCapture")]
+        public static partial IntPtr GetCapture();
+
+        [LibraryImport("User32.dll", EntryPoint = "ReleaseCapture", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static partial bool ReleaseCapture();
+
+        [LibraryImport("User32.dll", EntryPoint = "SendMessageW")]
+        public static partial IntPtr SendMessageW(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
         // Windows 8.1+ (shcore). Returns an HRESULT; resolved lazily, so a missing export surfaces as an
         // EntryPointNotFoundException/DllNotFoundException at the call site (handled there → 0).

@@ -6,10 +6,9 @@ namespace DesktopOrganizer.Tests.Unit.Behaviors;
 
 /// <summary>
 /// Unit tests for <see cref="PanelSizingGridSupport.NotifyHeightResizeCommitted"/> (P06 fix-cycle
-/// MAJOR-4, adr/ADR-029-icon-layout-policy.md "Fix-цикл P06") — the single shared helper both
-/// <see cref="PanelResizeController"/> (Thumb path) and <see cref="NativePanelResizeController"/>
-/// (native <c>WM_SIZING</c> path) call at their respective end-of-gesture points, so neither controller
-/// needs its own copy of the "was this a vertical resize" check.
+/// MAJOR-4, adr/ADR-029-icon-layout-policy.md "Fix-цикл P06") — the single shared helper
+/// <see cref="NativePanelResizeController"/> (native <c>WM_SIZING</c> path) calls at its end-of-gesture
+/// point, so the controller needs no copy of the "was this a vertical resize" check.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class PanelSizingGridSupportNotifyHeightResizeCommittedTests

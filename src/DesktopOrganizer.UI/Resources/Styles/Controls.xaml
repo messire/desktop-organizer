@@ -382,37 +382,25 @@
     </Style>
 
     <!--
-        Edit Layout resize handle (docs/PLANS/phase-6-edit-layout-ux.md §1 D-6, R-5). ChildWindow.xaml's 8
-        ResizeOverlay Thumbs reference THIS style — per R-5, the Style attribute value was the ONLY
-        change made to that XAML region when it was introduced (P6-4, replacing the now-removed
-        ResizeThumbStyle, which every ResizeOverlay Thumb used before this style existed); the
-        ResizeOverlay Grid's ColumnDefinition/RowDefinition geometry (6/*/6), and every Thumb's
-        Tag/Cursor/DragStarted/DragDelta/DragCompleted wiring, stay byte-for-byte — this Style changes
-        ONLY the ControlTemplate (visual), never hit-test geometry.
-
-        Default appearance (Normal mode, or Edit Layout before the trigger below applies) is pixel-identical
-        to the plain Border-filling-the-Thumb template ResizeThumbStyle used to provide: a Transparent
-        (but still hit-testable) Background — same 6px-square hit region either way. A Style.Trigger on
-        the inherited theming:PanelTheme.IsLayoutEditing attached property (Theming/PanelTheme.cs) then
-        swaps in a visible, accent-tinted grip while editing — the property flows to these Thumbs
-        directly via normal WPF inheritance (they are descendants of PanelRoot, not across a
-        ContextMenu/Popup boundary — the R-6 trap documented on PanelTheme only applies there — which is
-        why PanelTheme's inherited attached properties reach them). Accent colour comes from the SAME
-        {Binding Path=(theming:PanelTheme.Accent), RelativeSource={RelativeSource Self}} pattern
-        Panels.xaml's PanelItemContainerStyle (SelectionBorder) already uses — never a hex literal
-        (DoD-10).
+        Visual-only Edit Layout resize grip (docs/PLANS/phase-6-edit-layout-ux.md §1 D-6, ADR-022 / G-3,
+        ADR-026 D-6). Resize hit-testing is WM_NCHITTEST (the native sizing loop), so ChildWindow.xaml's
+        ResizeGripVisuals Grid draws the accent grips with plain Borders - non-interactive (the Grid is
+        IsHitTestVisible=False). Default appearance (Normal mode) is Transparent; a Style.Trigger on the
+        inherited theming:PanelTheme.IsLayoutEditing attached property (Theming/PanelTheme.cs) swaps in the
+        accent-tinted grip while editing - the property flows to these Borders directly via normal WPF
+        inheritance (they are descendants of PanelRoot, not across a ContextMenu/Popup boundary - the R-6
+        trap documented on PanelTheme only applies there). CornerRadius from Radius.Control. Colour comes
+        from the {Binding Path=(theming:PanelTheme.Accent), RelativeSource={RelativeSource Self}} pattern
+        Panels.xaml's PanelItemContainerStyle (SelectionBorder) also uses - never a hex literal
+        (Palette P tokens only, ADR-025/030).
+        Decisions review cycle 1 (U6): the four straight-edge strips use ResizeGripVisualEdgeStyle below
+        (square, no CornerRadius) - only the four corner squares keep the rounding. A rounded strip met the
+        rounded corner square with a visible notch at every joint.
     -->
-    <Style x:Key="ResizeHandleStyle" TargetType="Thumb">
+    <Style x:Key="ResizeGripVisualStyle" TargetType="Border">
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Thumb">
-                    <Border x:Name="HandleChrome"
-                            Background="{TemplateBinding Background}"
-                            CornerRadius="{StaticResource Radius.Control}"/>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
+        <Setter Property="CornerRadius" Value="{StaticResource Radius.Control}"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
         <Style.Triggers>
             <Trigger Property="theming:PanelTheme.IsLayoutEditing" Value="True">
                 <Setter Property="Background">
@@ -422,6 +410,11 @@
                 </Setter>
             </Trigger>
         </Style.Triggers>
+    </Style>
+
+    <!-- Straight-edge grip strip: same look as ResizeGripVisualStyle, square corners so the strip meets the corner squares flush. -->
+    <Style x:Key="ResizeGripVisualEdgeStyle" TargetType="Border" BasedOn="{StaticResource ResizeGripVisualStyle}">
+        <Setter Property="CornerRadius" Value="0"/>
     </Style>
 
     <!--

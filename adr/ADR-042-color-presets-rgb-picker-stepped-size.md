@@ -626,6 +626,22 @@ Accent grid, Advanced hex, Surface, Opacity) в обоих местах прим
 
 ---
 
+## Amendment 2026-09-30 (ADR-047): HC-пробел закрыт токенами `Theme.Selection.*`
+
+[ADR-047](ADR-047-unified-design-system.md): известный HC-пробел («кольцо выбора свотча/сегмента не связано с
+`HighlightBrush`», см. «Известный пробел High Contrast» в Amendment 2026-09-28) закрыт токенами
+`Theme.Selection.Indicator`/`Theme.Selection.Fill`; Icon layout / Panel geometry (ранее `ComboBox` на 2 значения)
+переведены на `Settings.SegmentedGroup`. Пункт Manual verify «High Contrast — известный пробел» выше относится к
+состоянию до этого amendment.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-28 | (редизайн, тот же день) | 12 пресетов с раздельными `DarkModeTextHex`/`LightModeTextHex`; явный `PanelThemeMode`; окно в стиле Windows 11 Personalization | 10 пресетов; «правило пары»/порог 0.5; `FindExact` |
+| 2026-09-29 | бэклог 1.x п. 4/5 | Тёмный тинт текста у каждого хроматического пресета; редактор: карточка «Цвет» + «Дополнительно» | Общий `#FFFFFF` для тёмного режима; прежний состав карточек |
+| 2026-09-30 | [ADR-047](ADR-047-unified-design-system.md) | HC-пробел закрыт (`Theme.Selection.*`); `Settings.SegmentedGroup` | «Известный пробел High Contrast» |
+
 **Источник:** [docs/PLANS/color-presets-and-size-step.md](../docs/PLANS/color-presets-and-size-step.md) —
 план считается выполненным и остаётся историческим артефактом (прецедент — `docs/PLANS/panel-item-sorting.md`
 и ADR-014).

@@ -21,6 +21,18 @@ public class LayoutEditModeServiceTests
     // ----- R-11: Mode is transient, never persisted -----
 
     /// <summary>
+    /// ADR-audit review cycle 1 (H3): the relayed property name must stay equal to the persisted
+    /// <see cref="IAppSettings.NormalModeLayoutGestures"/> setting name (derived via <c>nameof</c>), and
+    /// to the literal subscribers historically matched on.
+    /// </summary>
+    [Fact]
+    public void NormalModeGesturesPropertyName_EqualsAppSettingsPropertyName()
+    {
+        Assert.Equal(nameof(IAppSettings.NormalModeLayoutGestures), ILayoutEditModeService.NormalModeGesturesPropertyName);
+        Assert.Equal("NormalModeLayoutGestures", ILayoutEditModeService.NormalModeGesturesPropertyName);
+    }
+
+    /// <summary>
     /// Verifies that a freshly constructed <see cref="LayoutEditModeService"/> always starts in
     /// <see cref="LayoutInteractionMode.Normal"/>.
     /// </summary>
@@ -348,6 +360,26 @@ public class LayoutEditModeServiceTests
         var result = sut.Toggle(LayoutModeChangeSource.SettingsWindow);
 
         Assert.False(result);
+        Assert.Equal(LayoutInteractionMode.Normal, sut.Mode);
+    }
+
+    // ----- ADR-audit WP-C / C1: Normal-mode gesture preference relay -----
+
+    /// <summary>
+    /// Verifies that <see cref="ILayoutEditModeService.NotifyNormalModeGesturesChanged"/> raises
+    /// <see cref="INotifyPropertyChanged.PropertyChanged"/> with the agreed property name and touches no
+    /// mode state.
+    /// </summary>
+    [Fact]
+    public void NotifyNormalModeGesturesChanged_RaisesPropertyChanged_WithoutChangingMode()
+    {
+        var (sut, _, _) = CreateSut();
+        var raisedProperties = new List<string?>();
+        ((INotifyPropertyChanged)sut).PropertyChanged += (_, e) => raisedProperties.Add(e.PropertyName);
+
+        sut.NotifyNormalModeGesturesChanged();
+
+        Assert.Equal([ILayoutEditModeService.NormalModeGesturesPropertyName], raisedProperties);
         Assert.Equal(LayoutInteractionMode.Normal, sut.Mode);
     }
 

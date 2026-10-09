@@ -2,7 +2,7 @@ namespace DesktopOrganizer.UI.Interaction;
 
 /// <summary>
 /// Snapshot of every value <see cref="ResizeGeometryCalculator.Apply"/> needs besides the gesture's own
-/// raw extent — computed once per resize gesture (<c>PanelResizeController.BuildConstraints</c>, mirrors
+/// raw extent — computed once per resize gesture (<c>ResizeConstraintsFactory.BuildConstraints</c>, mirrors
 /// the <c>_snapCellWidth</c>/<c>_snapCellHeight</c> fields set once in the pre-extraction
 /// <c>OnResizeDragStarted</c>) and reused, unchanged, for every subsequent delta of that gesture.
 /// docs/PLANS/phase-1-resize-stabilization.md §2.4.

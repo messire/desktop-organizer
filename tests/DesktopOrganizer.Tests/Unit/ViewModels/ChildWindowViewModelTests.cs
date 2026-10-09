@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Threading;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.UI.Diagnostics;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
@@ -125,6 +126,349 @@ public class ChildWindowViewModelTests
         {
             Directory.Delete(source, recursive: true);
         }
+    }
+
+    // ── ADR-audit WP-B (B1): a read-only session must never physically move files ────────────────
+
+    /// <summary>
+    /// Verifies that when the state store reports a read-only session (<c>IsWritable == false</c> — newer
+    /// schema or advisory lock not acquired), <see cref="ChildWindowViewModel.AddDroppedFiles"/> never
+    /// calls <see cref="IPanelItemStorageService.MoveIn"/> and references the file in place — otherwise the
+    /// file would vanish into hidden storage and the (never persisted) panel would be gone after a restart.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_ReadOnlySession_DoesNotMoveFileAndReferencesOriginalPath()
+    {
+        var source = NewTempFilePath();
+        File.WriteAllText(source, "content");
+        var stateStore = new Mock<IApplicationStateStore>();
+        stateStore.SetupGet(s => s.IsWritable).Returns(false);
+        _storageMock.Setup(s => s.MoveIn(source)).Returns(@"C:\managed\x\file.txt");
+
+        using var sut = BuildSut(stateStore: stateStore.Object);
+
+        try
+        {
+            sut.AddDroppedFiles([source]);
+
+            var item = Assert.Single(sut.AllItems);
+            Assert.Equal(source, item.Path);
+            Assert.True(File.Exists(source));
+            _storageMock.Verify(s => s.MoveIn(It.IsAny<string>()), Times.Never);
+            _storageMock.Verify(s => s.MoveInDirectory(It.IsAny<string>()), Times.Never);
+            Assert.False(sut.MovesDroppedItemsIntoStorage);
+        }
+        finally
+        {
+            File.Delete(source);
+        }
+    }
+
+    /// <summary>
+    /// Verifies the folder branch of the read-only guard: <see cref="IPanelItemStorageService.MoveInDirectory"/>
+    /// is never called either.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_ReadOnlySession_Folder_DoesNotMoveDirectory()
+    {
+        var source = NewTempDirPath();
+        var stateStore = new Mock<IApplicationStateStore>();
+        stateStore.SetupGet(s => s.IsWritable).Returns(false);
+
+        using var sut = BuildSut(stateStore: stateStore.Object);
+
+        try
+        {
+            sut.AddDroppedFiles([source]);
+
+            var item = Assert.Single(sut.AllItems);
+            Assert.Equal(source, item.Path);
+            _storageMock.Verify(s => s.MoveInDirectory(It.IsAny<string>()), Times.Never);
+            _storageMock.Verify(s => s.MoveIn(It.IsAny<string>()), Times.Never);
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// F5: the first external drop in a read-only session raises <see cref="ChildWindowViewModel.ReadOnlyDropHintRequested"/>
+    /// exactly once for this panel (in-memory guard) — and touches neither the persisted
+    /// <see cref="IAppSettings.HasShownMoveHint"/> flag nor the Move-semantics hint.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_ReadOnlySession_RaisesReadOnlyDropHintOnce_WithoutPersistedFlag()
+    {
+        var first = NewTempFilePath();
+        var second = NewTempFilePath();
+        File.WriteAllText(first, "a");
+        File.WriteAllText(second, "b");
+        var stateStore = new Mock<IApplicationStateStore>();
+        stateStore.SetupGet(s => s.IsWritable).Returns(false);
+
+        using var sut = BuildSut(stateStore: stateStore.Object);
+        var readOnlyHintCount = 0;
+        var moveHintRaised = false;
+        sut.ReadOnlyDropHintRequested += (_, _) => readOnlyHintCount++;
+        sut.MoveHintRequested += (_, _) => moveHintRaised = true;
+
+        try
+        {
+            sut.AddDroppedFiles([first]);
+            sut.AddDroppedFiles([second]);
+
+            Assert.Equal(1, readOnlyHintCount);
+            Assert.False(moveHintRaised);
+            Assert.False(_appSettingsMock.Object.HasShownMoveHint);
+            _appSettingsMock.Verify(s => s.Save(), Times.Never);
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
+        }
+    }
+
+    /// <summary>
+    /// F5: a writable session never raises the read-only drop hint.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_WritableSession_DoesNotRaiseReadOnlyDropHint()
+    {
+        var source = NewTempFilePath();
+        File.WriteAllText(source, "a");
+        var stateStore = new Mock<IApplicationStateStore>();
+        stateStore.SetupGet(s => s.IsWritable).Returns(true);
+        _storageMock.Setup(s => s.MoveIn(source)).Returns((string?)null);
+
+        using var sut = BuildSut(stateStore: stateStore.Object);
+        var raised = false;
+        sut.ReadOnlyDropHintRequested += (_, _) => raised = true;
+
+        try
+        {
+            sut.AddDroppedFiles([source]);
+
+            Assert.False(raised);
+        }
+        finally
+        {
+            File.Delete(source);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that a writable session (<c>IsWritable == true</c>) keeps the normal Move behavior.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_WritableSession_StillMovesFileIn()
+    {
+        var source = NewTempFilePath();
+        File.WriteAllText(source, "content");
+        var stateStore = new Mock<IApplicationStateStore>();
+        stateStore.SetupGet(s => s.IsWritable).Returns(true);
+        _storageMock.Setup(s => s.MoveIn(source)).Returns((string?)null);
+
+        using var sut = BuildSut(stateStore: stateStore.Object);
+
+        try
+        {
+            sut.AddDroppedFiles([source]);
+
+            _storageMock.Verify(s => s.MoveIn(source), Times.Once);
+            Assert.True(sut.MovesDroppedItemsIntoStorage);
+        }
+        finally
+        {
+            File.Delete(source);
+        }
+    }
+
+    // ── ADR-009 amendment 2026-10-10 (O1): cloud-folder drop hint ────────────────────────────────
+
+    /// <summary>
+    /// A file dropped from a cloud-synced folder that is actually moved into storage raises
+    /// <see cref="ChildWindowViewModel.CloudDropHintRequested"/> — once for the whole session (shared gate),
+    /// not again for the next drop — and never touches the persisted Move hint flag; the move itself is not blocked.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_CloudSyncedFileMoved_RaisesCloudDropHintOncePerSession_WithoutTouchingMoveHintFlag()
+    {
+        var first = NewTempFilePath();
+        var second = NewTempFilePath();
+        File.WriteAllText(first, "a");
+        File.WriteAllText(second, "b");
+        var managedFirst = @"C:\managed\1\a.txt";
+        var managedSecond = @"C:\managed\2\b.txt";
+        _storageMock.Setup(s => s.MoveIn(first)).Returns(managedFirst);
+        _storageMock.Setup(s => s.MoveIn(second)).Returns(managedSecond);
+        _storageMock.Setup(s => s.IsManaged(managedFirst)).Returns(true);
+        _storageMock.Setup(s => s.IsManaged(managedSecond)).Returns(true);
+        _appSettingsMock.Object.HasShownMoveHint = true; // The Move hint is spent: only the cloud hint may fire.
+        var detector = new Mock<ICloudFolderDetector>();
+        detector.Setup(d => d.Classify(It.IsAny<string>())).Returns(CloudPathKind.SyncedFolder);
+
+        using var sut = BuildSut(cloudFolderDetector: detector.Object);
+        var cloudHintCount = 0;
+        sut.CloudDropHintRequested += (_, _) => cloudHintCount++;
+
+        try
+        {
+            sut.AddDroppedFiles([first]);
+            sut.AddDroppedFiles([second]);
+
+            Assert.Equal(1, cloudHintCount);
+            Assert.Equal(2, sut.AllItems.Count());
+            Assert.True(_appSettingsMock.Object.HasShownMoveHint);
+            _appSettingsMock.Verify(s => s.Save(), Times.Never);
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
+        }
+    }
+
+    /// <summary>
+    /// The session gate is shared between panels: a second panel does not repeat the hint.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_CloudSyncedFile_SharedGate_SecondPanelDoesNotRaise()
+    {
+        var first = NewTempFilePath();
+        var second = NewTempFilePath();
+        File.WriteAllText(first, "a");
+        File.WriteAllText(second, "b");
+        _storageMock.Setup(s => s.MoveIn(It.IsAny<string>())).Returns<string>(p => p + ".managed");
+        _storageMock.Setup(s => s.IsManaged(It.Is<string>(p => p.EndsWith(".managed", StringComparison.Ordinal)))).Returns(true);
+        var detector = new Mock<ICloudFolderDetector>();
+        detector.Setup(d => d.Classify(It.IsAny<string>())).Returns(CloudPathKind.Placeholder);
+        var gate = new CloudDropHintGate();
+
+        using var panelA = BuildSut(cloudFolderDetector: detector.Object, cloudDropHintGate: gate);
+        using var panelB = BuildSut(cloudFolderDetector: detector.Object, cloudDropHintGate: gate);
+        var count = 0;
+        panelA.CloudDropHintRequested += (_, _) => count++;
+        panelB.CloudDropHintRequested += (_, _) => count++;
+
+        try
+        {
+            panelA.AddDroppedFiles([first]);
+            panelB.AddDroppedFiles([second]);
+
+            Assert.Equal(1, count);
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
+        }
+    }
+
+    /// <summary>
+    /// A file outside any cloud folder never raises the cloud hint.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_LocalFileMoved_DoesNotRaiseCloudDropHint()
+    {
+        var source = NewTempFilePath();
+        File.WriteAllText(source, "a");
+        _storageMock.Setup(s => s.MoveIn(source)).Returns(@"C:\managed\1\a.txt");
+        _storageMock.Setup(s => s.IsManaged(@"C:\managed\1\a.txt")).Returns(true);
+        var detector = new Mock<ICloudFolderDetector>();
+        detector.Setup(d => d.Classify(It.IsAny<string>())).Returns(CloudPathKind.None);
+
+        using var sut = BuildSut(cloudFolderDetector: detector.Object);
+        var raised = false;
+        sut.CloudDropHintRequested += (_, _) => raised = true;
+
+        try
+        {
+            sut.AddDroppedFiles([source]);
+
+            Assert.False(raised);
+        }
+        finally
+        {
+            File.Delete(source);
+        }
+    }
+
+    /// <summary>
+    /// A cloud file that could not be moved (MoveIn fell back to referencing it in place) is still synced —
+    /// no "no longer synchronized" hint.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_CloudFileMoveFellBack_DoesNotRaiseCloudDropHint()
+    {
+        var source = NewTempFilePath();
+        File.WriteAllText(source, "a");
+        _storageMock.Setup(s => s.MoveIn(source)).Returns((string?)null);
+        var detector = new Mock<ICloudFolderDetector>();
+        detector.Setup(d => d.Classify(It.IsAny<string>())).Returns(CloudPathKind.SyncedFolder);
+
+        using var sut = BuildSut(cloudFolderDetector: detector.Object);
+        var raised = false;
+        sut.CloudDropHintRequested += (_, _) => raised = true;
+
+        try
+        {
+            sut.AddDroppedFiles([source]);
+
+            Assert.False(raised);
+        }
+        finally
+        {
+            File.Delete(source);
+        }
+    }
+
+    /// <summary>
+    /// In a read-only session nothing is moved, so there is nothing to warn about.
+    /// </summary>
+    [Fact]
+    public void AddDroppedFiles_CloudFileInReadOnlySession_DoesNotRaiseCloudDropHint()
+    {
+        var source = NewTempFilePath();
+        File.WriteAllText(source, "a");
+        var stateStore = new Mock<IApplicationStateStore>();
+        stateStore.SetupGet(s => s.IsWritable).Returns(false);
+        var detector = new Mock<ICloudFolderDetector>();
+        detector.Setup(d => d.Classify(It.IsAny<string>())).Returns(CloudPathKind.SyncedFolder);
+
+        using var sut = BuildSut(stateStore: stateStore.Object, cloudFolderDetector: detector.Object);
+        var raised = false;
+        sut.CloudDropHintRequested += (_, _) => raised = true;
+
+        try
+        {
+            sut.AddDroppedFiles([source]);
+
+            Assert.False(raised);
+        }
+        finally
+        {
+            File.Delete(source);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that when the writability flips during the session (live read, not a cached value) the VM
+    /// follows it.
+    /// </summary>
+    [Fact]
+    public void MovesDroppedItemsIntoStorage_FollowsLiveStoreWritability()
+    {
+        var stateStore = new Mock<IApplicationStateStore>();
+        stateStore.SetupGet(s => s.IsWritable).Returns(true);
+        using var sut = BuildSut(stateStore: stateStore.Object);
+
+        Assert.True(sut.MovesDroppedItemsIntoStorage);
+
+        stateStore.SetupGet(s => s.IsWritable).Returns(false);
+
+        Assert.False(sut.MovesDroppedItemsIntoStorage);
     }
 
     /// <summary>
@@ -2692,7 +3036,7 @@ public class ChildWindowViewModelTests
         var sidebarModel = new SystemIconsPanelModel();
         sidebarModel.Items.Clear();
         sidebarModel.Items.Add(new SystemIconItemModel { Kind = SystemIconKind.ThisPc, IsVisible = true, Order = 0 });
-        using var sidebarPanel = new SystemIconsPanelViewModel(sidebarModel, Mock.Of<ISystemShellService>(), coordinator);
+        using var sidebarPanel = new SystemIconsPanelViewModel(sidebarModel, Mock.Of<ISystemShellService>(), coordinator, Mock.Of<IWindowManager>());
 
         var fenceItem = new FileItem(@"C:\fake\A.txt", null, displayName: null);
         var sidebarItem = sidebarModel.Items[0];
@@ -3232,7 +3576,10 @@ public class ChildWindowViewModelTests
         IWindowManager? windowManager = null,
         IPageManager? pageManager = null,
         IIconLoadQueue? iconLoadQueue = null,
-        Func<IDebounceTimer?>? probeRefilterDebounceTimerProvider = null) => new(
+        Func<IDebounceTimer?>? probeRefilterDebounceTimerProvider = null,
+        IApplicationStateStore? stateStore = null,
+        ICloudFolderDetector? cloudFolderDetector = null,
+        ICloudDropHintGate? cloudDropHintGate = null) => new(
         _iconProviderMock.Object,
         _fileLauncherMock.Object,
         _watcherFactoryMock.Object,
@@ -3247,7 +3594,10 @@ public class ChildWindowViewModelTests
         iconLoadQueue,
         itemProbeQueue: null,
         timeProvider: null,
-        probeRefilterDebounceTimerProvider: probeRefilterDebounceTimerProvider);
+        probeRefilterDebounceTimerProvider: probeRefilterDebounceTimerProvider,
+        stateStore: stateStore,
+        cloudFolderDetector: cloudFolderDetector,
+        cloudDropHintGate: cloudDropHintGate);
 
     /// <summary>
     /// Minimal <see cref="IDebounceTimer"/> test double for the icon-resize debounce (M3, release-polish

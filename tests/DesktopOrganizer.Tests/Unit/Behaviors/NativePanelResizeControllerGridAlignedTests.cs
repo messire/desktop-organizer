@@ -249,6 +249,23 @@ public class NativePanelResizeControllerGridAlignedTests
         Assert.NotEqual(before.Width, harness.Bounds.Width);
     }
 
+    /// <summary>
+    /// Verifies that <see cref="NativePanelResizeController.SnapWidthToGrid"/> follows the same priority rule as
+    /// <see cref="ResizeConstraintsFactory"/> (ADR-011 amendment 2026-09-24): an active <c>GridSize</c> (&gt; 1)
+    /// beats <c>SnapResizeToIconGrid</c>, so a <see cref="PanelGeometryMode.LegacyFreeform"/> panel's width is
+    /// left alone instead of being pulled off the GridSize lattice onto the icon grid.
+    /// </summary>
+    [Fact]
+    public void SnapWidthToGrid_IsANoOp_ForALegacyFreeformPanel_WhenGridSizeIsActive()
+    {
+        var harness = CreateHarness(gridAligned: false, viewMode: PanelViewMode.Grid, snapEnabled: true, gridSize: 16);
+        var before = harness.Bounds;
+
+        harness.Controller.SnapWidthToGrid();
+
+        Assert.Equal(before, harness.Bounds);
+    }
+
     // ── DoD D4-1 through the REAL controller: 30 full native cycles, no stuck state, deterministic
     // geometry, one persist per cycle. ───────────────────────────────────────────────────────────────
 

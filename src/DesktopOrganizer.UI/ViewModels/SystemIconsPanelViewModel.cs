@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
@@ -20,6 +21,7 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     private readonly ISystemShellService _shellService;
     private readonly SystemIconsPanelModel _model;
     private readonly IPanelSelectionCoordinator _selectionCoordinator;
+    private readonly IWindowManager _windowManager;
 
     // Backing observable list that drives the ItemsControl.
     private readonly ObservableCollection<SystemIconItemModel> _visibleItems = [];
@@ -49,14 +51,20 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     /// none of these <c>WS_EX_NOACTIVATE</c> windows ever receiving normal focus (ui-polishing-1 §5.4,
     /// Block D).
     /// </param>
+    /// <param name="windowManager">
+    /// Used to take items out of the panels once the Recycle Bin operation really removed them (ADR-audit review
+    /// cycle 3, M4).
+    /// </param>
     public SystemIconsPanelViewModel(
         SystemIconsPanelModel model,
         ISystemShellService shellService,
-        IPanelSelectionCoordinator selectionCoordinator)
+        IPanelSelectionCoordinator selectionCoordinator,
+        IWindowManager windowManager)
     {
         _model = model;
         _shellService = shellService;
         _selectionCoordinator = selectionCoordinator;
+        _windowManager = windowManager;
 
         _shellService.RecycleBinChanged += OnRecycleBinChanged;
         _selectionCoordinator.SelectionClaimed += OnSelectionClaimed;
@@ -214,10 +222,18 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     /// </summary>
     /// <param name="paths">The file paths to send to the Recycle Bin.</param>
     /// <param name="ownerHwnd">
-    /// The owning window handle, passed as the owner of the native <c>SHFileOperation</c> call; the
-    /// operation itself runs silently (<c>FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT</c>), so no
-    /// UI is ever shown.
+    /// Owner of the shell UI the operation may show, or <see cref="IntPtr.Zero"/> for none. The flags are
+    /// ADR-035's (<c>FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_WANTNUKEWARNING</c>, no
+    /// <c>FOF_SILENT</c>): an ordinary recycle asks nothing, but the shell does ask before deleting an item that
+    /// cannot go to the Recycle Bin, and shows its cancellable progress dialog for a long operation. The sidebar
+    /// passes <see cref="IntPtr.Zero"/> — its own window is <c>WS_EX_NOACTIVATE</c> and pinned to the bottom of the
+    /// Z-order, which would hide an owned dialog.
     /// </param>
+    /// <remarks>
+    /// Because of that UI this must not be called from inside an OLE <c>Drop</c> (the drag source would stay frozen
+    /// behind a modal dialog): the sidebar's drop handler queues it on the dispatcher instead
+    /// (<c>RecycleBinFileDrop</c>, ADR-035 amendment).
+    /// </remarks>
     public void SendToRecycleBin(string[] paths, IntPtr ownerHwnd)
     {
         try
@@ -229,10 +245,12 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
             // Degrade silently.
         }
 
+        RemoveVanishedItemsFromPanels(paths);
+
         // Explicit refresh: ISystemShellService.SendToRecycleBin may not always fire
         // RecycleBinChanged synchronously; one explicit refresh here is sufficient.
-        // RefreshRecycleBin() is safe here because SendToRecycleBin is called from
-        // the Drop handler which runs on the UI thread.
+        // RefreshRecycleBin() is safe here because SendToRecycleBin runs on the UI thread
+        // (a dispatcher operation queued by the sidebar's Drop handler).
         RefreshRecycleBin();
     }
 
@@ -276,6 +294,30 @@ public sealed class SystemIconsPanelViewModel : INotifyPropertyChanged, IDisposa
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Takes the paths that are really gone after the Recycle Bin operation out of every panel (ADR-audit review
+    /// cycle 3, M4). A drag from a panel onto the sidebar's Recycle Bin is recycled on the dispatcher, after the
+    /// panel's own moved-out check (0/500/2000 ms) may already have given up while a shell dialog was still open —
+    /// without this the item would stay in the panel as a dead reference. A path that still exists (the user
+    /// declined, or the operation failed) is left alone.
+    /// </summary>
+    /// <param name="paths">The paths that were handed to the Recycle Bin.</param>
+    private void RemoveVanishedItemsFromPanels(string[] paths)
+    {
+        try
+        {
+            var vanished = paths
+                .Where(path => !string.IsNullOrWhiteSpace(path) && !File.Exists(path) && !Directory.Exists(path))
+                .ToList();
+            if (vanished.Count > 0)
+                _windowManager.RemoveItemsFromPanels(vanished);
+        }
+        catch
+        {
+            // Degrade silently: the worst case is the pre-existing dead reference, which the panel shows greyed out.
+        }
+    }
 
     /// <summary>
     /// Rebuilds _visibleItems from the current model state (filter + sort). Must be called on the UI

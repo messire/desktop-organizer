@@ -1,8 +1,9 @@
 # ADR-019: Боковая панель как top-level окно вместо WorkerW-child
 
-**Статус:** Accepted (раздел «Trade-off Topmost» ниже — **пересмотрено, см.
-[ADR-020](ADR-020-sidebar-zorder-back-without-topmost.md)**; top-level-окно и вся
-virtual-desktop-логика этого документа остаются в силе без изменений)
+**Статус:** Accepted — Amended 2026-09-02 (ADR-020: раздел «Trade-off Topmost» ниже **пересмотрен**, см.
+[ADR-020](ADR-020-sidebar-zorder-back-without-topmost.md); top-level-окно и вся virtual-desktop-логика
+этого документа остаются в силе); Amended 2026-09-27 (ADR-034: `ReassertAfterShellRestart` переиспользует
+anchor-логику после рестарта Explorer); Amended 2026-10-09 (ADR-audit WP-E: действующий контракт COM `IVirtualDesktopManager` продублирован из ADR-016)
 **Дата:** 2026-09-02
 **Пересматривает:** [ADR-016](ADR-016-virtual-desktop-visibility.md) (механизм — **Superseded by ADR-019**)
 **Уточняет:** [ADR-007](ADR-007-system-icons-panel-window-type.md) (пункт «Z-order» — для `SystemIconsPanel`
@@ -141,6 +142,22 @@ _desktopIntegration.ApplyDesktopWindowStyles(new WindowInteropHelper(_window).Ha
   менеджера).
 - **`IsEmbedded(IntPtr)`** удалён из `IDesktopIntegrationService`/`DesktopIntegrationService` вместе с
   тестами: единственный продакшн-потребитель — снятый блок re-embed.
+
+### Инвариант P/Invoke и COM виртуальных столов (действующий контракт, перенесён из ADR-016)
+
+Эта работа продолжает опираться на `IVirtualDesktopManager`, введённый в [ADR-016](ADR-016-virtual-desktop-visibility.md)
+(тот помечен `Superseded by ADR-019` по подложке, но механизм и контракты остаются действующими). Инвариант
+проекта «P/Invoke только за `INativeApi`» формально **не нарушается** активацией COM-объекта: `IVirtualDesktopManager`
+активируется в `VirtualDesktopService` через `Type.GetTypeFromCLSID` + `Activator.CreateInstance` с приватным
+`[ComImport]`-интерфейсом, объявленным внутри самого класса, — это не `[DllImport]`/`[LibraryImport]`. Решение —
+**не выносить это объявление за `INativeApi`**: граница абстракции здесь `IVirtualDesktopService`, он играет для
+COM ту же роль изоляции, что `INativeApi` для P/Invoke, и COM-интерфейс не «протекает» наружу. Настоящие P/Invoke,
+нужные этому механизму (`GetForegroundWindow`, `GetParent`/`GetClassName`), живут в `INativeApi`/`NativeApi`. Контракт
+`IVirtualDesktopService`: все члены вызываются **только со STA-потока** (UI-поток); `IsWindowOnCurrentDesktop`
+возвращает `true` при неопределимом состоянии (не трогать окно при неизвестности);
+`TryMoveWindowToCurrentDesktop() == true` означает «вызов принят», а не «окно переехало» (`MoveWindowToDesktop`
+отвечает `S_OK` как no-op на нетрекаемых окнах); RCW не освобождается принудительно (`Dispose` обнуляет поле).
+Любой новый COM-интерфейс за пределами `INativeApi` обязан иметь такую же единственную обёртку-реализацию.
 
 ### Поведенческая матрица (ON/OFF)
 
@@ -285,10 +302,14 @@ ResolveAnchorDesktopId(persisted: Guid?, systemDefault: Guid?, panelCurrent: Gui
 
 ---
 
-## Manual verify (Win10 / Win11) — не выполнено в этой сессии
+## Manual verify (Win10 / Win11)
+
+> **Статус:** выполнена на Windows 11 24H2 2026-09-27, признана достаточной; Windows 10 не проверяется — см.
+> [docs/ROADMAP.md](../docs/ROADMAP.md) (строки 6–8, раздел «Полировочный батч polishing/ui-1»). Список
+> ниже оставлен как исторический чек-лист (пп. 7–8 неактуальны после ADR-020, см. пометки).
 
 Перенесено из `docs/PLANS/sidebar-virtual-desktop-redesign.md` §11/§14 (дополнено находками ревью).
-Требуется интерактивная сессия с ≥3 виртуальными столами.
+Интерактивная сессия с ≥3 виртуальными столами.
 
 1. **ON, переключение стола.** Панель появляется на новом столе в течение ~1 с (задержка ожидаема —
    poll-интервал, не дефект).
@@ -378,3 +399,13 @@ ResolveAnchorDesktopId(persisted: Guid?, systemDefault: Guid?, panelCurrent: Gui
 - Пересматриваемое решение: [ADR-016](ADR-016-virtual-desktop-visibility.md) (Superseded by ADR-019).
 - Уточняемое решение: [ADR-007](ADR-007-system-icons-panel-window-type.md) (пункт «Z-order»).
 - ROADMAP: раздел «Полировочный батч `polishing/ui-1`», Блок E.
+
+---
+
+## Amendments
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-02 | [ADR-020](ADR-020-sidebar-zorder-back-without-topmost.md) | `Topmost="True"` убран; периодический якорь над `Progman` | Раздел «Trade-off: `Topmost="True"`» (исторический); риски «Topmost-конкуренция» и «Полноэкранные приложения»; Non-goals про авто-подъём Z-order; manual-verify пп. 7–8 |
+| 2026-09-27 | [ADR-034](ADR-034-explorer-restart-recovery.md) | `ReassertAfterShellRestart` переиспользует anchor-логику (`ResolveAnchorDesktopId`) после рестарта Explorer | — |
+| 2026-10-09 | ADR-audit WP-E | Раздел «Инвариант P/Invoke и COM виртуальных столов» перенесён из ADR-016, чтобы действующий контракт не жил только в superseded-документе | — |

@@ -1,6 +1,6 @@
 # ADR-010: Очистка managed-копий при удалении панели — разделение «закрыть» vs «удалить навсегда»
 
-**Статус:** Accepted
+**Статус:** Accepted — Amended 2026-09-27 (ADR-035: «удалить» всегда через Корзину, fail-visibly); Amended 2026-09-27 ×2 (ADR-040: команда «Убрать из панели» удалена); Amended 2026-09-29 (ADR-045: третье правило релиза — дублирование). **Действующий свод правил судьбы managed-файлов — [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md); таблица вызывающих мест в Решении 1 ниже — историческая, актуальная — в ADR-048 и в разделе «Amendment 2026-10-09».**
 **Дата:** 2026-07-26
 
 ---
@@ -157,3 +157,35 @@ page-level удаления — см. ADR-035's собственное «Known l
 панели (см. также amendment к [ADR-035](ADR-035-panel-deletion-recycle-bin.md) выше). Инвариант вызывающих
 мест (таблица в Решении 1) для `RemoveChildWindow`/`releaseManagedItems` не меняется — клонирование не
 вызывает ни `Release`, ни `RemoveChildWindow` вовсе.
+
+## Amendment (2026-10-09, ADR-audit WP-E / ADR-048): актуальная таблица вызывающих мест
+
+Таблица в Решении 1 устарела (после ADR-035 `Release(string)` удалён, «удалить» = Корзина, а
+`PageManagerService.RemovePage` больше не передаёт `true`). Сверено с кодом
+(`WindowManager.RemoveChildWindow`, `PageManagerService.RemovePage`, `LayoutSnapshotService.Restore`,
+`MainWindowViewModel.RemovePanel`, `WindowManager.ClonePanelToPage`):
+
+| Вызывающая сторона | Сценарий | `releaseManagedItems` | Что происходит с managed-файлами |
+|---|---|---|---|
+| `MainWindowViewModel.RemovePanel` | Пользователь удаляет одну панель | `true` | `RemoveChildWindow` сам делает один batch `IPanelItemStorageService.ReleaseToRecycleBin` из хранилища; при остатке — `PanelRemovalResult.Blocked`, панель остаётся (all-or-kept) |
+| `PageManagerService.RemovePage` | Пользователь удаляет страницу | `false` (`deferSave: true`) | **Сам** собирает managed-пути всех панелей страницы и делает один batch `ReleaseToRecycleBin` **до** удаления панелей; при остатке страница и все панели остаются; затем `RemoveChildWindow(..., releaseManagedItems: false, deferSave: true)` — файлы уже в Корзине |
+| `LayoutSnapshotService.Restore` | Замена набора панелей из снапшота | `false` (`deferSave: true`) | Ничего — пересоздаваемые панели ссылаются на те же managed-пути |
+| `WindowManager.ClonePanelToPage` (откат) | Неудавшееся клонирование | не вызывается | `DiscardCopies` удаляет только свежие копии напрямую; панель-клон снимается из `_childWindows` и закрывается напрямую (не через `RemoveChildWindow(true)`) |
+
+Инвариант Решения 1 уточнён: `releaseManagedItems: true` допустим только для перманентного удаления **одной
+панели** (`RemovePanel`); при массовом удалении (страница) вызывающий сам делает batch-recycle и передаёт
+`false`. Одноаргументная `RemoveChildWindow(Guid)` (эквивалент `false`) не имеет вызывающих в `src/`.
+«Закрытие» окна панели (`ChildWindow.OnClosing`/`Dispose` при завершении приложения) managed-файлы не
+трогает: панель переживает перезапуск, файлы остаются в хранилище.
+
+Подтверждение в `RemovePanel` (Решение 2) по-прежнему зависит от наличия managed-файлов, но текст больше не
+говорит «безвозвратно, мимо Корзины» — после ADR-035 файлы уходят в Корзину.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-27 | [ADR-035](ADR-035-panel-deletion-recycle-bin.md) | «Удалить» всегда через Корзину (`ReleaseToRecycleBin`), fail-visibly, all-or-kept для страницы | Решение 2: формулировка «стирается безвозвратно мимо Корзины»; «Открытый архитектурный вопрос» про стирание мимо Корзины — закрыт; `IPanelItemStorageService.Release(string)` удалён |
+| 2026-09-27 | [ADR-040](ADR-040-native-shell-context-menu.md) | Команда «Убрать из панели» удалена; прецедент `Restore` сохранён | Контекст/Решение 1: «Убрать из панели» как существующая команда меню |
+| 2026-09-29 | [ADR-045](ADR-045-panel-clone-to-page.md) | `CopyManaged`/`DiscardCopies` — дублирование как третье правило | — |
+| 2026-10-09 | ADR-audit WP-E / [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md) | Таблица Решения 1 исправлена (см. выше) | Таблица из Решения 1 как описание текущего кода |

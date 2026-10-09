@@ -1,6 +1,6 @@
 # ADR-040: Native Shell Context Menu for Panel Items
 
-Status: Accepted (2026-09-27) — amends ADR-009, ADR-010
+**Статус:** Accepted (2026-09-27) — amends ADR-009, ADR-010, ADR-035 — Amended 2026-09-30 (ADR-047 phase 6.4b: opt-in dark classic Win32 menus, `SetPreferredAppMode`/`FlushMenuThemes`, the shell menu follows the app theme; the display mechanism is unchanged). **Current consolidated release rules for managed items: [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md).**
 
 ## Context
 
@@ -161,3 +161,10 @@ panel never gains keyboard focus or comes to the foreground while the menu is op
   `RecycleManagedItem`; this ADR closes its "restored items are orphaned" limitation for the single-item
   shell-menu Delete path specifically.
 - ADR-036 (Drag-Out of Panel Items) — now the only way to remove an item from a panel without deleting it.
+
+## Amendments
+
+| Date | Source | What changed | Which sections/decisions no longer apply |
+|---|---|---|---|
+| 2026-09-30 | [ADR-047](ADR-047-unified-design-system.md) (phase 6.4b, D-11) | Opt-in dark classic Win32 menus for the process (`SetPreferredAppMode`/`FlushMenuThemes`, ordinals 135/136, behind `INativeApi`/`INativeMenuTheming`, build gate ≥18362): this shell menu is now drawn dark when the app is in the dark theme | — (the display mechanism — helper window, `IContextMenu2`/`IContextMenu3` forwarding, `CMINVOKECOMMANDINFOEX` — is unchanged) |
+| 2026-10-09 | ADR-audit WP-E / [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md) | The managed-item release rules (including this ADR's single-item Delete path) are consolidated in ADR-048 | — |

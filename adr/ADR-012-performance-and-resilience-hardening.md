@@ -1,6 +1,6 @@
 # ADR-012: Фаза 7 — Persistence-дебаунс, вынос машины состояний хука, Freeze()-инвариант, авторитетный кеш манифеста
 
-**Статус:** Accepted
+**Статус:** Accepted — Amended 2026-09-22 (ADR-024 D-12: `SaveScheduler` переехал из `WindowManager` в `ApplicationStateService`; публичный контракт `SaveWindowsState`/`SaveWindowsStateNow` сохранён); Amended 2026-09-30 (ADR-046: Freeze-инвариант распространён на межпоточную передачу воркер→UI, закреплён явной рантайм-проверкой вместо `Debug.Assert`)
 **Дата:** 2026-08-15
 
 ---
@@ -268,7 +268,18 @@ storage root в рамках одного процесса**. Правки `.man
   Блока F, не является следствием изменений этой фазы — задокументировано как pre-existing техдолг,
   требует отдельного фикса.
 
-**Manual verify (Win10/Win11) — см. `docs/PLANS/phase-7-performance-hardening.md`, «Сводный список
-manual verify»:** ни один из блоков A–F не проверен вживую на Windows — среда разработки ограничена
-`dotnet build`/`dotnet test`. Особое внимание блоку B (глобальный хук, единственный блок с риском
-подтормаживания ввода системы при регрессии).
+**Manual verify** — блоки A–F выполнены пользователем на Windows 11 24H2 2026-09-27, признаны достаточными;
+Windows 10 не проверяется — см. [docs/ROADMAP.md](../docs/ROADMAP.md) (строки 6–8, 1328–1331).
+Исторический чек-лист — `docs/PLANS/phase-7-performance-hardening.md`, «Сводный список manual verify»
+(особое внимание блоку B — глобальный хук, единственный блок с риском подтормаживания ввода системы при
+регрессии).
+
+---
+
+## Amendments
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | [ADR-024](ADR-024-versioned-json-persistence.md) D-12 | Единый `SaveScheduler` живёт в `ApplicationStateService` (`RequestSave()` — 500 мс дебаунс, `SaveNow()` — синхронно); `IWindowManager.SaveWindowsState()`/`SaveWindowsStateNow()` — тонкие делегаты | Решение 1: владение `SaveScheduler` классом `WindowManager` и запись состояния панелей в `user.config` (`ChildWindowsState`); политика «дебаунс vs синхронно» (таблица вызывающих мест) сохранена |
+| после 2026-08-15 | [ADR-023](ADR-023-single-instance-and-ipc.md) (Фаза 3), [ADR-024](ADR-024-versioned-json-persistence.md) (advisory storage-root lock) | Single-instance guard + именованный pipe | «Известный открытый риск: нет single-instance guard между процессами» (Решение 4, «Последствия») — закрыт |
+| 2026-09-30 | [ADR-046](ADR-046-background-icon-loading.md) | Freeze-инвариант Решения 3 распространён на межпоточную передачу; явная рантайм-проверка на границе доставки | `Debug.Assert` как единственная проверка заморозки |

@@ -39,7 +39,10 @@ internal static class PanelCloneBuilder
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(filePaths);
 
-        var dto = PanelStateMapper.ToDto(source);
+        // A clone is a new entity: unknown fields (ADR-024 Amendment "Additive revisions") may be bound to the
+        // identity of the source panel, and "field absent => documented default" is always a valid state, so
+        // none of them are carried over (a snapshot restore, the same panel coming back, does keep them).
+        var dto = PanelStateMapper.ToDto(source, includeUnknownFields: false);
         dto.Id = Guid.NewGuid();
         dto.PageId = pageId;
         dto.Title = title;

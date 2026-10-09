@@ -1,6 +1,6 @@
 # ADR-041: First-Run Panel and Uninstall Restore of Panel Items
 
-Status: Accepted (2026-09-27)
+**Статус:** Accepted (2026-09-27) — Amended 2026-10-09 (ADR-audit WP-A: a failed directory enumeration counts as an unrestored item — the storage root is kept, exit code 7). **Current consolidated release rules for managed items (incl. which restore policy applies where): [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md).**
 
 ## Context
 
@@ -101,7 +101,8 @@ file directly under the storage root, from a pre-ADR-013 install):
 4. **Cleanup**: now-empty per-item GUID directories are deleted (structure only, never content) regardless
    of outcome; the entire `PanelItems` storage root itself is deleted **only when every single item was
    successfully restored** (`failed == 0`) — a partial failure leaves the root (and its still-unmoved
-   items) in place rather than losing track of them.
+   items) in place rather than losing track of them. A directory whose content could not even be listed
+   counts as a failure too (Amendment 2026-10-09 at the end of this document).
 5. **Early exit, no folder creation on a clean install**: if the `PanelItems` folder does not exist at all
    (an install that never had a managed item), `RestoreAll` returns immediately with a "nothing to restore"
    result — it never creates the folder, the manifest, or the desktop directory as a side effect of running.
@@ -153,3 +154,26 @@ restored, then files are removed; run `--restore-panel-items` twice in a row —
   `application-state.json`) this ADR's restorer and first-run panel logic both leave untouched.
 - ADR-033 (Crash Safety and an Always-On Application Log) — `Program.Main`'s existing exit-code convention,
   extended by this ADR with `6`/`7`/`8`.
+
+## Amendment (2026-10-09, ADR-audit WP-A): a failed enumeration is an unrestored item
+
+**Defect (audit finding).** A listing failure during enumeration (access denied, a broken reparse point, a path
+error) was logged but not counted: a directory whose content could not be listed contributed nothing to `failed`, so
+with the remaining items restored the run could report `failed == 0` and delete the whole `PanelItems` storage root
+(`TryDeleteStorageRoot`) over files it had never seen — the opposite of this ADR's "never lose track of them" rule
+(item 4 above).
+
+**Decision.** `EnumerateManagedItems()` now returns the items **and** a failure count, and `RestoreAll` seeds
+`failed` with it. Every unreadable location counts as one failed item: the storage root itself
+(`EnumerateStorageRootFailed`), a top-level entry whose path is invalid (`EnumerateEntryPathInvalid`) and a
+per-item GUID directory that cannot be listed (`EnumerateItemDirectoryFailed`), each logged at `Error` with the path.
+Consequences, all following from the unchanged `failed == 0` rule: the storage root and the manifest are **kept**,
+every item that *could* be listed is still restored, `PanelItemsRestoreResult.Success` is `false`, and
+`--restore-panel-items` exits with code **7** (partial failure) instead of 0.
+
+**Message.** On a partial failure the one-line CLI message (stderr; the diagnostics log has the details) reads
+`Restored {restored} item(s); {failed} item(s) or location(s) could not be restored and remain under '{storageRoot}' —
+see the diagnostics log.` — "or location(s)" because a failed enumeration is a location, not an item known to exist.
+
+Unchanged: the manifest format, the persistence contour (`State`/`Logs`), `ResolveTarget` (policy U, ADR-048), the exit
+codes `0/6/7/8` and the "no early deletion of the root" guard.

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Linq;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Services;
 
@@ -18,6 +19,7 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
     private readonly IConfirmationService _confirmation;
     private readonly IInputDialogService _inputDialog;
     private readonly ILocalizationService _localization;
+    private readonly IApplicationStateStore _stateStore;
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -51,16 +53,22 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
     /// <param name="confirmation">Gates the restore/delete commands behind a user confirmation prompt.</param>
     /// <param name="inputDialog">Prompts for the snapshot name when capturing.</param>
     /// <param name="localization">Localizes the auto-generated snapshot name and this ViewModel's dialogs.</param>
+    /// <param name="stateStore">
+    /// Tells whether this session is read-only (<see cref="IApplicationStateStore.IsWritable"/>): a restore
+    /// returns no files there, so the confirmation must not promise it (ADR-audit review cycle 3, M3).
+    /// </param>
     public LayoutSnapshotsViewModel(
         ILayoutSnapshotService service,
         IConfirmationService confirmation,
         IInputDialogService inputDialog,
-        ILocalizationService localization)
+        ILocalizationService localization,
+        IApplicationStateStore stateStore)
     {
         _service = service;
         _confirmation = confirmation;
         _inputDialog = inputDialog;
         _localization = localization;
+        _stateStore = stateStore;
 
         CaptureSnapshotCommand = new RelayCommand(CaptureSnapshot);
         RestoreSnapshotCommand = new RelayCommand<string>(RestoreSnapshot);
@@ -94,9 +102,14 @@ public class LayoutSnapshotsViewModel : INotifyPropertyChanged
     {
         if (string.IsNullOrWhiteSpace(snapshotId)) return;
 
-        if (!_confirmation.Confirm(
-                _localization.GetString("Snapshot_Restore_Message"),
-                _localization.GetString("Snapshot_Restore_Title"))) return;
+        // Two short paragraphs (what closes / what happens to the files), each its own RESX key so no value
+        // becomes a "wall of text" (ResxTextLengthGuardTests). In a read-only session Restore moves no file
+        // (LayoutSnapshotService, WP-B review F2), so the second paragraph would promise something untrue.
+        var message = _localization.GetString("Snapshot_Restore_Message");
+        if (_stateStore.IsWritable)
+            message += "\n\n" + _localization.GetString("Snapshot_Restore_Files_Message");
+
+        if (!_confirmation.Confirm(message, _localization.GetString("Snapshot_Restore_Title"))) return;
 
         _service.Restore(snapshotId);
     }

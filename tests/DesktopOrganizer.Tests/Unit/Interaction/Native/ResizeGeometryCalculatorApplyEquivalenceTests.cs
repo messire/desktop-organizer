@@ -9,8 +9,8 @@ namespace DesktopOrganizer.Tests.Unit.Interaction.Native;
 /// <summary>
 /// A pure algebraic property of <see cref="ResizeGeometryCalculator.Apply"/> itself: it produces a
 /// BIT-FOR-BIT identical <see cref="Rect"/> whether its <c>raw</c> argument arrived via an
-/// <see cref="ResizeGeometryCalculator.Accumulate"/> chain of N small per-frame deltas (the shape
-/// <c>Behaviors.PanelResizeController.OnResizeDragDelta</c> feeds it) or via one directly-computed
+/// <see cref="ResizeGeometryCalculator.Accumulate"/> chain of N small per-frame deltas (the shape the removed Thumb-driven
+/// controller fed it, ADR-022 phase 1) or via one directly-computed
 /// absolute extent (the shape <c>Behaviors.NativePanelResizeController.ProposeBounds</c> feeds it, D-4),
 /// for the same total movement, on every one of the 8 <see cref="ResizeEdge"/> values, in both Grid+snap
 /// and List+free constraint shapes.
@@ -168,8 +168,8 @@ public class ResizeGeometryCalculatorApplyEquivalenceTests
     // ── MINOR-2 (fix-cycle 2): the constraint shape above is LegacyStretch-equivalent by construction
     // (GridMetrics.FileListHPadding/MinPanelWidth(iconSize) never reserved M-2's scrollbar width) — this
     // suite never exercised the FixedGap constraint shape at all before this fix-cycle, even though
-    // ResizeConstraintsFactory.BuildConstraints (the REAL production path both PanelResizeController and
-    // NativePanelResizeController's SnapWidthToGrid use) has read model.IconLayoutPolicy since P05.
+    // ResizeConstraintsFactory.BuildConstraints (the REAL production path NativePanelResizeController's
+    // gesture and SnapWidthToGrid use) has read model.IconLayoutPolicy since P05.
     // Built via the SAME ResizeConstraintsFactory.BuildConstraints the two SnapWidthToGrid copies use
     // (not hand-rolled like the two constraint factories above), so this coverage would also catch either
     // copy silently drifting from what the factory actually produces for a FixedGap panel. ──────────────

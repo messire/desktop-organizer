@@ -158,18 +158,6 @@ namespace DesktopOrganizer.UI.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("False")]
-        public bool NativePanelSizing {
-            get {
-                return ((bool)(this["NativePanelSizing"]));
-            }
-            set {
-                this["NativePanelSizing"] = value;
-            }
-        }
-
-        [global::System.Configuration.UserScopedSettingAttribute()]
-        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("12")]
         public int GridSnapDistance {
             get {

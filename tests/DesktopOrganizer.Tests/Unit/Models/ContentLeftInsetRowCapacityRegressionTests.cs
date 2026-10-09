@@ -5,7 +5,7 @@ namespace DesktopOrganizer.Tests.Unit.Models;
 /// <summary>
 /// Regression coverage for ADR-029's F-3 fix (docs/PLANS/workspace-grid-00-baseline.md finding F-3,
 /// docs/fix-prompts/05-icon-layout.md): a panel snapped to <c>k</c> columns
-/// (<c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>) must
+/// (<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>) must
 /// actually RENDER <c>k</c> columns once <c>PanelChrome</c>'s fixed accent-indicator column
 /// (<see cref="PanelMetrics.ContentLeftInset"/>) is subtracted from the snapped window width — before
 /// this fix, <see cref="GridMetrics.FileListHPadding"/> was an independent <c>0</c> literal that let
@@ -171,7 +171,7 @@ public class ContentLeftInsetRowCapacityRegressionTests
     }
 
     /// <summary>
-    /// The exact window-width formula <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s
+    /// The exact window-width formula <c>NativePanelResizeController</c>'s
     /// <c>SnapWidthToGrid</c> use for a panel that snaps to exactly <paramref name="columns"/> columns —
     /// content <see cref="AdaptiveGridLayout.Extent"/> plus the chrome
     /// <see cref="GridMetrics.FileListHPadding"/> now accounts for (F-3 fix).

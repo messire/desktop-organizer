@@ -1,8 +1,11 @@
 # ADR-038: Release Engineering — Installer, CI, and Manual Update Check
 
-Status: Accepted (2026-09-27) — Amended 2026-09-27 (release polish 1.0: application/installer metadata) —
+**Статус:** Accepted (2026-09-27) — Amended 2026-09-27 (release polish 1.0: application/installer metadata) —
 Amended 2026-09-28 (Company = khagendev, user.config migration; supersedes the 2026-09-27 amendment's
-"Company pinned to DesktopOrganizer.UI" decision)
+"Company pinned to DesktopOrganizer.UI" decision). **Open (ADR-audit WP-E):** CI and the update check are inert while
+the repository has no remote and no `v*` tags — see `docs/ROADMAP.md`, "Решения, ожидающие пользователя", item 4. — Amended 2026-10-10 (user decision, ROADMAP item 4: RC convention extended with an
+annotated `vX.Y.Z` tag per squash commit; CI also runs on `rc/**`; retro tags v0.5.1…v0.8.0 created locally; the remote is still
+to be added by the user — the "Open" note above is therefore narrowed to "no remote yet").
 
 ## Context
 
@@ -273,3 +276,37 @@ preferences intact (not reset to defaults); the old folder is still present afte
 - ADR-032 (UI Localization) — the About section's update-check status text follows the same hot-switch
   convention this ADR's `AboutViewModel` reuses.
 - `docs/PLANS/release-hardening-1.0.md` §7 (packages G1/G2).
+
+## Amendments (сводка)
+
+| Date | Source | What changed | Which sections/decisions no longer apply |
+|---|---|---|---|
+| 2026-09-27 | release polish 1.0 | `Product`/`AssemblyTitle` for Task Manager; installer English-first + `MinVersion=10.0`, `.pdb`/`.xml` excluded; Copyright/`LICENSE` holder unified to "khagen" | "`LICENSE` is MIT, copyright "messire"" (Q4 decision) |
+| 2026-09-28 | user approval in task | `Company` = `khagendev` (inherited); one-time `UserConfigFolderMigration` of `user.config`; GitHub URL "messire" confirmed, question closed | The 2026-09-27 amendment's "`Company` pinned to `DesktopOrganizer.UI`" |
+| 2026-10-09 | ADR-audit WP-E (clarification, no behavior change) | **What "pinned" means in `ci.yml` (verified):** only the Inno Setup tool version (`--version=6.7.1`) and `softprops/action-gh-release` (commit SHA, `# v2.6.2`) are pinned; `actions/checkout@v4`, `actions/setup-dotnet@v4` and `actions/upload-artifact@v4` track a major tag. The README row previously said "pinned actions/tool versions" (overstated) and has been aligned with this text | — |
+| 2026-10-10 | user decision (ROADMAP item 4, commit `b796feb`) | RC convention: annotated tag `vX.Y.Z` on each rc squash commit; CI on `rc/**`; retro tags v0.5.1…v0.8.0 (local); remote — user action | "CI and update check are inert while there are no `v*` tags" (tags exist locally; remote still pending) |
+
+## Amendment 2026-10-10 (user decision): release tags and CI on `rc/**`
+
+*(Раздел на русском, как и другие поздние amendments; остальной документ — на языке оригинала.)*
+
+Решение пользователя 2026-10-10 по п. 4 «Решений, ожидающих пользователя» (`docs/ROADMAP.md`):
+
+- **Конвенция RC дополнена тегом.** Каждая rc-ветка `rc/X.Y.Z` по-прежнему заканчивается одним squash-коммитом `vX.Y.Z`
+  (тело = сообщения feature-коммитов, bump `Version`); теперь на этот коммит ставится **annotated-тег `vX.Y.Z`**. Тег — то,
+  что запускает tag-triggered job сборки инсталлятора (`ci.yml`, `if: startsWith(github.ref, 'refs/tags/v')`) и на что
+  указывают ссылки `[X.Y.Z]` внизу `CHANGELOG.md`; `GitHubReleaseUpdateChecker` читает `tag_name` последнего GitHub Release — а Release создаётся этим job'ом из тега.
+- **CI запускается и на ветках `rc/**`.** `on.push.branches` в `.github/workflows/ci.yml` — `[ master, 'rc/**' ]` (раньше
+  только `master`), `tags: [ 'v*' ]` и `pull_request` на `master` без изменений: каждый push в rc-ветку получает гейт
+  «0 errors / 0 warnings» до того, как squash-коммит получит тег.
+- **Ретро-теги проставлены локально:** `v0.5.1`, `v0.6.0`, `v0.6.1`, `v0.7.0`, `v0.8.0` (сверено по `.git/refs/tags`) — на
+  соответствующие squash-коммиты rc-веток.
+- **Remote добавляет пользователь** (GitHub-владелец `messire`, см. Amendment 2026-09-28). Пока `origin` нет, CI, tag-job
+  и update-check по-прежнему не могут сработать на практике: решение закрыто **кроме remote** и первого push тегов.
+
+Поведение кода, `IAppSettings`, persistence не менялись (только `ci.yml` и документация процесса).
+
+**State.** The workflow (`.github/workflows/ci.yml`) exists and, since 2026-10-10, is aligned with the RC-tag convention
+(CI on `rc/**`, release job on `v*` tags); local tags v0.5.1…v0.8.0 exist. The repository still has no `origin` remote
+(user action pending), so the CI jobs, the tag-triggered installer job and the GitHub-based update check cannot run in
+practice until the remote is added and the tags are pushed. `docs/ROADMAP.md`, "Решения, ожидающие пользователя", item 4.

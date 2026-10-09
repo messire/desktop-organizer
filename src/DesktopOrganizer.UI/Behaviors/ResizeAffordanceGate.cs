@@ -3,7 +3,7 @@ namespace DesktopOrganizer.UI.Behaviors;
 /// <summary>
 /// Composes two independent conditions — "not rolled up" and "allowed by the current layout-edit
 /// policy" — into the single <see cref="IResizeAffordance.SetEnabled"/> call the underlying affordance
-/// (<see cref="ThumbOverlayAffordance"/> or <see cref="NativeSizingAffordance"/>) actually understands
+/// (<see cref="NativeSizingAffordance"/>) actually understands
 /// (docs/PLANS/phase-6-edit-layout-ux.md §1 D-5). <see cref="RollUpBehavior"/> receives THIS object in
 /// its <c>resizeAffordance</c> constructor parameter and keeps calling <see cref="SetEnabled"/> exactly
 /// as before — unaware that resize can now also be gated by layout-edit policy — while
@@ -26,8 +26,7 @@ public sealed class ResizeAffordanceGate : IResizeAffordance
     // actually rolled up (never at construction), and ChildWindow applies the real policy value
     // immediately after constructing this gate (D-5) — so neither default is ever observed as the
     // gate's own steady-state value in production. True/true also matches the wrapped affordances'
-    // own default-enabled state (ThumbOverlayAffordance's XAML-authored visibility,
-    // NativeSizingAffordance's `_enabled = true` field), so a gate that is never touched behaves
+    // own default-enabled state (NativeSizingAffordance's `_enabled = true` field), so a gate that is never touched behaves
     // exactly like the affordance it wraps would have on its own.
     private bool _notCollapsed = true;
     private bool _allowedByPolicy = true;
@@ -36,7 +35,7 @@ public sealed class ResizeAffordanceGate : IResizeAffordance
     /// <summary>
     /// Initializes a new instance of the <see cref="ResizeAffordanceGate"/> class.
     /// </summary>
-    /// <param name="inner">The underlying affordance (<see cref="ThumbOverlayAffordance"/> or <see cref="NativeSizingAffordance"/>) that actually gates resize input.</param>
+    /// <param name="inner">The underlying affordance (<see cref="NativeSizingAffordance"/>) that actually gates resize input.</param>
     public ResizeAffordanceGate(IResizeAffordance inner)
     {
         ArgumentNullException.ThrowIfNull(inner);

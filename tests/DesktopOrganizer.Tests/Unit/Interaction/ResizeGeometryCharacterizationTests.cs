@@ -7,13 +7,13 @@ namespace DesktopOrganizer.Tests.Unit.Interaction;
 
 /// <summary>
 /// Phase 1 (commit C1, docs/PLANS/phase-1-resize-stabilization.md §4/§5.1) characterization tests.
-/// These pin the CURRENT resize geometry math — <see cref="PanelResizeController.OnResizeDragStarted"/>'s
-/// raw-accumulator/snap-cell setup and <see cref="PanelResizeController.OnResizeDragDelta"/>'s
-/// quantize/clamp/reposition math (PanelResizeController.cs:83-215), plus
-/// <see cref="PanelResizeController.SnapWidthToGrid"/> — BEFORE any refactoring.
+/// These pin the CURRENT resize geometry math — <c>OnResizeDragStarted</c> of the pre-extraction Thumb controller's
+/// raw-accumulator/snap-cell setup and <c>OnResizeDragDelta</c> of the pre-extraction Thumb controller's
+/// quantize/clamp/reposition math (pre-extraction Thumb controller), plus
+/// <c>SnapWidthToGrid</c> of the pre-extraction Thumb controller — BEFORE any refactoring.
 /// <para>
 /// The test project cannot construct a real WPF <see cref="System.Windows.Window"/>/<see cref="System.Windows.Controls.Primitives.Thumb"/>
-/// (no STA thread — see <c>SystemIconsPanelManagerTests.cs:58</c>), so <see cref="PanelResizeController"/>
+/// (no STA thread — see <c>SystemIconsPanelManagerTests.cs:58</c>), so the pre-extraction Thumb controller
 /// itself cannot be exercised directly. Instead, <see cref="ResizeMathHarness"/> below is a line-for-line,
 /// Window-free copy of the production formula, operating on a plain <see cref="Rect"/>. Every branch is
 /// annotated with the exact production line range it mirrors.
@@ -33,7 +33,7 @@ namespace DesktopOrganizer.Tests.Unit.Interaction;
 public class ResizeGeometryCharacterizationTests
 {
     // Arbitrary but fixed "current window" bounds shared by the free-mode (List/snap-off) cases below.
-    // rawRight = 100 + 300 = 400, rawBottom = 200 + 250 = 450 (PanelResizeController.cs:95-96) — these are
+    // rawRight = 100 + 300 = 400, rawBottom = 200 + 250 = 450 (pre-extraction Thumb controller) — these are
     // the fixed opposite-edge anchors snapshotted once at DragStarted, referenced throughout.
     private static readonly Rect StartBounds = new(100, 200, 300, 250);
 
@@ -41,7 +41,7 @@ public class ResizeGeometryCharacterizationTests
     // Single-axis edges (Left/Top/Right/Bottom) additionally prove: (a) only the intended axis moves,
     // (b) the OPPOSITE edge (the anchor snapshotted at DragStarted) stays exactly where it was, and
     // (c) the sign convention of the raw accumulator (T-GEO-24): Right/Bottom ADD the delta,
-    // Left/Top SUBTRACT it (PanelResizeController.cs:136-154).
+    // Left/Top SUBTRACT it (pre-extraction Thumb controller).
     // Corner edges (T-GEO-09..12) exercise both axes and both anchors simultaneously.
 
     /// <summary>Verifies that applying one delta to each of the eight edges through <see cref="ResizeMathHarness"/> matches the pinned pre-C2 production formula.</summary>
@@ -79,7 +79,7 @@ public class ResizeGeometryCharacterizationTests
 
     // ── T-GEO-13..16: min-size clamp — shrink far past the minimum on each edge ─────────────────────
     // The opposite (anchor) edge must stay exactly where it was even though the dragged edge's own
-    // travel is clamped by GridMetrics.MinPanelSize (List mode's flat floor) — PanelResizeController.cs:173-183.
+    // travel is clamped by GridMetrics.MinPanelSize (List mode's flat floor) — pre-extraction Thumb controller.
 
     /// <summary>Verifies that shrinking far past the minimum on each edge clamps the result to <c>GridMetrics.MinPanelSize</c> while the anchor edge stays unaffected.</summary>
     /// <param name="direction">The edge direction string (e.g. <c>"Left"</c>, <c>"Bottom"</c>).</param>
@@ -111,7 +111,7 @@ public class ResizeGeometryCharacterizationTests
     }
 
     // ── T-GEO-17/18: Grid + snap on — width snaps to whole columns, height to whole rows, both via
-    // Math.Ceiling (PanelResizeController.cs:177-183). Golden values are computed by calling the exact
+    // Math.Ceiling (pre-extraction Thumb controller). Golden values are computed by calling the exact
     // same already-tested AdaptiveGridLayout.SnapExtent/EdgePadding building blocks production calls —
     // never a literal that could hide a formula drift.
 
@@ -173,7 +173,7 @@ public class ResizeGeometryCharacterizationTests
     }
 
     // ── T-GEO-21: List mode is free on BOTH axes even when SnapResizeToIconGrid == true — the
-    // OnResizeDragStarted branch decision (PanelResizeController.cs:100-117), not the Delta formula.
+    // OnResizeDragStarted branch decision (pre-extraction Thumb controller), not the Delta formula.
 
     /// <summary>Verifies that <see cref="ResizeMathHarness.SelectSnapCells"/> stays free on both axes for List mode, or when icon-grid snap is disabled.</summary>
     /// <param name="snapResizeToIconGrid">Whether icon-grid snap is enabled.</param>
@@ -205,7 +205,7 @@ public class ResizeGeometryCharacterizationTests
     }
 
     // ── T-GEO-22: min WIDTH selection — Grid uses the icon-grid-derived floor, List uses the flat
-    // floor (PanelResizeController.cs:173-175). Height's floor is always GridMetrics.MinPanelSize in
+    // floor (pre-extraction Thumb controller). Height's floor is always GridMetrics.MinPanelSize in
     // BOTH modes (no selection at all) — already exercised implicitly by every test above using the
     // constant directly for height.
 
@@ -267,10 +267,10 @@ public class ResizeGeometryCharacterizationTests
         // Max(...) clamp cannot mask which operand won.
         var result = harness.ApplyDelta("Bottom", StartBounds, horizontalChange: 0d, verticalChange: 500d);
 
-        Assert.Equal(750d, result.Height, precision: 6); // == raw.Height, exactly, per PanelResizeController.cs:183
+        Assert.Equal(750d, result.Height, precision: 6); // == raw.Height, exactly, per pre-extraction Thumb controller
     }
 
-    // ── SnapWidthToGrid — separate, standalone drop-time snap entry point (PanelResizeController.cs:243-258).
+    // ── SnapWidthToGrid — separate, standalone drop-time snap entry point (pre-extraction Thumb controller).
 
     /// <summary>Verifies that <see cref="ResizeMathHarness.SnapWidthToGrid"/> quantises the width to a snapped column extent via <see cref="Math.Ceiling(double)"/>.</summary>
     [Fact]
@@ -303,9 +303,9 @@ public class ResizeGeometryCharacterizationTests
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Window-free, line-for-line copy of <see cref="PanelResizeController.OnResizeDragStarted"/>'s
-    /// raw-accumulator/snap-cell setup and <see cref="PanelResizeController.OnResizeDragDelta"/>'s
-    /// quantize/clamp/reposition math (PanelResizeController.cs:83-258), operating on a <see cref="Rect"/>
+    /// Window-free, line-for-line copy of <c>OnResizeDragStarted</c> of the pre-extraction Thumb controller's
+    /// raw-accumulator/snap-cell setup and <c>OnResizeDragDelta</c> of the pre-extraction Thumb controller's
+    /// quantize/clamp/reposition math (pre-extraction Thumb controller), operating on a <see cref="Rect"/>
     /// instead of a <see cref="System.Windows.Window"/>. Every method/branch below is annotated with the
     /// exact production line range it mirrors — do NOT reorder, "simplify", or otherwise diverge from that
     /// source without re-reading it first; doing so would silently defeat this file's entire purpose
@@ -325,7 +325,7 @@ public class ResizeGeometryCharacterizationTests
 
         public ResizeMathHarness(Rect start, double snapCellWidth, double snapCellHeight, double minWidth)
         {
-            // PanelResizeController.OnResizeDragStarted:93-96.
+            // pre-extraction Thumb controller OnResizeDragStarted.
             _rawWidth = start.Width;
             _rawHeight = start.Height;
             _rawRight = start.Left + start.Width;
@@ -335,17 +335,17 @@ public class ResizeGeometryCharacterizationTests
             _minWidth = minWidth;
         }
 
-        /// <summary>Mirrors PanelResizeController.OnResizeDragStarted:100-117.</summary>
+        /// <summary>Mirrors pre-extraction Thumb controller OnResizeDragStarted.</summary>
         public static (double SnapCellWidth, double SnapCellHeight) SelectSnapCells(bool snapResizeToIconGrid, PanelViewMode viewMode, double iconSize)
             => snapResizeToIconGrid && viewMode == PanelViewMode.Grid
                 ? (GridMetrics.CellSize(iconSize), GridMetrics.RowHeight(iconSize))
                 : (0d, 0d);
 
-        /// <summary>Mirrors PanelResizeController.OnResizeDragDelta:173-175.</summary>
+        /// <summary>Mirrors pre-extraction Thumb controller OnResizeDragDelta.</summary>
         public static double SelectMinWidth(PanelViewMode viewMode, double iconSize)
             => viewMode == PanelViewMode.Grid ? GridMetrics.MinPanelWidth(iconSize) : GridMetrics.MinPanelSize;
 
-        /// <summary>Mirrors PanelResizeController.SnapWidthToGrid:243-258 (Grid mode assumed by the caller).</summary>
+        /// <summary>Mirrors pre-extraction Thumb controller SnapWidthToGrid (Grid mode assumed by the caller).</summary>
         public static double SnapWidthToGrid(double currentWidth, double iconSize)
         {
             var cell = GridMetrics.CellSize(iconSize);
@@ -356,7 +356,7 @@ public class ResizeGeometryCharacterizationTests
                 AdaptiveGridLayout.SnapExtent(content, cell, AdaptiveGridLayout.DefaultMinGap, AdaptiveGridLayout.EdgePadding(cell, AdaptiveGridLayout.DefaultEdgePaddingRatio)) + GridMetrics.FileListHPadding));
         }
 
-        /// <summary>Mirrors PanelResizeController.OnResizeDragDelta:132-214 for a single delta applied to <paramref name="current"/>.</summary>
+        /// <summary>Mirrors pre-extraction Thumb controller OnResizeDragDelta for a single delta applied to <paramref name="current"/>.</summary>
         public Rect ApplyDelta(string direction, Rect current, double horizontalChange, double verticalChange)
         {
             // :136-154 — raw accumulator sign convention (T-GEO-24): Right/Bottom ADD, Left/Top SUBTRACT.

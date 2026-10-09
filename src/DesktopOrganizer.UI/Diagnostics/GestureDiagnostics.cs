@@ -290,34 +290,7 @@ public sealed class GestureDiagnostics : IGestureDiagnostics
     }
 
     /// <inheritdoc />
-    public void CaptureGot(Guid? panelId, string sourceName, string? captureOwner)
-    {
-        if (!_log.IsEnabled) return;
-
-        _log.Write(
-            "capture",
-            "CaptureGot",
-            Scope(panelId),
-            new KeyValuePair<string, object?>("sourceName", sourceName),
-            new KeyValuePair<string, object?>("captureOwner", captureOwner));
-    }
-
-    /// <inheritdoc />
-    public void CaptureLost(Guid? panelId, string sourceName, string? captureOwner, bool thumbIsDragging)
-    {
-        if (!_log.IsEnabled) return;
-
-        _log.Write(
-            "capture",
-            "CaptureLost",
-            Scope(panelId),
-            new KeyValuePair<string, object?>("sourceName", sourceName),
-            new KeyValuePair<string, object?>("captureOwner", captureOwner),
-            new KeyValuePair<string, object?>("thumbIsDragging", thumbIsDragging));
-    }
-
-    /// <inheritdoc />
-    public void PanelClosing(Guid? panelId, bool thumbIsDragging)
+    public void PanelClosing(Guid? panelId, bool resizeActive)
     {
         if (!_log.IsEnabled) return;
 
@@ -325,7 +298,7 @@ public sealed class GestureDiagnostics : IGestureDiagnostics
             "panel",
             "PanelClosing",
             Scope(panelId),
-            new KeyValuePair<string, object?>("thumbIsDragging", thumbIsDragging));
+            new KeyValuePair<string, object?>("resizeActive", resizeActive));
     }
 
     /// <inheritdoc />

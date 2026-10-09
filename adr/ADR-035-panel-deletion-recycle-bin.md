@@ -1,7 +1,6 @@
 # ADR-035: Panel/Page Deletion Goes to the Recycle Bin
 
-Status: Accepted (2026-09-27) — amends ADR-010; amended 2026-09-27 by ADR-040; amended 2026-09-29 by
-ADR-045 (clone-rollback exception — see bottom of document)
+**Статус:** Accepted (2026-09-27) — amends ADR-010; Amended 2026-09-27 (ADR-040: single managed item deleted through its native shell menu is first restored, then recycled); Amended 2026-09-29 (ADR-045: clone-rollback exception — see bottom of document); Amended 2026-10-09 (ADR-audit WP-A + review cycle 1: the sidebar's `SendToRecycleBin` shares `NativeApi.RecycleFlags` — `FOF_WANTNUKEWARNING`, no `FOF_SILENT`; the sidebar drop is deferred out of the OLE `Drop` via `RecycleBinFileDrop.TryQueue`, owner `IntPtr.Zero`, reported effect `DragDropEffects.None`). **Current consolidated release rules: [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md).**
 
 ## Context
 
@@ -44,7 +43,41 @@ FOF_NOERRORUI`. `FOF_WANTNUKEWARNING` is deliberately kept: without it, an item 
 Bin would be silently, permanently deleted instead of asking — the shell's own warning dialog is the one
 acceptable shell-owned UI surface this feature introduces. `owner = IntPtr.Zero`; must be called on the UI
 (STA) thread, since the shell may show that dialog. The pre-existing `SendToRecycleBin` (used by
-`SystemIconsPanel`) is untouched — different call site, different semantics, not shared.
+`SystemIconsPanel`, drop onto the sidebar Recycle Bin icon) shares the same flag set since the 2026-10 ADR audit
+(`NativeApi.RecycleFlags`): it previously ran `FOF_SILENT` without `FOF_WANTNUKEWARNING` and so deleted silently
+and permanently what could not go to the Recycle Bin.
+
+**Sidebar drop is deferred out of the OLE `Drop` (2026-10-09, ADR-audit review cycle 1).** Because the sidebar
+path can now show shell UI (the nuke warning, the cancellable progress dialog), it no longer runs inside the
+`Drop` handler: `RecycleBinFileDrop.TryQueue` copies the dropped paths and posts `SendToRecycleBin` to the
+dispatcher at `Background` priority, so it runs after the source's `DoDragDrop` has returned. Run synchronously,
+the dialog would be modal while Explorer's (or 7-Zip's, Total Commander's) drag loop is still blocked waiting
+for `Drop` to return — the source freezes and the whole thing looks like a hang. Three decisions go with it:
+
+- *Owner window = `IntPtr.Zero`* (same as `RecycleItems` above), not the sidebar: the sidebar is
+  `WS_EX_NOACTIVATE` and pinned to the bottom of the Z-order by its 300 ms timer (ADR-020), and owner and owned
+  windows travel together in the Z-order — showing the dialog would first pull the sidebar up, and the timer
+  pushing the sidebar back down can drag the dialog behind every application window, with no taskbar button to
+  find it (the sidebar is `WS_EX_TOOLWINDOW`) and the sidebar disabled underneath it. No
+  `SetForegroundWindow`/`AllowSetForegroundWindow` dance either: after an OLE drop this process did not receive
+  the last input event (the source's drag loop did), so it has no foreground right to hand on, and
+  `AllowSetForegroundWindow` can only be granted by the current foreground process. The KB 135788 helper-window
+  pattern of the shell context menu (ADR-040) works there only because the right-click was our own input. An
+  unowned shell dialog gets its own taskbar button; if the foreground lock keeps it from activating, the button
+  flashes — visible, never buried.
+- *Reported drop effect = `DragDropEffects.None`* (the drag-over cursor still shows `Move`). When `Drop` returns
+  nothing has happened yet, and for `Move` an "unoptimized move" source deletes the originals itself once
+  `DoDragDrop` returns — permanently, before the Recycle Bin operation even starts, and even if the user then
+  answers "No" to the nuke warning. `None` is what the shell's data-transfer guidance prescribes for a target
+  that performs the move itself, and no source reads it as "delete your copy". `Copy` would be equally safe for
+  the originals but misreports what happened.
+- The path array is copied before queueing — it belongs to the drop's data object, which the source releases
+  when `DoDragDrop` returns.
+
+Manual verify (Win11): drop a file from Explorer onto the sidebar's Recycle Bin icon → Explorer stays
+responsive, the file is in the Recycle Bin; drop a file larger than the Recycle Bin quota → the "delete
+permanently?" question appears (own taskbar button, not hidden behind Explorer), "No" → the file is still in
+its folder; the same from 7-Zip / Total Commander → no source-side deletion.
 
 ### `IPanelItemStorageService.ReleaseToRecycleBin(IReadOnlyList<string> storedPaths) → RecycleOutcome`
 
@@ -145,3 +178,32 @@ strictly to copies `CopyManaged` created inside the *same, still-in-flight* clon
 path shape and manifest provenance), which were never shown to the user as part of any panel; they exist
 for, at most, a fraction of a second inside a transaction this ADR's own author never sees complete. Every
 other deletion path this ADR governs (`ReleaseToRecycleBin`, `PageManagerService.RemovePage`) is unchanged.
+
+## Amendment (2026-10-09, ADR-audit WP-A + review cycle 1): one flag set for every Recycle Bin call, sidebar drop deferred
+
+The ADR audit found two Recycle Bin paths with different safety properties. The decisions are written inline in
+**Decision** above (the section "`INativeApi.RecycleItems`" and the paragraph "Sidebar drop is deferred out of the
+OLE `Drop`"); this amendment is their index and states what no longer holds.
+
+- **Single flag set.** `INativeApi.SendToRecycleBin` (sidebar Recycle Bin icon, `ISystemShellService`) and
+  `INativeApi.RecycleItems` (panel/page removal) both run `RunShFileDelete(paths, owner, NativeApi.RecycleFlags)` =
+  `FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_WANTNUKEWARNING`, no `FOF_SILENT`. No longer true: "the sidebar
+  recycles silently" — an item that cannot go to the Recycle Bin now asks the shell's "delete permanently?" question
+  instead of being destroyed without one, and a long operation shows a cancellable progress dialog.
+- **Sidebar drop is deferred.** `SystemIconsPanelWindow` hands the dropped paths to `RecycleBinFileDrop.TryQueue` (copy of
+  the path array, `Dispatcher.BeginInvoke` at `Background`), which runs `SystemIconsPanelViewModel.SendToRecycleBin(paths,
+  IntPtr.Zero)` after the source's `DoDragDrop` has returned. Owner = `IntPtr.Zero` (not the `WS_EX_NOACTIVATE` sidebar
+  that ADR-020 keeps at the bottom of the Z-order), reported effect = `DragDropEffects.None` (`RecycleBinFileDrop.ReportedEffect`;
+  the drag-over cursor still shows `Move`). A sidebar-reorder drag (no file list) is not handled and bubbles on.
+- **Dead references after the deferred recycle (fix cycle, commit `8219acc`; described from the coordinator's message, not
+  re-verified in code).** The recycle can now run long after the drop (the shell dialog may stay open), while a panel
+  may in the meantime still reference a file that has left the disk. After the deferred recycle,
+  `SystemIconsPanelViewModel.SendToRecycleBin` removes the paths that no longer exist on disk from the panels via
+  `IWindowManager.RemoveItemsFromPanels`. Only references are removed; nothing else is deleted, and a path that is still on
+  disk (declined nuke warning, failure) keeps its panel item.
+- **Unchanged:** `ReleaseToRecycleBin`, `RecycleOutcome`, all-or-kept semantics, the "restored items land under
+  `PanelItems\<guid>\`" limitation (ADR-048, limitation 1).
+
+**Known limitation (follow-up, `docs/ROADMAP.md`):** `FOF_NOCONFIRMATION` suppresses the shell's own "Are you sure you want to
+move this to the Recycle Bin?" prompt even when the user's Recycle Bin properties ask for it; the app's own confirmations
+(ADR-010/ADR-047) are the only ones shown.

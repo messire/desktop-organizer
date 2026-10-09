@@ -51,6 +51,9 @@ public class TrayIconManager : ITrayIconManager
     /// <summary>Stable <see cref="ToolStripItem.Name"/> of the "Exit" menu item.</summary>
     internal const string ExitItemName = "Tray.Exit";
 
+    /// <summary>The product name shown as the tray icon tooltip (and its read-only variant).</summary>
+    internal const string ToolTipProductName = "DesktopOrganizer";
+
     private readonly INotifyIconAdapter _notifyIconAdapter;
     private readonly ILocalizationService _localization;
     private readonly ITrayMenuWindowStyler? _windowStyler;
@@ -77,6 +80,10 @@ public class TrayIconManager : ITrayIconManager
     // language without requiring the caller to invoke UpdateContextMenu again just because the language
     // changed.
     private bool _canEnterEditLayout = true;
+
+    // ADR-audit WP-B (F5): the last SetReadOnlySession snapshot — decides whether the tray tooltip carries
+    // the localized "(read-only)" suffix. Re-applied on a language switch (OnCultureChanged).
+    private bool _isReadOnlySession;
 
     /// <summary>
     /// LOW-2 fix (code review, panel clone to page, backlog 1.x wave 3 review): set by <see cref="Dispose"/>.
@@ -182,6 +189,7 @@ public class TrayIconManager : ITrayIconManager
     public void Initialize()
     {
         _notifyIconAdapter.SetIcon(TrayIconPath);
+        ApplyToolTip();
 
         // Settings window starts hidden (app lives in the tray) — see ADR-002. Edit layout/Lock layout
         // start unchecked/enabled — the caller (App.StartApp) immediately refreshes this with the real
@@ -263,6 +271,15 @@ public class TrayIconManager : ITrayIconManager
 
         EnsureContextMenuBuilt();
         _showDesktopIconsItem!.Checked = visible;
+    }
+
+    /// <inheritdoc />
+    public void SetReadOnlySession(bool isReadOnly)
+    {
+        if (_disposed) return;
+
+        _isReadOnlySession = isReadOnly;
+        ApplyToolTip();
     }
 
     /// <inheritdoc />
@@ -622,8 +639,22 @@ public class TrayIconManager : ITrayIconManager
         _exitItem!.Text = _localization.GetString("Tray_Exit");
     }
 
+    /// <summary>
+    /// Sets the tray icon tooltip: the product name, plus the localized "(read-only)" suffix while the
+    /// session is read-only (<see cref="SetReadOnlySession"/>).
+    /// </summary>
+    private void ApplyToolTip()
+    {
+        var text = _isReadOnlySession
+            ? _localization.Format("Tray_Tooltip_ReadOnly_Format", ToolTipProductName)
+            : ToolTipProductName;
+        _notifyIconAdapter.SetToolTip(text);
+    }
+
     private void OnCultureChanged(object? sender, CultureChangedEventArgs e)
     {
+        if (!_disposed) ApplyToolTip();
+
         // Guard rather than assert: EnsureContextMenuBuilt only runs lazily on the first
         // Initialize/UpdateContextMenu/SetDesktopIconsVisible call, so a culture change that lands
         // before any of those (unlikely in production — App.StartApp applies the language before

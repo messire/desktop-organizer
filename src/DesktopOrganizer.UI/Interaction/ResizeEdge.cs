@@ -1,8 +1,9 @@
 namespace DesktopOrganizer.UI.Interaction;
 
 /// <summary>
-/// One of the 8 resize handles a panel exposes (<c>ChildWindow.xaml</c>'s <c>ResizeOverlay</c>, one
-/// <c>Thumb</c> per member, <c>Thumb.Tag</c> set to the member's exact name). Extracted as part of
+/// One of the 8 resize edges/corners a panel exposes (the native hit-test zones, see
+/// <c>NativeHitTestMapper</c>; the <c>ResizeGripVisuals</c> borders in <c>ChildWindow.xaml</c> carry the
+/// member's exact name in their <c>Tag</c>). Extracted as part of
 /// Phase 1 resize stabilization (docs/PLANS/phase-1-resize-stabilization.md §2.3) so the resize
 /// gesture pipeline can be typed instead of comparing raw strings.
 /// </summary>
@@ -34,44 +35,13 @@ public enum ResizeEdge
 }
 
 /// <summary>
-/// Parses/classifies <see cref="ResizeEdge"/> from the exact <c>Thumb.Tag</c> strings used in
-/// <c>ChildWindow.xaml</c>'s <c>ResizeOverlay</c> (8 <c>Thumb</c> elements, one per
-/// <see cref="ResizeEdge"/> member). The classification helpers below are deliberately expressed as
-/// the same substring tests the original code used
-/// (<c>direction.Contains("Left")</c>/<c>"Right"</c>/<c>"Top"</c>/<c>"Bottom"</c>,
-/// <c>PanelResizeController.cs:136-205</c> pre-extraction) rather than a hand-written <c>switch</c> —
+/// Classifies <see cref="ResizeEdge"/> members by the axes they move and the boundary they anchor. The
+/// helpers below are deliberately expressed as the same substring tests the original code used
+/// (<c>direction.Contains("Left")</c>/<c>"Right"</c>/<c>"Top"</c>/<c>"Bottom"</c>) rather than a hand-written <c>switch</c> —
 /// a <c>switch</c> "as convenient" risks silently diverging on a corner case (plan §2.3).
 /// </summary>
 public static class ResizeEdgeParser
 {
-    /// <summary>
-    /// Parses <paramref name="tag"/> into a <see cref="ResizeEdge"/>. Only the exact 8 strings used as
-    /// <c>Thumb.Tag</c> in <c>ChildWindow.xaml:231-238</c> are recognized — comparison is
-    /// <see cref="StringComparison.Ordinal"/> (these values come from XAML markup, never from locale-
-    /// sensitive user input). Keep this switch and the XAML <c>Tag</c> values in sync by hand; they are
-    /// intentionally duplicated (see the remarks on <c>ChildWindow.xaml</c>'s <c>ResizeOverlay</c>).
-    /// </summary>
-    /// <param name="tag">The candidate <c>Thumb.Tag</c> value (may be <see langword="null"/>).</param>
-    /// <param name="edge">The parsed edge, valid only when this method returns <see langword="true"/>.</param>
-    /// <returns><see langword="true"/> if <paramref name="tag"/> is one of the 8 known strings.</returns>
-    public static bool TryParse(string? tag, out ResizeEdge edge)
-    {
-        switch (tag)
-        {
-            case "Left": edge = ResizeEdge.Left; return true;
-            case "Top": edge = ResizeEdge.Top; return true;
-            case "Right": edge = ResizeEdge.Right; return true;
-            case "Bottom": edge = ResizeEdge.Bottom; return true;
-            case "TopLeft": edge = ResizeEdge.TopLeft; return true;
-            case "TopRight": edge = ResizeEdge.TopRight; return true;
-            case "BottomLeft": edge = ResizeEdge.BottomLeft; return true;
-            case "BottomRight": edge = ResizeEdge.BottomRight; return true;
-            default:
-                edge = default;
-                return false;
-        }
-    }
-
     /// <summary>
     /// <see langword="true"/> for every edge that moves the panel's WIDTH — i.e. every edge whose tag
     /// contained <c>"Left"</c> or <c>"Right"</c> in the original string-based code. <c>Top</c>/<c>Bottom</c>

@@ -36,9 +36,10 @@ public enum NativeSizingEdge
 {
     /// <summary>
     /// No edge/corner under the cursor. Returned by the client from <see cref="INativePanelSizingClient.HitTest"/>;
-    /// the service then leaves the message unhandled so <c>DefWindowProc</c> resolves it to
-    /// <c>HTCLIENT</c>. Also used internally as the sentinel for an unrecognized <c>WM_SIZING</c>
-    /// <c>wParam</c> and for "no active sizing cycle".
+    /// the service then answers <c>HTCLIENT</c> itself for a point inside the window rectangle (a point
+    /// outside it is left to <c>DefWindowProc</c>) — the window's own area never depends on
+    /// <c>DefWindowProc</c> resolving it to <c>HTCLIENT</c>. Also used internally as the sentinel for an
+    /// unrecognized <c>WM_SIZING</c> <c>wParam</c> and for "no active sizing cycle".
     /// </summary>
     None,
 
@@ -78,10 +79,23 @@ public enum NativeSizingEdge
 /// продолжает без вмешательства в геометрию, но жест при этом теряет своё состояние).
 /// Терминальное уведомление приходит ровно одно на цикл: либо <see cref="SizeMoveExited"/>,
 /// либо <see cref="SizeMoveAborted"/>, и только если <see cref="SizeMoveEntered"/> вернул
-/// <see langword="true"/>.
+/// <see langword="true"/>. Исключение — цикл, отменённый самим клиентом через
+/// <see cref="INativePanelSizingService.CancelActiveSizing"/>: там терминального уведомления нет вовсе.
 /// </remarks>
 public interface INativePanelSizingClient
 {
+    /// <summary>
+    /// Gets a value indicating whether resize hit-testing is enabled at all right now (the resize gate:
+    /// off for a locked panel, a rolled-up panel and the default move-only mode). Read FIRST on every
+    /// <c>WM_NCHITTEST</c>, before any native call — so it must be a cheap flag read.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="false"/> ⇒ the service skips the DPI query and <see cref="HitTest"/> entirely and
+    /// answers <c>HTCLIENT</c> for a point inside the window. <see cref="HitTest"/>'s own semantics are
+    /// unchanged: called while the gate is off it still reports <see cref="NativeSizingEdge.None"/>.
+    /// </remarks>
+    bool IsHitTestEnabled { get; }
+
     /// <summary>
     /// <c>WM_NCHITTEST</c>. Возвращает грань/угол под курсором.
     /// </summary>
@@ -89,7 +103,8 @@ public interface INativePanelSizingClient
     /// <param name="windowRect">Прямоугольник окна (<c>GetWindowRect</c>), экранные пиксели.</param>
     /// <param name="dpiScale">Текущий масштаб окна (1.0 при 96 DPI).</param>
     /// <returns>
-    /// Грань/угол, либо <see cref="NativeSizingEdge.None"/> ⇒ <c>HTCLIENT</c> (WPF обрабатывает сам).
+    /// Грань/угол, либо <see cref="NativeSizingEdge.None"/> ⇒ <c>HTCLIENT</c> (сервис отвечает им явно,
+    /// клиентскую область дальше обрабатывает WPF).
     /// </returns>
     NativeSizingEdge HitTest(NativePointPx screenPoint, NativeRectPx windowRect, double dpiScale);
 
@@ -128,8 +143,10 @@ public interface INativePanelSizingClient
     /// </summary>
     /// <param name="finalRect">Итоговый прямоугольник окна (<c>GetWindowRect</c>), пиксели.</param>
     /// <remarks>
-    /// Отмена по <c>ESC</c> не отличима от штатного завершения (R-8 плана): система в обоих случаях
-    /// шлёт только это сообщение.
+    /// Отмена по <c>ESC</c> приходит тем же сообщением (R-8 плана). Отличить её клиент может только по
+    /// геометрии: система восстанавливает стартовый прямоугольник, поэтому <paramref name="finalRect"/>,
+    /// равный стартовому из <see cref="SizeMoveEntered"/>, клиент трактует как отменённый жест (ADR-022
+    /// phase 0-B, G-4).
     /// </remarks>
     void SizeMoveExited(NativeRectPx finalRect);
 
@@ -142,7 +159,9 @@ public interface INativePanelSizingClient
     /// <summary>
     /// <c>WM_DPICHANGED</c> / <c>WM_DPICHANGED_AFTERPARENT</c>. См. D-6 плана — reparent-нутой в
     /// <c>WorkerW</c> панели при текущем (не Per-Monitor-V2) awareness может не прийти никогда;
-    /// источник правды о смене DPI — <c>IMonitorService.MonitorsChanged</c>.
+    /// источник правды о смене DPI — <c>IMonitorService.MonitorsChanged</c>. Может прийти и посреди
+    /// sizing-цикла (панель пересекает границу мониторов): жест при этом НЕ обрывается (ADR-022 phase 0-B,
+    /// G-1) — сообщение не помечается обработанным, геометрию по-прежнему ведёт клиент.
     /// </summary>
     /// <param name="newScale">Новый масштаб (1.0 при 96 DPI).</param>
     /// <param name="suggestedRect">Предлагаемый системой прямоугольник, экранные пиксели.</param>
@@ -166,4 +185,34 @@ public interface INativePanelSizingService
     /// (R-10 плана: хук обязан сниматься детерминированно, иначе делегат держит окно и контроллер).
     /// </returns>
     IDisposable Attach(IntPtr hwnd, INativePanelSizingClient client);
+
+    /// <summary>
+    /// Прерывает системный sizing-цикл, идущий сейчас для <paramref name="hwnd"/> (ADR-022 phase 0-B, G-2):
+    /// нужен клиенту, который сам завершает жест посреди цикла (смена режима/страницы, shell recovery,
+    /// закрытие панели — dispatcher-операции, выполняемые внутри вложенного цикла <c>DefWindowProc</c>).
+    /// Без этого цикл продолжал бы ресайзить окно уже без снапа и без сохранения.
+    /// </summary>
+    /// <param name="hwnd">Окно панели, ранее переданное в <see cref="Attach"/>.</param>
+    /// <returns>
+    /// <see langword="true"/>, если для <paramref name="hwnd"/> шёл принятый клиентом цикл и запрос на отмену
+    /// отправлен; иначе <see langword="false"/> (нет хука, нет цикла, повторный вызов). Идемпотентен, не бросает.
+    /// </returns>
+    /// <remarks>
+    /// Цикл закрывается на стороне сервиса СРАЗУ и БЕЗ терминального уведомления клиенту: клиент сам
+    /// инициировал отмену и сам завершает свой жест. Последующие <c>WM_SIZING</c>/<c>WM_EXITSIZEMOVE</c>
+    /// этого цикла (система доставит их, пока цикл не размотается) клиенту не передаются. Вызывать только из
+    /// UI-потока, которому принадлежит окно.
+    /// </remarks>
+    bool CancelActiveSizing(IntPtr hwnd);
+
+    /// <summary>
+    /// Reads the current window rectangle (<c>GetWindowRect</c>, physical SCREEN pixels) of
+    /// <paramref name="hwnd"/> — lets the client compare it against a gesture's starting rectangle AFTER the
+    /// gesture was ended and the system loop cancelled (the client has no direct native access: P/Invoke
+    /// lives behind the service layer).
+    /// </summary>
+    /// <param name="hwnd">The panel window.</param>
+    /// <param name="rect">Receives the rectangle when the call succeeds; <see langword="default"/> otherwise.</param>
+    /// <returns><see langword="true"/> if the rectangle could be read; <see langword="false"/> otherwise (never throws).</returns>
+    bool TryGetWindowRect(IntPtr hwnd, out NativeRectPx rect);
 }

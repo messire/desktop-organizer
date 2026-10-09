@@ -90,6 +90,39 @@ public class StateMigrationRunnerTests
     }
 
     /// <summary>
+    /// Verifies that <see cref="StateMigrationRunner.MigrateToCurrent"/> carries the envelope's
+    /// <c>schemaRevision</c> (the fourth reserved key) through the chain verbatim — dropping it would silently
+    /// reset the revision high-water mark for any caller that re-uses the returned envelope (F5).
+    /// </summary>
+    [Fact]
+    public void MigrateToCurrent_CarriesSchemaRevisionVerbatim()
+    {
+        var runner = new StateMigrationRunner(new ISettingsMigration[] { StepMarker(1, 2), StepMarker(2, 3) });
+        var document = DocumentAtVersion(1);
+        document["schemaRevision"] = 7;
+
+        var (migrated, applied) = runner.MigrateToCurrent(document, 3);
+
+        Assert.Equal(2, applied);
+        Assert.Equal(3, migrated["schemaVersion"]!.GetValue<int>());
+        Assert.Equal(7, migrated["schemaRevision"]!.GetValue<int>());
+    }
+
+    /// <summary>
+    /// Verifies that a document without <c>schemaRevision</c> does not gain one from the runner (the revision is
+    /// written by <c>StateEnvelope.Wrap</c> only).
+    /// </summary>
+    [Fact]
+    public void MigrateToCurrent_NoSchemaRevision_DoesNotInventOne()
+    {
+        var runner = new StateMigrationRunner(new ISettingsMigration[] { StepMarker(1, 2) });
+
+        var (migrated, _) = runner.MigrateToCurrent(DocumentAtVersion(1), 2);
+
+        Assert.False(migrated.ContainsKey("schemaRevision"));
+    }
+
+    /// <summary>
     /// Verifies that a document already at the current schema version applies zero migrations and
     /// returns the exact same document instance, unchanged.
     /// </summary>

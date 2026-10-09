@@ -4,6 +4,7 @@ using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.Services.Storage;
+using DesktopOrganizer.Services.Storage.Migrations;
 using DesktopOrganizer.Tests.Helpers;
 
 namespace DesktopOrganizer.Tests.Unit.Storage;
@@ -134,21 +135,21 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "old"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6), new FakeMigration(6, 7) });
 
             var firstStore = BuildStore(paths, migrationRunner: runner);
             var firstResult = firstStore.Load();
 
             Assert.Equal(StateLoadStatus.Loaded, firstResult.Status);
             Assert.Equal(2, firstResult.SchemaVersionOnDisk);
-            Assert.Equal(4, firstResult.MigrationsApplied);
+            Assert.Equal(5, firstResult.MigrationsApplied);
 
             // S-4 (manual matrix analogue): the migrated document must have been written back to
             // primary, so a second, independent Load() sees it already at the current version.
             var onDisk = JsonNode.Parse(File.ReadAllText(paths.PrimaryFilePath)) as JsonObject;
             Assert.Equal(StateEnvelope.CurrentSchemaVersion, onDisk!["schemaVersion"]!.GetValue<int>());
 
-            var secondStore = BuildStore(paths, migrationRunner: new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) }));
+            var secondStore = BuildStore(paths, migrationRunner: new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6), new FakeMigration(6, 7) }));
             var secondResult = secondStore.Load();
 
             Assert.Equal(StateLoadStatus.Loaded, secondResult.Status);
@@ -177,7 +178,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "old"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6), new FakeMigration(6, 7) });
             var store = BuildStore(paths, migrationRunner: runner);
 
             store.Load();
@@ -210,7 +211,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "old"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6), new FakeMigration(6, 7) });
             var store = BuildStore(paths, migrationRunner: runner);
             store.Load();
 
@@ -239,7 +240,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "first-upgrade"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6), new FakeMigration(6, 7) });
             BuildStore(paths, migrationRunner: runner).Load();
 
             // Simulate a second, independent v2 document later reaching the same on-disk slot (e.g. an
@@ -289,7 +290,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.BackupFilePath, FullDocument(2, "old-backup"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6), new FakeMigration(6, 7) });
             var store = BuildStore(paths, migrationRunner: runner);
 
             store.Load();
@@ -320,7 +321,7 @@ public class JsonApplicationStateStoreTests
         try
         {
             SeedFile(paths, paths.PrimaryFilePath, FullDocument(2, "old"));
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6), new FakeMigration(6, 7) });
             var store = BuildStore(paths, storageLock: new FakeStorageLock { IsHeld = false }, migrationRunner: runner);
 
             store.Load();
@@ -355,7 +356,7 @@ public class JsonApplicationStateStoreTests
             var orphanedTemp = paths.NewTempFilePath();
             File.WriteAllText(orphanedTemp, "{\"truncat"); // deliberately incomplete/invalid JSON
 
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6), new FakeMigration(6, 7) });
             var store = BuildStore(paths, migrationRunner: runner);
 
             store.Load();
@@ -620,14 +621,14 @@ public class JsonApplicationStateStoreTests
         try
         {
             var legacy = new FakeLegacyImporter { Result = FullDocument(1, "legacy") };
-            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(1, 2), new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6) });
+            var runner = new StateMigrationRunner(new ISettingsMigration[] { new FakeMigration(1, 2), new FakeMigration(2, 3), new FakeMigration(3, 4), new FakeMigration(4, 5), new FakeMigration(5, 6), new FakeMigration(6, 7) });
             var store = BuildStore(paths, legacyImporter: legacy, migrationRunner: runner);
 
             var result = store.Load();
 
             Assert.Equal(StateLoadStatus.ImportedFromLegacy, result.Status);
             Assert.Equal(1, result.SchemaVersionOnDisk);
-            Assert.Equal(5, result.MigrationsApplied);
+            Assert.Equal(6, result.MigrationsApplied);
             Assert.Equal("legacy", result.Payload["marker"]!.GetValue<string>());
             Assert.True(File.Exists(paths.PrimaryFilePath));
 
@@ -698,6 +699,195 @@ public class JsonApplicationStateStoreTests
             var saveOutcome = store.Save(new JsonObject { ["anything"] = "goes" });
             Assert.Equal(StateSaveResult.SkippedReadOnly, saveOutcome.Result);
             Assert.Equal(originalBytes, File.ReadAllText(paths.PrimaryFilePath));
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    // ── Additive revisions (ADR-024 Amendment, schema v7) ────────────────────
+
+    /// <summary>
+    /// Verifies the "same major, higher revision" rule: a primary at the current major whose
+    /// <c>schemaRevision</c> is above this build's own loads as <see cref="StateLoadStatus.Loaded"/>, stays
+    /// writable (unlike the newer-major rung 7), emits one <c>StateNewerRevisionOpened</c> event, and a later save
+    /// keeps the high-water revision instead of lowering it to this build's.
+    /// </summary>
+    [Fact]
+    public void Load_SameMajorHigherRevision_LoadedWritable_SaveKeepsHighWaterRevision()
+    {
+        var (root, paths) = BuildPaths();
+        try
+        {
+            var higherRevision = StateEnvelope.CurrentSchemaRevision + 5;
+            var document = FullDocument(StateEnvelope.CurrentSchemaVersion, "from-newer-revision");
+            document["schemaRevision"] = higherRevision;
+            SeedFile(paths, paths.PrimaryFilePath, document);
+            var diagnostics = new FakeDiagnosticsLog();
+            var store = BuildStore(paths, diagnostics: diagnostics);
+
+            var result = store.Load();
+
+            Assert.Equal(StateLoadStatus.Loaded, result.Status);
+            Assert.Equal(0, result.MigrationsApplied);
+            Assert.True(store.IsWritable);
+            Assert.Equal("from-newer-revision", result.Payload["marker"]!.GetValue<string>());
+            Assert.False(result.Payload.ContainsKey("schemaRevision"));
+
+            var opened = Assert.Single(diagnostics.Events, e => e.Name == "StateNewerRevisionOpened");
+            Assert.Equal(higherRevision, opened.Payload.Single(p => p.Key == "revisionOnDisk").Value);
+            Assert.Equal(StateEnvelope.CurrentSchemaRevision, opened.Payload.Single(p => p.Key == "buildRevision").Value);
+
+            var outcome = store.Save(new JsonObject { ["marker"] = "edited" });
+
+            Assert.Equal(StateSaveResult.Saved, outcome.Result);
+            var onDisk = (JsonObject)JsonNode.Parse(File.ReadAllText(paths.PrimaryFilePath))!;
+            Assert.Equal(StateEnvelope.CurrentSchemaVersion, onDisk["schemaVersion"]!.GetValue<int>());
+            Assert.Equal(higherRevision, onDisk["schemaRevision"]!.GetValue<int>());
+            Assert.Equal("edited", onDisk["marker"]!.GetValue<string>());
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Verifies the same high-water rule on the recovery rungs: a backup (primary missing) written by a newer
+    /// revision is recovered writable and the rewritten primary keeps its revision.
+    /// </summary>
+    [Fact]
+    public void Load_PrimaryMissing_BackupHigherRevision_RecoversAndKeepsRevision()
+    {
+        var (root, paths) = BuildPaths();
+        try
+        {
+            var higherRevision = StateEnvelope.CurrentSchemaRevision + 2;
+            var document = FullDocument(StateEnvelope.CurrentSchemaVersion, "from-backup");
+            document["schemaRevision"] = higherRevision;
+            SeedFile(paths, paths.BackupFilePath, document);
+            var store = BuildStore(paths);
+
+            var result = store.Load();
+
+            Assert.Equal(StateLoadStatus.RecoveredFromBackup, result.Status);
+            Assert.True(store.IsWritable);
+            var onDisk = (JsonObject)JsonNode.Parse(File.ReadAllText(paths.PrimaryFilePath))!;
+            Assert.Equal(higherRevision, onDisk["schemaRevision"]!.GetValue<int>());
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that a missing, non-integer or negative <c>schemaRevision</c> counts as revision 0 — the file is
+    /// loaded normally (never quarantined) and the next save writes this build's revision.
+    /// </summary>
+    /// <param name="revisionJson">The raw JSON text placed in the <c>schemaRevision</c> slot, or <see langword="null"/> for a missing key.</param>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("\"abc\"")]
+    [InlineData("-3")]
+    [InlineData("1.5")]
+    [InlineData("null")]
+    [InlineData("{}")]
+    public void Load_MalformedRevision_TreatedAsZero_NotQuarantined(string? revisionJson)
+    {
+        var (root, paths) = BuildPaths();
+        try
+        {
+            var text = FullDocument(StateEnvelope.CurrentSchemaVersion, "m").ToJsonString();
+            if (revisionJson is not null)
+            {
+                var document = (JsonObject)JsonNode.Parse(text)!;
+                document.Remove("schemaRevision");
+                text = document.ToJsonString().TrimEnd('}') + ",\"schemaRevision\":" + revisionJson + "}";
+            }
+
+            Directory.CreateDirectory(paths.StateDirectory);
+            File.WriteAllText(paths.PrimaryFilePath, text);
+            var diagnostics = new FakeDiagnosticsLog();
+            var store = BuildStore(paths, diagnostics: diagnostics);
+
+            var result = store.Load();
+
+            Assert.Equal(StateLoadStatus.Loaded, result.Status);
+            Assert.Null(result.QuarantinePath);
+            Assert.True(store.IsWritable);
+            Assert.DoesNotContain(diagnostics.Events, e => e.Name == "StateQuarantined");
+            Assert.DoesNotContain(diagnostics.Events, e => e.Name == "StateNewerRevisionOpened");
+
+            store.Save(new JsonObject { ["marker"] = "after" });
+            var onDisk = (JsonObject)JsonNode.Parse(File.ReadAllText(paths.PrimaryFilePath))!;
+            Assert.Equal(StateEnvelope.CurrentSchemaRevision, onDisk["schemaRevision"]!.GetValue<int>());
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Verifies the major-higher rule is untouched by revisions: a v(current+1) primary is read-only even when it
+    /// carries a <c>schemaRevision</c> of 0, and the file is not modified.
+    /// </summary>
+    [Fact]
+    public void Load_NewerMajorWithRevision_StillReadOnly_FileUntouched()
+    {
+        var (root, paths) = BuildPaths();
+        try
+        {
+            var document = FullDocument(StateEnvelope.CurrentSchemaVersion + 1, "future-major");
+            document["schemaRevision"] = 0;
+            SeedFile(paths, paths.PrimaryFilePath, document);
+            var originalBytes = File.ReadAllText(paths.PrimaryFilePath);
+            var store = BuildStore(paths);
+
+            var result = store.Load();
+
+            Assert.Equal(StateLoadStatus.NewerSchema, result.Status);
+            Assert.False(store.IsWritable);
+            Assert.Equal(originalBytes, File.ReadAllText(paths.PrimaryFilePath));
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    /// <summary>
+    /// Verifies the v6 -&gt; v7 upgrade end to end with the real <see cref="V6ToV7Migration"/>: a v6 primary writes
+    /// <c>application-state.premigration-v6.json</c> and the primary becomes <c>schemaVersion 7</c> with
+    /// <c>schemaRevision 0</c> and the payload unchanged.
+    /// </summary>
+    [Fact]
+    public void Load_V6Primary_WritesPremigrationV6Backup_AndV7WithRevision0()
+    {
+        var (root, paths) = BuildPaths();
+        try
+        {
+            var v6 = StateEnvelope.Wrap(new JsonObject { ["marker"] = "v6", ["futureKey"] = new JsonObject { ["a"] = 1 } }, 6, DateTimeOffset.UtcNow, "0.8.0", 0);
+            v6.Remove("schemaRevision");
+            SeedFile(paths, paths.PrimaryFilePath, v6);
+            var v6Bytes = File.ReadAllText(paths.PrimaryFilePath);
+            var store = BuildStore(paths, migrationRunner: new StateMigrationRunner(new ISettingsMigration[] { new V6ToV7Migration() }));
+
+            var result = store.Load();
+
+            Assert.Equal(StateLoadStatus.Loaded, result.Status);
+            Assert.Equal(6, result.SchemaVersionOnDisk);
+            Assert.Equal(1, result.MigrationsApplied);
+            Assert.True(File.Exists(paths.PreMigrationBackupPath(6)));
+            Assert.Equal(v6Bytes, File.ReadAllText(paths.PreMigrationBackupPath(6)));
+
+            var onDisk = (JsonObject)JsonNode.Parse(File.ReadAllText(paths.PrimaryFilePath))!;
+            Assert.Equal(7, onDisk["schemaVersion"]!.GetValue<int>());
+            Assert.Equal(0, onDisk["schemaRevision"]!.GetValue<int>());
+            Assert.Equal("v6", onDisk["marker"]!.GetValue<string>());
+            Assert.Equal(1, onDisk["futureKey"]!["a"]!.GetValue<int>());
         }
         finally
         {
@@ -1321,5 +1511,5 @@ public class JsonApplicationStateStoreTests
     }
 
     private static JsonObject FullDocument(int schemaVersion, string marker) =>
-        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, schemaVersion, DateTimeOffset.UtcNow, "test");
+        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, schemaVersion, DateTimeOffset.UtcNow, "test", StateEnvelope.CurrentSchemaRevision);
 }

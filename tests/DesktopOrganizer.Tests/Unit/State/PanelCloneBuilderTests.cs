@@ -168,6 +168,31 @@ public class PanelCloneBuilderTests
         Assert.Equal(3, clone.HeightSpanUnits);
     }
 
+    /// <summary>
+    /// Verifies that a clone is a new entity: unknown fields and preserved unknown enum strings of the source are not
+    /// carried over (ADR-024 Amendment "Additive revisions"), while the source itself is left untouched.
+    /// </summary>
+    [Fact]
+    public void PanelCloneBuilder_DropsPersistedExtras()
+    {
+        var sourceDto = PanelStateMapper.ToDto(BuildFullyPopulatedModel());
+        sourceDto.Extras = new Dictionary<string, System.Text.Json.JsonElement> { ["futureKey"] = System.Text.Json.JsonSerializer.SerializeToElement("x") };
+        sourceDto.Geometry.Extras = new Dictionary<string, System.Text.Json.JsonElement> { ["futureGeometry"] = System.Text.Json.JsonSerializer.SerializeToElement(1) };
+        sourceDto.Appearance.SurfaceStyle = "Mica";
+        var source = PanelStateMapper.FromDto(sourceDto);
+        Assert.NotNull(source.PersistedExtras);
+
+        var clone = PanelCloneBuilder.Build(source, source.PageId, "Clone", [.. source.FilePaths]);
+
+        Assert.Null(clone.PersistedExtras);
+        var cloneDto = PanelStateMapper.ToDto(clone);
+        Assert.Null(cloneDto.Extras);
+        Assert.Null(cloneDto.Geometry.Extras);
+        Assert.Equal("Ambient", cloneDto.Appearance.SurfaceStyle);
+        Assert.NotNull(source.PersistedExtras);
+        Assert.Equal("Mica", PanelStateMapper.ToDto(source).Appearance.SurfaceStyle);
+    }
+
     private static ChildWindowModel BuildFullyPopulatedModel() => new()
     {
         Id = Guid.NewGuid(),

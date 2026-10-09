@@ -684,6 +684,39 @@ public class TrayIconManagerTests
         Assert.Null(exception);
     }
 
+    // ── ADR-audit WP-B review F5: "(read-only)" suffix on the tray icon tooltip ─────────────────
+
+    /// <summary>
+    /// A writable session shows the plain product name as the tray tooltip.
+    /// </summary>
+    [Fact]
+    public void Initialize_WritableSession_SetsPlainToolTip()
+    {
+        _sut.Initialize();
+
+        _notifyIconAdapterMock.Verify(a => a.SetToolTip("DesktopOrganizer"), Times.Once);
+        _notifyIconAdapterMock.Verify(a => a.SetToolTip(It.Is<string>(t => t.Contains("read-only"))), Times.Never);
+    }
+
+    /// <summary>
+    /// A read-only session appends the localized suffix, follows a language switch and drops it again when
+    /// the session is writable.
+    /// </summary>
+    [Fact]
+    public void SetReadOnlySession_AppendsLocalizedSuffix_AndFollowsLanguageSwitch()
+    {
+        _sut.Initialize();
+
+        _sut.SetReadOnlySession(true);
+        _notifyIconAdapterMock.Verify(a => a.SetToolTip("DesktopOrganizer (read-only)"), Times.Once);
+
+        _localization.ApplyLanguage("ru");
+        _notifyIconAdapterMock.Verify(a => a.SetToolTip("DesktopOrganizer (только чтение)"), Times.Once);
+
+        _sut.SetReadOnlySession(false);
+        _notifyIconAdapterMock.Verify(a => a.SetToolTip("DesktopOrganizer"), Times.Exactly(2));
+    }
+
     private static ToolStripMenuItem FindItem(ContextMenuStrip menu, string name) =>
         Assert.IsType<ToolStripMenuItem>(Assert.Single(menu.Items.Cast<ToolStripItem>(), i => i.Name == name));
 

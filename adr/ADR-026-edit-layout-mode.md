@@ -1,6 +1,6 @@
 # ADR-026: Dedicated Edit Layout Mode
 
-Status: Accepted
+**Статус:** Accepted — Amended 2026-09-22 (ADR-028: таблица `IsLayoutLocked` явно распространена на команду «Align to workspace grid»); Amended 2026-09-26 (ADR-031: чекбокс «Edit layout mode» удалён из окна настроек, `Ctrl+E` сохранён); Amended 2026-10-09 (ADR-audit WP-C: третий триггер re-gate — `ILayoutEditModeService.NotifyNormalModeGesturesChanged`, смена `NormalModeLayoutGestures` доходит до открытых панелей сразу); Amended 2026-10-10 (ADR-022: видимые resize-грипы Edit Layout на native-пути — `ResizeGripVisuals`, D-6)
 
 Фаза 6 «Edit Layout UX» (`docs/Refactoring/PHASES/PHASE-6-edit-layout-ux.md`,
 `docs/Refactoring/ROADMAP.md`). Ветка `ui/ambient-accent-design-tokens` (от Фазы 5, ADR-025 Accepted).
@@ -90,7 +90,9 @@ Edit Layout переиспользует визуальный язык Фазы 
 - accent-индикатор — множитель `×1.35`;
 - resize-грипы становятся видимыми (accent-тонированный `ResizeHandleStyle` вместо полностью прозрачного
   `ResizeThumbStyle`); геометрия `ResizeOverlay` (колонки/строки 6px/`*`/6px) не меняется ни на пиксель —
-  меняется только `ControlTemplate` Thumb'а.
+  меняется только `ControlTemplate` Thumb'а. *(Устарело 2026-10-10: `ResizeOverlay`, `Thumb`'ы и `ResizeHandleStyle`
+  удалены (ADR-022 Фаза 1); грипы — чисто визуальный `ResizeGripVisuals`, hit-test у `WM_NCHITTEST`, см. Amendment
+  2026-10-10 ниже.)*
 
 Инвариант-тест (`LayoutEditVisualsTests`): для каждого из пяти `PanelVisualState` значение при
 `isLayoutEditing:true` строго ≥ значения при `false`, хотя бы по одному каналу — строго больше;
@@ -192,7 +194,9 @@ Edit Layout переиспользует визуальный язык Фазы 
 ## Manual verify (Win10/Win11)
 
 Фаза целиком про ввод — ни один из V-1..V-19 не воспроизводим в среде разработки (нет живого Windows
-GUI). Полная матрица — `docs/PLANS/phase-6-edit-layout-ux.md` §7.2 и
+GUI). **Выполнено пользователем на Windows 11 24H2 2026-09-27, признано достаточным** (Windows 10 не
+проверяется) — см. [docs/ROADMAP.md](../docs/ROADMAP.md) (строки 6–8); перечень ниже — исторический
+чек-лист. Полная матрица — `docs/PLANS/phase-6-edit-layout-ux.md` §7.2 и
 `docs/Refactoring/Testing/edit-layout-manual-matrix.md`. Наивысший приоритет: V-1/V-2 (переключение
 режима из всех точек), V-3/V-4 (Normal — resize запрещён, move с порогом), V-7 (выход из режима
 во время активного жеста), V-9/V-14 (обе ветки resize — legacy и нативная), V-10/V-18 (snap-guides,
@@ -249,3 +253,48 @@ mode» в окне настроек удаляется (эта настройк�
 сохраняется без изменений. Трей (checkable-пункт, гарантированный путь вне `WS_EX_NOACTIVATE`) и меню
 заголовка панели остаются двумя независимыми путями переключения — вход «одним действием» по-прежнему
 выполнен с запасом.
+
+## Amended 2026-10-09 (ADR-audit WP-C): третий триггер re-gate — смена `NormalModeLayoutGestures`
+
+**Дефект.** Resize-gate открытой панели (D-5) пересчитывался только при двух событиях: реальный переход режима
+(`ILayoutEditModeService.ModeChanged`) и смена `IsLayoutLocked` при неизменном `Mode == Normal`. Третий вход
+`LayoutGesturePolicy.Resolve` — настройка `IAppSettings.NormalModeLayoutGestures` (в окне настроек она
+редактируется через `GlobalDefaultsViewModel`) — не имел уведомления (`IAppSettings` не INPC), поэтому смена `MoveOnly` ↔ `MoveAndResize` ↔ `None`
+доходила до уже открытых панелей только после следующего переключения Edit Layout или перезапуска. Move-жест не
+страдал (`canMove` перечитывает политику на каждое нажатие на заголовок), resize — страдал.
+
+**Решение.** Новый член `ILayoutEditModeService.NotifyNormalModeGesturesChanged()` поднимает `PropertyChanged` с именем
+`ILayoutEditModeService.NormalModeGesturesPropertyName` (= `nameof(IAppSettings.NormalModeLayoutGestures)`) — ретрансляция
+поверх уже общего для всех панелей singleton'а, без нового персистентного состояния и без нового события. Вызывает его
+`MainWindowViewModel` при `PropertyChanged(NormalModeLayoutGestures)` от `GlobalDefaultsViewModel` (то есть после записи
+настройки). `ChildWindow.OnLayoutEditModePropertyChanged` теперь реагирует на **три** входа политики — `ModeChanged`,
+`IsLayoutLocked`, `NormalModeLayoutGestures` — и для всех запускает **один и тот же полный путь** `AbortGesturesAndApplyLayoutGate`
+(`AbortResize(SourceChanged)` → `AbortDrag()` → `ForceIdle()` → `SetAllowedByPolicy`, порядок D-4). Укороченного «просто
+переприменить gate» нет: в нормальной работе жеста в момент смены настройки нет (пользователь в окне настроек) и abort — идемпотентный
+no-op, а единый путь сохраняет гарантию порядка D-4, если программная смена когда-нибудь совпадёт с живым жестом.
+
+Схема, `IAppSettings`/`user.config`, дефолт `MoveOnly` и семантика `LayoutGesturePolicy` не менялись (замороженный контур не затронут).
+
+## Amendment 2026-10-10 (ADR-022): грипы Edit Layout на native-пути — `ResizeGripVisuals`
+
+В D-6 «resize-грипы становятся видимыми (accent-тонированный `ResizeHandleStyle` …)» описывало `Thumb`-шаблон `ResizeOverlay`.
+После решения пользователя 2026-10-10 единственным путём ресайза становится native ([ADR-022](ADR-022-native-panel-sizing.md)
+Amendment 2026-10-10), где `ResizeOverlay` свёрнут и грипов в Edit Layout не было бы. Фаза 0 добавила **чисто визуальный**
+`ResizeGripVisuals` (Grid из 8 `Border`, `IsHitTestVisible="False"`, та же сетка 8/`*`/8) с тем же триггером
+`PanelTheme.IsLayoutEditing` → accent; видимость определяет `NativeSizingAffordance(UIElement? gripVisuals)` по тому же флагу
+гейта (`ResizeAffordanceGate`: Edit Layout / `IsLayoutLocked` / roll-up / `NormalModeLayoutGestures`), поэтому таблица
+`IsLayoutLocked` и политика Normal-режима не менялись. Hit-test по-прежнему `WM_NCHITTEST`; `ResizeHandleStyle` (Thumb) оставался
+до Фазы 1 — **удалён 2026-10-10** вместе с `ResizeOverlay` (ADR-022 Фаза 1, `bc60c8e`): грипы — только визуальные
+`Border`'ы (стили `ResizeGripVisualStyle`/`ResizeGripVisualEdgeStyle`, тот же триггер `PanelTheme.IsLayoutEditing` → accent),
+никогда не hit-test-цель; опора на них политики `IsLayoutLocked`/Normal-режима — через `ResizeAffordanceGate`. Инвариант-тесты
+`LayoutEditVisuals` не затронуты; геометрию грипов пинит `ResizeGripVisualsTests`. Ограничение: над полосой ресайза панель не
+«горит» hover'ом (край — non-client, DO-052).
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | [ADR-028](ADR-028-workspace-grid.md) | Таблица `IsLayoutLocked` распространена на `GridAligned`; команда «Align to workspace grid» блокируется `IsLayoutLocked`; конвейер snap-guides получает шаг workspace-quantization перед `SnapGuideCalculator` | — |
+| 2026-09-26 | [ADR-031](ADR-031-settings-window-navigation-and-panel-customize.md) | Чекбокс «Edit layout mode» удалён из окна настроек (сессионная команда); `Ctrl+E` на `MainWindow` сохранён | «Последствия»: «Три независимые точки переключения режима — трей, меню заголовка, окно настроек + `Ctrl+E`» — теперь две (трей, меню заголовка) + `Ctrl+E` |
+| 2026-10-09 | ADR-audit WP-C | Третий триггер re-gate resize открытых панелей: `ILayoutEditModeService.NotifyNormalModeGesturesChanged` (ретрансляция из `MainWindowViewModel` при смене `GlobalDefaults.NormalModeLayoutGestures`), полный abort→re-gate | Допущение, что gate пересчитывается только по `ModeChanged`/`IsLayoutLocked` (смена настройки действовала после следующего toggle/перезапуска) |
+| 2026-10-10 | [ADR-022](ADR-022-native-panel-sizing.md) | Видимые грипы Edit Layout на native-пути: `ResizeGripVisuals` (8 `Border`, visual-only) + `NativeSizingAffordance(UIElement? gripVisuals)` | D-6: «акцентные грипы = `ControlTemplate` Thumb'а `ResizeHandleStyle`» — как единственный механизм (Thumb-механизм удалён в Фазе 1, 2026-10-10: `ResizeHandleStyle`/`ResizeOverlay` больше нет, остался только `ResizeGripVisuals`) |

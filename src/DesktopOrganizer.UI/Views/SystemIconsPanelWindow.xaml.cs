@@ -265,12 +265,16 @@ public partial class SystemIconsPanelWindow : Window
         if (sender is not FrameworkElement fe) return;
         if (fe.DataContext is not SystemIconItemModel item) return;
 
+        // ADR-035 amendment (ADR-audit review cycle 1, G1): the Recycle Bin operation may show shell UI (nuke
+        // warning, progress), so it runs AFTER this OLE Drop has returned and the source's drag loop is released —
+        // and the source is told DragDropEffects.None so it never deletes the originals itself (RecycleBinFileDrop
+        // remarks). The dialog has no owner (IntPtr.Zero): this sidebar is NOACTIVATE and kept at the bottom of the
+        // Z-order by a 300 ms timer, which would drag an owned dialog down behind every application window; an
+        // unowned dialog gets its own taskbar button instead (same owner as the panel-deletion path, ADR-035).
         if (item.Kind == SystemIconKind.RecycleBin &&
-            e.Data.GetDataPresent(DataFormats.FileDrop) &&
-            e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+            RecycleBinFileDrop.TryQueue(e.Data, Dispatcher, paths => _viewModel.SendToRecycleBin(paths, IntPtr.Zero)))
         {
-            var hwnd = new WindowInteropHelper(this).Handle;
-            _viewModel.SendToRecycleBin(paths, hwnd);
+            e.Effects = RecycleBinFileDrop.ReportedEffect;
             e.Handled = true;
         }
 

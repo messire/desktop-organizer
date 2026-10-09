@@ -10,7 +10,86 @@ tracked — `0.1.0` is the first tagged history point.
 
 ## [Unreleased]
 
-Nothing yet.
+## [0.9.0] — 2026-10-10
+
+ADR audit fixes, 2026-10-09 (a review of all 47 ADRs against the code; each item below is documented in the ADR it
+names):
+
+- **Fixed (Windows 11 24H2+):** panels no longer pop up on top of your application windows. A newly created panel, a
+  panel re-created after Explorer restarts, and the panels of a page you switch to now stay behind application windows,
+  in the desktop layer, without a flash; clicking a panel still neither activates it nor raises it above your windows
+  (ADR-049, ADR-034, ADR-020). Windows 10 and the system icons sidebar behave as before.
+- **Fixed:** when the app starts in a read-only session (the saved state was written by a newer version, or another
+  instance holds the storage lock), it now tells you so — a one-time notice in Settings, a "(read-only)" suffix on the tray
+  tooltip (truncated to the 127-character limit of a tray tooltip), and a hint on the panel when you drop a file. In that session a dropped file is no longer moved off your desktop
+  into hidden storage (it stays where it is and is shown as a copy), because the panel could not be saved anyway; restoring
+  a layout snapshot does not move files either, and its confirmation does not promise to. The notice names the actual
+  reason (the saved state was written by a newer version, or another instance holds the storage lock), and when such a
+  session starts with no panels on screen, Settings opens by itself once so the notice is actually seen. Nothing about how
+  settings or state are stored changed (ADR-024).
+- **Fixed:** restoring a saved layout no longer leaves files stranded. Panels that are not part of the snapshot are
+  closed and their files go back to their original location (not the Recycle Bin); if a file cannot be returned, it is
+  not lost — it stays visible in a panel and an error message with the count is shown, and a success message with the count
+  is shown otherwise. A panel that fails to be re-created no longer interrupts the rest of the restore, and restoring the
+  same snapshot again works too (ADR-004, ADR-048).
+- **Fixed:** dropping files onto the Recycle Bin icon of the sidebar now asks before permanently deleting something that
+  is too large for the Recycle Bin (as the panel deletion already did), no longer freezes Explorer / 7-Zip / Total
+  Commander while the question is shown, and never lets the dragging program delete the originals before you answer. Panel
+  items for files that have left the disk are removed afterwards (ADR-035).
+- **Fixed:** uninstalling no longer deletes the managed storage folder when one of its sub-folders could not even be read;
+  the unreadable location is counted as a file that was not restored, the folder is kept, and the uninstaller reports a
+  partial failure (exit code 7) with a message pointing to the diagnostics log (ADR-041).
+- **Fixed:** changing the Normal-mode layout gestures setting (which gestures are allowed outside Edit Layout mode) now takes effect on already open panels immediately, not only
+  after the next Edit-layout toggle or a restart (ADR-026).
+- **Fixed:** with "Snap panel position to grid" on, panel width is no longer pulled back onto the icon grid after changing
+  the icon size or view mode, and the "Snap panel size to icon grid" switch is disabled in that state, with its description
+  explaining why (ADR-011, ADR-015, ADR-018, ADR-029).
+- **Fixed (multi-monitor, different DPI):** auto-fit to content, native resizing and roll-up/roll-down read the panel
+  position through the same per-monitor conversion as the rest of the layout code (ADR-037).
+- **Improved:** the always-on application log now also records icon-loading failures (a stuck icon extraction, a disabled
+  loading lane, a quarantined network share, a failed existence probe) that used to appear only with `--diag`; repeated
+  identical errors are capped (first five, then one "suppressed" notice) so the log stays readable, and Z-order problems
+  are logged once per session (ADR-033, ADR-046, ADR-049).
+- **Changed (internal, no user-visible effect):** the desktop-band Z-order mechanism has three new native helpers
+  (`GetWindowProcessId`, `TryReadWindowPosZOrder`, `WriteWindowPosZOrder`) behind `INativeApi`.
+
+Decisions of 2026-10-10 (each is documented in the ADR it names):
+
+- **Changed (settings file format, schema version 7):** the internal state file (`application-state.json`) now carries a
+  second, additive version counter, so a later build can add an optional field without making an earlier build of the
+  same major version unable to open the file. A build that meets fields or values it does not know (for example a panel
+  surface style added by a newer version) keeps them and writes them back unchanged instead of dropping them or treating
+  the whole file as damaged. Nothing visible changes today — no new field is stored yet (ADR-024).
+- **Added:** dragging a file from a OneDrive folder (including a Desktop that OneDrive backs up) into a panel now shows
+  a one-time-per-session hint that the file was moved out of the synced folder into panel storage and is no longer synced
+  — to return it, drag it from the panel back into a folder. Dropping still moves the file as before (ADR-009).
+- **Added:** Settings → Backup has a "Files without a panel" card. "Find files without a panel" lists files that are still
+  in panel storage but that no panel (on any page, or in any saved layout) uses any more — for example after deleting a
+  panel in a read-only session. For each you can "Return" it to where it came from or "Open folder"; nothing is deleted or
+  moved automatically, and the card is unavailable in a read-only session (ADR-009, ADR-048).
+- **Changed:** panels now always resize through the Windows sizing loop. The "Native resize (experimental)" setting is
+  removed, together with the old resize path it switched off and its `--native-sizing` / `--no-native-sizing` command-line
+  switches and `DESKTOPORGANIZER_NATIVESIZING` environment variable; a settings file saved by an earlier version that still
+  contains this entry is read without errors (the leftover entry is simply ignored, and everything else in the file is
+  kept). Resizing a panel across a monitor with a different display scale no longer interrupts the drag; pressing Esc
+  during a resize returns the panel to its previous size without saving and without switching an auto-fit panel to manual
+  height; only a click on a resize edge leaves the active window alone — a click on the rest of the panel behaves as it did
+  before; double-clicking a top or bottom edge no longer maximizes the panel vertically; and the accent resize grips of
+  Edit Layout mode are drawn (ADR-022, ADR-021, ADR-026, ADR-037). Known limits: resizing is verified with a mouse only
+  (touch and pen are not), and a panel is not highlighted while the pointer is over its resize edge.
+- **Changed (documentation only):** the rules for what happens to a file dragged into a panel (when it is returned to its
+  original place, sent to the Recycle Bin, or kept) are now consolidated in one document, ADR-048; no behavior change.
+- **Changed (internal, release process):** every release candidate's squash commit `vX.Y.Z` now gets an annotated tag
+  `vX.Y.Z`; CI also runs on `rc/**` branches (ADR-038). No effect on the app.
+- **Upgrade notes:** after the first launch of this version the state file has schema version 7 (the automatic
+  pre-upgrade snapshot is saved as `%LOCALAPPDATA%\DesktopOrganizer\State\application-state.premigration-v6.json`).
+  **After the upgrade, every launch of 0.8.0 or earlier on this file opens an empty, read-only session without any
+  notice** — 0.8.0 cannot yet recognize this state (your panels are not deleted and the file is not touched). It stays
+  that way until you run this or a newer version again, or close the app and manually restore
+  `application-state.premigration-v6.json` over `application-state.json` (it holds everything as it was right before the
+  upgrade, not anything changed afterwards). The "once" here is the format change itself, not a single session: this is
+  the last format change of this kind — moving back and forth between revisions of the same major version (7.x) no longer
+  produces a read-only session.
 
 ## [0.8.0] — 2026-09-30
 
@@ -254,7 +333,8 @@ and inline title rename for panels; file launching and a file context menu; grid
 embedding via the `WorkerW` technique; a dynamic settings window with add/remove panel; centralized NuGet
 package version management.
 
-[Unreleased]: https://github.com/messire/DesktopOrganizer/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/messire/DesktopOrganizer/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/messire/DesktopOrganizer/releases/tag/v0.9.0
 [0.8.0]: https://github.com/messire/DesktopOrganizer/releases/tag/v0.8.0
 [0.6.1]: https://github.com/messire/DesktopOrganizer/releases/tag/v0.6.1
 [0.6.0]: https://github.com/messire/DesktopOrganizer/releases/tag/v0.6.0

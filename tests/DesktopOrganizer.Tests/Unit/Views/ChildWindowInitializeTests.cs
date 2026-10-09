@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Threading;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Diagnostics;
+using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -22,7 +23,7 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 /// user gesture, and ADR-028's "no jump on first launch" invariant applies to EVERY
 /// <see cref="PanelGeometryMode"/>, not just <see cref="PanelGeometryMode.GridAligned"/> (see this
 /// fix-cycle's ADR-028/ADR-029 amendments). Before the fix, <c>Initialize</c> unconditionally called
-/// <c>IPanelResizeController.SnapWidthToGrid()</c> "so persisted sizes stay aligned even after the icon
+/// <c>NativePanelResizeController.SnapWidthToGrid()</c> "so persisted sizes stay aligned even after the icon
 /// size was changed in a previous session" — harmless before ADR-029's F-3 chrome fix (a numeric no-op,
 /// <c>GridMetrics.FileListHPadding</c> was <c>0</c>), but a silent one-time width jump afterwards
 /// (<c>FileListHPadding</c> became 8): a persisted 3-column width of 344 DIP became 352, and a persisted
@@ -43,12 +44,11 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 /// already exists from an earlier test). <see cref="RunOnStaThread{T}"/>/<c>MergeResourceDictionaries</c>
 /// below are duplicated from that class rather than shared/refactored out (matches this codebase's own
 /// established precedent of duplicating small STA/chrome-accounting helpers across
-/// <c>PanelResizeController</c>/<c>NativePanelResizeController</c> rather than reaching for a shared
+/// <c>NativePanelResizeController</c> and others rather than reaching for a shared
 /// utility neither one has a reference to).
-/// <see cref="DesktopOrganizer.UI.Interaction.Native.NativeSizingSwitch"/> is steered onto the Thumb-based
-/// <see cref="DesktopOrganizer.UI.Behaviors.PanelResizeController"/> path
-/// (<c>IAppSettings.NativePanelSizing = false</c>) so construction never touches any native/P-Invoke code
-/// — the whole point of this test is exercised entirely in managed WPF layout.
+/// The window is never shown, so <c>NativePanelResizeController.AttachTo</c> (which needs a real HWND) is
+/// never reached and the mocked <see cref="INativePanelSizingService"/> keeps construction free of any
+/// native/P-Invoke code — the whole point of these tests is exercised entirely in managed WPF layout.
 /// </remarks>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class ChildWindowInitializeTests
@@ -90,7 +90,7 @@ public class ChildWindowInitializeTests
 
     /// <summary>
     /// Characterizes the exact bug MAJOR-1 avoids, at the same seam <c>Initialize</c> used to call
-    /// (<c>PanelResizeController.SnapWidthToGrid</c>, reached here via the STILL-SUPPORTED
+    /// (<c>NativePanelResizeController.SnapWidthToGrid</c>, reached here via the STILL-SUPPORTED
     /// <c>OnModelPropertyChanged</c> IconSize-change path — MAJOR-1 removes only the LOAD-time call, not
     /// this user-driven one) — confirms the removed call-site really would have produced the jump
     /// described above, so the two tests above are pinned against a REAL mechanism, not a coincidence.
@@ -162,7 +162,7 @@ public class ChildWindowInitializeTests
     /// moment the SAME live panel switches to <c>FixedGap</c> — because <c>FixedGap</c>'s M-2 reservation
     /// (<see cref="SystemParameters.VerticalScrollBarWidth"/>) makes the SAME 352 DIP window no longer
     /// wide enough to fit 3 columns once that extra chrome is accounted for. The expected value is
-    /// computed via the exact same formula <see cref="DesktopOrganizer.UI.Behaviors.PanelResizeController.SnapWidthToGrid"/>
+    /// computed via the exact same formula <see cref="DesktopOrganizer.UI.Behaviors.NativePanelResizeController.SnapWidthToGrid"/>
     /// itself uses (not a hard-coded number) — this is the same "characterize the real mechanism, not a
     /// coincidence" style already used by this class's MAJOR-1 tests above.
     /// </summary>
@@ -248,6 +248,62 @@ public class ChildWindowInitializeTests
         Assert.Equal(352d, afterPolicyChange);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // ADR-022 phase 1 review (C3): OnClosing reports whether a resize gesture was active at close time
+    // (PanelClosing's resizeActive flag) from the panel's PanelInteractionTracker state. The tracker is
+    // private to ChildWindow, so these tests read it through reflection (precedent: the removed
+    // controller-type test) and drive the REAL state machine via its public TryEnter.
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Closing a panel whose tracker is in <see cref="PanelInteractionState.Resizing"/> must report
+    /// <c>resizeActive: true</c> to <see cref="IGestureDiagnostics.PanelClosing"/>.
+    /// </summary>
+    [Fact]
+    public void Close_WhileTrackerIsResizing_ReportsPanelClosingWithResizeActiveTrue()
+    {
+        var reported = CloseAndCapturePanelClosingFlag(PanelInteractionState.Resizing);
+
+        Assert.True(reported);
+    }
+
+    /// <summary>
+    /// Closing an idle panel must report <c>resizeActive: false</c>.
+    /// </summary>
+    [Fact]
+    public void Close_WhileTrackerIsIdle_ReportsPanelClosingWithResizeActiveFalse()
+    {
+        var reported = CloseAndCapturePanelClosingFlag(PanelInteractionState.Idle);
+
+        Assert.False(reported);
+    }
+
+    private static bool CloseAndCapturePanelClosingFlag(PanelInteractionState state)
+    {
+        return RunOnStaThread(() =>
+        {
+            bool? resizeActive = null;
+            var diagnostics = new Mock<IGestureDiagnostics>();
+            diagnostics
+                .Setup(d => d.PanelClosing(It.IsAny<Guid?>(), It.IsAny<bool>()))
+                .Callback<Guid?, bool>((_, active) => resizeActive = active);
+
+            using var harness = ChildWindowHarness.Build(diagnostics: diagnostics.Object);
+            harness.Window.Initialize(BuildGridModel(344d));
+
+            var tracker = (PanelInteractionTracker)typeof(ChildWindow)
+                .GetField("_interactionTracker", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(harness.Window)!;
+            if (state != PanelInteractionState.Idle)
+                Assert.True(tracker.TryEnter(state));
+
+            harness.Window.Close();
+
+            Assert.NotNull(resizeActive);
+            return resizeActive!.Value;
+        });
+    }
+
     private static ChildWindowModel BuildGridModel(double width, double iconSize = 48d, IconLayoutPolicy policy = IconLayoutPolicy.LegacyStretch) => new()
     {
         ViewMode = PanelViewMode.Grid,
@@ -258,7 +314,7 @@ public class ChildWindowInitializeTests
     };
 
     /// <summary>
-    /// Pure re-implementation of <see cref="DesktopOrganizer.UI.Behaviors.PanelResizeController.SnapWidthToGrid"/>'s formula
+    /// Pure re-implementation of <see cref="DesktopOrganizer.UI.Behaviors.NativePanelResizeController.SnapWidthToGrid"/>'s formula
     /// (Grid mode, snap enabled) — used by the two tests above so their expectations are derived from the
     /// SAME mechanism the production code uses, not independently hard-coded numbers that could drift
     /// from it, or that could be wrong at a <see cref="SystemParameters.VerticalScrollBarWidth"/>
@@ -304,7 +360,7 @@ public class ChildWindowInitializeTests
 
         public ChildWindow Window { get; }
 
-        public static ChildWindowHarness Build(bool snapResizeToIconGrid = true)
+        public static ChildWindowHarness Build(bool snapResizeToIconGrid = true, IGestureDiagnostics? diagnostics = null)
         {
             // M-2 fix (P08 fix cycle 2): ownership decided by reference-comparing
             // WpfApplicationHost.EnsureApplication()'s return value against the pre-call ambient state,
@@ -337,7 +393,6 @@ public class ChildWindowInitializeTests
                 Mock.Of<IGestureDiagnostics>());
 
             var appSettings = new Mock<IAppSettings>();
-            appSettings.SetupProperty(s => s.NativePanelSizing, false);
             appSettings.SetupProperty(s => s.SnapResizeToIconGrid, snapResizeToIconGrid); // must be true (the default) for the avoided-bug characterization test / MAJOR-2 re-snap tests to actually reach SnapWidthToGrid's body
             appSettings.SetupProperty(s => s.NormalModeLayoutGestures, string.Empty);
 
@@ -346,7 +401,7 @@ public class ChildWindowInitializeTests
                 Mock.Of<IWindowManager>(),
                 Mock.Of<IDesktopIntegrationService>(),
                 appSettings.Object,
-                Mock.Of<IGestureDiagnostics>(),
+                diagnostics ?? Mock.Of<IGestureDiagnostics>(),
                 Mock.Of<INativePanelSizingService>(),
                 (ILayoutEditModeService)app.Resources["LayoutEditMode"],
                 Mock.Of<IMonitorService>(),

@@ -4,7 +4,9 @@ name: CI
 # P/Invoke (INativeApi) — there is no meaningful Linux/macOS runner for this repo.
 on:
   push:
-    branches: [ master ]
+    # rc/* carries the squash commit `vX.Y.Z` of every release candidate (RC convention, ADR-038
+    # amendment 2026-10-10); the matching annotated tag `vX.Y.Z` on that commit triggers the release job.
+    branches: [ master, 'rc/**' ]
     tags: [ 'v*' ]
   pull_request:
     branches: [ master ]

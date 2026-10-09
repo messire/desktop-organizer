@@ -1,6 +1,6 @@
 # ADR-023: Single Instance and Activation IPC
 
-Status: Accepted
+**Статус:** Accepted — Addendum 2026-09-25 (D-10: инсталлятор сам штатно закрывает запущенное приложение через именованное событие `DesktopOrganizerShutdownRequestEvent` + `IShutdownRequestListener`, заменяет блокирующий `[Setup] AppMutex=`); Amended 2026-09-22 (P08 fix cycle 2: UI-marshal активации — fire-and-forget); Amended 2026-09-27 (ADR-032: строка 281 «English-only» — superseded, оба сообщения локализованы); Amended 2026-09-27 (ADR-033: код выхода 5 — fatal unhandled exception, документирован на `Program.Main` рядом с 0–4)
 
 Branch `feat/single-instance-ipc` (from `rc/0.4.0`). Implementation master plan:
 `docs/PLANS/phase-3-single-instance-ipc.md` (D-0..D-9, risks R-1..R-15). Commits `812743b`(C1)
@@ -268,8 +268,11 @@ panel load, desktop gestures) is unchanged.
   protection is a storage-root file lock, planned for Phase 4 (`ADR-024`, versioned JSON persistence).
   This phase closes `DO-001` at the process-lifecycle level; R-15 is the explicitly accepted remainder.
 - Manual verification on live Windows (FUS/multi-session behavior M-9/M-10, installer prompt M-7,
-  foreground-activation M-3, abandoned-mutex-after-kill M-5, the full 20-launch stress matrix M-1/M-12)
-  is still outstanding — see `docs/Refactoring/Testing/single-instance-manual-matrix.md`.
+  foreground-activation M-3, abandoned-mutex-after-kill M-5, the full 20-launch stress matrix M-1/M-12):
+  **performed by the user on Windows 11 24H2, 2026-09-27, accepted as sufficient** (Windows 10 is not
+  checked separately) — see [docs/ROADMAP.md](../docs/ROADMAP.md) (lines 6–8, manual verify for Phases 0–10).
+  The historical checklist `docs/Refactoring/Testing/single-instance-manual-matrix.md` is kept as a record.
+  The "R-15 remainder" above was closed by the ADR-024 storage-root advisory lock.
 
 ## Not done in this phase (deliberately)
 
@@ -397,3 +400,20 @@ cross-cutting task" note above (line 281). Both messages
 and `docs/PLANS/localization.md` §2.8) are now localized RESX keys resolved against
 `CultureInfo.CurrentUICulture` in `Program.cs`, before DI/`ApplicationStateService.Load()` run. No other
 decision in this ADR (D-1..D-10) is revisited.
+
+## Amendment (2026-09-27): exit code 5 (ADR-033)
+
+[ADR-033](ADR-033-crash-safety-and-app-log.md) adds exit code `5` — a fatal unhandled exception handled by
+`CrashCoordinator.HandleFatal` — documented on `Program.Main` next to the single-instance codes `0`–`4`
+(`Program.cs`, remarks on `Main`). Later `--restore-panel-items` ([ADR-041](ADR-041-first-run-panel-and-uninstall-restore.md))
+adds `6`/`7`/`8`. Exit code `1` (an unhandled exception before/during the handshake, line 229–230 above)
+is unchanged.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | P08 fix cycle 2 | Activation wiring's UI marshal — fire-and-forget (см. раздел выше) | — |
+| 2026-09-25 | Addendum D-10 | Инсталлятор закрывает приложение через именованное событие; `[Setup] AppMutex=` заменён на ask→close→retry в `[Code]` | Блокирующий `AppMutex` как механизм закрытия |
+| 2026-09-27 | [ADR-032](ADR-032-ui-localization.md) | Сообщения `Startup_*` локализованы | «English-only» (строка 281) |
+| 2026-09-27 | [ADR-033](ADR-033-crash-safety-and-app-log.md) | Код выхода 5 (fatal unhandled exception на UI-потоке, `CrashCoordinator`); позже `--restore-panel-items` добавил 6/7/8 | — (код 1 для исключения до/во время handshake не менялся) |

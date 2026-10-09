@@ -116,6 +116,8 @@ P00, часть A (аудит, код не менялся). Ветка `bugfix/w
 
 `SetWindowPos` / `MoveWindow` в native-коде (ИЗМЕРЕНО): `DesktopIntegrationService.SendToBackOfZOrder` (:96-144) вызывает `SetWindowPos` с флагами `SWP_NOMOVE|SWP_NOSIZE`, и его вызывает только `SystemIconsPanelManager.cs:343`. Для `ChildWindow` вызовов `SetWindowPos`/`MoveWindow` **нет**. Геометрию native-кода меняет только W8 (`WriteRect`).
 
+> **Исправление 2026-10-09 (ADR-audit, [ADR-049](../../adr/ADR-049-desktop-band-top-level-fence-panels.md)):** утверждение «для `ChildWindow` вызовов `SetWindowPos` нет» **больше неверно** (а `SendToBackOfZOrder` ещё и вызывается не только из `SystemIconsPanelManager`: ранее — также из shell-restart recovery панели). Теперь `DesktopIntegrationService.KeepInDesktopBand` (для top-level панелей, режим T) вызывает `SetWindowPos` с `SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_NOOWNERZORDER` и `hWndInsertAfter` из «полосы рабочего стола», а фильтр `WM_WINDOWPOSCHANGING` (`ChildWindow.ZOrder.cs`) переписывает Z-order-половину `WINDOWPOS`. Эти вызовы **не меняют геометрию** (`SWP_NOMOVE|SWP_NOSIZE`; кадры перемещения/ресайза фильтр пропускает по `SWP_NOZORDER`), поэтому таблица writer’ов геометрии выше остаётся полной.
+
 #### B. Модельные writers (`ChildWindowModel.Position/Size/MonitorDeviceId/IsRolledUp`)
 
 | # | Writer (file:line) | Что пишет | Триггер | Квантизация | Единицы / origin | Отрицательные | Повторная запись | Persist |

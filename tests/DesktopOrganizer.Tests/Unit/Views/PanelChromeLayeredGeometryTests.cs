@@ -13,7 +13,7 @@ using DesktopOrganizer.UI.Views;
 using Moq;
 
 // ChildWindowModel.Position/Size are System.Drawing.Point/Size (matching Win32 window geometry), NOT
-// System.Windows.Point/Size — same aliasing Unit.Views.ResizeOverlayGeometryTests/ChildWindowInitializeTests use.
+// System.Windows.Point/Size — same aliasing Unit.Views.ResizeGripVisualsTests/ChildWindowInitializeTests use.
 using DrawingPoint = System.Drawing.Point;
 using DrawingSize = System.Drawing.Size;
 
@@ -22,14 +22,14 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 /// <summary>
 /// ADR-030 "Reference-Style Layered Panel Chrome" (docs/PLANS/reference-panel-chrome.md §5.3, T-V1/T-V2/T-V3)
 /// — real-window geometry pins for the layered chrome viewed ALONGSIDE its real window siblings
-/// (<c>ResizeOverlay</c>, <c>TitleText</c>, the header button group) — as opposed to
+/// (<c>ResizeGripVisuals</c>, <c>TitleText</c>, the header button group) — as opposed to
 /// <c>Unit.Resources.ResourceDictionaryMergeTests</c>' own isolated-<see cref="PanelChrome"/> pins (T-R*),
 /// which construct a bare <see cref="PanelChrome"/> directly against its style and never touch a real
-/// <see cref="ChildWindow"/> at all. Same harness convention as <c>Unit.Views.ResizeOverlayGeometryTests</c>
+/// <see cref="ChildWindow"/> at all. Same harness convention as <c>Unit.Views.ResizeGripVisualsTests</c>
 /// (real <see cref="ChildWindow"/>, <see cref="Window.Show"/> never called — see that class's own remarks
 /// for why a shown, real <c>HWND</c> here crashes the whole `dotnet test` host process later in the run)
 /// — duplicated per this codebase's established "one small STA/chrome harness per test class" convention
-/// (see <c>ResizeOverlayGeometryTests</c>' own remarks on that point) rather than shared.
+/// (see <c>ResizeGripVisualsTests</c>' own remarks on that point) rather than shared.
 /// </summary>
 [Trait(UnitTests, "DesktopOrganizer.UI")]
 public class PanelChromeLayeredGeometryTests
@@ -37,17 +37,19 @@ public class PanelChromeLayeredGeometryTests
     private const double WindowExtent = 200d;
 
     /// <summary>
-    /// T-V1: in a real, unshown <see cref="ChildWindow"/> (200x200) — <c>ResizeOverlay</c> still occupies
-    /// the WHOLE window rect (unchanged, plan §0 "0 изменённых строк в ChildWindow.xaml"), while
+    /// T-V1: in a real, unshown <see cref="ChildWindow"/> (200x200) — <c>ResizeGripVisuals</c> still occupies
+    /// the WHOLE window rect, while
     /// <c>PART_SurfaceLayer</c> (the layered chrome's own inset content root, plan D-1/D-2) is shrunk by
     /// <see cref="PanelMetrics.ChromeOuterInset"/> on every side — i.e. the 2-DIP ring between the window
     /// edge and <c>PART_SurfaceLayer</c>'s own edge, made nearly transparent by the inset, must lie ENTIRELY
     /// inside both the straight-edge (<see cref="PanelMetrics.ResizeEdgeThickness"/>) and corner
     /// (<see cref="PanelMetrics.ResizeCornerThickness"/>) resize strips (plan D-5's hit-catcher rationale:
-    /// the resize gesture must still start immediately at the outer ring, not partway in).
+    /// the resize gesture must still start immediately at the outer ring, not partway in). The test pins the
+    /// <see cref="PanelMetrics"/> constants that <c>NativeHitTestMapper</c> uses to build the native resize
+    /// hit-test zones.
     /// </summary>
     [Fact]
-    public void ResizeOverlay_SpansWholeWindow_AndFullyCoversTheChromeInsetRing()
+    public void ResizeGripVisuals_SpansWholeWindow_AndFullyCoversTheChromeInsetRing()
     {
         var snapshot = RunOnStaThread(() => MeasureLayeredChrome(WindowExtent, WindowExtent));
 
@@ -187,7 +189,7 @@ public class PanelChromeLayeredGeometryTests
         PanelTheme.SetVisualState(panelRoot, visualState);
         PanelTheme.SetIsLayoutEditing(panelRoot, isLayoutEditing);
 
-        var overlay = (Grid)harness.Window.FindName("ResizeOverlay")!;
+        var overlay = (Grid)harness.Window.FindName("ResizeGripVisuals")!;
         overlay.Measure(new Size(width, height));
         overlay.Arrange(new Rect(0, 0, width, height));
         overlay.UpdateLayout();
@@ -279,7 +281,7 @@ public class PanelChromeLayeredGeometryTests
         Rect HeaderButtonRect);
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════
-    // STA/resource-chain infrastructure — duplicated from Unit.Views.ResizeOverlayGeometryTests (this
+    // STA/resource-chain infrastructure — duplicated from Unit.Views.ResizeGripVisualsTests (this
     // codebase's established convention of duplicating small STA/chrome harnesses per test class rather
     // than sharing one; see that class's own remarks for why). Never calls Window.Show()/Close().
     // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -325,7 +327,6 @@ public class PanelChromeLayeredGeometryTests
                 Mock.Of<IGestureDiagnostics>());
 
             var appSettings = new Mock<IAppSettings>();
-            appSettings.SetupProperty(s => s.NativePanelSizing, false);
             appSettings.SetupProperty(s => s.SnapResizeToIconGrid, false);
             appSettings.SetupProperty(s => s.NormalModeLayoutGestures, nameof(NormalModeLayoutGestures.MoveAndResize));
 
@@ -360,7 +361,7 @@ public class PanelChromeLayeredGeometryTests
 
     /// <summary>
     /// Runs <paramref name="func"/> to completion on a brand-new STA thread and returns its result — see
-    /// <see cref="LayeredChromeHarness"/>'s own remarks and <c>ResizeOverlayGeometryTests</c>' class-level
+    /// <see cref="LayeredChromeHarness"/>'s own remarks and <c>ResizeGripVisualsTests</c>' class-level
     /// remarks for why STA is required and <see cref="Window.Show"/> is never called here.
     /// </summary>
     private static T RunOnStaThread<T>(Func<T> func) => StaTestRunner.Run(func);

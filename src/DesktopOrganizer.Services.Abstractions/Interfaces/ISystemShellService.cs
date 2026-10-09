@@ -46,7 +46,9 @@ public interface ISystemShellService
     RecycleBinState GetRecycleBinState();
 
     /// <summary>
-    /// Moves the given file/folder paths to the Recycle Bin (allow-undo). Returns <see langword="false"/> on failure.
+    /// Moves the given file/folder paths to the Recycle Bin (allow-undo). An item that cannot go to the Recycle Bin
+    /// (too large, drive without one) is never deleted permanently without the shell asking first
+    /// (<c>FOF_WANTNUKEWARNING</c>, ADR-035). Returns <see langword="false"/> on failure or when the user declines.
     /// </summary>
     /// <param name="paths">Full paths to delete.</param>
     /// <param name="ownerHwnd">Owner window handle for any confirmation UI.</param>

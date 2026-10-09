@@ -7,6 +7,9 @@ namespace DesktopOrganizer.Services.Tools;
 /// </summary>
 internal class NotifyIconAdapter : INotifyIconAdapter
 {
+    /// <summary>The longest text <see cref="NotifyIcon.Text"/> accepts.</summary>
+    internal const int MaxToolTipLength = 127;
+
     private readonly NotifyIcon _notifyIcon = new () { Visible = true, };
 
     // Tracks the GDI icon handle currently assigned to the tray icon so it can be disposed once
@@ -58,6 +61,10 @@ internal class NotifyIconAdapter : INotifyIconAdapter
         => _notifyIcon.ShowBalloonTip(timeout, title, text, icon);
 
     /// <inheritdoc/>
+    public void SetToolTip(string text)
+        => _notifyIcon.Text = TruncateToolTip(text);
+
+    /// <inheritdoc/>
     public void SetContextMenu(ContextMenuStrip menu)
         => _notifyIcon.ContextMenuStrip = menu;
 
@@ -74,5 +81,22 @@ internal class NotifyIconAdapter : INotifyIconAdapter
         _notifyIcon.Dispose();
         _currentIcon?.Dispose();
         _currentIcon = null;
+    }
+
+    /// <summary>
+    /// <see cref="NotifyIcon.Text"/> throws <see cref="ArgumentOutOfRangeException"/> for more than
+    /// <see cref="MaxToolTipLength"/> characters (the Win32 <c>NOTIFYICONDATA.szTip</c> limit) - cut the text to
+    /// fit rather than letting a long localized tooltip take the tray icon down.
+    /// </summary>
+    /// <param name="text">The requested tooltip (may be <see langword="null"/> from a loose caller).</param>
+    /// <returns>The text, at most <see cref="MaxToolTipLength"/> characters long.</returns>
+    internal static string TruncateToolTip(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        if (text.Length <= MaxToolTipLength) return text;
+
+        // Do not leave a lone high surrogate at the cut.
+        var length = char.IsHighSurrogate(text[MaxToolTipLength - 1]) ? MaxToolTipLength - 1 : MaxToolTipLength;
+        return text[..length];
     }
 }

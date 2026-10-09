@@ -99,9 +99,11 @@ public partial class ChildWindow
 
             case DesktopEmbedResult.NoDesktopLayer:
                 // Top-level panel (Windows 11 24H2+, or a WorkerW that does not exist yet): the new
-                // shell's windows may now sit above it — put it back directly above the desktop band.
-                // Styles were already re-applied by EmbedInDesktop itself.
-                _desktopIntegration.SendToBackOfZOrder(tracked);
+                // shell's windows may now sit above it — put it back at the top of the desktop band
+                // (ADR-034 amendment 2026-10-09: band-aware, so N panels and the sidebar's own
+                // one-slot-above-Progman timer never swap places). Styles were already re-applied by
+                // EmbedInDesktop itself.
+                _desktopIntegration.KeepInDesktopBand(tracked);
                 return PanelShellRecoveryOutcome.TopLevel;
 
             default:

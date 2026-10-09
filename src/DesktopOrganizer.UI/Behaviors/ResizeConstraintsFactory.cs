@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Windows;
 using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
@@ -10,13 +11,11 @@ namespace DesktopOrganizer.UI.Behaviors;
 /// <c>OnResizeDragDelta</c> branch decisions (docs/PLANS/phase-1-resize-stabilization.md §2.4).
 /// </summary>
 /// <remarks>
-/// Extracted out of <see cref="PanelResizeController"/> as part of Phase 2 commit C4
-/// (docs/PLANS/phase-2-native-panel-sizing.md §1.5) so both the legacy <c>Thumb</c> path
-/// (<see cref="PanelResizeController"/>) and the native <c>WM_SIZING</c> path
-/// (<see cref="NativePanelResizeController"/>) build <see cref="ResizeConstraints"/> from ONE
-/// implementation — a second copy of this logic would silently diverge from the first the next time
-/// either snap metric changes, breaking the golden equivalence between the two paths (plan §3, "жёсткое
-/// требование").
+/// Extracted out of the former Thumb-driven resize controller as part of Phase 2 commit C4
+/// (docs/PLANS/phase-2-native-panel-sizing.md §1.5); the native <c>WM_SIZING</c> path
+/// (<see cref="NativePanelResizeController"/>) builds <see cref="ResizeConstraints"/> from this ONE
+/// implementation (ADR-022: the Thumb path is removed) — a second copy of this logic would silently diverge the next
+/// time either snap metric changes, breaking the regression-golden suite (plan §3, "жёсткое требование").
 /// </remarks>
 internal static class ResizeConstraintsFactory
 {
@@ -73,7 +72,7 @@ internal static class ResizeConstraintsFactory
         // priority over SnapResizeToIconGrid, per the ADR-011 amendment — and so the diagnostics log
         // (IGestureDiagnostics.ResizeStarted) never reports icon-grid snap cells for a gesture that is
         // actually being quantised to GridSize).
-        if (sizeGridStep <= 0d && !isGridAligned && snapEnabled && model is not null && model.ViewMode == PanelViewMode.Grid)
+        if (IsIconGridSnapActive(model, snapEnabled, isGridAligned, sizeGridStep))
         {
             // Grid mode: width snaps to whole columns (GridMetrics.CellSize == x) and height snaps to
             // whole rows (GridMetrics.RowHeight == x_v) — deliberately NOT the same cell size on both
@@ -123,6 +122,24 @@ internal static class ResizeConstraintsFactory
     }
 
     /// <summary>
+    /// The ONE priority rule between the three width/height quantisers (ADR-011 amendment 2026-09-24 vs
+    /// ADR-015/018): the icon-grid snap (<c>AdaptiveGridLayout</c> cell, System C) applies only in Grid mode
+    /// with <c>IAppSettings.SnapResizeToIconGrid</c> on, never for a
+    /// <see cref="PanelGeometryMode.GridAligned"/> panel (workspace grid, System B, owns its size) and never
+    /// while <c>GridSize</c> is active (<paramref name="sizeGridStep"/> &gt; 0 — GridSize has priority and
+    /// quantises instead). Shared by <see cref="BuildConstraints"/> (the resize gesture) and both
+    /// controllers' <c>SnapWidthToGrid</c> (the post-<c>IconSize</c>/<c>ViewMode</c>/<c>IconLayoutPolicy</c>
+    /// re-snap) so the two can never disagree.
+    /// </summary>
+    /// <param name="model">The panel's model (<see langword="null"/> before <c>Initialize</c> — never snaps).</param>
+    /// <param name="snapEnabled"><c>IAppSettings.SnapResizeToIconGrid</c>.</param>
+    /// <param name="isGridAligned">Whether the panel is on the workspace grid for this operation.</param>
+    /// <param name="sizeGridStep">The step resolved by <see cref="ResolveSizeGridStep"/> (<c>0</c> = GridSize inactive).</param>
+    /// <returns><see langword="true"/> iff the icon-grid snap is the active quantiser.</returns>
+    internal static bool IsIconGridSnapActive([NotNullWhen(true)] ChildWindowModel? model, bool snapEnabled, bool isGridAligned, double sizeGridStep)
+        => sizeGridStep <= 0d && !isGridAligned && snapEnabled && model is not null && model.ViewMode == PanelViewMode.Grid;
+
+    /// <summary>
     /// ADR-011 Amendment 2026-09-24 (resize extension): resolves <see cref="ResizeConstraints.SizeGridStep"/>
     /// from the raw <paramref name="gridSize"/> setting.
     /// </summary>
@@ -148,7 +165,7 @@ internal static class ResizeConstraintsFactory
     /// GridAligned panel would pull it OFF the workspace grid it is locked to), otherwise <c>0</c> (the
     /// panel is left on its ordinary workspace-grid quantisation, undisturbed by GridSize).
     /// </returns>
-    private static double ResolveSizeGridStep(int gridSize, bool isGridAligned, double unitSize)
+    internal static double ResolveSizeGridStep(int gridSize, bool isGridAligned, double unitSize)
     {
         if (gridSize <= 1) return 0d;
         if (!isGridAligned) return gridSize;

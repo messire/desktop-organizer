@@ -13,13 +13,13 @@ namespace DesktopOrganizer.Services.Storage;
 /// <see cref="ISettingsMigration.Migrate"/> — which, per its own contract, only ever sees payload
 /// keys — the <c>document</c> passed to this runner is the <em>full</em> document, envelope keys
 /// included: it must carry a top-level integer <c>schemaVersion</c> key (this is how the runner
-/// knows where in the chain to start), and may also carry <c>writtenAtUtc</c>/<c>appVersion</c> if
-/// the caller has them (both are passed through completely untouched — no migration ever sees or
+/// knows where in the chain to start), and may also carry <c>writtenAtUtc</c>/<c>appVersion</c>/<c>schemaRevision</c> if
+/// the caller has them (all passed through completely untouched — no migration ever sees or
 /// touches them). This runner uses <see cref="StateEnvelope"/> to draw that envelope/payload line —
 /// <see cref="StateEnvelope.TryGetSchemaVersion"/> to read the starting version and
 /// <see cref="StateEnvelope.StripEnvelope"/> to produce the payload-only document each
 /// <see cref="ISettingsMigration.Migrate"/> call actually sees — rather than re-deriving the
-/// reserved-key list itself, and re-attaches <c>writtenAtUtc</c>/<c>appVersion</c> (carried through
+/// reserved-key list itself, and re-attaches <c>writtenAtUtc</c>/<c>appVersion</c>/<c>schemaRevision</c> (carried through
 /// verbatim as the original <see cref="JsonNode"/>s, not re-parsed/re-typed) plus the updated
 /// <c>schemaVersion</c> once the chain completes. The split exists so this type can be driven
 /// directly off on-disk / golden-fixture documents (always envelope + payload together) while
@@ -141,9 +141,12 @@ internal sealed class StateMigrationRunner
         }
 
         // Carried through verbatim (not re-parsed/re-typed) — this runner only ever changes
-        // schemaVersion; writtenAtUtc/appVersion are none of any migration's business.
+        // schemaVersion; writtenAtUtc/appVersion/schemaRevision are none of any migration's business.
+        // schemaRevision (v7+) is a reserved envelope key too: dropping it here would silently reset the
+        // high-water mark for every caller that re-uses the returned envelope (e.g. StateRestoreCommand).
         var writtenAtUtc = document["writtenAtUtc"]?.DeepClone();
         var appVersion = document["appVersion"]?.DeepClone();
+        var schemaRevision = document["schemaRevision"]?.DeepClone();
 
         var payload = StateEnvelope.StripEnvelope(document);
 
@@ -174,6 +177,11 @@ internal sealed class StateMigrationRunner
         if (appVersion is not null)
         {
             payload["appVersion"] = appVersion;
+        }
+
+        if (schemaRevision is not null)
+        {
+            payload["schemaRevision"] = schemaRevision;
         }
 
         return (payload, migrationsApplied);

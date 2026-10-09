@@ -34,7 +34,7 @@ gesture lifecycle, полный список событий и privacy-инва�
 |---|---|---|
 | `timestamp` | ISO 8601 с офсетом | `DateTimeOffset.Now` на момент `Write` |
 | `seq` | integer | Монотонный счётчик per-process (не переживает перезапуск) |
-| `category` | string | `session` \| `gesture` \| `capture` \| `panel` \| `state` (Фаза 4) \| `layout` (Фаза 6) \| `icon` (P08, extended ADR-046) \| `liveness` (ADR-046) |
+| `category` | string | `session` \| `gesture` \| `panel` \| `state` (Фаза 4) \| `layout` (Фаза 6) \| `icon` (P08, extended ADR-046) \| `liveness` (ADR-046) |
 | `name` | string | Имя события (см. таблицу ниже) |
 | `scope` | string \| null | Первые 8 символов `Guid` панели (`N`-формат), `null` для session-событий |
 | `payload` | object | Поля события, см. ниже |
@@ -46,7 +46,7 @@ gesture lifecycle, полный список событий и privacy-инва�
 геометрия (double), enum-имена (string, из закрытого набора), bool, count/duration (int/long).
 Причина: тестировщики будут присылать эти файлы разработчикам для диагностики зависаний — лог не должен
 содержать личных данных. Инвариант закреплён unit-тестами (`GestureDiagnosticsTests` для `gesture`/
-`capture`/`panel`, `SingleInstanceDiagnosticsTests` для single-instance событий категории `session`)
+`panel`, `SingleInstanceDiagnosticsTests` для single-instance событий категории `session`)
 и в XML-doc `DiagnosticEvent`.
 
 Отдельно для Фазы 3: `{sidHash}`/`userKey` (дериват SID пользователя, из которого собираются имена
@@ -89,27 +89,28 @@ guard-мьютекс) **не резолвит `IDiagnosticsLog` вообще**: 
 
 | Событие | Фаза | Payload |
 |---|---|---|
-| `ResizeStarted` | 0 | `direction`, `boundsX/Y/Width/Height`, `viewMode`, `iconSize`, `snapEnabled`, `snapCellWidth/Height`, `captureOwner` |
+| `ResizeStarted` | 0; с ADR-022 Фаза 1 (2026-10-10) пишется **только** из native `WM_ENTERSIZEMOVE` (`NativePanelResizeController.SizeMoveEntered` после `TryBegin`) | `direction`, `boundsX/Y/Width/Height`, `viewMode`, `iconSize`, `snapEnabled`, `snapCellWidth/Height`, `captureOwner` (всегда константа `"NativeSizingLoop"`; прежнее имя типа элемента-владельца capture — `Thumb` — ушло вместе с Thumb-путём) |
 | `ResizeDelta` (throttled, ≤1/50мс) | 0 | `direction`, `hChange`, `vChange`, `rawWidth/Height`, `appliedX/Y/Width/Height` |
-| `ResizeCompleted` | 0 (payload расширен в Фазе 1, commit C8) | `direction`, `canceled` (из `DragCompletedEventArgs.Canceled`, сохранён для обратной совместимости со схемой Фазы 0), `boundsX/Y/Width/Height`, `lastRawWidth/Height`, `lastAppliedX/Y/Width/Height`, `deltaCount`, `emittedCount`, `durationMs`, `endReason` (`Interaction.ResizeEndReason.ToString()` — закрытый набор: `Completed`/`Canceled`/`CaptureLost`/`SourceChanged`/`Unloaded`/`Closing`/`Failed`), `exceptionType` (только когда `endReason == Failed`: имя типа исключения, `Exception.GetType().Name` — НИКОГДА `Exception.Message`; `null` для остальных `endReason`) |
+| `ResizeCompleted` | 0 (payload расширен в Фазе 1, commit C8) | `direction`, `canceled` (`true` только для `endReason == Canceled`, т.е. native ESC при rect, равном стартовому, ADR-022 G-4; сохранён для обратной совместимости со схемой Фазы 0, раньше брался из `DragCompletedEventArgs.Canceled`), `boundsX/Y/Width/Height`, `lastRawWidth/Height`, `lastAppliedX/Y/Width/Height`, `deltaCount`, `emittedCount`, `durationMs`, `endReason` (`Interaction.ResizeEndReason.ToString()` — закрытый набор: `Completed`/`Canceled`/`CaptureLost`/`SourceChanged`/`Unloaded`/`Closing`/`Failed`), `exceptionType` (только когда `endReason == Failed`: имя типа исключения, `Exception.GetType().Name` — НИКОГДА `Exception.Message`; `null` для остальных `endReason`) |
 | `DragStarted` | 0 | `startCursorX/Y`, `boundsX/Y/Width/Height` |
 | `DragDelta` (throttled, ≤1/50мс) | 0 | `appliedX/Y/Width/Height` |
 | `DragCompleted` | 0 | `boundsX/Y/Width/Height`, `lastAppliedX/Y/Width/Height`, `deltaCount`, `emittedCount`, `durationMs` |
 | `SizeMoveEntered` (`WM_ENTERSIZEMOVE`) | **2 — реализовано** (commit C4, `NativePanelResizeController`) | `hwnd`, `edge` (`Services.Abstractions.NativeSizingEdge.ToString()`) |
-| `SizeMoveExited` (`WM_EXITSIZEMOVE`) | **2 — реализовано** (commit C4, `NativePanelResizeController`) | `hwnd`, `finalX/Y/Width/Height` (DIP, `GetWindowRect` converted via `NativeSizingCoordinateMapper.ToDip`) |
+| `SizeMoveExited` (`WM_EXITSIZEMOVE`) | **2 — реализовано** (commit C4, `NativePanelResizeController`) | `hwnd`, `finalX/Y/Width/Height` (DIP, `GetWindowRect` конвертирован `ToDesktopDip` по снимку `IDesktopScaleProvider.Current`; `NativeSizingCoordinateMapper` с ADR-037 не используется) |
 
-### `capture` (scope = panel id prefix)
+### Категория `capture` — удалена (ADR-022 Фаза 1, 2026-10-10)
 
-| Событие | Фаза | Payload |
-|---|---|---|
-| `CaptureGot` | 0 | `sourceName` (тип `e.OriginalSource`), `captureOwner` (`Mouse.Captured?.GetType().Name`) |
-| `CaptureLost` | 0 | `sourceName`, `captureOwner`, `thumbIsDragging` (`Thumb.IsDragging` на момент потери capture — ключевой сигнал для диагностики зависания resize, см. ADR-021) |
+События `CaptureGot` и `CaptureLost` (и их поля `sourceName`, `captureOwner`, `thumbIsDragging`) писались только обработчиками
+`Mouse.GotMouseCapture`/`LostMouseCapture` на `ResizeOverlay` Thumb-пути. Путь удалён, `IGestureDiagnostics.CaptureGot`/
+`CaptureLost` удалены, в `src/` нет ни одного `Write("capture", …)`; в логах старых сборок категория встречаться может.
+Эквивалент потери capture на native-пути — `ResizeCompleted.endReason == "CaptureLost"` (системный цикл прерван:
+`NativePanelResizeController.SizeMoveAborted`, `WM_CAPTURECHANGED`).
 
 ### `panel` (scope = panel id prefix)
 
 | Событие | Фаза | Payload |
 |---|---|---|
-| `PanelClosing` | 0 | `thumbIsDragging` |
+| `PanelClosing` | 0; поле переименовано в ADR-022 Фазе 1 (2026-10-10) | `resizeActive` (bool — панель закрывается во время активного resize-жеста: `PanelInteractionTracker.State == Resizing`); прежнее `thumbIsDragging` (`(Mouse.Captured as Thumb)?.IsDragging`) удалено |
 | `ExistenceRefreshFailed` | **P08 fix cycle 1, 2026-09-22 (UX P2)** — `GestureDiagnostics.ExistenceRefreshFailed`, вызывается из `ChildWindowViewModel.RefreshExistence`'s `catch` | `exceptionType` (`Exception.GetType().Name`) — **никогда** `Exception.Message`. Заменяет `Console.Error.WriteLine`, который в `WinExe`-процессе никто не читает (тот же класс дефекта, что и `icon`-категория ниже) |
 | `AlignToWorkspaceGridRefused` | **P03 fix cycle 1 final verification, 2026-09-22** — `GestureDiagnostics.AlignToWorkspaceGridRefused`, вызывается из `ChildWindow.WorkspaceGrid.cs` при отказе `WorkspaceGridPlacement.TryAlign` | `reason` — код (`NoMonitor` / `Unmeasured`), **никогда** title/path панели. Заменяет `Console.Error.WriteLine` |
 | `PanelItemsBuilt` | **ADR-046, backlog 1.x item 7** — `GestureDiagnostics.PanelItemsBuilt`, `Stopwatch` вокруг `BaseViewModel.AddFilesCore` + непосредственно следующего фильтра/сортировки в `LoadFromModel`/`ReplaceAll`/Folder-Portal-ресинке. Ровно та часть метрики ROADMAP «не дольше одного кадра», которую можно измерить без Windows-GUI — построение `FileItem`'ов без fs/shell (D-5) плюс проход фильтра/сортировки; загрузка иконок и liveness-проба асинхронны и не блокируют этот проход (генерация контейнеров невиртуализированной `AdaptiveIconGridPanel`, ADR-018, — отдельная, не покрываемая этим событием стоимость, см. `docs/PLANS/background-icon-loading.md` §8.4) | `count` (int, число элементов после перестройки), `elapsedMicroseconds` (long) |
@@ -309,10 +310,10 @@ applied/discarded per the invariants in `docs/PLANS/background-icon-loading.md` 
 последним — `IGestureDiagnostics.LayoutModeChanged` (чисто наблюдательное событие, ни на что не влияет).
 
 `SizingModeChanged` — per-panel (`scope` = 8-символьный префикс `Guid` панели, тот же `Scope(panelId)`
-helper, что и остальные события категорий `gesture`/`capture`/`panel`), пишется ПОСЛЕ мутации
+helper, что и остальные события категорий `gesture`/`panel`), пишется ПОСЛЕ мутации
 `ChildWindowModel.SizingMode` (`AutoContent → Manual`), чисто наблюдательное — не влияет на сам переход.
-Единственный сегодняшний вызывающий путь — завершённый пользовательский resize-жест (Thumb ИЛИ нативный
-`WM_SIZING`), затронувший ВЫСОТУ панели, для панели, находившейся в `PanelSizingMode.AutoContent`
+Единственный сегодняшний вызывающий путь — завершённый пользовательский resize-жест (нативный
+`WM_SIZING`; Thumb-путь удалён в ADR-022 Фазе 1), затронувший ВЫСОТУ панели, для панели, находившейся в `PanelSizingMode.AutoContent`
 («manual wins» правило ADR-029 Решение 7, Fences-подобное поведение). Событие НЕ пишется при демотации
 через любой другой путь (Manual изначально, переключение через UI и т.д. не порождают эту запись —
 только именно это, конкретное, автоматическое понижение режима).
@@ -375,5 +376,6 @@ do not apply to them.
 Для каждого сценария из `resize-repro-matrix.md`: воспроизвести с `--diag`, найти в
 `%LOCALAPPDATA%\DesktopOrganizer\Logs\app-*.jsonl` последнюю запись для нужного `scope` —
 это последнее зафиксированное состояние gesture lifecycle непосредственно перед зависанием.
-Особое внимание — есть ли `CaptureLost` без последующего `ResizeCompleted` (сигнатура утечки capture,
-которую Фаза 1 должна устранить).
+Особое внимание — есть ли `SizeMoveEntered`/`ResizeStarted` без последующих `SizeMoveExited` и `ResizeCompleted` (сигнатура
+зависшего системного sizing-цикла; прежняя сигнатура «`CaptureLost` без `ResizeCompleted`» относилась к удалённому Thumb-пути).
+Для native-пути `endReason == "CaptureLost"` в `ResizeCompleted` — это прерванный системой цикл (`SizeMoveAborted`), а не утечка.

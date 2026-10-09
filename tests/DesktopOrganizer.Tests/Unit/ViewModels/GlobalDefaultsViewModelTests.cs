@@ -374,5 +374,45 @@ public class GlobalDefaultsViewModelTests
         _appSettingsMock.Verify(s => s.Save(), Times.Once);
     }
 
+    /// <summary>
+    /// ADR-audit review cycle 1 (H1): the "Snap panel size to icon grid" toggle only has an effect while
+    /// position snapping is off (<c>ResizeConstraintsFactory.IsIconGridSnapActive</c> is false for
+    /// <c>GridSize &gt; 1</c>), so <see cref="GlobalDefaultsViewModel.IsSnapResizeToIconGridAvailable"/>
+    /// must be the exact negation of <see cref="GlobalDefaultsViewModel.SnapToGridEnabled"/>.
+    /// </summary>
+    /// <param name="gridSize">The persisted <see cref="IAppSettings.GridSize"/>.</param>
+    /// <param name="expected">The expected availability.</param>
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(2, false)]
+    [InlineData(16, false)]
+    public void IsSnapResizeToIconGridAvailable_Get_IsNegationOfSnapToGridEnabled(int gridSize, bool expected)
+    {
+        _appSettingsMock.SetupProperty(s => s.GridSize, gridSize);
+        var sut = BuildSut();
+
+        Assert.Equal(expected, sut.IsSnapResizeToIconGridAvailable);
+        Assert.Equal(!sut.SnapToGridEnabled, sut.IsSnapResizeToIconGridAvailable);
+    }
+
+    /// <summary>
+    /// Verifies that toggling position snapping raises <c>PropertyChanged</c> for
+    /// <see cref="GlobalDefaultsViewModel.IsSnapResizeToIconGridAvailable"/> so the XAML <c>IsEnabled</c>
+    /// binding refreshes live.
+    /// </summary>
+    [Fact]
+    public void SnapToGridEnabled_Toggled_RaisesIsSnapResizeToIconGridAvailableChanged()
+    {
+        _appSettingsMock.SetupProperty(s => s.GridSize, 1);
+        var sut = BuildSut();
+        var raised = new List<string?>();
+        sut.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        sut.SnapToGridEnabled = true;
+
+        Assert.Contains(nameof(GlobalDefaultsViewModel.IsSnapResizeToIconGridAvailable), raised);
+        Assert.False(sut.IsSnapResizeToIconGridAvailable);
+    }
+
     private GlobalDefaultsViewModel BuildSut() => new(_appSettingsMock.Object, _windowManagerMock.Object, _colorPickerMock.Object);
 }

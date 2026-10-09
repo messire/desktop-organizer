@@ -1,6 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
+using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Behaviors;
+using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.Theming;
@@ -140,6 +143,36 @@ public class RollUpBehaviorGridAlignedTests
         Assert.Equal(0, commits);
     }
 
+    // ── ADR-audit WP-C / C2 (ADR-037): the grid host is handed desktop-DIP bounds, not raw Left/Top. ───
+
+    /// <summary>
+    /// Verifies that on a snapshot whose scale differs from the window's own, the bounds
+    /// <see cref="RollUpBehavior"/> resolves the grid state against are converted through
+    /// <see cref="PanelWindowCoordinates"/> (mixed-DPI TopLevel desktop) rather than the raw
+    /// <c>Left</c>/<c>Top</c>.
+    /// </summary>
+    [Fact]
+    public void ToggleRollUp_OnAMixedScaleSnapshot_ResolvesGridStateInDesktopDip()
+    {
+        var (resolved, expected) = RunSta(
+            harness =>
+            {
+                harness.UseSnapshotScaledAgainstTheWindow(1.5d);
+
+                harness.Behavior.ToggleRollUp();
+
+                var expectedTopLeft = PanelWindowCoordinates
+                    .ToDesktopBounds(harness.Window, new Rect(harness.Window.Left, harness.Window.Top, 0d, 0d), harness.Scale.Object.Current)
+                    .TopLeft;
+
+                return (harness.GridHost.LastResolvedBounds.TopLeft, expectedTopLeft);
+            });
+
+        Assert.NotEqual(new Point(96d, 200d), expected); // not vacuous: the conversion is a real one
+        Assert.Equal(expected.X, resolved.X, 6);
+        Assert.Equal(expected.Y, resolved.Y, 6);
+    }
+
     private static T RunSta<T>(Func<Harness, T> body, bool gridAligned = true)
     {
         T result = default!;
@@ -178,6 +211,7 @@ public class RollUpBehaviorGridAlignedTests
             };
 
             Window = new Window { Left = 96d, Top = 200d, Width = 264d, Height = ExpandedSpanHeightDip };
+            Scale = FakeDesktopScale.Uniform();
 
             Behavior = new RollUpBehavior(
                 Window,
@@ -187,7 +221,22 @@ public class RollUpBehaviorGridAlignedTests
                 Mock.Of<IResizeAffordance>(),
                 TitleBarHeight,
                 () => Model,
-                GridHost);
+                GridHost,
+                Scale.Object);
+        }
+
+        public Mock<IDesktopScaleProvider> Scale { get; }
+
+        /// <summary>
+        /// Swaps in a uniform TopLevel snapshot whose scale is <paramref name="factor"/> times the window's own
+        /// current DPI scale, so the adapter's conversion is non-identity regardless of the machine's DPI.
+        /// </summary>
+        public void UseSnapshotScaledAgainstTheWindow(double factor)
+        {
+            var windowScale = PanelWindowCoordinates.GetWindowScale(Window, Scale.Object.Current);
+            var model = DesktopScaleModel.Create(DesktopLayerMode.TopLevel, windowScale * factor, windowScale * factor, []);
+            Scale.SetupGet(p => p.Current).Returns(model);
+            Scale.SetupGet(p => p.Mode).Returns(model.Mode);
         }
 
         public ChildWindowModel Model { get; }

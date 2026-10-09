@@ -146,10 +146,10 @@
             SelectionBorder BorderThickness — adds unaccounted chrome inside FileListHost that
             GridMetrics.FileListHPadding doesn't know about. NOT because both view modes resize with
             the same icon-grid quantisation — they
-            don't: Resize_DragStarted in ChildWindow.xaml.cs zeroes BOTH _snapCellWidth/_snapCellHeight
+            don't: ResizeConstraintsFactory.BuildConstraints yields SnapCellWidth/SnapCellHeight = 0
             for List mode, which is free-form/pixel-accurate on both axes, unlike Grid mode (finalization
             m-9 — corrects a prior version of this comment that claimed otherwise). Rather, both view
-            modes' Resize_DragDelta subtracts GridMetrics.FileListHPadding from the raw drag width to get
+            modes' resize step subtracts GridMetrics.FileListHPadding from the raw drag width to get
             content width before comparing against the MinPanelSize/MinPanelWidth floor, whether or not
             that width ends up snapped — so this override matters here just as much as on
             GridViewTemplate below, independent of quantisation.

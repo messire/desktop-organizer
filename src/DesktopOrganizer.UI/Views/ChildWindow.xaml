@@ -2,8 +2,8 @@
      from code-behind/a resource without a converter/extra code, so it stays a literal. It MUST stay
      numerically equal to DesktopOrganizer.UI.Models.GridMetrics.MinPanelSize (also used by
      ChildWindow.xaml.cs's own MinPanelSize and App.xaml.cs's lasso-drawn panel minimum) — if one
-     changes, change all three by hand, or ChildWindow.Resize_DragDelta's Left/Width math for the
-     LEFT resize handle can desync when this coercion silently clamps a computed Width below what the
+     changes, change all three by hand, or NativePanelResizeController's Left/Width math for the
+     LEFT resize edge can desync when this coercion silently clamps a computed Width below what the
      code assumed (finalization MAJOR M-1).
 
      MinHeight below is the same kind of hard coercion, on Window.Height, and for the same reason
@@ -34,6 +34,7 @@
         Background="Transparent"
         AllowDrop="True"
         PreviewKeyDown="ChildWindow_PreviewKeyDown"
+        Loaded="ChildWindow_CloudHintLoaded"
         Unloaded="ChildWindow_Unloaded">
     <!--
         PanelRoot replaces the old outer <Border CornerRadius="6"> — the panel's rounded surface now
@@ -646,41 +647,21 @@
                             Margin="0,0,0,0"/>
         </controls:PanelChrome>
 
-        <!-- Resize overlay: transparent thumbs on edges/corners; centre cell is empty so
-             clicks pass through to the content underneath. Grid.RowSpan="2" — a sibling of
-             PanelChrome, not a child of its Content (R-5): z-order/hit-testing relative to the
-             chrome above must not change by a single pixel. -->
-        <Grid x:Name="ResizeOverlay"
+        <!-- Resize grip visuals (ADR-022 / G-3, ADR-026 D-6): VISUAL ONLY, never a hit-test target
+             (IsHitTestVisible="False" — WM_NCHITTEST owns hit-testing, see NativePanelSizingService).
+             8/*/8 geometry: corner cells = PanelMetrics.ResizeCornerThicknessLength, straight edges =
+             PanelMetrics.ResizeEdgeThickness anchored to the outer edge, i.e. exactly the bands
+             NativeHitTestMapper.Map classifies. The straight-edge borders are SMALLER than their own
+             corner-sized host cell and corners fill their own cell, so WPF's automatic layout clip of
+             oversized children never applies. Transparent by default; ResizeGripVisualStyle paints the
+             PanelTheme.Accent tint while PanelTheme.IsLayoutEditing. Visibility is owned by
+             NativeSizingAffordance (gated by ResizeAffordanceGate, so roll-up and the Normal-mode
+             MoveOnly policy collapse it); Collapsed in the XAML until the affordance enables it. A
+             sibling of PanelChrome (R-5): z-order/hit-testing relative to the chrome must not change. -->
+        <Grid x:Name="ResizeGripVisuals"
               Grid.RowSpan="2"
-              Mouse.GotMouseCapture="ResizeOverlay_GotMouseCapture"
-              Mouse.LostMouseCapture="ResizeOverlay_LostMouseCapture"
-              PreviewMouseLeftButtonDown="ResizeOverlay_PreviewMouseLeftButtonDown">
-            <!-- P09 release-gate fix (docs/PLANS/workspace-grid-07-visual.md, defect list, P1): the outer
-                 row/column cells are now dedicated to PanelMetrics.ResizeCornerThicknessLength (8 DIP) —
-                 NOT ResizeEdgeThickness (6) as fix-cycle 2 had them. Fix-cycle 2's corner Thumbs (explicit
-                 Width/Height=8 inside a 6-DIP cell, relying on Horizontal/VerticalAlignment to "overflow"
-                 the extra 2 DIP) never actually rendered/hit-tested at 8x8 on this WPF path: WPF applies
-                 an automatic per-element layout clip (FrameworkElement's internal NeedsClipBounds
-                 mechanism — separate from, and NOT bypassed by, Panel.ClipToBounds or alignment) to ANY
-                 child whose resolved RenderSize exceeds the arrange slot the Grid actually gave it,
-                 silently cropping the "overflow" straight back down to 6x6 — alignment only ever
-                 controlled WHICH 6x6 corner of the 8x8 desired size survived the clip, never whether the
-                 clip applied at all. The comment this replaces claimed the opposite ("WPF does not clip a
-                 Grid child to its cell unless ClipToBounds is set") — that was simply wrong for this
-                 shape of oversized-child-in-undersized-cell; confirmed with a real, on-Windows STA
-                 regression test (Unit.Views.ResizeOverlayGeometryTests) before this fix, see
-                 PanelMetrics.ResizeCornerThickness's own remarks for the full explanation. Fix: give the
-                 outer cells the WIDER corner thickness, then make the straight-edge Thumbs below the
-                 SMALLER ones (ResizeEdgeThickness, anchored to their own outer edge via
-                 Horizontal/VerticalAlignment) — a child SMALLER than its own cell is never auto-clipped
-                 regardless of alignment, so this needs no overflow trick in either direction. The corner
-                 Thumbs simply fill their own dedicated cell (default Stretch alignment, no explicit
-                 Width/Height needed at all), matching NativeHitTestMapper.Map's cornerDip band exactly
-                 with no reliance on clip semantics either way. Declared AFTER the straight-edge Thumbs
-                 below (same z-order rule NativeHitTestMapper.Map mirrors on the native path: corner
-                 classification wins first) — the two Grid cells are now fully disjoint (unlike fix-cycle
-                 2's shared-cell overflow), so this ordering is a belt-and-braces consistency choice with
-                 the native path rather than a load-bearing requirement of this Grid's own hit-testing. -->
+              Visibility="Collapsed"
+              IsHitTestVisible="False">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="{x:Static uimodels:PanelMetrics.ResizeCornerThicknessLength}"/>
                 <ColumnDefinition Width="*"/>
@@ -692,34 +673,23 @@
                 <RowDefinition Height="{x:Static uimodels:PanelMetrics.ResizeCornerThicknessLength}"/>
             </Grid.RowDefinitions>
 
-            <!-- Straight edges — explicit ResizeEdgeThickness (6 DIP), SMALLER than their own
-                 ResizeCornerThickness-sized (8 DIP) host cell and anchored to the panel's own outer edge.
-                 A child smaller than its Grid cell is never auto-clipped (only an OVERSIZED child
-                 triggers WPF's automatic layout clip — see this Grid's own remarks above), so this
-                 renders/hit-tests at the exact intended 6 DIP thickness with no clip involved at all. -->
-            <Thumb Grid.Row="0" Grid.Column="1" Tag="Top"
-                   Height="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" VerticalAlignment="Top"
-                   Cursor="SizeNS" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-            <Thumb Grid.Row="1" Grid.Column="0" Tag="Left"
-                   Width="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" HorizontalAlignment="Left"
-                   Cursor="SizeWE" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-            <Thumb Grid.Row="1" Grid.Column="2" Tag="Right"
-                   Width="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" HorizontalAlignment="Right"
-                   Cursor="SizeWE" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-            <Thumb Grid.Row="2" Grid.Column="1" Tag="Bottom"
-                   Height="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" VerticalAlignment="Bottom"
-                   Cursor="SizeNS" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+            <Border Grid.Row="0" Grid.Column="1" Tag="Top"
+                    Height="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" VerticalAlignment="Top"
+                    Style="{StaticResource ResizeGripVisualEdgeStyle}"/>
+            <Border Grid.Row="1" Grid.Column="0" Tag="Left"
+                    Width="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" HorizontalAlignment="Left"
+                    Style="{StaticResource ResizeGripVisualEdgeStyle}"/>
+            <Border Grid.Row="1" Grid.Column="2" Tag="Right"
+                    Width="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" HorizontalAlignment="Right"
+                    Style="{StaticResource ResizeGripVisualEdgeStyle}"/>
+            <Border Grid.Row="2" Grid.Column="1" Tag="Bottom"
+                    Height="{x:Static uimodels:PanelMetrics.ResizeEdgeThickness}" VerticalAlignment="Bottom"
+                    Style="{StaticResource ResizeGripVisualEdgeStyle}"/>
 
-            <!-- Corners — fill their own dedicated ResizeCornerThickness (8 DIP) cell exactly (default
-                 Stretch alignment; no explicit Width/Height/overflow needed, unlike fix-cycle 2). -->
-            <Thumb Grid.Row="0" Grid.Column="0" Tag="TopLeft"
-                   Cursor="SizeNWSE" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-            <Thumb Grid.Row="0" Grid.Column="2" Tag="TopRight"
-                   Cursor="SizeNESW" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-            <Thumb Grid.Row="2" Grid.Column="0" Tag="BottomLeft"
-                   Cursor="SizeNESW" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
-            <Thumb Grid.Row="2" Grid.Column="2" Tag="BottomRight"
-                   Cursor="SizeNWSE" Style="{StaticResource ResizeHandleStyle}" DragStarted="Resize_DragStarted" DragDelta="Resize_DragDelta" DragCompleted="Resize_DragCompleted"/>
+            <Border Grid.Row="0" Grid.Column="0" Tag="TopLeft" Style="{StaticResource ResizeGripVisualStyle}"/>
+            <Border Grid.Row="0" Grid.Column="2" Tag="TopRight" Style="{StaticResource ResizeGripVisualStyle}"/>
+            <Border Grid.Row="2" Grid.Column="0" Tag="BottomLeft" Style="{StaticResource ResizeGripVisualStyle}"/>
+            <Border Grid.Row="2" Grid.Column="2" Tag="BottomRight" Style="{StaticResource ResizeGripVisualStyle}"/>
         </Grid>
 
         <!-- Drag-to-reorder insertion indicator (ADR-014 Decision 5, Block C5). Lives in the same
@@ -756,7 +726,8 @@
                IsHitTestVisible="False">
             <Border Style="{StaticResource Theme.Popup.Chrome}"
                     MaxWidth="260">
-                <TextBlock TextWrapping="Wrap"
+                <TextBlock x:Name="MoveHintText"
+                           TextWrapping="Wrap"
                            Foreground="{DynamicResource Theme.Text.Primary}"
                            FontSize="{DynamicResource Font.Size.Caption}"
                            Text="{loc:Loc Hint_Move_Message}"/>

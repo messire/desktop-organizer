@@ -19,7 +19,7 @@ namespace DesktopOrganizer.UI.Models;
 /// returns a width of its own. <see cref="Controls.AdaptiveIconGridPanel"/> itself is not involved in
 /// this computation at all; like the rest of the snap-code family, this is an analytical DUPLICATE of
 /// what that control would render for the same inputs, computed before any real layout pass runs (the
-/// same reason <c>PanelResizeController.SnapWidthToGrid</c> exists as pure math rather than a
+/// same reason <c>NativePanelResizeController.SnapWidthToGrid</c> exists as pure math rather than a
 /// measure/arrange round-trip).
 /// </para>
 /// <para>

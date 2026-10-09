@@ -18,7 +18,7 @@ namespace DesktopOrganizer.UI.Behaviors;
 /// extract/test. Written to <c>PanelRoot</c> — the same element <see cref="PanelVisualStateBehavior"/>
 /// writes <see cref="PanelTheme.VisualStateProperty"/> to — so every descendant (including
 /// <see cref="Controls.PanelChrome"/> and, directly via inheritance, <c>ChildWindow.xaml</c>'s
-/// <c>ResizeOverlay</c> Thumbs) sees the resolved value without its own subscription.
+/// <c>ResizeGripVisuals</c> borders) sees the resolved value without its own subscription.
 /// </remarks>
 public sealed class LayoutEditModeBehavior : IDisposable
 {

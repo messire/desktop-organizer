@@ -1,6 +1,7 @@
 using System.Windows;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Tests.Helpers;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -21,6 +22,7 @@ public class LayoutSnapshotsViewModelTests
     private readonly Mock<ILayoutSnapshotService> _serviceMock = new();
     private readonly Mock<IConfirmationService> _confirmationMock = new();
     private readonly Mock<IInputDialogService> _inputDialogMock = new();
+    private readonly Mock<IApplicationStateStore> _stateStoreMock = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LayoutSnapshotsViewModelTests"/> class.
@@ -28,6 +30,7 @@ public class LayoutSnapshotsViewModelTests
     public LayoutSnapshotsViewModelTests()
     {
         _serviceMock.Setup(s => s.Snapshots).Returns([]);
+        _stateStoreMock.SetupGet(s => s.IsWritable).Returns(true);
     }
 
     /// <summary>
@@ -153,6 +156,51 @@ public class LayoutSnapshotsViewModelTests
     }
 
     /// <summary>
+    /// F6: the restore confirmation names both consequences - panels outside the snapshot close, their files
+    /// return to the original location - as two paragraphs.
+    /// </summary>
+    [Fact]
+    public void RestoreSnapshot_Confirmation_TellsPanelsCloseAndFilesReturn()
+    {
+        string? shown = null;
+        _confirmationMock
+            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
+            .Callback<string, string, MessageBoxImage>((message, _, _) => shown = message)
+            .Returns(false);
+        var sut = BuildSut();
+
+        sut.RestoreSnapshotCommand.Execute("snap-1");
+
+        Assert.NotNull(shown);
+        Assert.Contains("closed", shown!, StringComparison.Ordinal);
+        Assert.Contains("original location", shown!, StringComparison.Ordinal);
+        Assert.Contains("\n\n", shown!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// M3: in a read-only session a restore moves no file, so the confirmation must not promise that the files
+    /// return to their original location - only the panels paragraph is shown.
+    /// </summary>
+    [Fact]
+    public void RestoreSnapshot_ReadOnlySession_Confirmation_DoesNotPromiseFileReturn()
+    {
+        string? shown = null;
+        _stateStoreMock.SetupGet(s => s.IsWritable).Returns(false);
+        _confirmationMock
+            .Setup(c => c.Confirm(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MessageBoxImage>()))
+            .Callback<string, string, MessageBoxImage>((message, _, _) => shown = message)
+            .Returns(false);
+        var sut = BuildSut();
+
+        sut.RestoreSnapshotCommand.Execute("snap-1");
+
+        Assert.NotNull(shown);
+        Assert.Contains("closed", shown!, StringComparison.Ordinal);
+        Assert.DoesNotContain("original location", shown!, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n\n", shown!, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Verifies that declining the restore confirmation leaves the current layout untouched — the same
     /// regression guard as <see cref="DeleteSnapshot_ConfirmationDeclined_DoesNotDelete"/>, for the
     /// sibling command.
@@ -218,5 +266,6 @@ public class LayoutSnapshotsViewModelTests
             _serviceMock.Object,
             _confirmationMock.Object,
             _inputDialogMock.Object,
-            localization ?? TestLocalization.English);
+            localization ?? TestLocalization.English,
+            _stateStoreMock.Object);
 }

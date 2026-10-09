@@ -19,20 +19,6 @@ public interface IAppSettings
     bool SnapResizeToIconGrid { get; set; }
 
     /// <summary>
-    /// When <see langword="true"/>, panels resize via the native <c>WM_SIZING</c> loop
-    /// (<see cref="DesktopOrganizer.UI.Behaviors.NativePanelResizeController"/>, docs/PLANS/phase-2-native-panel-sizing.md)
-    /// instead of the legacy WPF <c>Thumb</c>-driven path
-    /// (<see cref="DesktopOrganizer.UI.Behaviors.PanelResizeController"/>). Defaults to
-    /// <see langword="false"/> so existing behavior is unchanged unless explicitly opted in — the path
-    /// is decided once per panel, at window creation, so a change here only takes effect after the app
-    /// restarts (or, for already-open panels, after they are re-created). Can be overridden at runtime
-    /// via the <c>--native-sizing</c>/<c>--no-native-sizing</c> command-line flags or the
-    /// <c>DESKTOPORGANIZER_NATIVESIZING</c> environment variable — see
-    /// <see cref="DesktopOrganizer.UI.Interaction.Native.NativeSizingSwitch"/>.
-    /// </summary>
-    bool NativePanelSizing { get; set; }
-
-    /// <summary>
     /// Magnetic pull distance (in pixels) used while dragging a panel: when the panel's raw
     /// position is within this many pixels of a grid line, it snaps to that line. 0 disables the
     /// live drag-time magnet (movement stays free until drop). Default: 12.

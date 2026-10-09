@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows.Media;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
@@ -17,6 +18,7 @@ public class SystemIconsPanelViewModelTests
 {
     private readonly Mock<ISystemShellService> _shellMock = new();
     private readonly Mock<IPanelSelectionCoordinator> _selectionCoordinatorMock = new();
+    private readonly Mock<IWindowManager> _windowManagerMock = new();
 
     // ── VisibleItems: only visible icons are exposed ──────────────────────────
 
@@ -531,6 +533,68 @@ public class SystemIconsPanelViewModelTests
         Assert.Same(item2, sut2.SelectedItem);
     }
 
+    // ── SendToRecycleBin: post-recycle cleanup of dead references (review cycle 3, M4) ──────────────
+
+    /// <summary>
+    /// M4: a path that is really gone after the Recycle Bin operation is taken out of the panels (a drag from a
+    /// panel onto the sidebar's Recycle Bin is recycled after the panel's own moved-out check may have given up);
+    /// a path that still exists (declined / failed) is left in place.
+    /// </summary>
+    [Fact]
+    public void SendToRecycleBin_RemovesVanishedPathsFromPanels_KeepsSurvivors()
+    {
+        var survivor = Path.GetTempFileName();
+        var gone = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            IReadOnlyCollection<string>? removed = null;
+            _windowManagerMock.Setup(wm => wm.RemoveItemsFromPanels(It.IsAny<IReadOnlyCollection<string>>()))
+                .Callback<IReadOnlyCollection<string>>(p => removed = p);
+            using var sut = BuildSut(BuildModel());
+
+            sut.SendToRecycleBin([survivor, gone], IntPtr.Zero);
+
+            _shellMock.Verify(s => s.SendToRecycleBin(It.IsAny<string[]>(), IntPtr.Zero), Times.Once);
+            Assert.Equal([gone], removed);
+        }
+        finally
+        {
+            File.Delete(survivor);
+        }
+    }
+
+    /// <summary>M4: when every path survived (e.g. the user declined the nuke warning) the panels are not touched.</summary>
+    [Fact]
+    public void SendToRecycleBin_NothingVanished_DoesNotTouchPanels()
+    {
+        var survivor = Path.GetTempFileName();
+        try
+        {
+            using var sut = BuildSut(BuildModel());
+
+            sut.SendToRecycleBin([survivor], IntPtr.Zero);
+
+            _windowManagerMock.Verify(wm => wm.RemoveItemsFromPanels(It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
+        }
+        finally
+        {
+            File.Delete(survivor);
+        }
+    }
+
+    /// <summary>M4: a failing cleanup never breaks the drop handler - the bin icon refresh still runs.</summary>
+    [Fact]
+    public void SendToRecycleBin_CleanupThrows_IsSwallowed()
+    {
+        _windowManagerMock.Setup(wm => wm.RemoveItemsFromPanels(It.IsAny<IReadOnlyCollection<string>>()))
+            .Throws(new InvalidOperationException("boom"));
+        using var sut = BuildSut(BuildModel());
+
+        var exception = Record.Exception(() => sut.SendToRecycleBin([@"C:\definitely\missing-file.txt"], IntPtr.Zero));
+
+        Assert.Null(exception);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
     private SystemIconsPanelModel BuildModel(params (SystemIconKind kind, bool visible, int order)[] items)
     {
@@ -551,5 +615,5 @@ public class SystemIconsPanelViewModelTests
     }
 
     private SystemIconsPanelViewModel BuildSut(SystemIconsPanelModel model, IPanelSelectionCoordinator? selectionCoordinator = null)
-        => new(model, _shellMock.Object, selectionCoordinator ?? _selectionCoordinatorMock.Object);
+        => new(model, _shellMock.Object, selectionCoordinator ?? _selectionCoordinatorMock.Object, _windowManagerMock.Object);
 }

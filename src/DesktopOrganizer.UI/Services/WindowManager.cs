@@ -1429,6 +1429,11 @@ public class WindowManager : IWindowManager
         // was never created" — must be attached before Show() so SourceInitialized is observed.
         window.AttachShellRecoveryTracking();
 
+        // ADR-034 amendment 2026-10-09 (ADR-audit WP-D): keeps the panel in the desktop band while it is a
+        // top-level window (Windows 11 24H2+, no WorkerW) — a no-op for WorkerW-embedded panels. Also before
+        // Show(), so the very first show is already filtered.
+        window.AttachDesktopZOrderKeeper();
+
         _childWindows[model.Id] = (window, model);
 
         // Only show the panel when its page is the active page.

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using DesktopOrganizer.UI.Models;
 
 namespace DesktopOrganizer.UI.State.Dto;
@@ -15,8 +17,12 @@ internal sealed class PanelAppearanceDto
     /// <summary>The panel surface's opacity — stored as-is; clamped to <c>[0.35, 1]</c> when rendered.</summary>
     public double SurfaceOpacity { get; set; } = 0.8;
 
-    /// <summary>Which of the ADR-025/ADR-030 surface treatments the panel renders.</summary>
-    public PanelSurfaceStyle SurfaceStyle { get; set; } = PanelSurfaceStyle.Ambient;
+    /// <summary>
+    /// Member name of <see cref="PanelSurfaceStyle"/> (which of the ADR-025/ADR-030 surface treatments the panel
+    /// renders). Plain <see cref="string"/> for the same reason as <see cref="PanelGeometryDto.GeometryMode"/>:
+    /// an unknown member written by a newer build degrades to the default instead of throwing.
+    /// </summary>
+    public string SurfaceStyle { get; set; } = nameof(PanelSurfaceStyle.Ambient);
 
     /// <summary>Hex string for the panel's title/item text color.</summary>
     public string TextColor { get; set; } = "#DDDDDD";
@@ -32,4 +38,13 @@ internal sealed class PanelAppearanceDto
     /// an absent field (schema v4 and earlier) means.
     /// </summary>
     public string IconLayoutPolicy { get; set; } = "LegacyStretch";
+
+    /// <summary>
+    /// Unknown JSON keys of this object, captured on load and written back verbatim on save (ADR-024
+    /// Amendment "Additive revisions"): a field added by a newer additive schema revision survives an edit
+    /// by this build. Keys are written exactly as read (no naming policy). <see langword="null"/> when there
+    /// are none.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extras { get; set; }
 }

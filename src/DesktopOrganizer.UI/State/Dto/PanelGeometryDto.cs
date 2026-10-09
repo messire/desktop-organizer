@@ -1,4 +1,5 @@
-using System.Windows;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DesktopOrganizer.UI.State.Dto;
 
@@ -38,8 +39,11 @@ internal sealed class PanelGeometryDto
     /// <summary>The device id of the monitor the panel was last placed on, or <see langword="null"/> if unknown.</summary>
     public string? MonitorDeviceId { get; set; }
 
-    /// <summary>The panel window's <see cref="System.Windows.WindowState"/>.</summary>
-    public WindowState WindowState { get; set; } = WindowState.Normal;
+    /// <summary>
+    /// Member name of the panel window's <see cref="System.Windows.WindowState"/>. Plain string — see
+    /// <see cref="GeometryMode"/>.
+    /// </summary>
+    public string WindowState { get; set; } = nameof(System.Windows.WindowState.Normal);
 
     /// <summary>Whether the panel is collapsed to its title bar.</summary>
     public bool IsRolledUp { get; set; }
@@ -70,4 +74,13 @@ internal sealed class PanelGeometryDto
     /// absent field (schema v4 and earlier) means.
     /// </summary>
     public string SizingMode { get; set; } = "Manual";
+
+    /// <summary>
+    /// Unknown JSON keys of this object, captured on load and written back verbatim on save (ADR-024
+    /// Amendment "Additive revisions"): a field added by a newer additive schema revision survives an edit
+    /// by this build. Keys are written exactly as read (no naming policy). <see langword="null"/> when there
+    /// are none.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extras { get; set; }
 }

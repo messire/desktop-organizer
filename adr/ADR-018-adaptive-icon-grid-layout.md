@@ -1,6 +1,6 @@
 # ADR-018: Адаптивная раскладка иконок в панели (Fences parity)
 
-**Статус:** Accepted, Amended by ADR-029 (2026-09-22)
+**Статус:** Accepted — Amended 2026-09-22 (ADR-029: `IconLayoutPolicy {LegacyStretch, FixedGap}`; `FixedGap` — ветка «неполного ряда» этого ADR, применённая безусловно; M-2 реализован через резерв ширины скроллбара для `FixedGap`); Amended 2026-10-09 (ADR-011 amendment, ADR-audit WP-C: единое условие применения icon-grid snap `IsIconGridSnapActive` для жеста и `SnapWidthToGrid`; при `GridSize > 1` он не действует)
 **Дата:** 2026-09-02
 
 ---
@@ -380,7 +380,10 @@ verify ниже) перед тем, как решать, стоит ли усл�
 
 ---
 
-## Manual verify (Win10/Win11) — не выполнено в этой сессии
+## Manual verify (Win10/Win11)
+
+> **Статус:** выполнена пользователем на Windows 11 24H2 2026-09-27, признана достаточной; Windows 10 не
+> проверяется — см. [docs/ROADMAP.md](../docs/ROADMAP.md) (строки 6–8). Список ниже — исторический чек-лист.
 
 Перенесено из `docs/PLANS/adaptive-icon-grid.md` §12 (17 пунктов, дополненных по итогам ревью пунктами
 про дробный `IconSize`, появление скроллбара и однoколоночную панель при загрузке), и далее дополнено
@@ -520,8 +523,8 @@ verify ниже) перед тем, как решать, стоит ли усл�
 - **Ресайз-код (`ChildWindow.xaml.cs`) сменил внутреннюю модель**, но публичный контракт/persistence
   (`ChildWindowModel`) не менялся — сериализованная ширина/высота остаётся тем же `double`, что и раньше.
 
-**Manual verify (Win10/Win11) — не выполнено, среда разработки ограничена `dotnet build`/`dotnet test`.**
-Полный список — раздел выше и `docs/ROADMAP.md`.
+**Manual verify** — выполнена (Windows 11 24H2, 2026-09-27; см. раздел выше и
+[docs/ROADMAP.md](../docs/ROADMAP.md)).
 
 ---
 
@@ -561,3 +564,23 @@ verify ниже) перед тем, как решать, стоит ли усл�
 Полная math/API-таблица, миграция, F-3 (учёт хрома `PanelChrome`, затрагивающий обе политики) и
 `PanelSizingMode`/`Fit panel to content` (отдельная, но смежная проблема — F-4, высота, отвязанная от
 контента) — см. `adr/ADR-029-icon-layout-policy.md`.
+
+---
+
+## Amendment 2026-10-09 (ADR-011 amendment, ADR-audit WP-C): когда снап по сетке значков вообще действует
+
+Раздел «Снап ширины/высоты панели» выше описывает математику `AdaptiveGridLayout.SnapExtent` и умалчивает об условии её
+применения. Условие теперь одно, в `ResizeConstraintsFactory.IsIconGridSnapActive`, и его используют resize-жест
+(`BuildConstraints`) и `SnapWidthToGrid()` в **обоих** контроллерах (`PanelResizeController`,
+`NativePanelResizeController`): Grid-режим + `IAppSettings.SnapResizeToIconGrid` + не `GridAligned` + **`GridSize <= 1`**. При
+`GridSize > 1` размер квантует `GridSize`, и `SnapExtent` не вызывается ни жестом, ни повторной подгонкой после смены
+`IconSize`/`ViewMode`/`IconLayoutPolicy`. Сами формулы `Extent(k)`, `DefaultMinGap`, `MinPanelWidth` не менялись. Тумблер
+«Привязка размера панели к сетке значков» отключён в окне настроек, пока включена позиционная привязка
+(`IsSnapResizeToIconGridAvailable`). Подробности — [ADR-011](ADR-011-manual-drag-with-magnetic-grid-snap.md), Amendment 2026-10-09.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | [ADR-029](ADR-029-icon-layout-policy.md) | `IconLayoutPolicy`: `FixedGap` (новый дефолт для новых панелей) рядом с `LegacyStretch` (bit-for-bit этот ADR); F-3 — `GridMetrics.FileListHPadding = PanelMetrics.ContentLeftInset`; для `FixedGap` реализован вариант (a) M-2 — резерв `SystemParameters.VerticalScrollBarWidth` через `CapacityWidth` | «M-2 остаётся открытым компромиссом … варианты (a)/(b) готовы» — для `FixedGap` реализован (a), для `LegacyStretch` M-2 остаётся принятым компромиссом (c); «`FileListHPadding = 0`» |
+| 2026-10-09 | [ADR-011](ADR-011-manual-drag-with-magnetic-grid-snap.md) (ADR-audit WP-C) | Единое условие применения icon-grid snap (`IsIconGridSnapActive`) для жеста и `SnapWidthToGrid`; при `GridSize > 1` он не действует | Неявное допущение раздела «Снап ширины/высоты панели», что `SnapExtent` применяется всякий раз при включённом `SnapResizeToIconGrid` |

@@ -1,6 +1,6 @@
 # ADR-027: Structured JSONL Diagnostics Logging for Gesture Lifecycle
 
-Status: Proposed
+**Статус:** Accepted (2026-10-09, ADR-audit WP-E; реализован в Фазе 0 и расширялся с 2026-09-22; на нём стоят Accepted-ADR-031/033/037/045, выпущен v0.8.0) — Amended (ADR-033: always-on уровень `Standard`, `IAppLog`) — Amended 2026-09-22 (P08: категория `icon`, `IconDiagnostics.SafeExtension` allow-list) — Addendum 2026-09-27 (L12: префикс файла `gestures-` → `app-`)
 
 ## Context
 
@@ -193,6 +193,23 @@ category, event name, or payload field changed, and no migration of already-writ
 (this log is a rolling, retention-pruned diagnostics artifact, never a source of truth read back by the
 app itself — see the non-blocking producer/backpressure contract above). Tests updated:
 `DiagnosticsLogFileNamingTests`, `JsonLinesDiagnosticsLogTests`.
+
+## Amendment (2026-09-27, ADR-033): always-on `Standard` level and `IAppLog`
+
+[ADR-033](ADR-033-crash-safety-and-app-log.md) puts a second facade, `IAppLog`/`DiagnosticsAppLog`, on top of
+the **same** single sink (`JsonLinesDiagnosticsLog`) with levels `DiagnosticsLevel { Standard, Verbose }`
+(`DiagnosticsSwitch`): `Standard` is the Release default and is always on; `Verbose` is the Debug default or
+`--diag` / `DESKTOPORGANIZER_DIAG=1`. `IDiagnosticsLog`'s own semantics are unchanged — it resolves to
+`NullDiagnosticsLog` under `Standard`, so gesture-lifecycle tracing (this ADR's subject) still only runs under
+`Verbose`. `LayoutModeChanged` (category `layout`, ADR-026) is one of its producers.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | P08 fix cycle 1 (M2) | Категория `icon`; `IconDiagnostics.SafeExtension` — две защиты вместо length-only cap | — |
+| 2026-09-27 | L12 (Addendum) | Префикс файла `gestures-` → `app-` | `gestures-{yyyyMMdd-HHmmss}-{pid}.jsonl` |
+| 2026-09-27 | [ADR-033](ADR-033-crash-safety-and-app-log.md) | Единый sink обслуживает и always-on `IAppLog` (`Standard`), и `IDiagnosticsLog` (`Verbose`) | «Enablement: off by default in Release» — для самого файла-sink (теперь always-on на `Standard`); для gesture-трассировки остаётся в силе |
 
 ## Related
 

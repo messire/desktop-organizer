@@ -48,7 +48,7 @@ public interface IApplicationStateStore
     StateLoadResult Load();
 
     /// <summary>
-    /// Wraps <paramref name="payload"/> in the current-schema-version envelope (schema version,
+    /// Wraps <paramref name="payload"/> in the current-schema-version envelope (schema version, additive schema revision,
     /// write timestamp, app version) and attempts to make it the new committed state via the atomic
     /// write protocol (ADR-024 D-6: temp file → fsync → validate by re-parsing → atomic replace of
     /// the primary file, with the previous primary preserved as <c>.bak</c>).
@@ -67,7 +67,7 @@ public interface IApplicationStateStore
     /// </remarks>
     /// <param name="payload">
     /// The current-schema-version structural state as plain payload keys — no envelope keys.
-    /// Reserved envelope keys (<c>schemaVersion</c>, <c>writtenAtUtc</c>, <c>appVersion</c>) are
+    /// Reserved envelope keys (<c>schemaVersion</c>, <c>writtenAtUtc</c>, <c>appVersion</c>, <c>schemaRevision</c>) are
     /// added by the implementation and must not appear as top-level keys in <paramref name="payload"/>.
     /// </param>
     StateSaveOutcome Save(JsonObject payload);

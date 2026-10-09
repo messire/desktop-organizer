@@ -1492,7 +1492,7 @@ public class SystemIconsPanelManagerTests
             IconSize = iconSize,
             AnchorVirtualDesktopId = anchorVirtualDesktopId,
             Items = (items ?? DefaultItemTuples())
-                .Select(t => new SystemIconsPanelItemStateDto { Kind = t.Kind, IsVisible = t.Visible, Order = t.Order })
+                .Select(t => new SystemIconsPanelItemStateDto { Kind = t.Kind.ToString(), IsVisible = t.Visible, Order = t.Order })
                 .ToList(),
         };
     }

@@ -1,6 +1,6 @@
 # ADR-046: Фоновая загрузка иконок STA-очередью и асинхронный liveness
 
-**Статус:** Accepted (2026-09-30)
+**Статус:** Accepted (2026-09-30) — Amended 2026-10-09 (ADR-audit WP-C + review cycle 1, ADR-033: операционные Warn/Error очередей иконок и liveness дублируются в `IAppLog`; `IconJobTimedOut`+`IconWorkerAbandoned` — одна запись; `AppLogEventThrottle` K=5)
 
 ---
 
@@ -271,6 +271,17 @@ UNC/offline-скип **не изменены**; изменился только 
 на `StaWorkerThread`. Контекстное меню (`ShowShellContextMenu`, ADR-008/ADR-040) остаётся на UI-потоке без
 изменений — оно создаёt HWND и гоняет собственный message loop (`TrackPopupMenuEx`), который обязан быть на
 том же потоке, что показывает окно.
+
+**Amends [ADR-033](ADR-033-crash-safety-and-app-log.md) (раздел «Диагностика» ниже действует только для `--diag`-трассы),
+2026-10-09, ADR-audit WP-C + review cycle 1 (G4):** операционные события очереди (`StaIconLoadQueue`: `IconWorkerAbandoned`,
+`IconLaneDisabled`, `RemoteRootQuarantined`; Error-уровень — `IconQueueSinkThrew`, `IconQueueWatchdogPassFailed`,
+`IconResultNotFrozen`) и liveness (`BackgroundItemProbeQueue`: `ItemProbeFailed`) теперь **дублируются в always-on
+`IAppLog`** и переживают отсутствие `--diag`. `IconJobTimedOut` и `IconWorkerAbandoned` — один инцидент: трасса
+диагностики сохраняет оба события (схема `diagnostics-log-events.md` не менялась), в app-лог пишется **одна** запись
+`IconWorkerAbandoned` с полями `lane`, `extension`, `abandoned`. Error-события app-лога ограничены
+`AppLogEventThrottle` (первые K = 5 на имя события, затем одно `LogEventSuppressed` с `event`/`limit`, далее только
+счётчик): сбой, повторяющийся на каждую иконку/пробу, не заполняет лог стек-трейсами. Трасса `--diag` получает каждое
+вхождение. Логика очереди, приоритеты, watchdog, circuit breaker и приватность payload (closed-set значения) не менялись.
 
 ## Manual verify (Windows 11 24H2) — не блокер
 

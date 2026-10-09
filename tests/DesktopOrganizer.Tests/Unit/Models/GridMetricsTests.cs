@@ -106,7 +106,7 @@ public class GridMetricsTests
     /// the formula B-F1 (ui-polishing-1 §3.3) explicitly preserves byte-for-byte across the
     /// SelectionBorder/margin split (5px template margin + 1px selection border = ItemMargin).
     /// Regressing this desyncs GridMetrics.CellSize from the actual per-item footprint rendered by
-    /// GridViewTemplate, which breaks resize-quantisation math (Resize_DragDelta/SnapWidthToGrid).
+    /// GridViewTemplate, which breaks resize-quantisation math (ProposeBounds/SnapWidthToGrid).
     /// </summary>
     /// <param name="iconSize">The icon size passed to <see cref="GridMetrics.CellSize"/>.</param>
     [Theory]
@@ -166,7 +166,7 @@ public class GridMetricsTests
     // Regression coverage for the bug found by code-quality-reviewer: MinPanelWidth's icon-grid-derived
     // formula (2 * CellSize(iconSize)) is smaller than the hard Window.MinWidth="120" WPF coercion in
     // ChildWindow.xaml for every IconSize the slider's low end allows (16/20/24/28 => 72/84/96/108px).
-    // Before the fix, ChildWindow.Resize_DragDelta computed Left from that too-small value while WPF
+    // Before the fix, NativePanelResizeController.ProposeBounds computed Left from that too-small value while WPF
     // silently coerced Width up to 120, desyncing the panel's right edge from where the user actually
     // released the LEFT resize handle. This Theory sweeps the full IconSize slider range (16-96) and
     // must fail on the pre-fix formula (Math.Max missing) and pass once MinPanelWidth is clamped to
@@ -188,7 +188,7 @@ public class GridMetricsTests
     /// MinPanelWidth must never return a value smaller than MinPanelSize, for every IconSize the slider
     /// allows (Minimum="16" through the settings-defined upper end, swept here in steps of 4) — the hard
     /// floor WPF's own Window.MinWidth="120" coercion imposes on Window.Width regardless of what this
-    /// method computes. This is the exact regression that broke ChildWindow.Resize_DragDelta's Left/Width
+    /// method computes. This is the exact regression that broke NativePanelResizeController.ProposeBounds's Left/Width
     /// math for the LEFT resize handle (finalization MAJOR M-1): at IconSize 16/20/24/28 the unclamped
     /// icon-grid formula (2 * CellSize(iconSize) = 72/84/96/108) undershoots 120.
     /// </summary>

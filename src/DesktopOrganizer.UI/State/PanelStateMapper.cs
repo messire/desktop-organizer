@@ -1,7 +1,9 @@
+using System.Text.Json;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.State.Dto;
 using Point = System.Drawing.Point;
 using Size = System.Drawing.Size;
+using WindowState = System.Windows.WindowState;
 
 namespace DesktopOrganizer.UI.State;
 
@@ -17,17 +19,48 @@ namespace DesktopOrganizer.UI.State;
 /// <see cref="ChildWindowModel.FileItems"/> is deliberately never touched here: it is the runtime-only
 /// projection of <see cref="ChildWindowModel.FilePaths"/> (already <c>[JsonIgnore]</c> on the model
 /// itself) and is rebuilt from disk after a panel is created, not persisted.
+/// <para>
+/// <b>Forward compatibility (ADR-024 Amendment "Additive revisions").</b> Unknown JSON keys at the four panel
+/// levels and unrecognised enum strings are carried on <see cref="ChildWindowModel.PersistedExtras"/> from
+/// <see cref="FromDto"/> to <see cref="ToDto"/>, so a panel edited by this build keeps every field a newer build
+/// wrote. An unrecognised enum string degrades to the documented default on the model (never a quarantine) and is
+/// written back as-is while the model still holds that default.
+/// </para>
 /// </remarks>
 internal static class PanelStateMapper
 {
+    private const string WindowStateKey = "geometry.windowState";
+    private const string GeometryModeKey = "geometry.geometryMode";
+    private const string SizingModeKey = "geometry.sizingMode";
+    private const string SurfaceStyleKey = "appearance.surfaceStyle";
+    private const string IconLayoutPolicyKey = "appearance.iconLayoutPolicy";
+    private const string ViewModeKey = "content.viewMode";
+    private const string ContentFilterKey = "content.contentFilter";
+    private const string SortModeKey = "content.sortMode";
+
     /// <summary>Maps a live <see cref="ChildWindowModel"/> to its schema-v3 <see cref="PanelStateDto"/>.</summary>
     /// <param name="model">The panel model to map.</param>
-    public static PanelStateDto ToDto(ChildWindowModel model)
+    /// <param name="includeUnknownFields">
+    /// <see langword="true"/> (default) writes back the model's <see cref="ChildWindowModel.PersistedExtras"/>;
+    /// <see langword="false"/> maps known fields only — used when the result is a brand-new entity
+    /// (<see cref="PanelCloneBuilder"/>).
+    /// </param>
+    public static PanelStateDto ToDto(ChildWindowModel model, bool includeUnknownFields = true)
     {
         ArgumentNullException.ThrowIfNull(model);
 
+        var extras = includeUnknownFields ? model.PersistedExtras : null;
+
+        // Spans are written for GridAligned, and also whenever geometryMode is written back as a preserved raw
+        // string this build does not know (a future mode that may rely on spans): dropping them would silently
+        // zero a newer build's data on a round trip through this one.
+        var geometryModeOut = WriteEnum(model.GeometryMode, extras, GeometryModeKey);
+        var keepSpans = model.GeometryMode == PanelGeometryMode.GridAligned
+                        || !string.Equals(geometryModeOut, model.GeometryMode.ToString(), StringComparison.Ordinal);
+
         return new PanelStateDto
         {
+            Extras = CopyOrNull(extras?.Panel),
             Id = model.Id,
             Title = model.Title,
             PageId = model.PageId,
@@ -38,35 +71,39 @@ internal static class PanelStateMapper
                 Width = model.Size.Width,
                 Height = model.Size.Height,
                 MonitorDeviceId = model.MonitorDeviceId,
-                WindowState = model.WindowState,
+                WindowState = WriteEnum(model.WindowState, extras, WindowStateKey),
                 IsRolledUp = model.IsRolledUp,
                 IsVisible = model.IsVisible,
-                GeometryMode = model.GeometryMode.ToString(),
+                GeometryMode = geometryModeOut,
 
                 // MINOR fix (fix-cycle 1, docs/PLANS/workspace-grid-migration.md §10.5): spans are only
                 // meaningful for GridAligned (§2 of the plan) — a LegacyFreeform panel that happens to
                 // still carry a stale span pair (e.g. the user switched it back from GridAligned) must
                 // not persist them, or a future reader could mistake "has spans" for "is GridAligned".
-                WidthSpanUnits = model.GeometryMode == PanelGeometryMode.GridAligned ? model.WidthSpanUnits : null,
-                HeightSpanUnits = model.GeometryMode == PanelGeometryMode.GridAligned ? model.HeightSpanUnits : null,
-                SizingMode = model.SizingMode.ToString(),
+                // Exception: an unknown geometryMode preserved verbatim (see keepSpans) keeps its spans.
+                WidthSpanUnits = keepSpans ? model.WidthSpanUnits : null,
+                HeightSpanUnits = keepSpans ? model.HeightSpanUnits : null,
+                SizingMode = WriteEnum(model.SizingMode, extras, SizingModeKey),
+                Extras = CopyOrNull(extras?.Geometry),
             },
             Appearance = new PanelAppearanceDto
             {
                 AccentColor = model.AccentColor,
                 SurfaceOpacity = model.SurfaceOpacity,
-                SurfaceStyle = model.SurfaceStyle,
+                SurfaceStyle = WriteEnum(model.SurfaceStyle, extras, SurfaceStyleKey),
                 TextColor = model.TextColor,
                 IconSize = model.IconSize,
-                IconLayoutPolicy = model.IconLayoutPolicy.ToString(),
+                IconLayoutPolicy = WriteEnum(model.IconLayoutPolicy, extras, IconLayoutPolicyKey),
+                Extras = CopyOrNull(extras?.Appearance),
             },
             Content = new PanelContentDto
             {
-                ViewMode = model.ViewMode,
-                ContentFilter = model.ContentFilter,
-                SortMode = model.SortMode,
+                ViewMode = WriteEnum(model.ViewMode, extras, ViewModeKey),
+                ContentFilter = WriteEnum(model.ContentFilter, extras, ContentFilterKey),
+                SortMode = WriteEnum(model.SortMode, extras, SortModeKey),
                 SourceFolderPath = model.SourceFolderPath,
                 FilePaths = [.. model.FilePaths],
+                Extras = CopyOrNull(extras?.Content),
             },
         };
     }
@@ -81,7 +118,10 @@ internal static class PanelStateMapper
         var appearance = dto.Appearance ?? new PanelAppearanceDto();
         var content = dto.Content ?? new PanelContentDto();
 
+        Dictionary<string, PreservedEnumValue>? preserved = null;
+
         var geometryMode = PanelGeometryModeParser.ParseOrLegacyFreeform(geometry.GeometryMode);
+        Preserve(geometry.GeometryMode, geometryMode, PanelGeometryMode.LegacyFreeform, GeometryModeKey, ref preserved);
         var widthSpanUnits = geometry.WidthSpanUnits;
         var heightSpanUnits = geometry.HeightSpanUnits;
 
@@ -109,24 +149,82 @@ internal static class PanelStateMapper
             Position = new Point(geometry.X, geometry.Y),
             Size = new Size(geometry.Width, geometry.Height),
             MonitorDeviceId = geometry.MonitorDeviceId,
-            WindowState = geometry.WindowState,
+            WindowState = ReadEnum(geometry.WindowState, WindowState.Normal, WindowStateKey, ref preserved),
             IsRolledUp = geometry.IsRolledUp,
             IsVisible = geometry.IsVisible,
             GeometryMode = geometryMode,
             WidthSpanUnits = widthSpanUnits,
             HeightSpanUnits = heightSpanUnits,
-            SizingMode = PanelSizingModeParser.ParseOrManual(geometry.SizingMode),
+            SizingMode = ParseSizingMode(geometry.SizingMode, ref preserved),
             AccentColor = appearance.AccentColor,
             SurfaceOpacity = appearance.SurfaceOpacity,
-            SurfaceStyle = appearance.SurfaceStyle,
+            SurfaceStyle = ReadEnum(appearance.SurfaceStyle, PanelSurfaceStyle.Ambient, SurfaceStyleKey, ref preserved),
             TextColor = appearance.TextColor,
             IconSize = appearance.IconSize,
-            IconLayoutPolicy = IconLayoutPolicyParser.ParseOrLegacyStretch(appearance.IconLayoutPolicy),
-            ViewMode = content.ViewMode,
-            ContentFilter = content.ContentFilter,
-            SortMode = content.SortMode,
+            IconLayoutPolicy = ParseIconLayoutPolicy(appearance.IconLayoutPolicy, ref preserved),
+            ViewMode = ReadEnum(content.ViewMode, PanelViewMode.List, ViewModeKey, ref preserved),
+            ContentFilter = ReadEnum(content.ContentFilter, PanelContentFilter.ShowAll, ContentFilterKey, ref preserved),
+            SortMode = ReadEnum(content.SortMode, PanelSortMode.Manual, SortModeKey, ref preserved),
             SourceFolderPath = content.SourceFolderPath,
             FilePaths = content.FilePaths is null ? [] : [.. content.FilePaths],
+            PersistedExtras = PanelPersistedExtras.TryCreate(dto.Extras, geometry.Extras, appearance.Extras, content.Extras, preserved),
         };
     }
+
+    private static PanelSizingMode ParseSizingMode(string? raw, ref Dictionary<string, PreservedEnumValue>? preserved)
+    {
+        var parsed = PanelSizingModeParser.ParseOrManual(raw);
+        Preserve(raw, parsed, PanelSizingMode.Manual, SizingModeKey, ref preserved);
+        return parsed;
+    }
+
+    private static IconLayoutPolicy ParseIconLayoutPolicy(string? raw, ref Dictionary<string, PreservedEnumValue>? preserved)
+    {
+        var parsed = IconLayoutPolicyParser.ParseOrLegacyStretch(raw);
+        Preserve(raw, parsed, IconLayoutPolicy.LegacyStretch, IconLayoutPolicyKey, ref preserved);
+        return parsed;
+    }
+
+    /// <summary>Tolerant read of a string-typed enum field: unknown input yields <paramref name="fallback"/> and is remembered.</summary>
+    private static TEnum ReadEnum<TEnum>(string? raw, TEnum fallback, string key, ref Dictionary<string, PreservedEnumValue>? preserved)
+        where TEnum : struct, Enum
+    {
+        var parsed = TolerantEnumParser.Parse(raw, fallback, out var recognized);
+        if (!recognized)
+        {
+            (preserved ??= [])[key] = new PreservedEnumValue(raw!, fallback.ToString());
+        }
+
+        return parsed;
+    }
+
+    /// <summary>Remembers <paramref name="raw"/> when the pre-existing parser that produced <paramref name="parsed"/> had to fall back.</summary>
+    private static void Preserve<TEnum>(string? raw, TEnum parsed, TEnum fallback, string key, ref Dictionary<string, PreservedEnumValue>? preserved)
+        where TEnum : struct, Enum
+    {
+        if (!TolerantEnumParser.IsRecognized(raw, parsed, fallback))
+        {
+            (preserved ??= [])[key] = new PreservedEnumValue(raw!, fallback.ToString());
+        }
+    }
+
+    /// <summary>
+    /// The on-disk string for an enum field: the model's value name — except that an unrecognised string read
+    /// from disk is written back verbatim as long as the model still holds the fallback it was degraded to (the
+    /// user did not touch the field). Choosing the fallback member explicitly is indistinguishable from not touching
+    /// it, so the raw string wins in that one case (documented limitation).
+    /// </summary>
+    private static string WriteEnum<TEnum>(TEnum value, PanelPersistedExtras? extras, string key)
+        where TEnum : struct, Enum
+    {
+        var name = value.ToString();
+        return extras?.Enums is { } enums
+               && enums.TryGetValue(key, out var preserved)
+               && string.Equals(name, preserved.Fallback, StringComparison.Ordinal)
+            ? preserved.Raw
+            : name;
+    }
+
+    private static Dictionary<string, JsonElement>? CopyOrNull(IReadOnlyDictionary<string, JsonElement>? source)
+        => source is { Count: > 0 } ? new Dictionary<string, JsonElement>(source) : null;
 }

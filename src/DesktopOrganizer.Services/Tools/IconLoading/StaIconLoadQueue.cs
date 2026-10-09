@@ -25,6 +25,7 @@ namespace DesktopOrganizer.Services.Tools.IconLoading;
 internal sealed class StaIconLoadQueue : IIconLoadQueue
 {
     private const string DirectoryTypeKey = "<dir>";
+    private const string AppLogSource = "StaIconLoadQueue";
 
     private readonly IIconProvider _iconProvider;
     private readonly IPathProbe _pathProbe;
@@ -32,6 +33,14 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
     private readonly IRemoteRootCircuitBreaker _breaker;
     private readonly IStaWorkerFactory _workerFactory;
     private readonly IDiagnosticsLog _diagnosticsLog;
+    private readonly IAppLog? _appLog;
+
+    /// <summary>
+    /// Caps every Error event of this queue in the always-on app log at
+    /// <see cref="AppLogEventThrottle.DefaultLimitPerEvent"/> entries per session (ADR-audit review cycle 1, G4):
+    /// a sink or watchdog failure can repeat per delivery/pass, and each entry carries a stack trace.
+    /// </summary>
+    private readonly AppLogEventThrottle _appLogErrorThrottle = new ();
     private readonly IconLoadQueueOptions _options;
     private readonly TimeProvider _timeProvider;
 
@@ -63,14 +72,20 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
     /// <param name="breaker">Shared circuit breaker for the Remote lane (D-3).</param>
     /// <param name="workerFactory">Creates each lane's STA worker, and its replacement after a watchdog abandon.</param>
     /// <param name="diagnosticsLog">Structured diagnostics sink for the <c>icon</c> category's queue events.</param>
+    /// <param name="appLog">
+    /// Always-on application log (ADR-033): receives the operational Warn/Error events (lane disabled, root
+    /// quarantined, non-frozen icon, sink exception, watchdog abandon) in addition to <paramref name="diagnosticsLog"/>,
+    /// which is a no-op without <c>--diag</c>. Optional — <see langword="null"/> keeps diagnostics-only behavior.
+    /// </param>
     public StaIconLoadQueue(
         IIconProvider iconProvider,
         IPathProbe pathProbe,
         IRemotePathClassifier classifier,
         IRemoteRootCircuitBreaker breaker,
         IStaWorkerFactory workerFactory,
-        IDiagnosticsLog diagnosticsLog)
-        : this(iconProvider, pathProbe, classifier, breaker, workerFactory, diagnosticsLog, IconLoadQueueOptions.Default, TimeProvider.System)
+        IDiagnosticsLog diagnosticsLog,
+        IAppLog? appLog = null)
+        : this(iconProvider, pathProbe, classifier, breaker, workerFactory, diagnosticsLog, IconLoadQueueOptions.Default, TimeProvider.System, appLog)
     {
     }
 
@@ -87,6 +102,7 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
     /// <param name="diagnosticsLog">Structured diagnostics sink for the <c>icon</c> category.</param>
     /// <param name="options">Tunable constants.</param>
     /// <param name="timeProvider">Clock used for every timing decision (job start times, quarantines, delivery flush timers).</param>
+    /// <param name="appLog">Always-on application log for the operational Warn/Error events; <see langword="null"/> disables it.</param>
     internal StaIconLoadQueue(
         IIconProvider iconProvider,
         IPathProbe pathProbe,
@@ -95,7 +111,8 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
         IStaWorkerFactory workerFactory,
         IDiagnosticsLog diagnosticsLog,
         IconLoadQueueOptions options,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IAppLog? appLog = null)
     {
         _iconProvider = iconProvider;
         _pathProbe = pathProbe;
@@ -103,6 +120,7 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
         _breaker = breaker;
         _workerFactory = workerFactory;
         _diagnosticsLog = diagnosticsLog;
+        _appLog = appLog;
         _options = options;
         _timeProvider = timeProvider;
 
@@ -367,7 +385,7 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
     /// <summary>Reports an exception <see cref="StaIconLoadGroup"/>'s <c>onResults</c> callback threw (D-9).</summary>
     /// <param name="ex">The exception the sink threw.</param>
     internal void LogSinkThrew(Exception ex)
-        => LogDiagnostic("IconQueueSinkThrew", new KeyValuePair<string, object?>("errorType", ex.GetType().Name));
+        => LogError("IconQueueSinkThrew", ex, new KeyValuePair<string, object?>("errorType", ex.GetType().Name));
 
     /// <summary>
     /// Removes <paramref name="group"/> from <see cref="_liveGroups"/> once it disposes (H3) — without this,
@@ -471,7 +489,7 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
     {
         try
         {
-            LogDiagnostic("IconQueueWatchdogPassFailed", new KeyValuePair<string, object?>("errorType", ex.GetType().Name));
+            LogError("IconQueueWatchdogPassFailed", ex, new KeyValuePair<string, object?>("errorType", ex.GetType().Name));
         }
         catch (Exception)
         {
@@ -891,7 +909,7 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
             // and every waiting real job simply falls through to its own Loaded/Unavailable/Failed result.
             if (icon is not null && !icon.IsFrozen)
             {
-                LogDiagnostic("IconResultNotFrozen", new KeyValuePair<string, object?>("stage", "typeIcon"));
+                LogError("IconResultNotFrozen", null, new KeyValuePair<string, object?>("stage", "typeIcon"));
                 icon = null;
             }
         }
@@ -991,7 +1009,7 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
 
         if (!icon.IsFrozen)
         {
-            LogDiagnostic("IconResultNotFrozen", new KeyValuePair<string, object?>("stage", LaneName(lane.Kind)));
+            LogError("IconResultNotFrozen", null, new KeyValuePair<string, object?>("stage", LaneName(lane.Kind)));
             TerminateJob(job, IconLoadOutcome.Failed, icon: null, exists: null, isDirectory: null);
             return;
         }
@@ -1114,14 +1132,17 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
         oldWorker?.Abandon();
 
         var extensionOrTypeKey = job is not null ? IconDiagnostics.SafeExtension(job.Path) : typeJob!.Value.TypeKey;
-        LogDiagnostic(
-            "IconJobTimedOut",
-            new KeyValuePair<string, object?>("lane", LaneName(lane.Kind)),
-            new KeyValuePair<string, object?>("extension", extensionOrTypeKey));
-        LogDiagnostic(
-            "IconWorkerAbandoned",
-            new KeyValuePair<string, object?>("lane", LaneName(lane.Kind)),
-            new KeyValuePair<string, object?>("abandoned", lane.AbandonedCount));
+
+        // The diagnostics trace keeps its two separate events (schema: docs/Refactoring/Testing/
+        // diagnostics-log-events.md); the always-on app log gets ONE Warn per timeout carrying the fields of
+        // both (ADR-audit review cycle 1, G4) — the timeout and the abandon are the same incident, and a pair
+        // of entries per stuck icon only doubles the noise.
+        var laneField = new KeyValuePair<string, object?>("lane", LaneName(lane.Kind));
+        var extensionField = new KeyValuePair<string, object?>("extension", extensionOrTypeKey);
+        var abandonedField = new KeyValuePair<string, object?>("abandoned", lane.AbandonedCount);
+        LogDiagnostic("IconJobTimedOut", laneField, extensionField);
+        LogDiagnostic("IconWorkerAbandoned", laneField, abandonedField);
+        _appLog?.Warn(AppLogSource, "IconWorkerAbandoned", laneField, extensionField, abandonedField);
 
         if (job is not null)
         {
@@ -1132,7 +1153,7 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
             else
             {
                 _breaker.ReportStuck(job.RemoteRoot!);
-                LogDiagnostic("RemoteRootQuarantined", new KeyValuePair<string, object?>("rootKind", ClassifyRootKind(job.RemoteRoot!)));
+                LogWarn("RemoteRootQuarantined", new KeyValuePair<string, object?>("rootKind", ClassifyRootKind(job.RemoteRoot!)));
             }
 
             TerminateJob(job, IconLoadOutcome.Unavailable, icon: null, exists: null, isDirectory: null);
@@ -1167,7 +1188,7 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
 
         if (disabled)
         {
-            LogDiagnostic("IconLaneDisabled", new KeyValuePair<string, object?>("lane", LaneName(lane.Kind)));
+            LogWarn("IconLaneDisabled", new KeyValuePair<string, object?>("lane", LaneName(lane.Kind)));
             DrainLaneAsUnavailable(lane);
         }
         else
@@ -1204,6 +1225,28 @@ internal sealed class StaIconLoadQueue : IIconLoadQueue
     private void LogDiagnostic(string name, params KeyValuePair<string, object?>[] payload)
     {
         if (_diagnosticsLog.IsEnabled) _diagnosticsLog.Write(IconDiagnostics.Category, name, null, payload);
+    }
+
+    /// <summary>
+    /// An operational Warn-level event (lane disabled, root quarantined, worker abandoned): written to the
+    /// diagnostics trace as before, and duplicated into the always-on <see cref="IAppLog"/> (ADR-033) so it
+    /// survives without <c>--diag</c>. Payloads carry only closed-set values (lane, root kind, extension).
+    /// </summary>
+    private void LogWarn(string name, params KeyValuePair<string, object?>[] payload)
+    {
+        LogDiagnostic(name, payload);
+        _appLog?.Warn(AppLogSource, name, payload);
+    }
+
+    /// <summary>
+    /// An operational Error-level event (Freeze-invariant violation, sink/watchdog exception); see <see cref="LogWarn"/>.
+    /// The diagnostics trace gets every occurrence; the app log only the first few per event name
+    /// (<see cref="_appLogErrorThrottle"/>).
+    /// </summary>
+    private void LogError(string name, Exception? ex, params KeyValuePair<string, object?>[] payload)
+    {
+        LogDiagnostic(name, payload);
+        _appLogErrorThrottle.Error(_appLog, AppLogSource, name, ex, payload);
     }
 }
 

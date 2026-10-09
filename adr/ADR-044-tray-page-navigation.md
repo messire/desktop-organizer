@@ -1,6 +1,6 @@
 # ADR-044: Навигация по страницам из трея
 
-**Статус:** Accepted (2026-09-29)
+**Статус:** Accepted (2026-09-29) — Amended 2026-09-30 (ADR-047: `TrayMenuRenderer`/`SetMenuPalette` красят меню трея по токенам темы Windows; MAJOR-1 — `ContextMenuStrip` по-прежнему не пересоздаётся — сохранён и перепроверен тестом)
 
 ---
 
@@ -138,3 +138,11 @@ message loop его разделяет), но откладывание даёт 
 **Расширяет:** [ADR-043](ADR-043-page-display-names.md) (`PageDescriptors`/`PagesChanged`/
 `PageDisplayNames.Resolve`). **Amends:** [ADR-002](ADR-002-main-window-as-settings.md) (двойной клик
 трея).
+
+---
+
+## Amendments
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-30 | [ADR-047](ADR-047-unified-design-system.md) (D-10) | Трей получил `TrayMenuRenderer`/`SetMenuPalette`: меню (`ContextMenuStrip`) красится по токенам темы Windows (`SystemUsesLightTheme`); верхний `ContextMenuStrip` по-прежнему не пересоздаётся при смене палитры (MAJOR-1 сохранён, перепроверен тестом) | — (инвариант «верхний `ContextMenuStrip` никогда не пересобирается» из раздела 2 в силе) |

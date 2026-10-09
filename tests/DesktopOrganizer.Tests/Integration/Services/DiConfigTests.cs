@@ -771,6 +771,103 @@ public class DiConfigTests
     }
 
     /// <summary>
+    /// ADR-009 amendment 2026-10-10: the optional cloud-hint parameters of <see cref="ChildWindowViewModel"/> and
+    /// the orphan card's ViewModel on <see cref="MainWindowViewModel"/> must be wired by DI — a registration gap
+    /// would silently switch the features off (null detector / null orphan card).
+    /// </summary>
+    [Fact]
+    public void UiConfigureServices_CloudHintAndOrphanScanner_AreWired()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        var storageRoot = NewTempStorageRoot();
+        try
+        {
+            StaTestRunner.Run(() =>
+            {
+                WpfApplicationHost.EnsureApplication();
+                var previousContext = SynchronizationContext.Current;
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+                try
+                {
+                    var services = new ServiceCollection();
+                    UiDiConfig.ConfigureServices(services, tempDir, storageRoot);
+                    using var serviceProvider = services.BuildServiceProvider();
+
+                    using var viewModel = serviceProvider.GetRequiredService<ChildWindowViewModel>();
+                    Assert.Same(serviceProvider.GetRequiredService<ICloudFolderDetector>(), PrivateField<ChildWindowViewModel>(viewModel, "_cloudFolderDetector"));
+                    Assert.Same(serviceProvider.GetRequiredService<ICloudDropHintGate>(), PrivateField<ChildWindowViewModel>(viewModel, "_cloudDropHintGate"));
+
+                    Assert.IsAssignableFrom<IManagedStorageOrphanScanner>(serviceProvider.GetRequiredService<IManagedStorageOrphanScanner>());
+                    Assert.Same(
+                        serviceProvider.GetRequiredService<ManagedStorageOrphansViewModel>(),
+                        serviceProvider.GetRequiredService<MainWindowViewModel>().StorageOrphans);
+                }
+                finally
+                {
+                    SynchronizationContext.SetSynchronizationContext(previousContext);
+                }
+            });
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+            SafeDeleteDirectory(storageRoot);
+        }
+    }
+
+    /// <summary>
+    /// ADR-audit WP-B review F4: <see cref="ChildWindowViewModel"/>'s <c>stateStore</c> parameter is optional
+    /// and null means "writable" — a registration that drops it would silently re-enable file moves in a
+    /// read-only session. Pins that the DI-resolved VM receives the singleton <see cref="IApplicationStateStore"/>
+    /// and that <see cref="ChildWindowViewModel.MovesDroppedItemsIntoStorage"/> follows its live
+    /// <see cref="IApplicationStateStore.IsWritable"/> in both directions (storage lock not held -> false,
+    /// lock acquired -> true).
+    /// </summary>
+    [Fact]
+    public void UiConfigureServices_ChildWindowViewModel_GetsStateStore_AndMovesFollowIsWritable()
+    {
+        var tempDir = NewTempDiagnosticsDirectory();
+        var storageRoot = NewTempStorageRoot();
+        try
+        {
+            StaTestRunner.Run(() =>
+            {
+                WpfApplicationHost.EnsureApplication();
+                var previousContext = SynchronizationContext.Current;
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+                try
+                {
+                    var services = new ServiceCollection();
+                    UiDiConfig.ConfigureServices(services, tempDir, storageRoot);
+                    using var serviceProvider = services.BuildServiceProvider();
+                    var store = serviceProvider.GetRequiredService<IApplicationStateStore>();
+                    var storageLock = serviceProvider.GetRequiredService<IStorageLock>();
+
+                    using var viewModel = serviceProvider.GetRequiredService<ChildWindowViewModel>();
+
+                    Assert.Same(store, PrivateField<ChildWindowViewModel>(viewModel, "_stateStore"));
+
+                    Assert.False(store.IsWritable);
+                    Assert.False(viewModel.MovesDroppedItemsIntoStorage);
+
+                    Assert.True(storageLock.TryAcquire());
+                    Assert.True(store.IsWritable);
+                    Assert.True(viewModel.MovesDroppedItemsIntoStorage);
+                }
+                finally
+                {
+                    SynchronizationContext.SetSynchronizationContext(previousContext);
+                }
+            });
+        }
+        finally
+        {
+            SafeDeleteDirectory(tempDir);
+            SafeDeleteDirectory(storageRoot);
+        }
+    }
+
+    /// <summary>
     /// Review M-4 / design system 1.x phase 6.4: the tray-palette and native-menu-theme adapters resolve
     /// through the full UI service collection as singletons (resolving alone does not Start them).
     /// </summary>

@@ -1,4 +1,5 @@
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.Services.Interfaces;
 using DesktopOrganizer.Services.Tools.IconLoading;
 using Moq;
@@ -474,6 +475,160 @@ public class StaIconLoadQueueTests
                 null,
                 It.Is<KeyValuePair<string, object?>[]>(p => p.Any(kv => kv.Key == "stage" && Equals(kv.Value, "typeIcon")))),
             Times.Once);
+    }
+
+    // ── Always-on IAppLog duplication (ADR-033) ──────────────────────────────────────────────────────
+
+    /// <summary>A disabled lane reaches the always-on app log as a Warn even when the diagnostics log is off (no <c>--diag</c>).</summary>
+    [Fact]
+    public void RunWatchdogPass_LaneDisabled_WritesWarnToAppLog_EvenWithDiagnosticsOff()
+    {
+        _diagnosticsLog.SetupGet(l => l.IsEnabled).Returns(false);
+        var appLog = new Mock<IAppLog>();
+        var options = IconLoadQueueOptions.Default with { StuckJobTimeout = TimeSpan.FromSeconds(5), MaxAbandonedWorkersPerLane = 0 };
+        var queue = CreateQueue(options, appLog.Object);
+        var (group, _, _) = CreateGroup(queue);
+
+        group.Submit([new IconLoadRequest("stuck.txt", 32)]);
+        _localWorkers.Single().RunNext();
+        _localWorkers.Single().SimulateStuck();
+        _time.Advance(options.StuckJobTimeout);
+        queue.RunWatchdogPass();
+
+        appLog.Verify(l => l.Warn(It.IsAny<string>(), "IconLaneDisabled", It.IsAny<KeyValuePair<string, object?>[]>()), Times.Once);
+        appLog.Verify(l => l.Warn(It.IsAny<string>(), "IconWorkerAbandoned", It.IsAny<KeyValuePair<string, object?>[]>()), Times.Once);
+        _diagnosticsLog.Verify(l => l.Write(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<KeyValuePair<string, object?>[]>()), Times.Never);
+    }
+
+    /// <summary>
+    /// G4 (ADR-audit review cycle 1): one timeout is ONE app-log Warn carrying the fields of both trace events
+    /// (lane, extension, abandoned count) — <c>IconJobTimedOut</c> no longer reaches the app log as a second entry —
+    /// while the diagnostics trace keeps both events with their documented payloads.
+    /// </summary>
+    [Fact]
+    public void RunWatchdogPass_StuckJob_WritesSingleMergedWarnToAppLog_AndBothTraceEvents()
+    {
+        var appLog = new Mock<IAppLog>();
+        var options = IconLoadQueueOptions.Default with { StuckJobTimeout = TimeSpan.FromSeconds(5) };
+        var queue = CreateQueue(options, appLog.Object);
+        var (group, _, _) = CreateGroup(queue);
+
+        group.Submit([new IconLoadRequest("stuck.txt", 32)]);
+        _localWorkers.First().RunNext();
+        _localWorkers.First().SimulateStuck();
+        _time.Advance(options.StuckJobTimeout);
+        queue.RunWatchdogPass();
+
+        appLog.Verify(
+            l => l.Warn(
+                It.IsAny<string>(),
+                "IconWorkerAbandoned",
+                It.Is<KeyValuePair<string, object?>[]>(p =>
+                    p.Any(kv => kv.Key == "lane" && Equals(kv.Value, "local")) &&
+                    p.Any(kv => kv.Key == "extension") &&
+                    p.Any(kv => kv.Key == "abandoned" && Equals(kv.Value, 1)))),
+            Times.Once);
+        appLog.Verify(l => l.Warn(It.IsAny<string>(), "IconJobTimedOut", It.IsAny<KeyValuePair<string, object?>[]>()), Times.Never);
+        _diagnosticsLog.Verify(
+            l => l.Write("icon", "IconJobTimedOut", null, It.Is<KeyValuePair<string, object?>[]>(p => p.Any(kv => kv.Key == "extension"))),
+            Times.Once);
+        _diagnosticsLog.Verify(
+            l => l.Write("icon", "IconWorkerAbandoned", null, It.Is<KeyValuePair<string, object?>[]>(p => p.Any(kv => kv.Key == "abandoned") && p.All(kv => kv.Key != "extension"))),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// G4 (ADR-audit review cycle 1): a sink that keeps throwing reaches the app log only
+    /// <see cref="AppLogEventThrottle.DefaultLimitPerEvent"/> times, followed by one suppression notice; the
+    /// diagnostics trace still records every occurrence.
+    /// </summary>
+    [Fact]
+    public void Deliver_OnResultsKeepsThrowing_AppLogErrorsAreThrottled()
+    {
+        const int deliveries = AppLogEventThrottle.DefaultLimitPerEvent + 3;
+        var appLog = new Mock<IAppLog>();
+        var queue = CreateQueue(appLog: appLog.Object);
+        var context = new CollectingSynchronizationContext();
+        var group = (StaIconLoadGroup)queue.CreateGroup(IconLoadPriority.Visible, context, _ => throw new InvalidOperationException("boom"));
+
+        for (var i = 0; i < deliveries; i++)
+        {
+            group.Submit([new IconLoadRequest($"f{i}.txt", 32)]);
+            _localWorkers.Single().RunAll();
+            context.Pump();
+        }
+
+        appLog.Verify(
+            l => l.Error(It.IsAny<string>(), "IconQueueSinkThrew", It.IsAny<InvalidOperationException>(), It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Exactly(AppLogEventThrottle.DefaultLimitPerEvent));
+        appLog.Verify(
+            l => l.Warn(
+                It.IsAny<string>(),
+                AppLogEventThrottle.SuppressedEvent,
+                It.Is<KeyValuePair<string, object?>[]>(p => p.Any(kv => kv.Key == "event" && Equals(kv.Value, "IconQueueSinkThrew")))),
+            Times.Once);
+        _diagnosticsLog.Verify(
+            l => l.Write("icon", "IconQueueSinkThrew", null, It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.AtLeast(deliveries));
+    }
+
+    /// <summary>A quarantined remote root reaches the app log as a Warn, carrying only the closed-set root kind (never the path).</summary>
+    [Fact]
+    public void RunWatchdogPass_StuckRemoteJob_WritesRootQuarantineWarnToAppLog()
+    {
+        var appLog = new Mock<IAppLog>();
+        var options = IconLoadQueueOptions.Default with { StuckJobTimeout = TimeSpan.FromSeconds(5) };
+        var queue = CreateQueue(options, appLog.Object);
+        var (group, _, _) = CreateGroup(queue);
+        _classifier.Setup(c => c.GetOwnRemoteRoot(@"\\srv\share\file.txt")).Returns(@"\\srv\share");
+
+        group.Submit([new IconLoadRequest(@"\\srv\share\file.txt", 32)]);
+        _localWorkers.Single().RunAll();
+        var remoteWorker = _remoteWorkers.Single();
+        remoteWorker.RunNext();
+        remoteWorker.SimulateStuck();
+        _time.Advance(options.StuckJobTimeout);
+        queue.RunWatchdogPass();
+
+        appLog.Verify(
+            l => l.Warn(
+                It.IsAny<string>(),
+                "RemoteRootQuarantined",
+                It.Is<KeyValuePair<string, object?>[]>(p => p.All(kv => !(Convert.ToString(kv.Value) ?? string.Empty).Contains("srv", StringComparison.OrdinalIgnoreCase)))),
+            Times.Once);
+    }
+
+    /// <summary>An exception thrown by the caller's sink reaches the app log as an Error carrying the exception.</summary>
+    [Fact]
+    public void Deliver_OnResultsThrows_WritesErrorToAppLog()
+    {
+        var appLog = new Mock<IAppLog>();
+        var queue = CreateQueue(appLog: appLog.Object);
+        var context = new CollectingSynchronizationContext();
+        var group = (StaIconLoadGroup)queue.CreateGroup(IconLoadPriority.Visible, context, _ => throw new InvalidOperationException("boom"));
+
+        group.Submit([new IconLoadRequest("a.txt", 32)]);
+        _localWorkers.Single().RunAll();
+        context.Pump();
+
+        appLog.Verify(
+            l => l.Error(It.IsAny<string>(), "IconQueueSinkThrew", It.IsAny<InvalidOperationException>(), It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Once);
+    }
+
+    /// <summary>A Freeze-invariant violation reaches the app log as an Error.</summary>
+    [Fact]
+    public void Submit_UnfrozenIcon_WritesErrorToAppLog()
+    {
+        var appLog = new Mock<IAppLog>();
+        var queue = CreateQueue(appLog: appLog.Object);
+        var (group, _, _) = CreateGroup(queue);
+        _iconProvider.Setup(p => p.GetIcon(It.IsAny<string>(), It.IsAny<int>())).Returns(new DrawingImage()); // not frozen
+
+        group.Submit([new IconLoadRequest("a.txt", 32)]);
+        _localWorkers.Single().RunAll();
+
+        appLog.Verify(l => l.Error(It.IsAny<string>(), "IconResultNotFrozen", null, It.IsAny<KeyValuePair<string, object?>[]>()), Times.Once);
     }
 
     // ── Remote lane / circuit breaker (D-2/D-3) ──────────────────────────────────────────────────────
@@ -1110,7 +1265,7 @@ public class StaIconLoadQueueTests
         return (group, context, delivered);
     }
 
-    private StaIconLoadQueue CreateQueue(IconLoadQueueOptions? options = null)
+    private StaIconLoadQueue CreateQueue(IconLoadQueueOptions? options = null, IAppLog? appLog = null)
     {
         var workerFactory = new Mock<IStaWorkerFactory>();
         workerFactory
@@ -1130,7 +1285,8 @@ public class StaIconLoadQueueTests
             workerFactory.Object,
             _diagnosticsLog.Object,
             options ?? IconLoadQueueOptions.Default,
-            _time);
+            _time,
+            appLog);
     }
 
     /// <summary>

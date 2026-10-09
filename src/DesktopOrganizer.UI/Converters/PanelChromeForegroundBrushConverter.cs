@@ -14,7 +14,7 @@ namespace DesktopOrganizer.UI.Converters;
 /// <c>{Binding Path=(theming:PanelTheme.Accent), RelativeSource={RelativeSource Self}}</c>/
 /// <c>{Binding Path=(theming:PanelTheme.Text), RelativeSource={RelativeSource Self}}</c>, the same
 /// inherited attached properties <c>Panels.xaml</c>'s own <c>SelectionFill</c> and <c>Controls.xaml</c>'s
-/// <c>ResizeHandleStyle</c> already read. <c>parameter</c> selects which
+/// <c>ResizeGripVisualStyle</c> already read. <c>parameter</c> selects which
 /// <see cref="PanelChromeForegroundKind"/> to resolve, parsed case-insensitively from its string form;
 /// unrecognized/missing defaults to <see cref="PanelChromeForegroundKind.Primary"/>.
 /// </summary>

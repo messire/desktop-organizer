@@ -87,6 +87,7 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
             _windowManager.NormalizePanelsToGrid();
             OnPropertyChanged(nameof(GridSize));
             OnPropertyChanged(nameof(SnapToGridEnabled));
+            OnPropertyChanged(nameof(IsSnapResizeToIconGridAvailable));
             OnPropertyChanged(nameof(GridStep));
         }
     }
@@ -129,6 +130,14 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// <see langword="true"/> while the "Snap panel size to icon grid" toggle can have an effect: the
+    /// icon-grid snap yields to the positional grid (<c>ResizeConstraintsFactory.IsIconGridSnapActive</c>
+    /// is false for <c>GridSize &gt; 1</c>), so the toggle is disabled while <see cref="SnapToGridEnabled"/>
+    /// is on.
+    /// </summary>
+    public bool IsSnapResizeToIconGridAvailable => !SnapToGridEnabled;
+
+    /// <summary>
     /// When <see langword="true"/>, resizing snaps panel dimensions to the icon-grid cell size.
     /// </summary>
     public bool SnapResizeToIconGrid
@@ -140,23 +149,6 @@ public class GlobalDefaultsViewModel : INotifyPropertyChanged
             _appSettings.SnapResizeToIconGrid = value;
             _appSettings.Save();
             OnPropertyChanged(nameof(SnapResizeToIconGrid));
-        }
-    }
-
-    /// <summary>
-    /// When <see langword="true"/>, panels resize via the native <c>WM_SIZING</c> loop instead of the
-    /// legacy WPF <c>Thumb</c> path (docs/PLANS/phase-2-native-panel-sizing.md). Experimental — takes
-    /// effect only for panels created after the app restarts.
-    /// </summary>
-    public bool NativePanelSizing
-    {
-        get => _appSettings.NativePanelSizing;
-        set
-        {
-            if (_appSettings.NativePanelSizing == value) return;
-            _appSettings.NativePanelSizing = value;
-            _appSettings.Save();
-            OnPropertyChanged(nameof(NativePanelSizing));
         }
     }
 

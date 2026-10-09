@@ -1,11 +1,12 @@
 # ADR-031: Settings Window — Sidebar Navigation + Panel Customize Dialog
 
-Status: Accepted (2026-09-26) — Amended 2026-09-27 (ADR-032: D-8 «только английский» — superseded);
+**Статус:** Accepted (2026-09-26) — Amended 2026-09-27 (ADR-032: D-8 «только английский» — superseded);
 Amended 2026-09-29 (ADR-042 amendment, бэклог 1.x пункт 5: карточная раскладка `PanelCustomizeWindow`/
 `NewPanelDefaultsSection` упрощена до Preview → «Цвет» → «Дополнительно», боковая навигация и немодальность
-самого окна не пересмотрены); Amended 2026-10-09 (D-6: переключатель «Show desktop icons» возвращён в
-Settings → General по явной просьбе пользователя, добавлено событие `IDesktopIconsService.VisibilityChanged`
-— см. «Amendment (2026-10-09)» в конце документа)
+самого окна не пересмотрены); Amended 2026-09-30 (ADR-047: карточки Settings → `SettingsCard`, ряд кнопок Panels →
+командная строка `DropDownButton`, тема окна следует Windows); Amended 2026-10-09 (D-6: переключатель «Show desktop
+icons» возвращён в Settings → General по явной просьбе пользователя, добавлено событие
+`IDesktopIconsService.VisibilityChanged` — см. «Amendment (2026-10-09)» в конце документа)
 
 Ветка `feature/settings-window-redesign` (от `rc/0.6.0`, база `3628cc4`). Источник решения — бриф
 `docs/prompts/settings-window-redesign.md` (инвентарь текущих настроек, решения D-1..D-10, разбивка на
@@ -125,7 +126,7 @@ MainWindow (Settings)
 ├── General
 │   ├── Start with Windows
 │   └── Advanced (expander)
-│       ├── Native resize (experimental)
+│       ├── Native resize (experimental)      [удалено 2026-10-10: ADR-022 Фаза 1, единственный путь ресайза]
 │       └── Reset one-time hints (HasShownMoveHint)
 ├── Layout & snapping
 │   ├── Snap panel position to grid (toggle; GridSize==1 при выкл.) + шаг (GridSize>1)
@@ -443,3 +444,27 @@ mode» по-прежнему вне окна настроек (amendment к ADR-
 **Отклонённая альтернатива** — отдельный ADR для события `VisibilityChanged`: это синхронизационная деталь
 уже принятых решений (D-6 и ADR-034), а не самостоятельное архитектурное решение; зафиксировано здесь и в
 amendment к [ADR-034](ADR-034-explorer-restart-recovery.md).
+
+## Amendment (2026-09-29): карточная раскладка Customize упрощена (ADR-042)
+
+[ADR-042](ADR-042-color-presets-rgb-picker-stepped-size.md) (amendment бэклога 1.x, пункт 5): раскладка карточек
+`PanelCustomizeWindow`/`NewPanelDefaultsSection` упрощена до Preview → «Цвет» → «Дополнительно» (свёрнутый
+expander через слот `AdvancedExtraContent`). Боковая навигация из 8 разделов и немодальность самого окна
+(D-1…D-3) не пересмотрены; изменился только внутренний состав карточек редактора цвета.
+
+## Amendment (2026-09-30): единая дизайн-система (ADR-047)
+
+[ADR-047](ADR-047-unified-design-system.md): карточки Settings переведены на контрол `SettingsCard` (закрывает
+`DO-026` для большинства карточек; `LayoutSnappingSection` — follow-up); тема окна настроек следует теме Windows
+(`AppsUseLightTheme`); ряд из 5 кнопок раздела «Панели» заменён командной строкой (D-8; позднее, 2026-10-09,
+«Ещё» заменён контекстным меню строки); Customize — заголовки групп через `Settings.GroupHeader`, `Auto-size` —
+`Theme.ToggleSwitch`.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-27 | [ADR-032](ADR-032-ui-localization.md) | Вся поверхность локализована (ru/en) | D-8 «только английский» |
+| 2026-09-29 | [ADR-042](ADR-042-color-presets-rgb-picker-stepped-size.md) | Карточки Customize/New-panel-defaults: Preview → «Цвет» → «Дополнительно» | Прежний состав карточек редактора цвета |
+| 2026-09-30 | [ADR-047](ADR-047-unified-design-system.md) | `SettingsCard`, командная строка Panels (`DropDownButton`), тема окна = тема Windows | Ряд из 5 кнопок раздела «Панели»; прежняя тема окна настроек, не следовавшая теме Windows |
+| 2026-10-09 | (без отдельного ADR) | D-6: «Show desktop icons» возвращён в Settings → General; событие `VisibilityChanged` | Утверждение D-6 «Show desktop icons не живёт в настройках» (Контекст п. 4, «Позитивные последствия») |

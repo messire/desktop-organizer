@@ -74,7 +74,7 @@ internal sealed class LocalizedValueConverter : IMultiValueConverter
             // Never throws (docs/PLANS/localization.md §2.4) — a misbehaving inner converter must not
             // take down the whole binding pipeline. Only the exception's type/message is logged, via
             // Debug.WriteLine, matching this codebase's convention for swallowed exceptions elsewhere
-            // (e.g. PanelResizeController.OnResizeDragDelta).
+            // (e.g. NativePanelResizeController.ProposeBounds).
             Debug.WriteLine($"{nameof(LocalizedValueConverter)}: swallowed {ex.GetType().Name} converting a {{loc:LocBinding}} value — {ex.Message}");
             return conversion?.FallbackValue ?? DependencyProperty.UnsetValue;
         }

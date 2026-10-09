@@ -273,6 +273,17 @@ public class ChildWindowModel : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Persisted fields of this panel that this build does not understand (unknown JSON keys, unrecognised enum
+    /// strings), carried unchanged from load to save so an older build never destroys data written by a newer
+    /// additive schema revision (ADR-024 Amendment "Additive revisions"). The UI never reads it; no change
+    /// notification. Must stay serializable: layout snapshots keep panels as serialized models, and a snapshot
+    /// restore must bring the extras back. <see langword="null"/> (and then omitted from JSON) when there is none.
+    /// </summary>
+    [Browsable(false)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PanelPersistedExtras? PersistedExtras { get; set; }
+
+    /// <summary>
     /// Runtime collection of file items. Not persisted — populated from <see cref="FilePaths"/> on load.
     /// </summary>
     [JsonIgnore]

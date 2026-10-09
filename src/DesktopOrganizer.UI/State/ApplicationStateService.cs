@@ -39,6 +39,10 @@ internal sealed class ApplicationStateService : IApplicationStateService
     private IDebounceTimer? _debounceTimer;
     private IDiagnosticsLog? _diagnosticsLog;
 
+    // Unknown fields of the loaded document that no model carries (ADR-024 Amendment "Additive revisions"):
+    // filled by Load(), written back by PersistNow(). Empty until the first Load().
+    private UnknownFieldLedger _ledger = new();
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ApplicationStateService"/> class.
     /// </summary>
@@ -121,11 +125,29 @@ internal sealed class ApplicationStateService : IApplicationStateService
         // call site instead of relying on it never happening.
         // Same crash class one level deeper (P02b fix-cycle 2 final verification, MAJOR-1): a null
         // ELEMENT ({"panels":[null]}) or a snapshot whose own "panels" is null. Skipped, never thrown.
-        Panels = (document.Panels ?? []).Where(p => p is not null).Select(PanelStateMapper.FromDto).ToList();
+        var ledger = UnknownFieldLedger.Capture(document);
+        var panelKeys = 0;
+        var panelEnums = 0;
+
+        Panels = (document.Panels ?? []).Where(p => p is not null).Select(p => PanelStateMapper.FromDto(p)).ToList();
+        foreach (var panel in Panels)
+        {
+            panelKeys += panel.PersistedExtras?.UnknownKeyCount ?? 0;
+            panelEnums += panel.PersistedExtras?.UnknownEnumCount ?? 0;
+        }
 
         (Pages, CurrentPageId) = PagesStateMapper.FromDto(document.Pages);
 
-        Snapshots = (document.LayoutSnapshots ?? []).Where(s => s is not null).Select(ToLayoutSnapshot).ToList();
+        Snapshots = (document.LayoutSnapshots ?? [])
+            .Where(s => s is not null)
+            .Select(s => ToLayoutSnapshot(s, ref panelKeys, ref panelEnums))
+            .ToList();
+
+        _ledger = ledger;
+        DiagForwardCompatFieldsPreserved(
+            ledger.UnknownKeyCount + panelKeys,
+            ledger.UnknownEnumCount + panelEnums,
+            ledger.UnknownSystemIconItemCount);
 
         // Absent key -> null, matching the pre-ADR-024 "blank settings value" contract: the caller
         // (SystemIconsPanelManager) keeps whichever built-in defaults its own model already carries
@@ -179,20 +201,33 @@ internal sealed class ApplicationStateService : IApplicationStateService
     /// <c>DesktopOrganizer.Core</c> never has to reference <c>DesktopOrganizer.UI</c>'s
     /// <c>ChildWindowModel</c> — the on-disk schema itself has carried real objects since schema v2.
     /// </summary>
-    private static LayoutSnapshot ToLayoutSnapshot(LayoutSnapshotStateDto dto) => new()
+    private static LayoutSnapshot ToLayoutSnapshot(LayoutSnapshotStateDto dto, ref int unknownKeys, ref int unknownEnums)
     {
-        Id = dto.Id,
-        Name = dto.Name,
-        CreatedAt = dto.CreatedAt,
-        PanelJsonItems = (dto.Panels ?? [])
-            .Where(p => p is not null)
-            .Select(PanelStateMapper.FromDto)
-            .Select(model => JsonSerializer.Serialize(model, SnapshotPanelJsonOptions))
-            .ToList(),
-    };
+        var panelJsonItems = new List<string>();
+        foreach (var panelDto in dto.Panels ?? [])
+        {
+            if (panelDto is null)
+            {
+                continue;
+            }
+
+            var model = PanelStateMapper.FromDto(panelDto);
+            unknownKeys += model.PersistedExtras?.UnknownKeyCount ?? 0;
+            unknownEnums += model.PersistedExtras?.UnknownEnumCount ?? 0;
+            panelJsonItems.Add(JsonSerializer.Serialize(model, SnapshotPanelJsonOptions));
+        }
+
+        return new LayoutSnapshot
+        {
+            Id = dto.Id,
+            Name = dto.Name,
+            CreatedAt = dto.CreatedAt,
+            PanelJsonItems = panelJsonItems,
+        };
+    }
 
     /// <summary>The inverse of <see cref="ToLayoutSnapshot"/>, used by <see cref="PersistNow"/>.</summary>
-    private static LayoutSnapshotStateDto ToSnapshotDto(LayoutSnapshot snapshot)
+    private static LayoutSnapshotStateDto ToSnapshotDto(LayoutSnapshot snapshot, UnknownFieldLedger ledger)
     {
         var panels = new List<PanelStateDto>();
 
@@ -216,13 +251,16 @@ internal sealed class ApplicationStateService : IApplicationStateService
             }
         }
 
-        return new LayoutSnapshotStateDto
+        var dto = new LayoutSnapshotStateDto
         {
             Id = snapshot.Id,
             Name = snapshot.Name,
             CreatedAt = snapshot.CreatedAt,
             Panels = panels,
         };
+
+        ledger.ApplyToSnapshot(dto);
+        return dto;
     }
 
     /// <summary>
@@ -254,16 +292,17 @@ internal sealed class ApplicationStateService : IApplicationStateService
             // matching the pre-ADR-024 WindowManager.PersistWindowsState ordering, so a live window's
             // Position/Size is always as fresh as possible at the moment it actually gets serialized.
             windowManager.SyncAllWindowsToModels();
-            var panels = windowManager.GetAllChildWindows().Select(PanelStateMapper.ToDto).ToList();
+            var panels = windowManager.GetAllChildWindows().Select(m => PanelStateMapper.ToDto(m)).ToList();
 
             var pageManager = ResolvePageManager();
             var pages = PagesStateMapper.ToDto(pageManager.PageDescriptors, pageManager.CurrentPage);
 
             var snapshotService = ResolveLayoutSnapshotService();
-            var snapshots = snapshotService.Snapshots.Select(ToSnapshotDto).ToList();
+            var ledger = _ledger;
+            var snapshots = snapshotService.Snapshots.Select(s => ToSnapshotDto(s, ledger)).ToList();
 
             var systemIconsPanelManager = ResolveSystemIconsPanelManager();
-            var systemIconsPanel = SystemIconsPanelStateMapper.ToDto(systemIconsPanelManager.Model);
+            var systemIconsPanel = SystemIconsPanelStateMapper.ToDto(systemIconsPanelManager.Model, ledger);
 
             var document = new ApplicationStateDocumentDto
             {
@@ -272,6 +311,7 @@ internal sealed class ApplicationStateService : IApplicationStateService
                 LayoutSnapshots = snapshots,
                 SystemIconsPanel = systemIconsPanel,
             };
+            ledger.ApplyToDocument(document);
 
             var node = JsonSerializer.SerializeToNode(document, StateJson.Options)!.AsObject();
             _store.Save(node);
@@ -310,6 +350,40 @@ internal sealed class ApplicationStateService : IApplicationStateService
         catch (Exception)
         {
             // See summary — a missing/failing IDiagnosticsLog must never affect the write barrier.
+        }
+    }
+
+    /// <summary>
+    /// Records one <c>StateForwardCompatFieldsPreserved</c> diagnostics event after a load that carried fields this
+    /// build does not understand (unknown JSON keys, unrecognised enum strings, system-icon items of an unknown
+    /// kind) — nothing is written when all counters are zero. Counters only: neither key names nor raw values are
+    /// logged (a hand-edited document may contain user data; same <c>state</c>-event discipline as the rest of
+    /// ADR-024). Never throws.
+    /// </summary>
+    /// <param name="unknownKeyCount">Number of unknown JSON keys carried across the document.</param>
+    /// <param name="unknownEnumCount">Number of unrecognised enum strings.</param>
+    /// <param name="unknownSystemIconItemCount">Number of system-icon items with an unknown kind.</param>
+    private void DiagForwardCompatFieldsPreserved(int unknownKeyCount, int unknownEnumCount, int unknownSystemIconItemCount)
+    {
+        if (unknownKeyCount <= 0 && unknownEnumCount <= 0 && unknownSystemIconItemCount <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var diagnostics = _diagnosticsLog ??= _serviceProvider.GetRequiredService<IDiagnosticsLog>();
+            diagnostics.Write(
+                "state",
+                "StateForwardCompatFieldsPreserved",
+                null,
+                new KeyValuePair<string, object?>("unknownKeyCount", unknownKeyCount),
+                new KeyValuePair<string, object?>("unknownEnumCount", unknownEnumCount),
+                new KeyValuePair<string, object?>("unknownSystemIconItemCount", unknownSystemIconItemCount));
+        }
+        catch (Exception)
+        {
+            // A missing/failing IDiagnosticsLog must never affect Load().
         }
     }
 

@@ -127,6 +127,10 @@ public static class DiConfig
         services.AddSingleton<IFolderWatcherFactory, FolderWatcherFactory>();
         services.AddSingleton<ISystemShellService, SystemShellService>();
         services.AddSingleton<IPanelItemStorageService, PanelItemStorageService>();
+
+        // ADR-009 amendment 2026-10-10: cloud-folder drop warning (O1) and the read-only orphan finder (O2).
+        services.AddSingleton<ICloudFolderDetector, CloudPathClassifier>();
+        services.AddSingleton<IManagedStorageOrphanScanner, ManagedStorageOrphanScanner>();
         services.AddSingleton<IFileItemRenameService, FileItemRenameService>();
 
         // Manual uninstall-time recovery switch (--restore-panel-items). Standalone — never resolved
@@ -164,9 +168,9 @@ public static class DiConfig
         // to IsSupported == false when the shell COM object is unavailable.
         services.AddSingleton<IVirtualDesktopService, VirtualDesktopService>();
 
-        // Native panel sizing (ADR-022 / Phase 2). Stateless singleton: it holds one hook per attached
-        // panel HWND and is inert until a panel calls Attach — which only happens behind the
-        // NativePanelSizing feature flag (default off).
+        // Native panel sizing (ADR-022). One process-wide singleton that keeps no global state of its own:
+        // per-panel state (one hook per attached panel HWND) lives in the attachments it creates, and the
+        // service is inert until a panel calls Attach — every ChildWindow does so once its HWND exists.
         services.AddSingleton<INativePanelSizingService, NativePanelSizingService>();
 
         // Versioned JSON application-state store (ADR-024, Phase 4). The migration chain is registered
@@ -178,6 +182,7 @@ public static class DiConfig
         services.AddSingleton<ISettingsMigration, V3ToV4Migration>();
         services.AddSingleton<ISettingsMigration, V4ToV5Migration>();
         services.AddSingleton<ISettingsMigration, V5ToV6Migration>();
+        services.AddSingleton<ISettingsMigration, V6ToV7Migration>();
 
         // Advisory storage-root lock (ADR-024 D-8, closes ADR-023 R-15). Singleton so the same instance
         // backs both Program.Main's TryAcquire() and IApplicationStateStore.IsWritable's live read of

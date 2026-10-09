@@ -58,28 +58,28 @@
   (`ResizeGeometryCharacterizationTests.cs` — C1 golden values pinned pre-extraction,
   `ResizeGeometryCalculatorTests.cs`, `PanelInteractionTrackerTests.cs`, `ResizeGestureSessionTests.cs`)
 
-## Native Sizing (Phase 2, shipped — behind `NativePanelSizing` flag, default `False`; see ADR-022)
+## Native Sizing (Phase 2, shipped; since 2026-10-10 the ONLY resize path — the `NativePanelSizing` flag and the WPF Thumb path were removed, ADR-022 Phase 1)
 - `src/DesktopOrganizer.Services.Abstractions/Interfaces/INativePanelSizingService.cs` —
   `INativePanelSizingService`/`INativePanelSizingClient`, `NativeSizingEdge`, `NativeRectPx`, `NativePointPx`
 - `src/DesktopOrganizer.Services/Tools/NativePanelSizingService.cs` — `HwndSource.AddHook`, decodes
   6 Win32 sizing messages, zero snap/geometry policy
 - `src/DesktopOrganizer.UI/Interaction/Native/NativeHitTestMapper.cs` — `WM_NCHITTEST` → edge/corner zones
-- `src/DesktopOrganizer.UI/Interaction/Native/NativeSizingCoordinateMapper.cs` — px↔DIP, one conversion point
+- `src/DesktopOrganizer.UI/Interaction/Native/NativeSizingCoordinateMapper.cs` — px↔DIP rounding reference; no production callers since ADR-037 (tests only, DO-050)
 - `src/DesktopOrganizer.UI/Interaction/Native/NativeSizingOriginResolver.cs` — self-calibrating `WM_SIZING`
   coordinate-space offset (R-3)
 - `src/DesktopOrganizer.UI/Interaction/Native/NativeSizingEdgeMap.cs` — `NativeSizingEdge` ↔ `ResizeEdge` ↔ `WMSZ_*`
-- `src/DesktopOrganizer.UI/Interaction/Native/NativeSizingSwitch.cs` — feature-flag resolution
-  (env > CLI > setting)
+- ~~`NativeSizingSwitch.cs` — feature-flag resolution (env > CLI > setting)~~ — removed (ADR-022 Phase 1)
 - `src/DesktopOrganizer.UI/Behaviors/NativePanelResizeController.cs` — `INativePanelSizingClient`
   implementation, reuses Phase 1 `ResizeGestureSession`/`ResizeGeometryCalculator` unmodified
-- `src/DesktopOrganizer.UI/Behaviors/IPanelResizeController.cs` — shared legacy/native controller contract
-- `src/DesktopOrganizer.UI/Behaviors/ResizeConstraintsFactory.cs` — constraints builder shared by both paths
-- `src/DesktopOrganizer.UI/Behaviors/IResizeAffordance.cs` + `ThumbOverlayAffordance.cs` +
-  `NativeSizingAffordance.cs` — roll-up-aware resize-handle visibility abstraction (R-9)
+- `src/DesktopOrganizer.UI/Behaviors/IPanelResizeController.cs` — narrow seam (`AbortResize`/`SnapWidthToGrid`) between `ChildWindow` and the native controller
+- `src/DesktopOrganizer.UI/Behaviors/ResizeConstraintsFactory.cs` — constraints builder (gesture + `SnapWidthToGrid` share its predicates)
+- `src/DesktopOrganizer.UI/Behaviors/IResizeAffordance.cs` + `NativeSizingAffordance.cs` — roll-up-aware
+  resize-grip visibility abstraction (R-9); `ThumbOverlayAffordance.cs` removed (ADR-022 Phase 1)
 - corresponding tests: `tests/DesktopOrganizer.Tests/Unit/Interaction/Native/`
   (`NativeHitTestMapperTests`, `NativeSizingCoordinateMapperTests`, `NativeSizingOriginResolverTests`,
-  `NativeSizingEdgeMapTests`, `NativeSizingSwitchTests`, `NativeResizeEquivalenceTests`),
-  `NativePanelSizingServiceTests`, `NativePanelResizeControllerTests`
+  `NativeSizingEdgeMapTests`, `ResizeGeometryCalculatorApplyEquivalenceTests` — renamed from `NativeResizeEquivalenceTests`;
+  `NativeSizingSwitchTests` removed), `NativePanelSizingServiceTests`, `NativePanelResizeControllerTests`
+  (regression-golden against `ExpectedPipelineOracle`), `Unit/Views/ResizeGripVisualsTests`, `Unit/Views/NativePanelSizingKeyRemovedTests`
 
 ## Single Instance + IPC (Phase 3, shipped — see ADR-023)
 - `src/DesktopOrganizer.Services.Abstractions/Interfaces/ISingleInstanceCoordinator.cs` —

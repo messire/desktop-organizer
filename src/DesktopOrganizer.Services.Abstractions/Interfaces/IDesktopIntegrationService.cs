@@ -11,7 +11,9 @@ namespace DesktopOrganizer.Services.Abstractions;
 /// wants the styles only (<see cref="ApplyDesktopWindowStyles"/>) — because <c>WorkerW</c> is a
 /// single layer shared by every Windows virtual desktop and anything parented into it is
 /// unconditionally visible on all of them (ADR-019) — and re-asserts its behind-everything placement
-/// on a timer through <see cref="SendToBackOfZOrder"/> instead.
+/// on a timer through <see cref="SendToBackOfZOrder"/> instead. Where no <c>WorkerW</c> exists (Windows 11
+/// 24H2+, ADR-034) fence panels stay top-level and are held in the desktop band by
+/// <see cref="ConstrainWindowPosChangingToDesktopBand"/> + <see cref="KeepInDesktopBand"/> — no timer.
 /// </para>
 /// </summary>
 public interface IDesktopIntegrationService
@@ -133,4 +135,46 @@ public interface IDesktopIntegrationService
     /// </para>
     /// </remarks>
     void SendToBackOfZOrder(IntPtr hwnd);
+
+    /// <summary>
+    /// Fence-panel counterpart of <see cref="SendToBackOfZOrder"/> for the Windows 11 24H2+ layout ("mode T",
+    /// ADR-034/ADR-037): when — and only when — <paramref name="hwnd"/> is really a top-level window
+    /// (<c>GetAncestor(GA_ROOT) == hwnd</c>, decided per call from the fact, never from the OS version), moves it
+    /// to the top of the <b>desktop band</b>: directly below the first foreign application window above
+    /// <c>Progman</c>. A panel embedded into <c>WorkerW</c> ("mode E") is left completely untouched.
+    /// </summary>
+    /// <param name="hwnd">Handle of the panel window. <see cref="IntPtr.Zero"/> is a no-op.</param>
+    /// <remarks>
+    /// <para>
+    /// The desktop band is the contiguous run of windows directly above <c>Progman</c> that belong to the
+    /// desktop layer: Explorer's <c>WorkerW</c> siblings and this process's own desktop windows (fence panels
+    /// and the system icons sidebar — <c>WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE</c>). A panel already inside
+    /// that run is left where it is (zero <c>SetWindowPos</c> calls), which is what keeps N panels and the
+    /// sidebar's own one-slot-above-<c>Progman</c> timer (ADR-020) from endlessly swapping places.
+    /// </para>
+    /// <para>
+    /// Event-driven, not periodic: called after a panel is shown and after shell-restart recovery; the
+    /// in-between protection is <see cref="ConstrainWindowPosChangingToDesktopBand"/>. Same flags as
+    /// <see cref="SendToBackOfZOrder"/> (<c>SWP_NOACTIVATE | SWP_NOOWNERZORDER</c>). Never throws.
+    /// </para>
+    /// </remarks>
+    void KeepInDesktopBand(IntPtr hwnd);
+
+    /// <summary>
+    /// <c>WM_WINDOWPOSCHANGING</c> filter for a fence panel (ADR-034 amendment 2026-10-09): when a top-level
+    /// panel is about to be raised (any Z-order change, or being shown), rewrites the proposed
+    /// <c>hwndInsertAfter</c> in place so the panel lands at the top of the desktop band instead of on top of
+    /// the application windows — or cancels the Z-order part (<c>SWP_NOZORDER</c>) when the panel already is
+    /// inside the band. Position, size, activation and visibility of the request are never changed.
+    /// </summary>
+    /// <param name="hwnd">The panel window receiving the message.</param>
+    /// <param name="windowPos">The message's <c>lParam</c> (pointer to <c>WINDOWPOS</c>).</param>
+    /// <remarks>
+    /// Runs inside the panel's window procedure: requests that carry <c>SWP_NOZORDER</c> and no
+    /// <c>SWP_SHOWWINDOW</c> (every move/resize frame) return after one structure read, hiding requests are
+    /// ignored, and a <c>WorkerW</c>-child panel (mode E) is never touched. Only cheap, message-free reads are
+    /// made (<c>FindWindow</c>, <c>GetWindow</c>, <c>GetWindowLongPtr</c>, <c>GetClassName</c>,
+    /// <c>GetWindowThreadProcessId</c>). Never throws.
+    /// </remarks>
+    void ConstrainWindowPosChangingToDesktopBand(IntPtr hwnd, IntPtr windowPos);
 }

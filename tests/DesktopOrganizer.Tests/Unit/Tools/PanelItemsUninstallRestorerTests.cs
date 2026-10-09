@@ -366,6 +366,95 @@ public class PanelItemsUninstallRestorerTests
         }
     }
 
+    // ── Enumeration failure must never lead to a root hard-delete (ADR-041 §RestoreAll p.4) ──
+
+    /// <summary>
+    /// Verifies that when the per-item GUID directory cannot be enumerated (so its content was never
+    /// read), the run counts that as a failure, and the storage root — still holding the unread user
+    /// file — is NOT deleted.
+    /// </summary>
+    [Fact]
+    public void RestoreAll_ItemDirectoryEnumerationFails_ReportsFailureAndKeepsRoot()
+    {
+        var (storage, root) = BuildStorageService();
+        var desktop = Path.Combine(Path.GetTempPath(), $"DOrgDesktop_{Guid.NewGuid():N}");
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgEnumDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "Unreadable.txt");
+        File.WriteAllText(source, "precious");
+
+        try
+        {
+            var managed = storage.MoveIn(source);
+            Assert.NotNull(managed);
+            var guidDir = Path.GetDirectoryName(managed!)!;
+
+            var restorer = new PanelItemsUninstallRestorer(
+                root,
+                desktop,
+                appLog: null,
+                enumerateEntries: path =>
+                    string.Equals(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), guidDir, StringComparison.OrdinalIgnoreCase)
+                        ? throw new UnauthorizedAccessException("simulated access denied")
+                        : Directory.GetFileSystemEntries(path));
+
+            var result = restorer.RestoreAll();
+
+            Assert.False(result.Success);
+            Assert.True(result.FailedCount >= 1);
+            Assert.Contains("item(s) or location(s) could not be restored", result.Message, StringComparison.Ordinal);
+            Assert.True(Directory.Exists(root), "The storage root must survive an enumeration failure.");
+            Assert.True(File.Exists(managed!), "The unread user file must not be deleted.");
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+            SafeDeleteDirectory(desktop);
+        }
+    }
+
+    /// <summary>
+    /// Verifies that when the storage root itself cannot be enumerated, the run reports a failure and
+    /// keeps the root rather than treating "nothing enumerated" as "nothing to restore".
+    /// </summary>
+    [Fact]
+    public void RestoreAll_StorageRootEnumerationFails_ReportsFailureAndKeepsRoot()
+    {
+        var (storage, root) = BuildStorageService();
+        var desktop = Path.Combine(Path.GetTempPath(), $"DOrgDesktop_{Guid.NewGuid():N}");
+        var sourceDir = Path.Combine(Path.GetTempPath(), $"DOrgEnumRootDir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceDir);
+        var source = Path.Combine(sourceDir, "Unreadable.txt");
+        File.WriteAllText(source, "precious");
+
+        try
+        {
+            var managed = storage.MoveIn(source);
+            Assert.NotNull(managed);
+
+            var restorer = new PanelItemsUninstallRestorer(
+                root,
+                desktop,
+                appLog: null,
+                enumerateEntries: _ => throw new IOException("simulated root enumeration failure"));
+
+            var result = restorer.RestoreAll();
+
+            Assert.False(result.Success);
+            Assert.Equal(0, result.RestoredCount);
+            Assert.True(result.FailedCount >= 1);
+            Assert.True(Directory.Exists(root), "The storage root must survive an enumeration failure.");
+            Assert.True(File.Exists(managed!), "The unread user file must not be deleted.");
+        }
+        finally
+        {
+            SafeDeleteDirectory(sourceDir);
+            SafeDeleteDirectory(root);
+            SafeDeleteDirectory(desktop);
+        }
+    }
+
     // ── Manifest temp leftovers (MINOR 1) ───────────────────────────────────
 
     /// <summary>

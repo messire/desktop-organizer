@@ -421,4 +421,16 @@ public interface IPanelItemStorageService
     /// </remarks>
     /// <param name="copyPaths">Managed paths previously returned by <see cref="CopyManaged"/> (<see cref="ManagedCopyResult.CopyPath"/>) during the same, still-in-progress operation.</param>
     void DiscardCopies(IReadOnlyList<string> copyPaths);
+
+    /// <summary>
+    /// Returns a snapshot of the manifest: every recorded (managed path, original path) pair, whether or not
+    /// the managed copy still exists on disk. Read-only — performs no writes of any kind and does not change
+    /// the manifest format; backs <see cref="IManagedStorageOrphanScanner"/> (ADR-009 amendment 2026-10-10).
+    /// </summary>
+    /// <returns>
+    /// The recorded pairs, in no meaningful order. Empty when the manifest does not exist or cannot be read
+    /// right now (an untrusted read is never reported as "nothing is managed" to a writer — this method is
+    /// read-only, so the worst outcome is an empty list).
+    /// </returns>
+    IReadOnlyList<KeyValuePair<string, string>> GetManifestEntries();
 }

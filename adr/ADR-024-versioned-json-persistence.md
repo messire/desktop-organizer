@@ -1,6 +1,6 @@
 # ADR-024: Versioned JSON Persistence for Structural Application State
 
-Status: Accepted
+**Статус:** Accepted — Amended 2026-09-22 (ADR-025: схема v3→v4, `accentColor`, лоссивная миграция `#1E1E1E` → `#6B7280`); Amended 2026-09-22 (ADR-028: схема v4→v5, аддитивные `geometryMode`/`widthSpanUnits`/`heightSpanUnits`/`iconLayoutPolicy`/`sizingMode`); Amended 2026-09-25 (раздельные корни хранилища Debug/Release); Amended 2026-09-27 (ADR-032: аддитивный скаляр `IAppSettings.Language`, единственное расширение `user.config` с явного разрешения пользователя); Amended 2026-09-29 (ADR-043: схема v5→v6, `pages.ids[]` → `pages.items[{id,name?}]`, с явного разрешения пользователя); Amended 2026-10-09 (ADR-audit WP-B: read-only сессия видна пользователю — UI читает `IApplicationStateStore.IsWritable`, drop не двигает файлы, `LayoutSnapshotService.Restore` в read-only не возвращает файлы; формат и семантика записи не менялись); Amended 2026-10-10 (решение пользователя «Аддитивная ревизия схемы»: схема v7 + envelope-ключ `schemaRevision`, round-trip неизвестных полей, толерантные enum, `V6ToV7Migration` — тождественная; читаются файлы того же major с более высокой ревизией; D-5 — четыре reserved-ключа, D-7 rung 1 — см. раздел «Amendment 2026-10-10»; после перехода на v7 каждый запуск ≤0.8.0 остаётся read-only, пока файл не восстановлен из premigration-бэкапа или не возвращена сборка ≥v7 — однократно лишь событие major-bump)
 
 Branch `refactor/versioned-json-store` (from `rc/0.4.0`). Implementation master plan:
 `docs/PLANS/phase-4-versioned-json-store.md` (D-0..D-13, risks R-1..R-14). Commits `131f009`(plan)
@@ -92,7 +92,7 @@ Root: `%LOCALAPPDATA%\DesktopOrganizer\State\`.
 Quarantine retention: at most 5 files, oldest deleted at startup (same discipline as
 `JsonLinesDiagnosticsLog.EnsureDirectoryAndRetention`).
 
-### D-5. Format — flat envelope, three reserved keys
+### D-5. Format — flat envelope, three reserved keys (four since v7 — Amendment 2026-10-10)
 
 ```json
 { "schemaVersion": 3, "writtenAtUtc": "2026-09-19T08:00:00.0000000Z", "appVersion": "0.4.0",
@@ -105,6 +105,13 @@ name (enforced by `SchemaContractTests`). `appVersion` is informational
 (`AssemblyInformationalVersion`, e.g. `0.4.0`) and **never** drives a decision on read — only
 `schemaVersion` does; branching on `appVersion` was explicitly rejected as a future temptation to
 avoid.
+
+**Amendment 2026-10-10 (v7):** the set of reserved top-level keys is now **four** — `schemaVersion`,
+`writtenAtUtc`, `appVersion` and `schemaRevision` (`StateEnvelope.ReservedKeys`/`IsReservedKey`/`Wrap(…,
+schemaRevision)`/`TryGetSchemaRevision`). The sentence above ("three … only reserved keys") describes the v3–v6
+envelope. The reserved set is **frozen within a major**: a new envelope key is only possible together with a major bump
+(otherwise a build of the same major would take it for a payload key). `SchemaContractTests` now enforces the
+"no migration emits a reserved key" rule against all four.
 
 ### D-6. Write protocol (5 stages)
 
@@ -131,7 +138,7 @@ Test seam for crash injection: an `internal` constructor accepting `Func<StateWr
 
 | # | Situation | Action | Status |
 |---|---|---|---|
-| 1 | primary parses, `schemaVersion ≤ Current`, migrations succeed | load | `Loaded` |
+| 1 | primary parses, `schemaVersion ≤ Current` (since v7: the same major with **any** `schemaRevision` is also rung 1 — Amendment 2026-10-10), migrations succeed | load | `Loaded` |
 | 2 | primary missing, `.bak` valid | load from `.bak`, immediately rewrite primary | `RecoveredFromBackup` |
 | 3 | primary corrupt, `.bak` valid | primary → quarantine, load `.bak`, rewrite primary | `RecoveredFromBackup` |
 | 4 | primary corrupt, `.bak` corrupt/absent | primary and `.bak` → quarantine, empty structural state, writes **allowed** | `Quarantined` |
@@ -149,6 +156,11 @@ diagnostics event + manual recovery via `--restore-state-backup` (C7, §D-11-adj
 untouched" must be present in the reader from the very first release that ships this store, or a
 rollback from a build that writes schema v3 to a build that only understands v2 would clobber the
 user's state. This is far cheaper to build in from day one than to retrofit.
+
+**Amendment 2026-10-10:** rung 7 still compares the **major** only. Since v7 a document with the same `schemaVersion`
+but a higher `schemaRevision` is *not* rung 7 — it is rung 1 (`Loaded`, writable, unknown fields preserved on save); see
+the read table in the Amendment 2026-10-10 section below. "Never overwritten" in rung 7 and in the Invariants applies to
+a higher **major**.
 
 ### D-8. Advisory file lock — done in this phase (closes ADR-023 R-15)
 
@@ -384,8 +396,10 @@ load/save/drag/resize/page-switch/snapshot behavior is unchanged from the user's
   the read ladder (`NewerSchema`) — no user action needed, no data loss, but that session starts with
   empty structural state by design.
 - Manual verification on live Windows (real-install upgrade, corrupt-primary recovery, FUS lock
-  contention, Controlled-Folder-Access/AV interaction, `--restore-state-backup`, startup performance)
-  is still outstanding — see `docs/Refactoring/Testing/storage-manual-matrix.md` (S-1..S-11).
+  contention, Controlled-Folder-Access/AV interaction, `--restore-state-backup`, startup performance):
+  **performed by the user on Windows 11 24H2, 2026-09-27, accepted as sufficient** (Windows 10 is not
+  checked separately) — see [docs/ROADMAP.md](../docs/ROADMAP.md) (lines 6–8, manual verify for Phases 0–10). The
+  historical checklist `docs/Refactoring/Testing/storage-manual-matrix.md` (S-1..S-11) is kept as a record.
 
 ## Not done in this phase (deliberately)
 
@@ -504,4 +518,225 @@ top-level ключи (`panels`, `layoutSnapshots`, `systemIconsPanel`) копи�
 - Диапазон разрешения — **только** `schemaVersion`/DTO `pages`/маппинг в `ApplicationStateService`.
   `JsonApplicationStateStore` (атомарная запись, `.bak`, карантин, advisory lock), `StateMigrationRunner`,
   `StateRestoreCommand`, `LegacySettingsImporter`, `LayoutSnapshotService` — без диффа.
+
+---
+
+## Amendment 2026-09-22 (ADR-025): схема v3→v4 — `accentColor` (оформлено ретроспективно, ADR-audit WP-E)
+
+Исходный текст этого ADR описывает схему v3. Бамп **v3→v4** (`V3ToV4Migration`, `JsonObject`-only, D-1) был
+введён [ADR-025](ADR-025-ambient-accent-visual-language.md) (Ambient Accent, D-5) и в этом документе не
+оформлялся (Amendment 2026-09-22 (ADR-028) выше уже ссылается на «v4 (ADR-025)»). Фактическое содержание шага
+(сверено с `src/DesktopOrganizer.Services/Storage/Migrations/V3ToV4Migration.cs`):
+
+- В `panels[].appearance` ключи `backgroundColor`/`backgroundOpacity` (мёртвые ключи v3) заменяются на
+  `accentColor`/`surfaceOpacity`/`surfaceStyle`.
+- **Единственный лоссивный шаг:** `backgroundColor == "#1E1E1E"` (исторический дефолт заливки v1–v3) →
+  `accentColor = "#6B7280"` (`Accent.Neutral`); любое другое значение переносится в `accentColor` дословно.
+  Принят как trade-off (ADR-025 «D-5 лоссивность»).
+- Все прочие ключи документа копируются без изменений; принцип D-9 («версия — реальный шаг») соблюдён.
+- Откат на сборку до v4 уходит в rung 7 (`NewerSchema`, D-7): read-only, файл не перезаписывается.
+
+## Amendment 2026-10-09 (ADR-audit WP-B): read-only сессия видна пользователю и не двигает файлы
+
+**Что изменилось (только поведение UI вокруг уже существующего флага, не механизм хранения).** Rung 7
+(«`NewerSchema` → read-only», D-7) и потеря advisory lock (D-8) и раньше превращали сессию в read-only: каждый
+`Save()` — тихий no-op, `IApplicationStateStore.IsWritable == false`. Аудит ADR 2026-10-09 показал, что сам
+пользователь об этом не узнавал, а два UI-пути двигали файлы так, будто запись возможна. Теперь:
+
+- **Единственная точка правды — `IApplicationStateStore.IsWritable`** (читается живьём; `JsonApplicationStateStore`:
+  `_storageLock.IsHeld && !_newerSchemaLockout`). Никакого второго флага в UI нет.
+- **Drop внешних файлов в панель** (`ChildWindowViewModel.AddDroppedFiles`, `MovesDroppedItemsIntoStorage`): в
+  read-only сессии вызов `MoveIn`/`MoveInDirectory` пропускается — панель ссылается на исходный путь, файл остаётся на
+  месте (иначе он ушёл бы со стола в скрытое хранилище при том, что ссылка на него никогда не сохранится). Эффект drop —
+  `DragDropEffects.Copy`, а не `Move` (`ChildWindow.ExternalDropEffect`; при `Move` источник — Проводник — удалил бы
+  оригинал). Вместо one-time Move-хинта (`HasShownMoveHint`) показывается hint у заголовка панели
+  (`ReadOnlyDropHintRequested` → `HintPopupController.ShowReadOnlyDropHint`) — **один раз на экземпляр панели**
+  (in-memory guard, не персистится).
+- **Уведомление `ReadOnlySessionNotice`** (singleton, `App.xaml.cs` после старта): один раз за сессию показывает
+  `StatusSeverity.Caution` через `IStatusNotifier`/InfoBar (ADR-047 D-9), три коротких RESX-предложения (что
+  происходит / что безопасно / что делать). Суффикс tooltip трея `Tray_Tooltip_ReadOnly_Format`
+  (`ITrayIconManager.SetReadOnlySession`); итоговый tooltip усекается до 127 символов (лимит `NotifyIcon.Text`; фикс-цикл
+  `8219acc`, описано по сообщению координатора).
+- **`LayoutSnapshotService.Restore` в read-only сессии не возвращает файлы** (подробности восстановления — ADR-004,
+  Amendment 2026-10-09): удаление панелей там не персистится, осиротеть на диске нечему, а физический перенос забрал бы
+  файл с рабочего стола без сохранённой ссылки.
+
+**Формат и семантика записи НЕ менялись:** `schemaVersion` остаётся 6, миграций, DTO, ключей, `IAppSettings`/
+`user.config`, атомарной записи, бэкапов, карантина, advisory lock и самой лестницы чтения/восстановления нет — изменено
+только то, что UI-слой *читает* уже существующий `IsWritable` и как реагирует на него. Единственное касание
+замороженного контура — поведение `LayoutSnapshotService.Restore` (раньше «без диффа», см. Amendment ADR-043 выше):
+выполнено по **явному указанию пользователя «делай»** на итемизированный список дефектов аудита 2026-10-09 (в списке —
+пункт про возврат managed-файлов при восстановлении снапшота). Сигнатура `ILayoutSnapshotService` и формат снапшотов
+(`PanelJsonItems`) не менялись; конструктор `LayoutSnapshotService` получил зависимости `IStatusNotifier`,
+`ILocalizationService`, `IApplicationStateStore`.
+
+**Известные ограничения:** уведомление показывается только в InfoBar окна настроек (баннер, привязанный к
+`IsWritable`, не построен); удаление панели/страницы в read-only сессии по-прежнему отправляет managed-файлы в Корзину
+(ADR-035/ADR-048) — см. `docs/ROADMAP.md`, «Follow-up’ы после аудита ADR».
+
+## Amendment 2026-10-10: аддитивные ревизии схемы (v7, `schemaRevision`)
+
+**Решение пользователя 2026-10-10** («Аддитивная ревизия схемы» — пункт 1 раздела «Решения, ожидающие пользователя»
+в `docs/ROADMAP.md`): явное разрешение на замороженный контур в объёме, ограниченном ниже («Границы разрешения»).
+Реализация — коммит `5633bb4` (ветка `bugfix/adr-audit-fixes`); план и обоснование —
+[`docs/PLANS/schema-additive-revision-v7.md`](../docs/PLANS/schema-additive-revision-v7.md).
+
+**Зачем.** До этого любое новое persisted-поле требовало бампа `schemaVersion` и, значит, превращало откат на
+предыдущую сборку в read-only сессию (инцидент 2026-09-24, rung 7). Цель — чтобы будущая фича с новым **опциональным**
+полем **не ломала** старую сборку того же major и **не требовала** миграции. Что мешало (сверено с кодом до правки):
+(F1) любой `schemaVersion > Current` → rung 7; (F2) `ApplicationStateService.PersistNow` собирал документ заново из живых
+моделей — неизвестные ключи терялись при первом сохранении; (F3) типизированные enum-свойства DTO на незнакомой
+строке бросали `JsonException` → карантин и **пустое writable** состояние (следующий save затирал primary); (F4)
+`V4ToV5Migration` копирует только allow-list ключей (top-level и снапшота); (F5) `StateMigrationRunner` при
+`StateRestoreCommand` не переносил бы новый envelope-ключ.
+
+### Версионирование: major + revision
+
+- `schemaVersion` остаётся целым **major** и теперь равен **7**. Major меняется только для несовместимых изменений
+  (rename/remove/reshape/смена типа или смысла/«must-understand» поле) — с миграцией и rung 7, как раньше.
+- Новый, **четвёртый** зарезервированный envelope-ключ `schemaRevision` (int ≥ 0) — аддитивный minor.
+  `StateEnvelope.CurrentSchemaRevision = 0`. Отсутствие ключа ≡ `0`; значение не-int или `< 0` ≡ `0` плюс
+  diag-событие `StateRevisionMalformed`, **не** карантин (ревизия — справочные метаданные, не payload).
+- **Таблица чтения** (rungs 1/2/3 — везде, где документ реально используется как загруженное состояние):
+
+| На диске | Сборка v7.rN | Результат |
+|---|---|---|
+| major < 7 | 7.rN | миграции до v7, premigration-бэкап `application-state.premigration-v{major}.json`, writable (как раньше) |
+| major = 7, ревизия ≤ rN | 7.rN | `Loaded`, writable |
+| major = 7, ревизия > rN | 7.rN | **`Loaded`, writable**, неизвестные поля сохраняются (см. ниже), diag `StateNewerRevisionOpened {revisionOnDisk, buildRevision}` |
+| major > 7 | 7.rN | rung 7 без изменений: `NewerSchema`, read-only, файл не трогается |
+
+- **Правило записи:** `schemaRevision = max(revisionOnDisk, CurrentSchemaRevision)` (`JsonApplicationStateStore.WriteRevision`) —
+  high-water mark, монотонен, старая сборка того же major его не понижает. Кто писал последним — по-прежнему
+  информационный `appVersion` (D-5: решения по `appVersion` не принимаются). `StateLoaded` получил поле
+  `schemaRevisionOnDisk`, `StateSaved` — `schemaRevision`.
+- **Отвергнуто (1): остаться на `schemaVersion = 6` и добавить опциональный `schemaRevision`.** Сборка 0.8.0 открыла бы
+  такой файл writable, но не умеет ни round-trip неизвестных полей, ни толерантный enum: при первом save она срезала бы
+  все новые поля, а на новом значении enum ушла бы в карантин и перезаписала primary пустым документом. Major 7 —
+  «черта»: каждая сборка, способная писать v7, гарантированно revision-safe; все небезопасные писатели (≤0.8.0)
+  отсекаются rung 7 — громко и без потери данных.
+- **Отвергнуто (2): «семантическая» строка `"schemaVersion": "7.0"`.** `StateEnvelope.TryGetSchemaVersion` во всех
+  выпущенных сборках читает `GetValue<int>()`; строка ⇒ документ **corrupt** ⇒ карантин и перезапись пустым — тот же
+  класс инцидента 2026-09-24. Плюс `AtomicJsonFileWriter` stage 3 (D-6) валидирует int-`schemaVersion`.
+
+### Round-trip неизвестных полей
+
+- Все **10 DTO** в `src/DesktopOrganizer.UI/State/Dto/` получили `[JsonExtensionData] Dictionary<string, JsonElement>?
+  Extras`: `ApplicationStateDocumentDto`, `PanelStateDto` (и `panels[]`, и `layoutSnapshots[].panels[]`),
+  `PanelGeometryDto`, `PanelAppearanceDto`, `PanelContentDto`, `PagesStateDto`, `PageStateDto`, `LayoutSnapshotStateDto`,
+  `SystemIconsPanelStateDto`, `SystemIconsPanelItemStateDto`.
+- **Носители между `Load` и `PersistNow`:**
+  - панели — `ChildWindowModel.PersistedExtras` (`PanelPersistedExtras`: неизвестные ключи на уровнях panel/geometry/
+    appearance/content + `Enums`; иммутабельный, без INPC, UI его не читает). Свойство на модели, а не side-table по `Id`,
+    потому что снапшоты хранят панели как сериализованный `ChildWindowModel` (`PanelJsonItems`), а `Restore` выдаёт новые
+    Guid — свойство переживает эти JSON round-trip'ы без диффа в `LayoutSnapshotService`;
+  - всё остальное — `UnknownFieldLedger` (internal, принадлежит `ApplicationStateService`): корень документа, секция
+    `pages`, страницы (по id), снапшоты (по id), секция `systemIconsPanel`, неизвестный `iconSize`, элементы с неизвестным
+    `kind` (дописываются в конец `items`; порядок задаёт `order`). `PageDescriptor` (record) не менялся — extras сломали
+    бы value-equality.
+- **`PanelCloneBuilder` extras сбрасывает** (`PanelStateMapper.ToDto(source, includeUnknownFields: false)`): клон — новая
+  сущность, неизвестное поле может быть привязано к идентичности, а «поля нет ⇒ дефолт» всегда валидно. Восстановление
+  снапшота extras **сохраняет** (это та же панель).
+- Факты сериализации, закреплённые тестами: ключи extension data пишутся дословно (без naming policy); `"x": null`
+  внутри extras сохраняется; дубликатов ключей нет (raw неизвестного enum пишется через само свойство, не через extras).
+- Известное безвредное следствие: порядок ключей меняется (extras после известных), поэтому первый `PersistNow` после
+  загрузки может пройти no-op guard (`_lastCommittedPayloadJson`) и записать файл один раз.
+
+### Толерантные enum
+
+- Шесть enum-полей DTO стали `string`: `PanelGeometryDto.WindowState`, `PanelAppearanceDto.SurfaceStyle`,
+  `PanelContentDto.ViewMode`/`ContentFilter`/`SortMode`, `SystemIconsPanelItemStateDto.Kind` (`GeometryMode`/
+  `SizingMode`/`IconLayoutPolicy`/`IconSize` были строками раньше, ADR-028/029). Формат на диске не меняется —
+  конвертер без naming policy и раньше писал имя члена как есть.
+- `TolerantEnumParser.Parse<TEnum>(raw, fallback, out recognized)`: без `,`, `Enum.TryParse(ignoreCase)`, `Enum.IsDefined`
+  **и отказ на числовой строке** (`"2"`, `"-1"`) — сохраняет смысл `allowIntegerValues: false`. Три прежних парсера
+  (`GeometryMode`/`SizingMode`/`IconLayoutPolicy`) набор принимаемых значений не меняли.
+- **Незнакомое значение** → документированный дефолт + запись `PreservedEnumValue(Raw, Fallback)` (в
+  `PersistedExtras.Enums` по пути поля, например `geometry.windowState`; для `systemIconsPanel.iconSize` — в ledger) +
+  diag-событие со счётчиками, **не карантин**. Если на save модель всё ещё держит `Fallback` (пользователь поле не менял),
+  на диск пишется **raw-строка**; изменил — пишется новое значение. Иначе значение `Mica` из будущей ревизии превращалось
+  бы в `Ambient` при любом перемещении панели.
+- **Ограничение (R8):** явный выбор пользователем значения, совпадающего с фолбэком, неотличим от «не трогал» — raw
+  сохраняется (в старой сборке визуально ничего не меняется).
+- **Число** в enum-поле по-прежнему `JsonException` → карантин, как раньше: будущие сборки чисел не пишут, это порча, а
+  не forward-compat. `StateJson.Options` (`allowIntegerValues: false`) не менялся; гейт — reflection-тест
+  `NoDtoProperty_IsEnumTyped`.
+- Диагностика: одно событие `StateForwardCompatFieldsPreserved {unknownKeyCount, unknownEnumCount,
+  unknownSystemIconItemCount}` после `Load()` (только если хоть один счётчик > 0). Только счётчики — ни имён ключей, ни
+  raw-значений (в ручной правке это могут быть пользовательские данные; дисциплина `state`-событий, см. Invariants).
+
+### Миграция v6→v7 и правило для будущих миграций
+
+- `V6ToV7Migration` (`FromVersion 6 → ToVersion 7`) — **тождественная**: deep-clone всех ключей. `schemaRevision: 0` миграция
+  **не добавляет** (контракт `ISettingsMigration`: миграция видит только payload и не создаёт reserved-ключи) — ревизию
+  пишет envelope при `PersistAfterLoad`: итоговый файл `{"schemaVersion":7,"schemaRevision":0,…}`. Premigration-бэкап —
+  `application-state.premigration-v6.json` (имя по исходной версии, механизм ADR-043 Amendment).
+- **`MigrationJson.CloneAllExcept(source, reshapedKeys)` обязателен для всех миграций от v6 и выше:** «копировать всё, кроме
+  явно перестраиваемого», allow-list запрещён (иначе ключи более поздней аддитивной ревизии были бы срезаны при
+  миграции). Гейт — `MigrationsPreserveUnknownKeysTests`. `V4ToV5Migration` **не менялась** (историческая, golden-входы
+  иммутабельны) и остаётся известным **анти-примером**: она копирует только allow-list top-level ключей и ключей
+  снапшота (`id/name/createdAt/panels`).
+- **Исправленный дефект (F5):** `StateMigrationRunner.MigrateToCurrent` при сборке результата возвращал только
+  `schemaVersion/writtenAtUtc/appVersion`; `schemaRevision` терялся бы (в том числе в `StateRestoreCommand`). Теперь он
+  переносится дословно (`MigrateToCurrent_CarriesSchemaRevisionVerbatim`).
+
+### Правило аддитивности (критерий «revision или major»)
+
+Изменение допустимо как **revision** (bump `CurrentSchemaRevision`, без миграции) только если выполнено всё:
+
+1. только **новый опциональный ключ** объекта (или новое значение существующего enum-поля); существующие ключи не
+   переименовываются, не удаляются, не меняют тип/форму/смысл;
+2. **отсутствие ключа ⇒ документированный дефолт**, воспроизводящий прежнее поведение байт-в-байт;
+3. поле **не «must-understand»**: игнорирующая его сборка не делает ничего неверного с известными данными;
+4. поле **терпит устаревание** относительно известных соседей (старая сборка правит известные поля и сохраняет новое как
+   есть) — новая сборка при чтении валидирует/лечит рассогласование;
+5. не новый envelope-ключ и не новый вид элементов в существующих массивах (кроме `systemIconsPanel.items` с неизвестным
+   `kind`, обработанным явно);
+6. новый enum-член: фолбэк старой сборки приемлем для отображения.
+
+Иначе — **major** (миграция + rung 7 + read-only для всех более старых сборок, пока файл не восстановлен из premigration-бэкапа). Bump ревизии без новой golden-фикстуры
+`v7-rN-full.json` не проходит тесты (`SchemaContractTests.RevisionFixtures_ExistForEveryRevisionUpToCurrent`).
+**Разрешение пользователя по-прежнему поштучное:** каждое новое persisted-поле, даже аддитивное, требует своего явного
+«да» в самой задаче (`CLAUDE.md`, раздел «Настройки и persistence — ЗАМОРОЖЕНЫ»); меняется только *цена* разрешённого
+аддитивного поля (без миграции и без read-only для старой v7-сборки).
+
+### Известное последствие — связано с событием major-bump
+
+После перехода файла на v7 **каждый** запуск сборки **≤0.8.0** на этом файле остаётся read-only (rung 7, `NewerSchema`):
+панели не показываются, файл не перезаписывается, — пока пользователь не восстановит
+`application-state.premigration-v6.json` вручную (payload v6 и v7 **совпадают**, т. к. миграция тождественная) или не
+вернётся на сборку ≥v7. «Однократно» относится к *событию* major-bump (последнему такому разрывом совместимости: дальнейшие
+аддитивные изменения идут через `schemaRevision` без bump major), а **не** к одной сессии. Уведомление
+`ReadOnlySessionNotice` (Amendment 2026-10-09) есть только в сборках, выпущенных после 0.8.0; сама 0.8.0 открывает файл
+read-only без уведомления. Формулировка вынесена в release notes (`CHANGELOG.md`).
+
+**NIT (ручная правка файла).** `schemaRevision` вида `1.0` или значение больше `int.MaxValue` не читается как `int` —
+считается malformed → `0` (событие `StateRevisionMalformed`, не карантин). Тогда high-water mark может понизиться на
+записи. Достижимо только ручной правкой файла; сборки приложения пишут целое `schemaRevision`. **Ограничение (R9):** любой будущий хотфикс ветки 0.8.x (сборка с v6) на профиле,
+открывавшемся v7-сборкой, тоже будет read-only — хотфиксы v6-линии после выхода v7 не выпускать.
+
+### Границы разрешения (что менялось и что нет)
+
+Менялось: `schemaVersion` 6→7 + `schemaRevision`, `StateEnvelope`/`JsonApplicationStateStore`/`StateMigrationRunner`,
+`V6ToV7Migration`/`MigrationJson`, DTO и маппинги `UI/State`, `ChildWindowModel.PersistedExtras`, `UnknownFieldLedger`,
+`TolerantEnumParser`. **Не менялись:** новые persisted-поля с данными (`CurrentSchemaRevision` остаётся `0` — введён
+механизм, а не поля), `IAppSettings`/`user.config`, протокол атомарной записи (D-6), `.bak`, карантин, advisory lock (D-8),
+пути, `LayoutSnapshotService`, `PageManagerService`, `SystemIconsPanelManager`, `StateJson`, миграции V1–V5.
+`user.config`/`IAppSettings` forward-compat этим Amendment **не покрыт** (R12).
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | [ADR-025](ADR-025-ambient-accent-visual-language.md) | v3→v4: `accentColor`/`surfaceOpacity`/`surfaceStyle` вместо `backgroundColor`/`backgroundOpacity`; лоссивное правило `#1E1E1E` → `#6B7280` | Описание схемы как v3 в теле (D-9: группировка v3); ключи `backgroundColor`/`backgroundOpacity` |
+| 2026-09-22 | [ADR-028](ADR-028-workspace-grid.md)/[ADR-029](ADR-029-icon-layout-policy.md) | v4→v5: аддитивные поля геометрии/раскладки | — |
+| 2026-09-25 | (без ADR) | `AppStorageRoot`: Debug → `DesktopOrganizer.Dev`, Release → `DesktopOrganizer` | Допущение «один корень `%LOCALAPPDATA%\DesktopOrganizer` для всех сборок» |
+| 2026-09-27 | [ADR-032](ADR-032-ui-localization.md) | Аддитивный скаляр `IAppSettings.Language` (с явного разрешения) | Допущение «9 оставшихся скаляров» в разделе Decision (список вырос) |
+| 2026-09-29 | [ADR-043](ADR-043-page-display-names.md) | v5→v6: `pages.items[{id,name?}]` | Описание `pages.ids[]` |
+| 2026-10-09 | ADR-audit WP-B | Read-only сессия: UI читает `IsWritable` (drop без `MoveIn`, эффект `Copy`, `ReadOnlySessionNotice`, hint, суффикс tooltip трея); `LayoutSnapshotService.Restore` в read-only не возвращает файлы. Формат/семантика записи не менялись | Допущение «read-only сессия невидима пользователю» (D-7 rung 7, D-8) |
+| 2026-10-10 | Решение пользователя «Аддитивная ревизия схемы» (коммит `5633bb4`, [план](../docs/PLANS/schema-additive-revision-v7.md)) | v6→v7 (тождественная) + envelope-ключ `schemaRevision` (`CurrentSchemaRevision = 0`); round-trip неизвестных полей (`[JsonExtensionData]` на 10 DTO, `ChildWindowModel.PersistedExtras`, `UnknownFieldLedger`); толерантные enum (`TolerantEnumParser`, `PreservedEnumValue`); файл того же major с более высокой ревизией открывается writable; `MigrationJson.CloneAllExcept` обязателен для миграций ≥v6; дефект `StateMigrationRunner` (терял бы `schemaRevision`) исправлен | D-5 «три reserved-ключа» (теперь четыре); D-7 rung 1 «`schemaVersion ≤ Current`» как единственное условие (теперь и любая ревизия того же major); допущение «любое новое поле = bump major»; «версия схемы — 6» |
+
+Текущая версия схемы — **7, ревизия 0** (`schemaVersion = 7`, `schemaRevision = 0`); механизм хранения заморожен
+(`CLAUDE.md`): bump major, новые миграции, **каждое** новое persisted-поле (даже аддитивное через `schemaRevision`) и
+скаляры `IAppSettings` — только с явного разрешения пользователя в самой задаче.
 

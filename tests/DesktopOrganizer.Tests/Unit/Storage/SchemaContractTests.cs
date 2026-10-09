@@ -1,7 +1,8 @@
 using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Windows;
+using System.Text.Json.Serialization;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Storage;
@@ -34,9 +35,9 @@ public class SchemaContractTests
     public void MigratedV1Document_KeyShape_MatchesApplicationStateDocumentDtoSerialization()
     {
         var v1Document = LoadFixture("v1-full.json");
-        var runner = new StateMigrationRunner(new ISettingsMigration[] { new V1ToV2Migration(), new V2ToV3Migration(), new V3ToV4Migration(), new V4ToV5Migration(), new V5ToV6Migration() });
+        var runner = new StateMigrationRunner(new ISettingsMigration[] { new V1ToV2Migration(), new V2ToV3Migration(), new V3ToV4Migration(), new V4ToV5Migration(), new V5ToV6Migration(), new V6ToV7Migration() });
         var (migrated, applied) = runner.MigrateToCurrent(v1Document, StateEnvelope.CurrentSchemaVersion);
-        Assert.Equal(5, applied);
+        Assert.Equal(6, applied);
 
         var migratedPayload = StateEnvelope.StripEnvelope(migrated);
         var migratedKeyPaths = CollectKeyPaths(migratedPayload);
@@ -123,6 +124,82 @@ public class SchemaContractTests
     }
 
     /// <summary>
+    /// Verifies that migrating a fully-populated v6 fixture through <see cref="V6ToV7Migration"/> never
+    /// produces a reserved envelope key (in particular not <c>schemaRevision</c>, which only
+    /// <see cref="StateEnvelope.Wrap"/> writes).
+    /// </summary>
+    [Fact]
+    public void V6ToV7Migration_NeverProducesAReservedEnvelopeKey()
+    {
+        var v6Document = LoadFixture("v6-full.json");
+        var v6Payload = StateEnvelope.StripEnvelope(v6Document);
+
+        var v7Payload = new V6ToV7Migration().Migrate(v6Payload);
+
+        Assert.All(v7Payload.Select(kv => kv.Key), key => Assert.False(StateEnvelope.IsReservedKey(key)));
+        Assert.Contains("schemaRevision", StateEnvelope.ReservedKeys);
+        Assert.Equal(4, StateEnvelope.ReservedKeys.Count);
+    }
+
+    /// <summary>
+    /// Gate for every future DTO (ADR-024 Amendment "Additive revisions"): each DTO under
+    /// <c>DesktopOrganizer.UI.State.Dto</c> must have exactly one <see cref="JsonExtensionDataAttribute"/> property
+    /// of type <c>Dictionary&lt;string, JsonElement&gt;</c>, otherwise a field added by a newer revision would be
+    /// silently dropped at that level on the next save.
+    /// </summary>
+    [Fact]
+    public void AllDtos_HaveExactlyOneJsonExtensionDataProperty()
+    {
+        var dtoTypes = GetDtoTypes();
+        Assert.Equal(10, dtoTypes.Count);
+
+        foreach (var type in dtoTypes)
+        {
+            var extensionProperties = type
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(p => p.GetCustomAttribute<JsonExtensionDataAttribute>() is not null)
+                .ToList();
+
+            var property = Assert.Single(extensionProperties);
+            Assert.Equal(typeof(Dictionary<string, JsonElement>), property.PropertyType);
+        }
+    }
+
+    /// <summary>
+    /// Gate: no DTO property has an enum type — enum-valued fields are plain strings parsed tolerantly by the
+    /// mappers, so an unknown member written by a newer build can never throw during deserialization.
+    /// </summary>
+    [Fact]
+    public void NoDtoProperty_IsEnumTyped()
+    {
+        foreach (var type in GetDtoTypes())
+        {
+            foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                var propertyType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+                Assert.False(propertyType.IsEnum, $"{type.Name}.{property.Name} is enum-typed ({propertyType.Name}).");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Bumping <see cref="StateEnvelope.CurrentSchemaRevision"/> without checking in the golden fixture for the new
+    /// revision (<c>v7-r{N}-full.json</c>) fails here: one fixture per revision, 0..current.
+    /// </summary>
+    [Fact]
+    public void RevisionFixtures_ExistForEveryRevisionUpToCurrent()
+    {
+        for (var revision = 0; revision <= StateEnvelope.CurrentSchemaRevision; revision++)
+        {
+            var fixture = LoadFixture($"v{StateEnvelope.CurrentSchemaVersion}-r{revision}-full.json");
+            Assert.True(StateEnvelope.TryGetSchemaVersion(fixture, out var version));
+            Assert.Equal(StateEnvelope.CurrentSchemaVersion, version);
+            Assert.True(StateEnvelope.TryGetSchemaRevision(fixture, out var fixtureRevision));
+            Assert.Equal(revision, fixtureRevision);
+        }
+    }
+
+    /// <summary>
     /// NIT fix (fix-cycle 1, docs/PLANS/workspace-grid-migration.md §10.5): the same literal default
     /// value (<c>"LegacyFreeform"</c>/<c>"Manual"</c>/<c>"LegacyStretch"</c>) is necessarily duplicated
     /// in two places that cannot share a single constant — <c>V4ToV5Migration</c> (Services layer,
@@ -195,6 +272,13 @@ public class SchemaContractTests
         }
     }
 
+    private static List<Type> GetDtoTypes() =>
+        typeof(ApplicationStateDocumentDto).Assembly
+            .GetTypes()
+            .Where(t => t.Namespace == typeof(ApplicationStateDocumentDto).Namespace && t is { IsClass: true, IsAbstract: false } && !t.IsNested)
+            .Where(t => t.GetCustomAttribute<System.Runtime.CompilerServices.CompilerGeneratedAttribute>() is null)
+            .ToList();
+
     private static JsonObject LoadFixture(string fileName)
     {
         var path = Path.Combine(GoldenDirectory, fileName);
@@ -234,7 +318,7 @@ public class SchemaContractTests
             ShowOnAllVirtualDesktops = true,
             IconSize = "Medium",
             AnchorVirtualDesktopId = Guid.NewGuid().ToString(),
-            Items = [new SystemIconsPanelItemStateDto { Kind = SystemIconKind.RecycleBin, IsVisible = true, Order = 0 }],
+            Items = [new SystemIconsPanelItemStateDto { Kind = nameof(SystemIconKind.RecycleBin), IsVisible = true, Order = 0 }],
         },
     };
 
@@ -250,7 +334,7 @@ public class SchemaContractTests
             Width = 3,
             Height = 4,
             MonitorDeviceId = "\\\\.\\DISPLAY1",
-            WindowState = WindowState.Normal,
+            WindowState = "Normal",
             IsRolledUp = false,
             IsVisible = true,
         },
@@ -258,15 +342,15 @@ public class SchemaContractTests
         {
             AccentColor = "#6B7280",
             SurfaceOpacity = 0.8,
-            SurfaceStyle = PanelSurfaceStyle.Ambient,
+            SurfaceStyle = "Ambient",
             TextColor = "#DDDDDD",
             IconSize = 48,
         },
         Content = new PanelContentDto
         {
-            ViewMode = PanelViewMode.List,
-            ContentFilter = PanelContentFilter.ShowAll,
-            SortMode = PanelSortMode.Manual,
+            ViewMode = "List",
+            ContentFilter = "ShowAll",
+            SortMode = "Manual",
             SourceFolderPath = "C:\\Source",
             FilePaths = ["C:\\a.txt"],
         },

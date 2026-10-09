@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace DesktopOrganizer.UI.State.Dto;
 
 /// <summary>
@@ -14,4 +17,13 @@ internal sealed class PagesStateDto
 
     /// <summary>The identifier of the currently active page. Written consistent with <see cref="Items"/>; not validated on load.</summary>
     public string CurrentPageId { get; set; } = "default";
+
+    /// <summary>
+    /// Unknown JSON keys of this object, captured on load and written back verbatim on save (ADR-024
+    /// Amendment "Additive revisions"): a field added by a newer additive schema revision survives an edit
+    /// by this build. Keys are written exactly as read (no naming policy). <see langword="null"/> when there
+    /// are none.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extras { get; set; }
 }

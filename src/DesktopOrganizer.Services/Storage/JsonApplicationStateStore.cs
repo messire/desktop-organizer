@@ -34,6 +34,12 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
     private bool _newerSchemaLockout;
     private string? _lastCommittedPayloadJson;
 
+    // ADR-024 Amendment "Additive revisions": the schemaRevision of the document this process loaded
+    // (0 when absent/malformed/not loaded from JSON). Every write records
+    // max(_revisionHighWater, StateEnvelope.CurrentSchemaRevision) - a monotonic high-water mark that a
+    // build knowing fewer fields than the file's writer can never lower.
+    private int _revisionHighWater;
+
     // Guards QuarantineLoadedDocument (ADR-024 finalization C-1) so only the first call after a given
     // Load() actually copies the primary file — reset alongside _loaded in Load().
     private bool _partialLoadQuarantined;
@@ -124,9 +130,12 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
     public StateLoadResult Load()
     {
         StateLoadResult result;
+        int revisionOnDisk;
         lock (_stateLock)
         {
+            _revisionHighWater = 0;
             result = LoadCore();
+            revisionOnDisk = _revisionHighWater;
             _loaded = true;
             _partialLoadQuarantined = false;
             if (result.Status == StateLoadStatus.NewerSchema) _newerSchemaLockout = true;
@@ -137,6 +146,7 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
             null,
             new KeyValuePair<string, object?>("status", result.Status.ToString()),
             new KeyValuePair<string, object?>("schemaVersionOnDisk", result.SchemaVersionOnDisk),
+            new KeyValuePair<string, object?>("schemaRevisionOnDisk", revisionOnDisk),
             new KeyValuePair<string, object?>("migrationsApplied", result.MigrationsApplied));
 
         return result;
@@ -168,7 +178,7 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
             if (_lastCommittedPayloadJson is not null && string.Equals(_lastCommittedPayloadJson, canonicalPayloadJson, StringComparison.Ordinal))
                 return new StateSaveOutcome(StateSaveResult.SkippedNoChange, null);
 
-            var envelope = StateEnvelope.Wrap(payload, StateEnvelope.CurrentSchemaVersion, DateTimeOffset.UtcNow, ResolveAppVersion());
+            var envelope = StateEnvelope.Wrap(payload, StateEnvelope.CurrentSchemaVersion, DateTimeOffset.UtcNow, ResolveAppVersion(), WriteRevision());
 
             try
             {
@@ -193,6 +203,7 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
                 "StateSaved",
                 null,
                 new KeyValuePair<string, object?>("schemaVersion", StateEnvelope.CurrentSchemaVersion),
+                new KeyValuePair<string, object?>("schemaRevision", WriteRevision()),
                 new KeyValuePair<string, object?>("trigger", "immediate"));
             return new StateSaveOutcome(StateSaveResult.Saved, null);
         }
@@ -292,6 +303,38 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
         }
     }
 
+    /// <summary>The revision recorded by every write: the high-water mark of disk vs. this build.</summary>
+    private int WriteRevision() => Math.Max(_revisionHighWater, StateEnvelope.CurrentSchemaRevision);
+
+    /// <summary>
+    /// Records the <c>schemaRevision</c> of a document that is about to be used as the loaded state
+    /// (rungs 1/2/3 - rung 7 never gets here). A missing key is revision 0 silently; a present-but-malformed
+    /// value is revision 0 plus one diagnostic, and never a quarantine (the revision is advisory metadata,
+    /// not payload). A revision above this build's own, at the same major, is opened writable: unknown
+    /// fields round-trip through the UI layer (ADR-024 Amendment "Additive revisions").
+    /// Must be called under <see cref="_stateLock"/>.
+    /// </summary>
+    private void NoteRevisionOnDisk(JsonObject fullDocument)
+    {
+        if (StateEnvelope.TryGetSchemaRevision(fullDocument, out var revision))
+        {
+            _revisionHighWater = Math.Max(_revisionHighWater, revision);
+        }
+        else if (fullDocument.ContainsKey("schemaRevision"))
+        {
+            Diag("StateRevisionMalformed", null);
+        }
+
+        if (revision > StateEnvelope.CurrentSchemaRevision)
+        {
+            Diag(
+                "StateNewerRevisionOpened",
+                null,
+                new KeyValuePair<string, object?>("revisionOnDisk", revision),
+                new KeyValuePair<string, object?>("buildRevision", StateEnvelope.CurrentSchemaRevision));
+        }
+    }
+
     /// <summary>Must be called under <see cref="_stateLock"/>.</summary>
     private StateLoadResult LoadCore()
     {
@@ -319,6 +362,7 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
                 if (!TryMigrate(primaryDocument, out var migrated, out var applied, out var migrationFailure))
                     return HandleMigrationFailure(migrationFailure!, primarySchemaVersion, _paths.PrimaryFilePath);
 
+                NoteRevisionOnDisk(primaryDocument);
                 if (applied > 0) WritePreMigrationBackupIfMissing(primaryDocument, primarySchemaVersion);
                 PersistAfterLoad(migrated, forcePersist: applied > 0);
                 return new StateLoadResult(StateLoadStatus.Loaded, migrated, primarySchemaVersion, applied, null);
@@ -332,6 +376,7 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
                 if (!TryMigrate(backupDocument, out var migrated, out var applied, out var migrationFailure))
                     return HandleMigrationFailure(migrationFailure!, backupSchemaVersion, _paths.BackupFilePath);
 
+                NoteRevisionOnDisk(backupDocument);
                 if (applied > 0) WritePreMigrationBackupIfMissing(backupDocument, backupSchemaVersion);
                 PersistAfterLoad(migrated, forcePersist: true);
                 Diag("StateRecoveredFromBackup", null, new KeyValuePair<string, object?>("reason", "PrimaryCorrupt"));
@@ -354,6 +399,7 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
                 if (!TryMigrate(backupDocument, out var migrated, out var applied, out var migrationFailure))
                     return HandleMigrationFailure(migrationFailure!, backupSchemaVersion, _paths.BackupFilePath);
 
+                NoteRevisionOnDisk(backupDocument);
                 if (applied > 0) WritePreMigrationBackupIfMissing(backupDocument, backupSchemaVersion);
                 PersistAfterLoad(migrated, forcePersist: true);
                 Diag("StateRecoveredFromBackup", null, new KeyValuePair<string, object?>("reason", "PrimaryMissing"));
@@ -502,7 +548,7 @@ internal sealed class JsonApplicationStateStore : IApplicationStateStore
 
         if (!_storageLock.IsHeld) return; // degraded read-only: leave the baseline unset.
 
-        var envelope = StateEnvelope.Wrap(migratedPayload, StateEnvelope.CurrentSchemaVersion, DateTimeOffset.UtcNow, ResolveAppVersion());
+        var envelope = StateEnvelope.Wrap(migratedPayload, StateEnvelope.CurrentSchemaVersion, DateTimeOffset.UtcNow, ResolveAppVersion(), WriteRevision());
         try
         {
             _writer.Write(envelope);

@@ -18,13 +18,6 @@ internal class AppSettings : IAppSettings
     }
 
     /// <inheritdoc />
-    public bool NativePanelSizing
-    {
-        get => Properties.Settings.Default.NativePanelSizing;
-        set => Properties.Settings.Default.NativePanelSizing = value;
-    }
-
-    /// <inheritdoc />
     public int GridSnapDistance
     {
         get => Properties.Settings.Default.GridSnapDistance;

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.State;
@@ -116,8 +118,8 @@ public class SystemIconsPanelStateMapperTests
         {
             Items =
             [
-                new SystemIconsPanelItemStateDto { Kind = SystemIconKind.ControlPanel, IsVisible = false, Order = 1 },
-                new SystemIconsPanelItemStateDto { Kind = SystemIconKind.ThisPc, IsVisible = true, Order = 0 },
+                new SystemIconsPanelItemStateDto { Kind = nameof(SystemIconKind.ControlPanel), IsVisible = false, Order = 1 },
+                new SystemIconsPanelItemStateDto { Kind = nameof(SystemIconKind.ThisPc), IsVisible = true, Order = 0 },
             ],
         };
         var model = new SystemIconsPanelModel();
@@ -145,6 +147,67 @@ public class SystemIconsPanelStateMapperTests
 
         Assert.Equal(defaultCount, model.Items.Count);
         Assert.All(model.Items, item => Assert.True(item.IsVisible));
+    }
+
+    /// <summary>
+    /// Verifies that an item whose <c>kind</c> this build does not know is skipped when applying to the model, kept
+    /// by the ledger, and written back (after the known items) by the next <c>ToDto</c>, together with section-level
+    /// and item-level unknown keys and an unrecognised icon size.
+    /// </summary>
+    [Fact]
+    public void UnknownSystemIconKind_Preserved()
+    {
+        var document = JsonSerializer.Deserialize<ApplicationStateDocumentDto>(
+            """
+            {
+              "systemIconsPanel": {
+                "isEnabled": true,
+                "iconSize": "Gigantic",
+                "futureSection": { "a": 1 },
+                "items": [
+                  { "kind": "RecycleBin", "isVisible": false, "order": 0, "futureItem": "keep" },
+                  { "kind": "Printers", "isVisible": true, "order": 9, "futureKindField": 2 },
+                  { "kind": "3", "isVisible": true, "order": 8 }
+                ]
+              }
+            }
+            """,
+            StateJson.Options)!;
+        var ledger = UnknownFieldLedger.Capture(document);
+        var model = new SystemIconsPanelModel();
+
+        SystemIconsPanelStateMapper.ApplyTo(document.SystemIconsPanel, model);
+        var dto = SystemIconsPanelStateMapper.ToDto(model, ledger);
+
+        Assert.Equal(2, ledger.UnknownSystemIconItemCount);
+        Assert.Equal(SystemIconSize.Medium, model.IconSize);
+        Assert.False(model.Items.Single(i => i.Kind == SystemIconKind.RecycleBin).IsVisible);
+        Assert.Equal("Gigantic", dto.IconSize);
+        Assert.Equal(["futureSection"], dto.Extras!.Keys);
+        Assert.Equal(Enum.GetValues<SystemIconKind>().Length + 2, dto.Items.Count);
+        var recycleBin = dto.Items.Single(i => i.Kind == nameof(SystemIconKind.RecycleBin));
+        Assert.Equal("keep", recycleBin.Extras!["futureItem"].GetString());
+        var printers = dto.Items.Single(i => i.Kind == "Printers");
+        Assert.Equal(9, printers.Order);
+        Assert.Equal(2, printers.Extras!["futureKindField"].GetInt32());
+        Assert.Contains(dto.Items, i => i.Kind == "3");
+        Assert.True(dto.Items.Take(Enum.GetValues<SystemIconKind>().Length).All(i => Enum.IsDefined(Enum.Parse<SystemIconKind>(i.Kind))));
+    }
+
+    /// <summary>Verifies that once the user picks a different icon size, the unrecognised raw size is no longer written.</summary>
+    [Fact]
+    public void UnrecognisedIconSize_UserChangedValue_WritesNewValue()
+    {
+        var document = JsonSerializer.Deserialize<ApplicationStateDocumentDto>(
+            """{ "systemIconsPanel": { "iconSize": "Gigantic" } }""",
+            StateJson.Options)!;
+        var ledger = UnknownFieldLedger.Capture(document);
+        var model = new SystemIconsPanelModel();
+        SystemIconsPanelStateMapper.ApplyTo(document.SystemIconsPanel, model);
+
+        model.IconSize = SystemIconSize.Large;
+
+        Assert.Equal("Large", SystemIconsPanelStateMapper.ToDto(model, ledger).IconSize);
     }
 
     private static SystemIconsPanelModel RoundTrip(SystemIconsPanelModel model)

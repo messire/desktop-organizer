@@ -36,7 +36,7 @@ namespace DesktopOrganizer.Tests.Unit.Views;
 /// reason. <see cref="Window.Left"/>/<see cref="Window.Top"/> are pushed far off-screen and
 /// <see cref="Window.ShowActivated"/> is set <see langword="false"/> before <see cref="Window.Show"/>, so
 /// nothing visibly flashes or steals focus during a <c>dotnet test</c> run — same precaution that class
-/// takes. Unlike <c>ChildWindow</c> (see <c>ResizeOverlayGeometryTests</c>' remarks on why THAT class
+/// takes. Unlike <c>ChildWindow</c> (see <c>ResizeGripVisualsTests</c>' remarks on why THAT class
 /// avoids <see cref="Window.Show"/>), <see cref="PanelCustomizeWindow"/> owns no background
 /// <see cref="System.Threading.Timer"/>/native <c>HWND</c> integration of its own, so showing/closing a
 /// real instance here carries none of that cross-thread dispatcher-ownership risk.

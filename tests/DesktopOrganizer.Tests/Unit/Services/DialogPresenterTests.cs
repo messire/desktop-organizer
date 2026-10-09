@@ -69,7 +69,8 @@ public class DialogPresenterTests
             var viewModel = new SystemIconsPanelViewModel(
                 new SystemIconsPanelModel(),
                 Mock.Of<ISystemShellService>(),
-                Mock.Of<IPanelSelectionCoordinator>());
+                Mock.Of<IPanelSelectionCoordinator>(),
+                Mock.Of<IWindowManager>());
 
             var window = new SystemIconsPanelWindow(viewModel) { ShowActivated = false, Left = -5000, Top = -5000 };
             try
@@ -135,7 +136,6 @@ public class DialogPresenterTests
                 Mock.Of<IGestureDiagnostics>());
 
             var appSettings = new Mock<IAppSettings>();
-            appSettings.SetupProperty(s => s.NativePanelSizing, false);
             appSettings.SetupProperty(s => s.SnapResizeToIconGrid, true);
             appSettings.SetupProperty(s => s.NormalModeLayoutGestures, string.Empty);
 

@@ -20,8 +20,12 @@ namespace DesktopOrganizer.UI.Behaviors;
 /// </summary>
 public sealed class HintPopupController
 {
+    private static readonly TimeSpan DefaultHintDuration = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan CloudHintDuration = TimeSpan.FromSeconds(8);
+
     private readonly Dispatcher _dispatcher;
     private readonly Popup _moveHintPopup;
+    private readonly TextBlock? _moveHintText;
     private readonly Popup _renameErrorPopup;
     private readonly TextBlock _renameErrorText;
     private readonly DependencyObject _renameEditorSearchRoot;
@@ -42,14 +46,20 @@ public sealed class HintPopupController
     /// <param name="renameErrorText">The <see cref="TextBlock"/> inside <paramref name="renameErrorPopup"/> whose text is set per <see cref="RenameOutcome"/>.</param>
     /// <param name="renameEditorSearchRoot">The visual-tree root to search for the active inline-rename <see cref="TextBox"/> (see <see cref="RefocusRenameEditor"/>).</param>
     /// <param name="getEditingItem">Accessor for <see cref="ChildWindowViewModel.EditingItem"/>.</param>
+    /// <param name="moveHintText">
+    /// The <see cref="TextBlock"/> inside <paramref name="moveHintPopup"/>; its text is set per show
+    /// (Move-semantics vs. read-only-drop hint). <see langword="null"/> leaves the popup's own text untouched.
+    /// </param>
     public HintPopupController(
         Dispatcher dispatcher,
         Popup moveHintPopup,
         Popup renameErrorPopup,
         TextBlock renameErrorText,
         DependencyObject renameEditorSearchRoot,
-        Func<FileItem?> getEditingItem)
+        Func<FileItem?> getEditingItem,
+        TextBlock? moveHintText = null)
     {
+        _moveHintText = moveHintText;
         _dispatcher = dispatcher;
         _moveHintPopup = moveHintPopup;
         _renameErrorPopup = renameErrorPopup;
@@ -63,12 +73,23 @@ public sealed class HintPopupController
     /// Rendering only — the one-time decision (whether to show at all) already happened in the
     /// ViewModel before <see cref="ChildWindowViewModel.MoveHintRequested"/> was raised.
     /// </summary>
-    public void ShowMoveHint()
-    {
-        _moveHintTimer?.Stop();
-        _moveHintPopup.IsOpen = true;
-        _moveHintTimer = StartAutoDismissTimer(_moveHintPopup, TimeSpan.FromSeconds(4));
-    }
+    public void ShowMoveHint() => ShowTitleHint(DefaultHintDuration, "Hint_Move_Message");
+
+    /// <summary>
+    /// Shows the same non-modal, auto-dismissing popup with the read-only-drop text ("the file stayed in
+    /// place, the panel will not be saved" - ADR-audit WP-B review F5). Rendering only; the once-per-panel
+    /// decision already happened in the ViewModel (<see cref="ChildWindowViewModel.ReadOnlyDropHintRequested"/>).
+    /// </summary>
+    public void ShowReadOnlyDropHint() => ShowTitleHint(DefaultHintDuration, "Hint_ReadOnlyDrop_Message");
+
+    /// <summary>
+    /// Shows the same non-modal, auto-dismissing popup with the cloud-folder text ("the file left your
+    /// OneDrive folder and is no longer synced; remove the panel to get it back" - ADR-009 amendment
+    /// 2026-10-10): a message line plus an action line, kept a bit longer than the other hints because it
+    /// is two sentences. Rendering only; the once-per-session decision already happened in the ViewModel
+    /// (<see cref="ChildWindowViewModel.CloudDropHintRequested"/>).
+    /// </summary>
+    public void ShowCloudDropHint() => ShowTitleHint(CloudHintDuration, "Hint_CloudDrop_Message", "Hint_CloudDrop_Hint");
 
     /// <summary>
     /// Shows the non-modal, auto-dismissing rename-error hint popup, anchored to the file list, then
@@ -140,6 +161,19 @@ public sealed class HintPopupController
         };
         timer.Start();
         return timer;
+    }
+
+    private void ShowTitleHint(TimeSpan duration, params string[] messageKeys)
+    {
+        if (_moveHintText is not null)
+        {
+            var loc = LocalizationSource.Current;
+            _moveHintText.Text = string.Join(" ", messageKeys.Select(key => loc.GetString(key)));
+        }
+
+        _moveHintTimer?.Stop();
+        _moveHintPopup.IsOpen = true;
+        _moveHintTimer = StartAutoDismissTimer(_moveHintPopup, duration);
     }
 
     /// <summary>

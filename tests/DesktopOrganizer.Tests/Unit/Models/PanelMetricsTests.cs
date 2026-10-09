@@ -99,7 +99,7 @@ public class PanelMetricsTests
     /// <summary>
     /// Same "double -&gt; GridLength" wrapper pattern as <see cref="PanelMetrics.HeaderRowHeight"/>/
     /// <see cref="PanelMetrics.ContentLeftInsetColumnWidth"/> — <c>ChildWindow.xaml</c>'s
-    /// <c>ResizeOverlay</c> Grid columns/rows read this, not a raw double. There is no equivalent wrapper
+    /// <c>ResizeGripVisuals</c> Grid columns/rows read this, not a raw double. There is no equivalent wrapper
     /// for <see cref="PanelMetrics.ResizeCornerThickness"/>: the corner <c>Thumb</c>s consume it directly
     /// as a plain <see langword="double"/> <c>Width</c>/<c>Height</c>, never through a
     /// <see cref="System.Windows.Controls.ColumnDefinition"/>/<see cref="System.Windows.Controls.RowDefinition"/>.
@@ -203,7 +203,7 @@ public class PanelMetricsTests
     /// <summary>
     /// MAJOR-A geometry pin, RIGHT edge vs. the vertical scrollbar: <c>FileListHost</c>
     /// (<c>ChildWindow.xaml</c>) has no right margin (documented, unrelated, "НЕ тронуто" for this fix
-    /// cycle's <c>ResizeOverlay</c>-only zone) — its scrollbar's own right edge sits flush with the
+    /// cycle's <c>ResizeGripVisuals</c>-only zone) — its scrollbar's own right edge sits flush with the
     /// panel's right edge, the same edge the RIGHT straight-edge <c>Thumb</c> occupies. Restoring
     /// <see cref="PanelMetrics.ResizeEdgeThickness"/> 8 -&gt; 6 reduces (but, within this fix cycle's
     /// frozen <c>FileListHost</c> margin, cannot eliminate) that overlap: fix-cycle 1's uniform 8 DIP
@@ -226,7 +226,7 @@ public class PanelMetricsTests
             $"Right-edge overlap fraction of the scrollbar ({overlapFraction:P1}) should be smaller than fix-cycle 1's ({fixCycle1OverlapFraction:P1}).");
 
         // A LITERAL zero would require a FileListHost right margin — out of scope for this fix cycle's
-        // ResizeOverlay-only zone (docs/PLANS/workspace-grid-07-visual.md "Зона"). Documented residual,
+        // ResizeGripVisuals-only zone (docs/PLANS/workspace-grid-07-visual.md "Зона"). Documented residual,
         // not silently accepted: see that plan's §11 (fix-cycle 2) and the matching ADR-025 Amendment.
         Assert.True(
             overlapFraction > 0d,

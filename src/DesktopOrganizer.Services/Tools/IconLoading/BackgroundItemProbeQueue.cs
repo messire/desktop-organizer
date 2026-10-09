@@ -23,6 +23,14 @@ internal sealed class BackgroundItemProbeQueue : IItemProbeQueue
 
     private readonly IPathProbe _pathProbe;
     private readonly IDiagnosticsLog _diagnosticsLog;
+    private readonly IAppLog? _appLog;
+
+    /// <summary>
+    /// Caps <c>ItemProbeFailed</c> in the always-on app log at <see cref="AppLogEventThrottle.DefaultLimitPerEvent"/>
+    /// entries per session (ADR-audit review cycle 1, G4): a failing probe repeats for every path of every
+    /// liveness tick, and each Error entry carries a stack trace.
+    /// </summary>
+    private readonly AppLogEventThrottle _appLogErrorThrottle = new ();
     private readonly SemaphoreSlim _batchThrottle;
 
     /// <summary>
@@ -31,8 +39,9 @@ internal sealed class BackgroundItemProbeQueue : IItemProbeQueue
     /// </summary>
     /// <param name="pathProbe">One cheap existence/directory-ness probe per path (D-11) — shared with <see cref="StaIconLoadQueue"/>'s circuit breaker (D-3).</param>
     /// <param name="diagnosticsLog">Structured diagnostics sink for a probe that unexpectedly threw.</param>
-    public BackgroundItemProbeQueue(IPathProbe pathProbe, IDiagnosticsLog diagnosticsLog)
-        : this(pathProbe, diagnosticsLog, DefaultMaxConcurrentBatches)
+    /// <param name="appLog">Always-on application log (ADR-033) that also receives a probe failure; optional.</param>
+    public BackgroundItemProbeQueue(IPathProbe pathProbe, IDiagnosticsLog diagnosticsLog, IAppLog? appLog = null)
+        : this(pathProbe, diagnosticsLog, DefaultMaxConcurrentBatches, appLog)
     {
     }
 
@@ -43,7 +52,8 @@ internal sealed class BackgroundItemProbeQueue : IItemProbeQueue
     /// <param name="pathProbe">One cheap existence/directory-ness probe per path.</param>
     /// <param name="diagnosticsLog">Structured diagnostics sink.</param>
     /// <param name="maxConcurrentBatches">Maximum number of <see cref="ProbeAsync"/> batches running at once.</param>
-    internal BackgroundItemProbeQueue(IPathProbe pathProbe, IDiagnosticsLog diagnosticsLog, int maxConcurrentBatches)
+    /// <param name="appLog">Always-on application log (ADR-033); optional.</param>
+    internal BackgroundItemProbeQueue(IPathProbe pathProbe, IDiagnosticsLog diagnosticsLog, int maxConcurrentBatches, IAppLog? appLog = null)
     {
         ArgumentNullException.ThrowIfNull(pathProbe);
         ArgumentNullException.ThrowIfNull(diagnosticsLog);
@@ -51,6 +61,7 @@ internal sealed class BackgroundItemProbeQueue : IItemProbeQueue
 
         _pathProbe = pathProbe;
         _diagnosticsLog = diagnosticsLog;
+        _appLog = appLog;
         _batchThrottle = new SemaphoreSlim(maxConcurrentBatches, maxConcurrentBatches);
     }
 
@@ -104,6 +115,7 @@ internal sealed class BackgroundItemProbeQueue : IItemProbeQueue
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogDiagnostic("ItemProbeFailed", new KeyValuePair<string, object?>("errorType", ex.GetType().Name));
+            _appLogErrorThrottle.Error(_appLog, "BackgroundItemProbeQueue", "ItemProbeFailed", ex, new KeyValuePair<string, object?>("errorType", ex.GetType().Name));
             return new PathProbeResult(path, Exists: false, IsDirectory: false, IsKnown: false);
         }
     }

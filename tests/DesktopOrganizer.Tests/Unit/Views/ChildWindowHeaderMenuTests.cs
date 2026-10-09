@@ -200,7 +200,6 @@ public class ChildWindowHeaderMenuTests
                 Mock.Of<IGestureDiagnostics>());
 
             var appSettings = new Mock<IAppSettings>();
-            appSettings.SetupProperty(s => s.NativePanelSizing, false);
             appSettings.SetupProperty(s => s.SnapResizeToIconGrid, true);
             appSettings.SetupProperty(s => s.NormalModeLayoutGestures, string.Empty);
 

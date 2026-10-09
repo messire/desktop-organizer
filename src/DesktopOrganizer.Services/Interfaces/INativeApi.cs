@@ -340,15 +340,17 @@ internal interface INativeApi
     /// </summary>
     /// <param name="paths">Full paths of the files/folders to move to the Recycle Bin.</param>
     /// <param name="ownerHwnd">
-    /// Owner window for <c>SHFileOperation</c>. The operation runs fully silent
-    /// (<c>FOF_NOCONFIRMATION</c>/<c>FOF_NOERRORUI</c>/<c>FOF_SILENT</c>), so no UI is normally shown.
+    /// Owner window for <c>SHFileOperation</c>. The flags are <c>FOF_ALLOWUNDO | FOF_NOCONFIRMATION |
+    /// FOF_NOERRORUI | FOF_WANTNUKEWARNING</c>: an ordinary recycle shows no UI, but an item that cannot
+    /// go to the Recycle Bin (too large, drive without one) makes the shell ask before deleting it for
+    /// good instead of silently destroying it (ADR-035).
     /// </param>
     bool SendToRecycleBin(string[] paths, IntPtr ownerHwnd);
 
     /// <summary>
     /// Moves the given paths to the Recycle Bin in a single <c>SHFileOperationW</c> batch
     /// (<c>FO_DELETE</c> with <c>FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_WANTNUKEWARNING</c>,
-    /// ADR-035). Unlike <see cref="SendToRecycleBin"/> (fully silent, used by the System Icons panel),
+    /// ADR-035). Same flags as <see cref="SendToRecycleBin"/> (used by the System Icons panel);
     /// this variant is for app-managed panel items that must NEVER be destroyed permanently: with
     /// <c>FOF_WANTNUKEWARNING</c> the shell asks the user before deleting an item that can't go to the
     /// Recycle Bin (too large, drive without a Recycle Bin) instead of silently nuking it, and the
@@ -532,6 +534,47 @@ internal interface INativeApi
     IntPtr GetRootWindow(IntPtr hwnd);
 
     /// <summary>
+    /// Returns the id of the process that created <paramref name="hwnd"/> (<c>GetWindowThreadProcessId</c>).
+    /// </summary>
+    /// <param name="hwnd">Window to query.</param>
+    /// <returns>The process id, or <c>0</c> for <see cref="IntPtr.Zero"/>/a dead handle. Never throws.</returns>
+    /// <remarks>
+    /// Read-only, in-kernel, sends no message to the target window — safe to call from inside a window
+    /// procedure (ADR-034 amendment 2026-10-09: the desktop-band walk runs inside <c>WM_WINDOWPOSCHANGING</c>).
+    /// </remarks>
+    uint GetWindowProcessId(IntPtr hwnd);
+
+    /// <summary>
+    /// Reads the Z-order half of the <c>WINDOWPOS</c> structure a <c>WM_WINDOWPOSCHANGING</c> message's
+    /// <c>lParam</c> points to.
+    /// </summary>
+    /// <param name="windowPos">
+    /// The message's <c>lParam</c> (a pointer to <c>WINDOWPOS</c>), valid by the contract of
+    /// <c>WM_WINDOWPOSCHANGING</c> — only that message's own <c>lParam</c> may be passed, never any other pointer.
+    /// </param>
+    /// <param name="insertAfter">The proposed <c>hwndInsertAfter</c>.</param>
+    /// <param name="flags">The proposed <c>SWP_*</c> flags.</param>
+    /// <returns>
+    /// <see langword="false"/> for a null pointer; <see langword="true"/> otherwise. There is no "unreadable
+    /// structure" outcome: the pointer is not validated (an invalid one is a caller bug that no managed
+    /// <c>catch</c> could absorb).
+    /// </returns>
+    bool TryReadWindowPosZOrder(IntPtr windowPos, out IntPtr insertAfter, out uint flags);
+
+    /// <summary>
+    /// Overwrites <c>hwndInsertAfter</c> and <c>flags</c> of the <c>WINDOWPOS</c> structure a
+    /// <c>WM_WINDOWPOSCHANGING</c> message's <c>lParam</c> points to — the documented way for a window to
+    /// veto or redirect a Z-order change of itself before it happens. Position and size are left untouched.
+    /// </summary>
+    /// <param name="windowPos">
+    /// The message's <c>lParam</c> (a pointer to <c>WINDOWPOS</c>), valid by the contract of
+    /// <c>WM_WINDOWPOSCHANGING</c>. Null is a no-op; any other pointer is written without validation.
+    /// </param>
+    /// <param name="insertAfter">The new <c>hwndInsertAfter</c>.</param>
+    /// <param name="flags">The new <c>SWP_*</c> flags.</param>
+    void WriteWindowPosZOrder(IntPtr windowPos, IntPtr insertAfter, uint flags);
+
+    /// <summary>
     /// Starts (or restarts) a <c>WM_TIMER</c> timer on <paramref name="hwnd"/> (<c>SetTimer</c> without a
     /// <c>TIMERPROC</c>) — the tick arrives through that window's own window procedure, on its thread.
     /// </summary>
@@ -661,6 +704,27 @@ internal interface INativeApi
     /// <param name="hwnd">Window whose DPI is requested.</param>
     /// <returns>Scale factor, 1.0 at 96 DPI. Never returns 0 and never throws.</returns>
     double GetDpiScaleForWindow(IntPtr hwnd);
+
+    /// <summary>
+    /// Asks <c>DefWindowProc</c>'s modal move/size loop running for <paramref name="hwnd"/> to stop
+    /// (ADR-022 phase 0-B, G-2): sends <c>WM_CANCELMODE</c> to the window — whose default processing
+    /// releases the mouse capture the loop runs on — and, if the window still owns the capture afterwards,
+    /// calls <c>ReleaseCapture</c> directly. The loop notices the lost capture and exits on its next
+    /// iteration (the caller is typically still nested inside it); <c>WM_EXITSIZEMOVE</c> follows then.
+    /// </summary>
+    /// <param name="hwnd">The window whose sizing loop is to be cancelled.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="hwnd"/> owned the mouse capture (i.e. a loop was running
+    /// for it on the calling thread) and the cancel request was issued; <see langword="false"/> otherwise
+    /// (zero handle, no capture, or a failure). Never throws.
+    /// </returns>
+    /// <remarks>
+    /// Must be called on the thread that owns <paramref name="hwnd"/> (the WPF UI thread): <c>GetCapture</c>
+    /// is per-thread and <c>SendMessage</c> to a same-thread window is a direct, synchronous call.
+    /// MANUAL VERIFY (Win10/Win11): whether the loop keeps the last live-resize frame or restores the
+    /// starting rectangle on a capture loss is <c>DefWindowProc</c>'s business and not observable headless.
+    /// </remarks>
+    bool CancelSizingLoop(IntPtr hwnd);
 
     // ── High-resolution panel item icons (IShellItemImageFactory / system image list) ───────────
     // Kept as one contiguous block (with its own region in NativeApi.cs) so it merges cleanly with

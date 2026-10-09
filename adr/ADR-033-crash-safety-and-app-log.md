@@ -1,6 +1,6 @@
 # ADR-033: Crash Safety and an Always-On Application Log
 
-Status: Accepted (2026-09-27)
+**Статус:** Accepted (2026-09-27) — Amended 2026-09-30 (ADR-047: крэш/старт/CLI `MessageBox` остаются намеренно вне единой дизайн-системы — минимум зависимостей до/после WPF-UI); Amended 2026-10-09 (ADR-audit WP-C + review cycle 1: операционные Warn/Error конвейера иконок дублируются в `IAppLog`, повторяющиеся события ограничены `AppLogEventThrottle`)
 
 ## Context
 
@@ -138,3 +138,33 @@ Negative:
 - ADR-034 (Explorer Restart Recovery) — `IAppLog` is the log every new package from this point on writes
   to; `ShellRecoveryCoordinator` logs through it.
 - `docs/PLANS/release-hardening-1.0.md` §1 (package B), §2 (package A).
+
+## Amendments
+
+| Date | Source | What changed | Which sections/decisions no longer apply |
+|---|---|---|---|
+| 2026-09-30 | [ADR-047](ADR-047-unified-design-system.md) (D-9) | The crash dialog, startup and CLI messages deliberately stay plain `MessageBox` — they are **not** moved to `AppDialogWindow`/`InfoBar`, to keep the dependency surface minimal before and after the WPF UI exists | — (the "dialog" step of the crash sequence is unchanged; informational `MessageBox`es elsewhere in the app were replaced by `AppDialogWindow`/`InfoBar`) |
+| 2026-10-09 | ADR-audit WP-C + review cycle 1 ([ADR-046](ADR-046-background-icon-loading.md)) | Operational Warn/Error events of the icon pipeline (`StaIconLoadQueue`, `BackgroundItemProbeQueue`) are duplicated into `IAppLog`, so they survive without `--diag`; a per-event, per-session budget (`AppLogEventThrottle`, K = 5, then one `LogEventSuppressed` Warn naming the event and the limit, then counting only) keeps a failure that repeats per icon / probe / window message from filling the always-on log; the same class with K = 1 and no notice backs the once-per-session Z-order diagnostics ([ADR-049](ADR-049-desktop-band-top-level-fence-panels.md)) | — (additive; for throttled Error sources the always-on log now holds the first K occurrences per event name, not every occurrence) |
+
+## Amendment (2026-10-09): icon-pipeline events in the app log, bounded by `AppLogEventThrottle`
+
+Source: the ADR audit (WP-C) and its review cycle 1 (G4). Behaviour only — no change to the sink, the level model, the
+scrubber or `IAppLog`'s members.
+
+- **What is duplicated.** The icon pipeline's operational events used to reach only the diagnostics trace (`--diag`).
+  `StaIconLoadQueue` now also writes its Warn-level events (`IconWorkerAbandoned`, `IconLaneDisabled`,
+  `RemoteRootQuarantined`, …) into `IAppLog` under source `StaIconLoadQueue`; `BackgroundItemProbeQueue` writes
+  `ItemProbeFailed`. Payloads stay closed-set (lane, root kind, extension; error type) — the privacy invariant of this
+  ADR is unchanged.
+- **Merged event.** `IconJobTimedOut` and `IconWorkerAbandoned` are one incident (a stuck job ⇒ its worker is abandoned).
+  The diagnostics trace keeps both events (schema `docs/Refactoring/Testing/diagnostics-log-events.md`); the app log gets
+  **one** `IconWorkerAbandoned` Warn carrying `lane`, `extension` and `abandoned`.
+- **Throttle.** Error-level events (Freeze-invariant violation, sink/watchdog exception, probe failure) pass through
+  `AppLogEventThrottle` (`Services/Diagnostics/AppLogEventThrottle.cs`): the first `K = 5` (`DefaultLimitPerEvent`)
+  occurrences of an event name are written, the next one is replaced by a single `LogEventSuppressed` Warn
+  (`event`, `limit`), every later one is only counted (`SuppressedCount`). The budget lives as long as the owning
+  instance (a DI singleton or process-wide static ⇒ the session). Thread-safe, never throws, **not** for window procedures
+  or `WH_MOUSE_LL` callbacks (an admitted entry is written synchronously). The Warn-level icon events (`IconWorkerAbandoned`,
+  `IconLaneDisabled`, `RemoteRootQuarantined`) are written directly, not through the throttle.
+- **Other users.** `DesktopIntegrationService` and `DesktopZOrderDiagnostics` use the same class with
+  `limitPerEvent: 1, announceSuppression: false` for once-per-session diagnostics (ADR-049).

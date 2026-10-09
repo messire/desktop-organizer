@@ -1,7 +1,7 @@
 # ADR-037: PerMonitorV2 and a Dual-Mode Desktop-Layer Scale
 
-Status: Accepted (2026-09-27) — amends ADR-004, ADR-022 D-6, ADR-028; supersedes the "System-DPI-aware"
-open question recorded in `docs/ROADMAP.md` "Сквозные задачи"
+**Статус:** Accepted (2026-09-27) — amends ADR-004, ADR-022 D-6, ADR-028; supersedes the "System-DPI-aware"
+open question recorded in `docs/ROADMAP.md` "Сквозные задачи"; Amended 2026-10-09 (ADR-audit WP-C: `ChildWindow.ContentSizing`/`Sizing` and `RollUpBehavior` read their bounds through `PanelWindowCoordinates.ToDesktopBounds` — closes the "raw `Left`/`Top`" gap in the adapter-layer rule); Amended 2026-10-10 (ADR-022 Phase 0: a `WM_DPICHANGED` during a native resize gesture no longer aborts it; ADR-022 Phase 1: native is the only resize path, so this rule now covers every resize gesture — there is no `Thumb` path to which mixed-DPI behavior could differ)
 
 ## Context
 
@@ -148,3 +148,43 @@ E6/QF-1 pending item above.
   of `RecoverDesktopLayer`; mode T is the same "top-level" outcome ADR-034 documents as expected on 24H2+.
 - `docs/PLANS/release-hardening-1.0-F-dpi.md`, `docs/PLANS/release-hardening-1.0-f0-results.md` — the
   detailed sub-plan and spike results this ADR summarizes.
+- ADR-049 (Desktop band for top-level fence panels) — the Z-order half of mode T: where this ADR decides how mode-T
+  panels are *measured*, ADR-049 decides how they are *stacked*.
+
+## Amendment (2026-10-09, ADR-audit WP-C): the adapter layer is now actually the only reader of `Left`/`Top`
+
+The section "`WM_DPICHANGED` and the WPF adapter layer" above states that `PanelWindowCoordinates`,
+`TopLevelPlacement` and `DragPositionCalculator` are the **only** places `window.Left`/`Top` are read or written for
+desktop-layer/top-level windows. The ADR audit found three consumers that still built a window-space `Rect` from the raw
+properties and fed it to desktop-DIP geometry (workspace-grid span/anti-overlap checks): `ChildWindow.ContentSizing`
+(auto-fit height), `ChildWindow.Sizing` (`CurrentBoundsDesktop`, native sizing / resize caps) and `RollUpBehavior`
+(collapse/expand bounds). In a uniform-scale configuration this is invisible — `WindowToDesktop` is the identity — but
+in mode T with monitors of different DPI the raw value is in the window's own monitor space, not desktop-DIP.
+
+All three now go through `PanelWindowCoordinates.ToDesktopBounds(window, windowSpaceBounds, scale)` (with a
+caller-computed height where the panel is rolled up or about to be re-fit; `RollUpBehavior` takes the scale optionally
+and passes the raw rectangle through only when no `IDesktopScaleProvider` was supplied — the unit-test construction).
+Only `Left`/`Top` are translated; `Width`/`Height` stay DIP-invariant, as before. No snapshot, persistence or
+`DesktopScaleModel` change; the uniform fast path stays bit-for-bit (`PersistedGeometryInvarianceTests`).
+
+Still true and unchanged: ADR-022's `NativeSizingCoordinateMapper` has no production callers after this ADR (the native
+path converts through `IDesktopScaleProvider`; see ADR-022, Amendment 2026-09-27, note of 2026-10-09).
+
+## Amendment (2026-10-10, ADR-022 Phase 0, G-1): `WM_DPICHANGED` mid-gesture does not abort a native resize
+
+Until this amendment the native resize path treated a `WM_DPICHANGED` that arrived inside the system sizing loop (the panel
+dragged across a monitor boundary with a different DPI, mode T) as a source change: it ended the session
+(`ResizeEndReason.SourceChanged`, deferred persist), leaving the rest of the drag as an unsnapped, unsaved orphan
+(`ProposeBounds` passes the proposed rect through when no session is active). Now `NativePanelResizeController.DpiChanged`
+touches neither geometry nor the session. The gesture's px↔desktop-DIP conversion goes through **one snapshot of
+`IDesktopScaleProvider.Current` taken on `SizeMoveEntered`** (`_gestureScale`), so every `WM_SIZING` of the gesture is snapped
+by the same scale and `WM_EXITSIZEMOVE` persists once; gesture geometry is in desktop-DIP, which does not depend on the
+window's own DPI. `ChildWindow.OnDpiChanged` still skips its deferred reapply while the interaction state is not `Idle`
+(the `TransitionLatch` rule above is unchanged). Residual risk, manual verify MV-8 (mixed DPI 100 % + 150 %): WPF answers the
+unhandled `WM_DPICHANGED` by applying the system's suggested rect, which the next `WM_SIZING` overrides — at most a one-frame
+jump; if it shows as jitter, the fallback is to end the gesture **and** cancel the system loop (`CancelActiveSizing`, G-2).
+
+*Status after ADR-022 Phase 1 (2026-10-10, checked against `NativePanelResizeController`):* the rule is unchanged and now
+unconditional (the `Thumb` path is gone). Mixed-DPI resize across a monitor boundary (MV-8) was part of the native-path
+manual-verify gate the user passed on 2026-10-10 (per the user's report; per-row results are not recorded in the
+repository); the one-frame suggested-rect jump remains a known residual risk.

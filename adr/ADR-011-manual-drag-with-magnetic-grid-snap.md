@@ -1,6 +1,6 @@
 # ADR-011: Ручной драг панели вместо `Window.DragMove()` — покадровый магнитный снаппинг к сетке
 
-**Статус:** Accepted
+**Статус:** Accepted — Amended 2026-09-22 (ADR-028: `PanelGeometryMode.GridAligned` вводит альтернативный, не пороговый snap-конвейер); Amended 2026-09-24 (`GridSizeNormalizer`: нормализация при смене `GridSize`, resize тоже прилипает к `GridSize`); Amended 2026-10-09 (ADR-audit WP-C: единое правило `ResizeConstraintsFactory.IsIconGridSnapActive` для resize-жеста и `SnapWidthToGrid` в обоих контроллерах — при `GridSize > 1` icon-grid snap не действует; тумблер «размер по сетке значков» отключён при позиционной привязке)
 **Дата:** 2026-07-26
 
 ---
@@ -129,9 +129,11 @@ independent units** (базовая линия 96 DPI). На масштабе э
 - Урок про device-пиксели vs DIU задокументирован здесь как прецедент для будущего ревью любого кода
   с `PointToScreen`/`PointFromScreen` в WPF-окнах этого проекта.
 
-**Manual verify (Win10/Win11)** — см. `docs/ROADMAP.md`, «Сквозные задачи»: плавность магнита, HiDPI
-125%/150% (там был найден и исправлен MAJOR-баг, но вживую не проверялся), alt-tab/потеря фокуса
-посреди драга, поведение у краёв экрана/мультимонитор, двойной клик vs одиночный драг по тайтлбару.
+**Manual verify** — выполнена пользователем на Windows 11 24H2 2026-09-27, признана достаточной (включая HiDPI
+125%/150%, Alt+Tab посреди драга); Windows 10 не проверяется — см. [docs/ROADMAP.md](../docs/ROADMAP.md)
+(строки 6–8, 1324–1326). Исторический перечень (оставлен как чек-лист): плавность магнита, HiDPI 125%/150%,
+alt-tab/потеря фокуса посреди драга, поведение у краёв экрана/мультимонитор, двойной клик vs одиночный драг
+по тайтлбару.
 
 ---
 
@@ -283,3 +285,30 @@ ResizeGeometryCalculatorSizeGridStepTests.cs`, `ResizeGestureSessionSizeGridStep
 этой узкой задачи), либо принять для панели новый continuous re-snap после каждого resize-жеста, что
 меняло бы визуальное поведение resize, а не только restore/persist — оставлено как рекомендация для
 будущей работы. **Снято см. раздел выше.**
+
+---
+
+## Amendment 2026-10-09 (ADR-audit WP-C): одно правило приоритета «сетка значков vs `GridSize`» для жеста и для `SnapWidthToGrid`
+
+**Дефект.** Amendment 2026-09-24 («resize тоже прилипает к `GridSize`») дал `GridSize > 1` приоритет над
+`SnapResizeToIconGrid` только внутри `ResizeConstraintsFactory.BuildConstraints` — то есть для самого resize-жеста.
+Второй путь, `SnapWidthToGrid()` (повторная подгонка ширины после смены `IconSize`/`ViewMode`/`IconLayoutPolicy`, ADR-015/018/029;
+по одной копии в `PanelResizeController` и `NativePanelResizeController`), не знал об этом приоритете и при включённом
+`SnapResizeToIconGrid` подтягивал ширину панели к ячейке сетки значков даже при `GridSize > 1` — то есть сразу
+сдвигал только что нормализованную к `GridSize` панель обратно с решётки.
+
+**Решение.** Правило вынесено в единственное место — `ResizeConstraintsFactory.IsIconGridSnapActive(model, snapEnabled,
+isGridAligned, sizeGridStep)` = `sizeGridStep <= 0 && !isGridAligned && snapEnabled && model.ViewMode == Grid`. Его вызывают
+`BuildConstraints` (жест) и **оба** контроллера в `SnapWidthToGrid`, поэтому они не могут разойтись; `sizeGridStep`
+контроллеры берут из `ResizeConstraintsFactory.ResolveSizeGridStep(GridSize, isGridAligned, …)` тем же способом, что жест.
+Итог: **при `GridSize > 1` icon-grid snap не действует нигде** (ни в жесте, ни после смены размера значка); для
+`GridAligned` (ADR-028) он по-прежнему не действует никогда; при `GridSize <= 1` поведение не меняется ни на бит.
+
+**Интерфейс настроек.** Раз тумблер «Привязка размера панели к сетке значков» (`SnapResizeToIconGrid`) не может ничего
+изменить, пока включена позиционная привязка (`GridSize > 1`), он **отключён** в этом состоянии:
+`GlobalDefaultsViewModel.IsSnapResizeToIconGridAvailable => !SnapToGridEnabled` (`LayoutSnappingSection.xaml`:
+`IsEnabled="{Binding IsSnapResizeToIconGridAvailable}"`); `GridSize` поднимает `PropertyChanged` и для него. Значение самого
+параметра при этом **не меняется и не сбрасывается** (отключается только контрол), описание
+(`Settings_Layout_SnapResizeToIconGrid_Description`, ru/en) говорит, что тумблер не действует при привязке позиции к сетке.
+
+Схема, `IAppSettings`/`user.config` (ключ `SnapResizeToIconGrid`, `GridSize`, дефолты) и семантика сохранения не менялись.

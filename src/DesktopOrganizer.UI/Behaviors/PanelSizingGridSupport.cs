@@ -4,9 +4,8 @@ using DesktopOrganizer.UI.Models;
 namespace DesktopOrganizer.UI.Behaviors;
 
 /// <summary>
-/// The tiny operations both resize controllers need against an <see cref="IPanelSizingGridHost"/>
-/// — kept in ONE place rather than copied into <see cref="PanelResizeController"/> and
-/// <see cref="NativePanelResizeController"/> (docs/PLANS/workspace-grid-03-04-integration.md §3.4's
+/// The tiny operations the resize controller needs against an <see cref="IPanelSizingGridHost"/>
+/// — kept in ONE place rather than inlined into <see cref="NativePanelResizeController"/> (docs/PLANS/workspace-grid-03-04-integration.md §3.4's
 /// explicit warning about duplicated resize logic: <c>SnapWidthToGrid</c>/<c>ResizeSnapEdgePadding</c>
 /// already cost this project once, baseline risk 10).
 /// </summary>
@@ -39,8 +38,8 @@ internal static class PanelSizingGridSupport
 
     /// <summary>
     /// The ONE workspace-grid quantisation pipeline for a <see cref="PanelGeometryMode.GridAligned"/>
-    /// resize, shared by the per-frame path (<see cref="ResizeGestureSession.TryUpdate"/>, both the
-    /// <c>Thumb</c> and the native <c>WM_SIZING</c> controller) and the commit path
+    /// resize, shared by the per-frame path (<see cref="ResizeGestureSession.TryUpdate"/>, driven by the
+    /// native <c>WM_SIZING</c> controller) and the commit path
     /// (<see cref="PersistSpans"/>) — so a frame the user sees and the geometry that is finally written
     /// can never be produced by two different formulas (§3.4's explicit warning, baseline risk 10):
     /// <list type="number">

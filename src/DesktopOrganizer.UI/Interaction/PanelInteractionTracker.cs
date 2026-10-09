@@ -4,7 +4,7 @@ namespace DesktopOrganizer.UI.Interaction;
 /// Owns one panel's current <see cref="PanelInteractionState"/> and enforces ADR-021's core invariant:
 /// only one gesture owns a panel's capture at a time. One instance per <see cref="Views.ChildWindow"/>
 /// (docs/PLANS/phase-1-resize-stabilization.md §2.2), shared between that panel's
-/// <see cref="Behaviors.PanelDragMoveBehavior"/> and <see cref="Behaviors.PanelResizeController"/>
+/// <see cref="Behaviors.PanelDragMoveBehavior"/> and <see cref="Behaviors.NativePanelResizeController"/>
 /// (via <see cref="ResizeGestureSession"/>).
 /// </summary>
 /// <remarks>

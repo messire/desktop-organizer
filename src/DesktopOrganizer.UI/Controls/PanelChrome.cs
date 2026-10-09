@@ -80,8 +80,8 @@ public class PanelChrome : ContentControl
     // layered template's new decorative parts. Every one of these MUST render with
     // <see cref="UIElement.IsHitTestVisible"/> = <see langword="false"/> in the default style
     // (<c>Resources/Styles/Panels.xaml</c>) — same R-5 rationale as <see cref="PartInteractionOverlay"/>
-    // above: none of them may ever intercept a mouse event the title-bar drag, the resize
-    // <see cref="System.Windows.Controls.Primitives.Thumb"/>s, or file drag/drop need to receive. The one
+    // above: none of them may ever intercept a mouse event the title-bar drag, the native
+    // resize hit-test zones (<see cref="Interaction.Native.NativeHitTestMapper"/>), or file drag/drop need to receive. The one
     // deliberate EXCEPTION to "purely decorative" is <see cref="PartHitCatcher"/> itself, whose entire
     // purpose is to keep the OS routing clicks to this window (plan D-5) — it is still
     // <c>IsHitTestVisible="False"</c> for WPF's OWN hit-test tree (so it never steals a click from a real

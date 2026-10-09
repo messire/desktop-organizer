@@ -12,13 +12,13 @@ namespace DesktopOrganizer.UI.Interaction;
 /// </summary>
 public enum ResizeEndReason
 {
-    /// <summary><c>Thumb.DragCompleted</c> with <c>Canceled == false</c> — the ordinary mouse-up end.</summary>
+    /// <summary>The ordinary end of a sizing loop (<c>WM_EXITSIZEMOVE</c> with a changed rect).</summary>
     Completed,
 
-    /// <summary><c>Thumb.DragCompleted</c> with <c>Canceled == true</c> — the <c>Thumb</c> lost capture mid-gesture.</summary>
+    /// <summary>The sizing loop was cancelled (<c>ESC</c>): the system restored the start rect.</summary>
     Canceled,
 
-    /// <summary>The <c>ResizeOverlay</c>'s bubbling <c>Mouse.LostMouseCapture</c> fired while this session was still active.</summary>
+    /// <summary>Mouse capture was lost while this session was still active (the native loop aborted, <c>NativePanelResizeController.SizeMoveAborted</c>).</summary>
     CaptureLost,
 
     /// <summary>
@@ -39,7 +39,7 @@ public enum ResizeEndReason
 
 /// <summary>
 /// The result of calling <see cref="ResizeGestureSession.End"/> — everything the WPF-facing caller
-/// (<see cref="Behaviors.PanelResizeController"/>) needs to decide what to do next, without reaching
+/// (<see cref="Behaviors.NativePanelResizeController"/>) needs to decide what to do next, without reaching
 /// back into the session's private state.
 /// </summary>
 /// <param name="WasActive">
@@ -64,7 +64,7 @@ public readonly record struct ResizeEndOutcome(
 
 /// <summary>
 /// The explicit, idempotent state machine of ONE resize gesture — Window-free (knows nothing about
-/// <c>Thumb</c>/<c>Window</c>), UI-thread-affine, no locking (docs/PLANS/phase-1-resize-stabilization.md
+/// <c>Window</c>/HWND), UI-thread-affine, no locking (docs/PLANS/phase-1-resize-stabilization.md
 /// §2.6). Owns the ADR-021 "only one gesture owns capture at a time" invariant for resize via the shared
 /// <see cref="PanelInteractionTracker"/>, and "every Begin has exactly one logical End, even if platform
 /// events are duplicated/missing" via <see cref="TryBegin"/>/<see cref="End"/>'s idempotency guards.
@@ -158,9 +158,9 @@ public sealed class ResizeGestureSession
 
     /// <summary>
     /// Attempts to start a new resize gesture. Fails (returns <see langword="false"/>, no state
-    /// changed) if a gesture is already active (double <c>DragStarted</c> without a matching
+    /// changed) if a gesture is already active (double begin without a matching
     /// <see cref="End"/> — the caller is expected to self-heal via <see cref="End"/> first, see
-    /// <see cref="Behaviors.PanelResizeController"/>'s stale-drag recovery), or if the shared
+    /// <see cref="Behaviors.NativePanelResizeController"/>'s stale-session recovery), or if the shared
     /// <see cref="PanelInteractionTracker"/> refuses to claim <see cref="PanelInteractionState.Resizing"/>
     /// (another gesture — e.g. a title-bar drag — currently owns the panel).
     /// </summary>
@@ -206,14 +206,14 @@ public sealed class ResizeGestureSession
     }
 
     /// <summary>
-    /// Applies one <c>Thumb.DragDelta</c> to the gesture's raw extent and computes the panel's next
+    /// Applies one resize delta (the native <c>WM_SIZING</c> controller synthesizes one per message) to the gesture's raw extent and computes the panel's next
     /// <see cref="Rect"/> via <see cref="ResizeGeometryCalculator"/>. Fails (returns
     /// <see langword="false"/>, <paramref name="applied"/> set to <paramref name="current"/> unchanged,
     /// no state mutated) if no gesture is active, or if <paramref name="edge"/> does not match the edge
     /// <see cref="TryBegin"/> was called with (an "unexpected source change" — plan §1.2 — the caller
     /// must immediately call <see cref="End"/> with <see cref="ResizeEndReason.SourceChanged"/>).
     /// </summary>
-    /// <param name="edge">The edge/corner reported by this delta's originating <c>Thumb</c>.</param>
+    /// <param name="edge">The edge/corner reported by this delta's originating sizing message.</param>
     /// <param name="delta">The raw mouse delta for this frame (<c>HorizontalChange</c>/<c>VerticalChange</c>).</param>
     /// <param name="current">The panel's on-screen <see cref="Rect"/> right before this delta.</param>
     /// <param name="applied">The panel's next <see cref="Rect"/> to apply.</param>
@@ -264,11 +264,13 @@ public sealed class ResizeGestureSession
     /// <remarks>
     /// <see cref="ResizeEndOutcome.ShouldPersist"/> is <see langword="true"/> whenever at least one
     /// delta was actually applied, REGARDLESS of <paramref name="reason"/> — including
-    /// <see cref="ResizeEndReason.Canceled"/>: WPF does not roll back geometry already written to
-    /// <c>Window.Width</c>/<c>Height</c>/<c>Left</c>/<c>Top</c> when a <c>Thumb</c>'s <c>DragCompleted</c>
-    /// reports <c>Canceled == true</c> — the panel is already visibly at the new geometry, so persisting
-    /// anything else would desync the saved layout from what the user sees on screen (plan §1.3). The
-    /// one exception is <see cref="ResizeEndReason.Failed"/>: an exception mid-delta may have left the
+    /// <see cref="ResizeEndReason.Canceled"/>. Historical rationale (plan §1.3): in the former WPF
+    /// <c>Thumb</c> path, WPF did not roll back geometry already written to
+    /// <c>Window.Width</c>/<c>Height</c>/<c>Left</c>/<c>Top</c> when <c>DragCompleted</c> reported
+    /// <c>Canceled == true</c>, so persisting anything else would have desynced the saved layout from what
+    /// the user saw on screen. Since G-4 the only source of <see cref="ResizeEndReason.Canceled"/> is the
+    /// native ESC/cancel path, which the controller ends with <c>persist: false</c>, so this rule no longer
+    /// decides the Canceled outcome in production. The one exception is <see cref="ResizeEndReason.Failed"/>: an exception mid-delta may have left the
     /// geometry only partially applied, so it is never safe to persist.
     /// </remarks>
     /// <param name="reason">Why the gesture is ending.</param>

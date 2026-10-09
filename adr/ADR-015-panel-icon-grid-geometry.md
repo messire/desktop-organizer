@@ -1,6 +1,6 @@
 # ADR-015: Модель геометрии сетки значков панели
 
-**Статус:** Accepted
+**Статус:** Accepted — Amended 2026-09-22 (ADR-028: наследующее уточнение третьей системы координат, не меняет решений); Amended 2026-09-22 (ADR-029: `GridMetrics.FileListHPadding` 0 → `PanelMetrics.ContentLeftInset` = 8); Amended 2026-10-09 (ADR-011 amendment, ADR-audit WP-C: `GridSize` — сетка позиции этого ADR — теперь имеет приоритет над icon-grid snap и в `SnapWidthToGrid`, не только в resize-жесте)
 **Дата:** 2026-09-01
 
 ---
@@ -189,7 +189,9 @@ CellSize       = BoxWidth + 2 * Gutter       // формула не меняла
 ## Manual verify (Win10 / Win11)
 
 Перенесено из `docs/PLANS/ui-polishing-1.md` §8, пп. 1–5 (не покрывается автотестами, требует
-интерактивной Windows-сессии, **не выполнено в этой сессии**):
+интерактивной Windows-сессии). **Выполнено пользователем на Windows 11 24H2 2026-09-27, признано
+достаточным** (Windows 10 не проверяется) — см. [docs/ROADMAP.md](../docs/ROADMAP.md) (строки 6–8); чек-лист
+оставлен как исторический:
 
 1. Выделение элемента **первой колонки и первой строки** Grid-режима: рамка полная со всех четырёх
    сторон, штрих слева/сверху не срезан (скриншот до/после).
@@ -229,8 +231,8 @@ CellSize       = BoxWidth + 2 * Gutter       // формула не меняла
   выделяемых UI-компонентов (см. отдельный раздел выше) — уже применимо и проверено на боковой панели
   (`SystemIconsPanelWindow`, блок D), переиспользующей тот же `PanelItemContainerStyle` без изменений.
 
-**Manual verify (Win10/Win11) — не выполнено, среда разработки ограничена `dotnet build`/`dotnet
-test`.** Полный список — раздел выше и `docs/ROADMAP.md`, раздел «Полировочный батч polishing/ui-1».
+**Manual verify** — выполнена (Windows 11 24H2, 2026-09-27, см. раздел выше и
+[docs/ROADMAP.md](../docs/ROADMAP.md), раздел «Полировочный батч polishing/ui-1»).
 
 ---
 
@@ -252,3 +254,30 @@ ADR-028) и internal icon layout (эта пара, ADR-015/018, плюс уто�
 системой B (ADR-028) и системой C (эта ADR-015/ADR-018), а не внутренняя константа icon-layout. Её
 математическое исправление (сколько именно DIP вычитать) — явное владение ADR-029, не этого документа и
 не ADR-028; здесь только подтверждается, что вопрос принадлежит этой границе, а не где-то ещё.
+
+---
+
+## Amendment 2026-09-22 (ADR-029): `FileListHPadding` больше не `0`
+
+[ADR-029](ADR-029-icon-layout-policy.md) Решение 2 (F-3) исправляет учёт хрома: `GridMetrics.FileListHPadding =
+PanelMetrics.ContentLeftInset` (= 8 DIP; после [ADR-030](ADR-030-reference-panel-chrome.md) эти 8 DIP — не колонка
+accent, а `2·ChromeOuterInset + 2·ContentSidePadding`). Формулы `BoxSize`/`CellSize`, правило «половина gutter'а»
+и top-align иконки (Решения 1–3) не затронуты — меняется только слагаемое хрома в `Width = n·CellSize +
+FileListHPadding`.
+
+## Amendment 2026-10-09 (ADR-011 amendment, ADR-audit WP-C): две сетки — и один приоритет
+
+Решение 1 этого ADR разводит сетку позиции окна (`GridSize`) и сетку раскладки значков (`GridMetrics`). Правило, какая из
+них квантует **размер** панели, теперь одно и то же для resize-жеста и для повторной подгонки ширины `SnapWidthToGrid()`
+(после смены `IconSize`/`ViewMode`/`IconLayoutPolicy`): `ResizeConstraintsFactory.IsIconGridSnapActive` — сетка значков
+действует только в Grid-режиме при включённом `SnapResizeToIconGrid`, не для `GridAligned` и **не при `GridSize > 1`**
+(там размер квантует `GridSize`). Формулы `BoxSize`/`CellSize` и решения 1–3 не менялись. Подробности —
+[ADR-011](ADR-011-manual-drag-with-magnetic-grid-snap.md), Amendment 2026-10-09.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | [ADR-028](ADR-028-workspace-grid.md) | Три системы координат; этот ADR = система C | — |
+| 2026-10-09 | [ADR-011](ADR-011-manual-drag-with-magnetic-grid-snap.md) (ADR-audit WP-C) | Единое правило `IsIconGridSnapActive`: при `GridSize > 1` icon-grid snap не действует и в `SnapWidthToGrid` | Неявное допущение, что `SnapWidthToGrid` всегда подгоняет ширину к ячейке сетки значков при включённом `SnapResizeToIconGrid` |
+| 2026-09-22 | [ADR-029](ADR-029-icon-layout-policy.md) | `FileListHPadding` = `ContentLeftInset` (8) | «Последствия», пункт 1: «`GridMetrics.FileListHPadding` теперь `0` (было `8`)» |

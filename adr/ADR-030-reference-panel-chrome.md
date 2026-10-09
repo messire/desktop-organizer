@@ -1,6 +1,6 @@
 # ADR-030: Reference-Style Layered Panel Chrome
 
-Status: Accepted (2026-09-25)
+**Статус:** Accepted (2026-09-25) — Amended 2026-09-28 (ADR-042: фиксированные слои хрома — hairline `PART_NeutralStroke`/`PART_InteractionOverlay`, overlay-скроллбар, header-текст/иконки — получили luminance-адаптивные токены через `PanelChromeForegroundPolicy`, т.к. поверхность панели больше не гарантированно тёмная); Amended 2026-10-10 (ADR-022 Фаза 1: `Thumb`-путь ресайза и `ResizeOverlay` удалены — `PART_HitCatcher` теперь обслуживает единственный, native-путь; упоминания Thumb'ов/«обоих путей» ниже исторические)
 
 Ветка `feature/reference-chrome`. Мастер-план реализации — `docs/PLANS/reference-panel-chrome.md`
 (D-1..D-12, риски R-1..R-12, вопросы Q-1/Q-2, матрица ручной проверки MV-1..MV-15). Конвейер:
@@ -212,7 +212,9 @@ soft stroke/gradient без pixel shader.
    после `af2c235` (baseline до задачи — 3272).
 9. ✅ **Закрыто.** `git diff --name-only e10b1fd..HEAD` ∩ persistence-freeze список (план §10) = ∅;
    `SchemaContractTests`/`PanelStateMapperTests`/`SystemIconsPanelStateMapperTests` не тронуты.
-10. ⏳ **Manual verify MV-12/MV-13** — не выполнено в этой среде (нет живого Windows GUI).
+10. ✅ **Manual verify MV-12/MV-13** — выполнено пользователем на Windows 11 24H2 2026-09-27 в составе общей
+    manual verify Фаз 0–10, признано достаточным (`docs/ROADMAP.md`, строки 6–8, 928–930); отдельного
+    протокола по MV-13 (RDP/software tier fallback) нет.
 
 ---
 
@@ -406,8 +408,9 @@ Frozen/static кисти для token-only ресурсов (`Brush.Chrome.Surfa
 
 ## Manual verify (Win10/Win11)
 
-Полная матрица — `docs/PLANS/reference-panel-chrome.md` §6 (MV-1..MV-15). Не выполнено в этой среде (нет
-живого Windows GUI). P1 (приоритет round-2): MV-1 (Idle-контур на ярких обоях под Glass min-opacity),
+Полная матрица — `docs/PLANS/reference-panel-chrome.md` §6 (MV-1..MV-15). **Выполнено пользователем на
+Windows 11 24H2 2026-09-27, признано достаточным** (Windows 10 не проверяется) — `docs/ROADMAP.md`, строки
+6–8 и 928–930; перечень ниже — исторический. P1 (приоритет round-2): MV-1 (Idle-контур на ярких обоях под Glass min-opacity),
 MV-2 (линия среза glow на 100/125/150/175%), MV-3 (hairline crisp на 125/175%), MV-4 (нулевой jitter,
 покадрово), MV-5/MV-6 (hit catcher на Thumb и нативном пути + угловая линза), MV-8 (rolled-up), MV-10
 (сохранённая раскладка — то же число колонок, `application-state.json` не переписан только из-за
@@ -417,3 +420,12 @@ MV-2 (линия среза glow на 100/125/150/175%), MV-3 (hairline crisp н
 fallback, в т.ч. HC+RDP), MV-14 (WorkerW). P3: MV-15 (UIA-дерево). Дополнительно из пользовательского
 промпта: 1/3/5+ панелей, Grid/List/Folder Portal видов, `SystemIconsPanel` (вне scope — старый визуал,
 BACKLOG), разные accent colors, субъективная отзывчивость drag/resize.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-25 | (реализация, раздел «Amendment 2026-09-25 — Реализация») | Фактически внедрённые слои, токены и решения ревью | — |
+| 2026-09-28 | [ADR-042](ADR-042-color-presets-rgb-picker-stepped-size.md) | Фиксированные слои хрома (hairline `PART_NeutralStroke`/`PART_InteractionOverlay`, overlay-скроллбар, header-текст/иконки) получили luminance-адаптивные токены (`PanelChromeForegroundPolicy`, `PanelThemeMode`) | Допущение, что поверхность панели всегда тёмная, а фиксированные токены хрома (светлые) всегда читаются |
+| 2026-10-09 | ADR-audit WP-E | Примечание: «`schemaVersion` остаётся 5» (раздел «Persistence и Acrylic») — состояние на момент ADR-030; текущая версия схемы 6 (ADR-043); ADR-030 схему не менял | — |
+| 2026-10-10 | [ADR-022](ADR-022-native-panel-sizing.md) Фаза 1 | `PART_HitCatcher` закрывает alpha=0 click-through для `WM_NCHITTEST` единственного native-пути (`RoundedRectClipConverter`, `PanelMetrics.ResizeEdgeThickness`/`ResizeCornerThickness`); `ResizeOverlay` (сиблинг `PanelChrome`) заменён визуальным `ResizeGripVisuals` (тоже сиблинг, `IsHitTestVisible=False`); тесты `ResizeOverlayGeometryTests` → `ResizeGripVisualsTests` | Формулировки «на обоих путях ресайза», «hit catcher на Thumb и нативном пути» (MV-5/MV-6), «`ResizeOverlay` остаётся сиблингом в `ChildWindow.xaml`» — Thumb-половина исчезла |

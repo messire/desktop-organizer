@@ -507,7 +507,7 @@ public class AtomicJsonFileWriterTests
     }
 
     private static JsonObject Envelope(string marker) =>
-        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, StateEnvelope.CurrentSchemaVersion, FixedWrittenAtUtc, "test");
+        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, StateEnvelope.CurrentSchemaVersion, FixedWrittenAtUtc, "test", StateEnvelope.CurrentSchemaRevision);
 
     private static string[] TempFiles(StateStorePaths paths) =>
         Directory.Exists(paths.StateDirectory) ? Directory.GetFiles(paths.StateDirectory, paths.TempFileSearchPattern) : Array.Empty<string>();

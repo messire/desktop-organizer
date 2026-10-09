@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using DesktopOrganizer.Localization;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.UI.Diagnostics;
@@ -530,6 +531,16 @@ public partial class App : Application
         // an empty/default section from a consumer that hasn't loaded yet and persists it over real
         // on-disk data.
         ApplicationState.MarkConsumersReady();
+
+        // ADR-audit WP-B (B1): a read-only session (newer on-disk schema / storage lock not acquired) discards
+        // every Save() and ChildWindowViewModel stops moving dropped files into hidden storage — tell the user
+        // once, on the non-blocking InfoBar (a Caution status persists until dismissed, so it is waiting in the
+        // settings window). After MarkConsumersReady so it never shadows the startup load itself.
+        _serviceProvider.GetRequiredService<ReadOnlySessionNotice>().ShowIfReadOnly();
+
+        // F5: the same live flag also marks the tray icon's tooltip "(read-only)", so the state is
+        // discoverable without opening the settings window. Nothing is persisted.
+        TrayIconManager.SetReadOnlySession(!_serviceProvider.GetRequiredService<IApplicationStateStore>().IsWritable);
 
         // ADR-034: after the write barrier above, so a recovery that has to rebuild a panel can never
         // run while a consumer is still unloaded.

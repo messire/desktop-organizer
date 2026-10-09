@@ -30,7 +30,7 @@ public static class PanelMetrics
 
     /// <summary>
     /// CORNER resize-grip width/height, in DIP — single source of truth shared by
-    /// <c>ChildWindow.xaml</c>'s <c>ResizeOverlay</c> corner <c>Thumb</c>s (WPF path) and
+    /// <c>ChildWindow.xaml</c>'s <c>ResizeGripVisuals</c> corner cells and
     /// <c>NativePanelResizeController</c>'s <c>CornerDip</c> constant (native <c>WM_NCHITTEST</c> path,
     /// via <see cref="Interaction.Native.NativeHitTestMapper.Map"/>'s <c>cornerDip</c> parameter).
     /// Widened <c>6 -&gt; 8</c> (docs/PLANS/workspace-grid-07-visual.md fix-cycle 1, MAJOR-1) to match
@@ -40,7 +40,7 @@ public static class PanelMetrics
     /// small square lens outside its own quarter-circle arc — on a window with
     /// <c>AllowsTransparency="True"</c>, a mouse-down landing on that permanently-alpha-0 lens is routed
     /// by the OS straight to whatever is beneath this window (the desktop), never reaching this window's
-    /// WPF message loop at all, REGARDLESS of the WPF <c>Thumb</c> resize handle's own hit-test geometry
+    /// WPF message loop at all, REGARDLESS of the native resize hit-test zone
     /// sitting at the same screen location (see <see cref="Interaction.Native.NativeHitTestMapper"/> and
     /// <c>Converters/RoundedRectClipConverter.cs</c>'s own remarks for the full explanation — this is an
     /// OS-level per-pixel-alpha click-through effect on a layered window, not a WPF <c>Clip</c>-scoping
@@ -74,20 +74,20 @@ public static class PanelMetrics
     /// exceeds the arrange slot the <c>Grid</c> actually gave it — silently clipping fix-cycle 2's
     /// "overflow" straight back down to 6×6; alignment only ever controlled WHICH 6×6 corner of the 8×8
     /// desired size survived the clip, never whether the clip applied. Confirmed with a real, on-Windows
-    /// STA regression test (<c>Unit.Views.ResizeOverlayGeometryTests</c>) before this fix. Fix: dedicate
-    /// <c>ResizeOverlay</c>'s outer <c>Grid</c> cells to THIS (wider) constant via
-    /// <see cref="ResizeCornerThicknessLength"/> instead, and make the straight-edge <c>Thumb</c>s the
+    /// STA regression test (<c>Unit.Views.ResizeGripVisualsTests</c>) before this fix. Fix: dedicate
+    /// <c>ResizeGripVisuals</c>'s outer <c>Grid</c> cells to THIS (wider) constant via
+    /// <see cref="ResizeCornerThicknessLength"/> instead, and make the straight-edge borders the
     /// SMALLER ones (<see cref="ResizeEdgeThickness"/>, anchored to their own outer edge) — a child
     /// SMALLER than its own cell is never auto-clipped regardless of alignment, so the corner
-    /// <c>Thumb</c>s now simply fill their own dedicated cell (default <c>Stretch</c> alignment, no
+    /// borders now simply fill their own dedicated cell (default <c>Stretch</c> alignment, no
     /// explicit <c>Width</c>/<c>Height</c> needed at all) with no reliance on clip semantics either way.
     /// </para>
     /// </summary>
     public const double ResizeCornerThickness = 8d;
 
     /// <summary>
-    /// STRAIGHT-EDGE resize-grip strip thickness, in DIP — the four non-corner <c>ResizeOverlay</c>
-    /// <c>Thumb</c>s (Top/Bottom/Left/Right) and the matching straight-edge classification band in
+    /// STRAIGHT-EDGE resize-grip strip thickness, in DIP — the four non-corner <c>ResizeGripVisuals</c>
+    /// <c>Border</c>s (Top/Bottom/Left/Right) and the matching straight-edge classification band in
     /// <see cref="Interaction.Native.NativeHitTestMapper.Map"/> (native path). Restored to its
     /// pre-fix-cycle-1 value of <c>6</c> (docs/PLANS/workspace-grid-07-visual.md fix-cycle 2, MAJOR-A) —
     /// see <see cref="ResizeCornerThickness"/>'s remarks for why sharing one constant between the corner
@@ -106,7 +106,7 @@ public static class PanelMetrics
     /// <c>Window.Width - ContentLeftInset</c>) — see adr/ADR-029-icon-layout-policy.md, Решение 2 ("F-3"
     /// fix, docs/PLANS/workspace-grid-00-baseline.md finding F-3). Before this constant existed,
     /// <see cref="GridMetrics.FileListHPadding"/> was an independent <c>0d</c> literal that every
-    /// analytical snap-time computation (<c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s
+    /// analytical snap-time computation (<c>NativePanelResizeController</c>'s
     /// <c>SnapWidthToGrid</c>, <see cref="GridMetrics.MinPanelWidth(double)"/>,
     /// <c>ResizeConstraintsFactory.BuildConstraints</c>'s <c>HorizontalChrome</c>) used to convert
     /// between a window-width value and a content-width value — silently disagreeing with this real
@@ -329,12 +329,12 @@ public static class PanelMetrics
 
     /// <summary>
     /// A <see cref="GridLength"/> wrapping <see cref="ResizeEdgeThickness"/>, for direct <c>x:Static</c>
-    /// use in <c>ChildWindow.xaml</c>'s <c>ResizeOverlay</c> <c>Grid.ColumnDefinitions</c>/
-    /// <c>RowDefinitions</c> of the straight-edge <c>Thumb</c>s' own MIDDLE column/row — the same "wrap
+    /// use in <c>ChildWindow.xaml</c>'s <c>ResizeGripVisuals</c> <c>Grid.ColumnDefinitions</c>/
+    /// <c>RowDefinitions</c> of the straight-edge borders' own MIDDLE column/row — the same "wrap
     /// the double in a <see cref="GridLength"/>" pattern already used by <see cref="HeaderRowHeight"/>/
     /// <see cref="ContentLeftInsetColumnWidth"/> below. See <see cref="ResizeCornerThicknessLength"/> for
     /// the OUTER (corner) cells' own wrapper — P09 (docs/PLANS/workspace-grid-07-visual.md, defect list)
-    /// gave <c>ResizeOverlay</c>'s outer cells dedicated <see cref="ResizeCornerThickness"/> sizing
+    /// gave <c>ResizeGripVisuals</c>'s outer cells dedicated <see cref="ResizeCornerThickness"/> sizing
     /// instead of sharing this (narrower) one, which is what this field's own doc used to describe as
     /// the shared shape — see <see cref="ResizeCornerThickness"/>'s remarks for why.
     /// </summary>
@@ -342,10 +342,10 @@ public static class PanelMetrics
 
     /// <summary>
     /// A <see cref="GridLength"/> wrapping <see cref="ResizeCornerThickness"/>, for direct <c>x:Static</c>
-    /// use in <c>ChildWindow.xaml</c>'s <c>ResizeOverlay</c> <c>Grid.ColumnDefinitions</c>/
+    /// use in <c>ChildWindow.xaml</c>'s <c>ResizeGripVisuals</c> <c>Grid.ColumnDefinitions</c>/
     /// <c>RowDefinitions</c> OUTER (corner) cells — added by the P09 fix
     /// (docs/PLANS/workspace-grid-07-visual.md, defect list; see <see cref="ResizeCornerThickness"/>'s own
-    /// remarks for the bug this replaces). The corner <c>Thumb</c>s themselves still consume
+    /// remarks for the bug this replaces). The corner borders themselves still consume
     /// <see cref="ResizeCornerThickness"/> only implicitly (they fill their own dedicated cell via default
     /// <c>Stretch</c> alignment, no explicit <c>Width</c>/<c>Height</c> needed) — this wrapper exists
     /// purely for the <c>Grid</c>'s own column/row definitions, the same "one raw constant, plus a wrapped

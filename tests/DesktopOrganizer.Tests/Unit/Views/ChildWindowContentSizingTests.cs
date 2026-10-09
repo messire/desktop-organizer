@@ -687,7 +687,7 @@ public class ChildWindowContentSizingTests
             var model = BuildGridModel(itemCount: 8, windowWidth, windowHeight: 500d, sizingMode: PanelSizingMode.AutoContent);
             harness.Window.Initialize(model);
 
-            // The single seam PanelResizeController/NativePanelResizeController call through
+            // The single seam NativePanelResizeController calls through
             // PanelSizingGridSupport.NotifyHeightResizeCommitted at the end of a HEIGHT-affecting gesture
             // — exercised here directly via the public IPanelSizingGridHost surface (an explicit
             // interface implementation is still callable through the interface, no reflection needed).
@@ -978,7 +978,6 @@ public class ChildWindowContentSizingTests
                 Mock.Of<IGestureDiagnostics>());
 
             var appSettings = new Mock<IAppSettings>();
-            appSettings.SetupProperty(s => s.NativePanelSizing, false);
             appSettings.SetupProperty(s => s.SnapResizeToIconGrid, true);
             appSettings.SetupProperty(s => s.NormalModeLayoutGestures, string.Empty);
 

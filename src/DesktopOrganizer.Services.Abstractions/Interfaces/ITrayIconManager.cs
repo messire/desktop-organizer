@@ -100,6 +100,16 @@ public interface ITrayIconManager : IDisposable
     void SetDesktopIconsVisible(bool visible);
 
     /// <summary>
+    /// Tells the tray whether this session is read-only (<c>IApplicationStateStore.IsWritable</c> is
+    /// <see langword="false"/>: newer on-disk schema, or the storage lock was not acquired) — a read-only
+    /// session appends a localized "(read-only)" suffix to the tray icon's tooltip so the state is
+    /// discoverable without opening the settings window (ADR-audit WP-B, F5). A snapshot, like
+    /// <see cref="SetDesktopIconsVisible"/>; re-localized on a language switch. Nothing is persisted.
+    /// </summary>
+    /// <param name="isReadOnly"><see langword="true"/> if the session is read-only.</param>
+    void SetReadOnlySession(bool isReadOnly);
+
+    /// <summary>
     /// (Re)builds the tray context menu's "Pages" submenu contents from the given snapshot
     /// (backlog-1x-master-plan.md §2, ADR-044) — the same "caller-supplied snapshot" shape as
     /// <see cref="UpdateContextMenu"/> (see its remarks): this layer never reads <c>IPageManager</c>

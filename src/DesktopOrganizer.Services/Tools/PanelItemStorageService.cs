@@ -63,7 +63,7 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
     /// ~2 minutes (<c>ChildWindowViewModel.SiblingAdoptionWatchTicks</c>) logs only ONCE instead of once
     /// per tick. Cleared once an entry actually adopts; a permanently-stuck entry (never adopted, watch
     /// eventually expires) leaves one small stray key behind — bounded by how many such entries a session
-    /// ever sees, accepted as negligible. Used only from the UI thread, same as the rest of this service.
+    /// ever sees, accepted as negligible. Used only from the UI thread, not guarded by <see cref="_manifestLock"/> (see the threading contract at <c>_manifestCache</c>).
     /// </summary>
     private readonly HashSet<string> _deferredAdoptionWarned = new(StringComparer.OrdinalIgnoreCase);
 
@@ -84,8 +84,11 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
 
     // Authoritative in-memory copy of the manifest, lazily loaded from disk on first access and
     // kept in sync via write-through on every mutation (see the "Manifest" region below). This
-    // service is registered as a DI singleton and used exclusively from the UI thread, but all
-    // access still goes through _manifestLock as a cheap belt-and-suspenders guard.
+    // service is registered as a DI singleton. Threading contract: Restore and GetManifestEntries may
+    // also be called from a background thread (ManagedStorageOrphansViewModel.TryReturn runs Restore on
+    // the thread pool) — they only touch the manifest, and every manifest access goes through
+    // _manifestLock. They must not use the UI-thread-only state (_deferredAdoptionWarned, used by the
+    // sibling-adoption path). Every other member is used from the UI thread only.
     private Dictionary<string, string>? _manifestCache;
 
     /// <summary>
@@ -408,6 +411,16 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
                 ex,
                 new KeyValuePair<string, object?>("path", storedPath));
             return new RenameResult(RenameOutcome.Failed, null);
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<KeyValuePair<string, string>> GetManifestEntries()
+    {
+        lock (_manifestLock)
+        {
+            var (manifest, trusted) = EnsureManifestCacheUnlocked();
+            return trusted ? [.. manifest] : [];
         }
     }
 

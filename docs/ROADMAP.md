@@ -137,7 +137,7 @@
 
 ## Фаза 2. Поведение панели как у Fences
 
-- [x] **Ресайз панели.** Оверлей из 8 прозрачных `Thumb` (края + углы, стиль `ResizeThumbStyle`),
+- [x] **Ресайз панели.** *(Историческая реализация; с 2026-10-10 ресайз идёт только по native-пути `WM_SIZING`, `Thumb`-оверлей удалён — ADR-022 Фаза 1, «Решения, ожидающие пользователя» п. 3.)* Оверлей из 8 прозрачных `Thumb` (края + углы, стиль `ResizeThumbStyle`),
       `Resize_DragDelta` меняет `Width/Height/Left/Top` с минимумом 120px; `Resize_DragCompleted` → snap + save.
       Улучшение (feature/fancy-windows): ресайз квантуется к сетке иконок (`GridMetrics.Quantize`),
       аккумулятор дельт без дрейфа; `IAppSettings.SnapResizeToIconGrid` (дефолт true).
@@ -710,7 +710,7 @@ A–E (§10 плана), `dotnet build`/`dotnet test` зелёные без ро
       подавляет квантование на время жеста. [ADR-029](../adr/ADR-029-icon-layout-policy.md):
       `IconLayoutPolicy {LegacyStretch, FixedGap}` (amendment к ADR-018), `PanelMetrics.ContentLeftInset`
       как единая константа контракта на хром (F-3), `PanelSizingMode {Manual, AutoContent}` (владение
-      F-4). Оба ADR остались `Proposed` до реализации/manual verify — см. «P09 (gate)» ниже.
+      F-4). Оба ADR были `Proposed` до реализации/manual verify; с 2026-10-09 (ADR-audit WP-E) — `Accepted`, см. «P09 (gate)» ниже.
 - [x] **P02 — Чистая геометрия `WorkspaceGridMetrics`/`WorkspaceLayoutPolicy`** (`docs/fix-prompts/02-metrics.md`,
       [docs/PLANS/workspace-grid-02-metrics.md](PLANS/workspace-grid-02-metrics.md)): pure-math слой,
       без подключения к рантайму. `SnapPosition`/`BoundsToSpans`/`SpansToBounds`/`SafeClamp`/
@@ -833,8 +833,8 @@ A–E (§10 плана), `dotnet build`/`dotnet test` зелёные без ро
       активного resize/drag-жеста — гонка геометрии), MAJOR-4 (завершённый ВЕРТИКАЛЬНЫЙ resize не
       демотировал `AutoContent → Manual` — Fences-подобное поведение добавлено), UX-P1 (сырые имена enum
       в двух `ComboBox` настроек → `EnumDisplayNameConverter`), UX-P2 (подменю «Panel sizing»
-      симметрично «Icon layout»). Статус ADR-029 сознательно возвращён `Accepted → Proposed` по итогам
-      этого fix-цикла (до релизной сверки P09).
+      симметрично «Icon layout»). Статус ADR-029 был сознательно возвращён `Accepted → Proposed` по итогам
+      этого fix-цикла (до релизной сверки P09); с 2026-10-09 — снова `Accepted`.
 - [x] **P07-visual fix-cycle 1** (`docs/fix-prompts/07-visual.md`, `docs/PLANS/workspace-grid-07-visual.md`,
       ADR-025 Amendment 2026-09-22): border radius 6→8 DIP resize-grip hit-test fix (widened
       `ResizeOverlay`/`NativePanelResizeController.BorderDip` to a shared `PanelMetrics.ResizeGripThickness`,
@@ -892,21 +892,25 @@ A–E (§10 плана), `dotnet build`/`dotnet test` зелёные без ро
       блокировки, требует отдельного ADR — см. `docs/REVIEWS/workspace-grid-debt.md` WGD-21), 1/20
       путей без manifest-записи (WGD-22).
 
-**P09 (gate) — pending.** Финальная релизная сверка (`docs/fix-prompts/09-acceptance.md`) не запущена в
-этом цикле — входные артефакты подготовлены: единый бэклог долга
+**P09 (gate) — закрыт 2026-10-09 (ADR-audit WP-E).** Формальный гейт `docs/fix-prompts/09-acceptance.md` как
+отдельная релизная сверка не запускался, но manual verify выполнена пользователем на Windows 11 24H2
+2026-09-27 и признана достаточной (см. ниже), на ADR-028/029 стоят Accepted-ADR (031/033/037/045) и выпущен v0.8.0 —
+**ADR-028 и ADR-029 переведены в `Accepted`**, их журналы вынесены в `docs/PLANS/`. Не закрыто manual verify:
+мультимониторный Вопрос 2 ADR-028 (пространство `Window.Left/Top` на мониторе с отрицательными координатами —
+нет стенда с двумя мониторами). Исторически: финальная релизная сверка не запускалась — входные артефакты были подготовлены: единый бэклог долга
 [docs/REVIEWS/workspace-grid-debt.md](REVIEWS/workspace-grid-debt.md) и сводная матрица
 [docs/REVIEWS/workspace-grid-manual-verify.md](REVIEWS/workspace-grid-manual-verify.md) (объединяет
 MV-1…MV-29 плана P03/P04, ADR-029 manual verify пп. 1–29, P07 §9/§11, P08, P02b rollback — без
-дублей). До выполнения P09 оба ADR (028, 029) остаются `Proposed` — см. их шапки
-(«Implemented 2026-09-22, Accepted pending manual verify — см. P09»).
+дублей). (Историческая формулировка: «до выполнения P09 оба ADR (028, 029) остаются `Proposed`» — снята
+2026-10-09, см. выше.)
 
 > ℹ️ **Manual verify — выполнено пользователем на Windows 11 24H2, 2026-09-27; признано достаточным**
 > для Ambient Accent (V-1..V-18), P07-visual fix-cycle 1 и пакета workspace-grid (P02–P08). Windows 10
 > отдельно не проверяется. Исторические полные списки — `docs/PLANS/phase-5-ambient-accent-ui.md` §7.2,
 > [docs/Refactoring/Testing/ambient-accent-visual-matrix.md](Refactoring/Testing/ambient-accent-visual-matrix.md),
 > [docs/REVIEWS/workspace-grid-manual-verify.md](REVIEWS/workspace-grid-manual-verify.md). Формальный
-> гейт P09 (§ выше) как отдельная релизная сверка не запускался — статус ADR-028/ADR-029 (`Proposed`)
-> не пересматривается этим решением, см. отчёт.
+> гейт P09 (§ выше) как отдельная релизная сверка не запускался; статус ADR-028/ADR-029 пересмотрен позже —
+> `Accepted` с 2026-10-09 (ADR-audit WP-E).
 
 - [x] **ADR-030 — Reference-Style Layered Panel Chrome** (ветка `feature/reference-chrome`, мастер-план
       [docs/PLANS/reference-panel-chrome.md](PLANS/reference-panel-chrome.md)). Слоистый `PanelChrome`
@@ -1121,17 +1125,20 @@ ADR-038 приняты, ROADMAP/README/CHANGELOG синхронизирован�
       [ADR-042](../adr/ADR-042-color-presets-rgb-picker-stepped-size.md).
 
 **Бэклог, найденный в рамках этого захода:**
-- High Contrast: foreground текста сегмента и кольцо выбора свотча ещё не связаны с `SystemColors.
-  HighlightBrush` (сейчас различимы только по 1px hairline) — требует manual verify, при подтверждении
-  отдельная задача (ADR-042 Amendment, «Известный пробел High Contrast»).
-- Icon layout (Grid/List) и Panel geometry (size presets) в `PanelCustomizeWindow` — опционально перевести на
-  тот же сегментированный контрол (`Settings.SegmentedGroup`/`SegmentedItem`), что теперь используют Mode и
-  Surface, вместо прежних `ComboBox`/radio-списков, ради визуальной согласованности карточного flow.
+- [x] High Contrast: foreground текста сегмента и кольцо выбора свотча ещё не связаны с `SystemColors.
+  HighlightBrush` (сейчас различимы только по 1px hairline) — **закрыто 2026-09-30** токенами
+  `Theme.Selection.Indicator`/`Theme.Selection.Fill` ([ADR-047](../adr/ADR-047-unified-design-system.md),
+  amendment к ADR-042, «Известный пробел High Contrast»).
+- [x] Icon layout (Grid/List) и Panel geometry (size presets) в `PanelCustomizeWindow` — перевести на
+  сегментированный контрол (`Settings.SegmentedGroup`/`SegmentedItem`) вместо прежних `ComboBox`/radio-списков —
+  **закрыто 2026-09-30** ([ADR-047](../adr/ADR-047-unified-design-system.md), amendment к ADR-042).
 - RU-раскладка на ширине окна 420 DIP (`PanelCustomizeWindow`/`NewPanelDefaultsSection`) — подтвердить на
   живом Windows, что названия пресетов и подписи сегментов не обрезаются на русском (manual verify пункт уже
   в ADR-042, здесь — как явное напоминание перед релизом).
-- Фоновый STA-фетч высокорезрешённых иконок (сейчас вся экстракция синхронна на UI-потоке; UNC/offline-скип
-  снимает два наиболее частых многосекундных подвисания, но не все — см. ADR-039 «Known follow-up»).
+- [x] Фоновый STA-фетч высокорезрешённых иконок (вся экстракция была синхронна на UI-потоке; UNC/offline-скип
+  снимал два наиболее частых многосекундных подвисания, но не все — ADR-039 «Known follow-up») — **закрыто
+  2026-09-30**, [ADR-046](../adr/ADR-046-background-icon-loading.md) (пункт 7 бэклога 1.x: `StaIconLoadQueue`,
+  `BackgroundItemProbeQueue`).
 - Запись, не успевшая дописаться архиватором/shell-командой к истечению 40-тикового pending-окна,
   остаётся скрытой в managed-хранилище до следующей shell-команды над тем же элементом (ADR-040 «Known
   Limitation»).
@@ -1162,8 +1169,10 @@ worktree на ветке `feature/background-icon-loading`, смёржен в `r
 [ADR-042](../adr/ADR-042-color-presets-rgb-picker-stepped-size.md) (пункты 4–5). Известные follow-up'ы,
 сознательно оставленные вне объёма 1.0 (не блокеры): часть карточек `LayoutSnappingSection` не переведена
 на `SettingsCard` (ADR-047 DO-026), 17/26 RESX-строк длиннее целевого лимита читаемости (ADR-047 T-5),
-повторный вход через трей при открытом модальном диалоге (ADR-047 R-5/R-6), двойной metadata round-trip и
-приоритет по вьюпорту для фоновой загрузки иконок (ADR-046).
+повторный вход через трей при открытом модальном диалоге (ADR-047 R-5/R-6), двойной metadata round-trip,
+приоритет по вьюпорту, виртуализация панелей и перечисление сетевого портала для фоновой загрузки иконок
+(ADR-046). Все они заведены как отдельные пункты `docs/Refactoring/BACKLOG.md` (DO-030…DO-036) и перечислены
+в разделе «Follow-up’ы после аудита ADR (2026-10-09)» ниже.
 
 - [x] **Двойной клик по иконке трея — round-robin переключение страниц. Закрыто 2026-09-29.**
       `TrayIconManager.Initialize`'s `DoubleClick` now raises `ITrayIconManager.OnNextPageRequested`
@@ -1399,6 +1408,182 @@ Windows 11 24H2.
       ADR-032 «Реализация»/follow-up-кандидаты. Manual verify — MV-L1..MV-L15
       (`docs/PLANS/localization.md` §7.3, обязательные MV-L2/L4/L6/L7/L12) **выполнена пользователем на
       Windows 11 24H2, 2026-09-27; признана достаточной**, Windows 10 отдельно не проверяется.
+
+---
+
+## Follow-up’ы после аудита ADR (2026-10-09)
+
+Источник — аудит всех 47 ADR против кода (rc/0.8.0), пакет WP-E (статусы, amendments в телах, разделение
+ADR-028/029, ADR-048, синхронизация трекеров) и финальный документационный проход (ADR-049, amendments фиксов,
+CHANGELOG). Каждый пункт заведён в [docs/Refactoring/BACKLOG.md](Refactoring/BACKLOG.md) (стабильные ID); здесь —
+сводка статусов. Ничего из этого не блокирует 1.0 и не требует изменения замороженного контура persistence.
+
+- [ ] **DO-030 — Виртуализация панелей.** `AdaptiveIconGridPanel` не виртуализирует элементы (ни при
+      `LegacyStretch`, ни при `FixedGap`); генерация 1000 контейнеров остаётся стоимостью UI-потока
+      (ADR-046 R7-8, ADR-029 Решение 5).
+- [ ] **DO-031 — Перечисление сетевого портала.** `GetSourceFiles`/`GetSafeEntries`
+      (`Directory.Exists(SourceFolderPath)`) синхронны — Folder Portal на недоступной шаре по-прежнему
+      блокирует UI-поток (ADR-046, «Известные ограничения»).
+- [ ] **DO-032 — Приоритет загрузки иконок по вьюпорту скролла** (а не только видимая/скрытая страница;
+      ADR-046 D-6).
+- [ ] **DO-033 — Двойной metadata round-trip в `IconProvider.GetIcon`** (`File.Exists` внутри `GetIcon` после
+      пробы на воркере) и опциональная `isDirectoryHint`-перегрузка `AddFilesCore` (ADR-046).
+- [ ] **DO-034 — `LayoutSnappingSection`: три карточки на ручном `Border` вместо `SettingsCard`** — остаток DO-026
+      (ADR-047, «Известные ограничения»).
+- [ ] **DO-035 — Повторный вход через трей при открытом модальном `AppDialogWindow`** (ADR-047 R-5/R-6).
+- [ ] **DO-036 — T-5 RESX:** 17 en / 26 ru строк длиннее целевого лимита читаемости (принято как долг 1.0,
+      ADR-047).
+- [ ] **DO-037 — Явное действие «Fit width to grid»** для `LegacyFreeform` вместо удалённого init re-snap
+      (ADR-028, «Открытые вопросы»).
+- [ ] **DO-038 — `Gap = 0` для `GridAligned`** (панели вплотную, как в Fences): продуктовый вопрос, UI нет
+      (ADR-028; `WorkspaceGridOptions.Gap` уже параметризован).
+- [ ] **DO-039 — Мультимониторные координаты (ADR-028 Вопрос 2 / ADR-037 QF-1):** пространство
+      `Window.Left/Top` на мониторе с отрицательными координатами и гипотеза якорения — требуют стенда с двумя
+      мониторами.
+- [ ] **DO-040 — Дебаунс всех триггеров `AutoContent`** (сейчас только resize по ширине; каждый
+      `CollectionChanged` синхронно пересчитывает высоту и пишет состояние; ADR-029 m-3).
+- [ ] **DO-041 — `AutoContent`/«Fit panel to content» для List-режима** (нет аналитической высоты строки;
+      ADR-029 Q3).
+- [ ] **DO-042 — Единая политика «вернуть файл на исходное место»** (ADR-009 Решения 4–5 vs ADR-041; ADR-048 Q1).
+- [ ] **DO-043 — Файл, восстановленный из Корзины после удаления панели/страницы, попадает в
+      `PanelItems\<guid>\`, а не на панель** (ADR-035, ADR-048 ограничение 1/Q3).
+- [x] **Закрыто в этом проходе (синхронизация трекеров):** фоновый STA-фетч иконок (ADR-046), HC-пробел и
+      сегментированные контролы Customize (ADR-047), `DO-010` (CI существует — но см. п. 4 ниже), `DO-026`
+      (`SettingsCard` построен, остаток — DO-034), `DO-028` (переименование страниц, ADR-043).
+
+### Дефекты кода, закрытые пакетами фиксов (ветка `bugfix/adr-audit-fixes`, 2026-10-09)
+
+Девять дефектов, найденных аудитом в коде (WP-A…WP-D и фикс-циклы; коммиты `d3a0750`, `f0d06c6`, `64bca92`, `26095c8`,
+`8ca2f17`, `3b9325c`, `21f8aba`, `8219acc`). Формат и семантика записи состояния **не менялись**
+(замороженный контур ADR-024; касание `LayoutSnapshotService` — по явному указанию пользователя «делай» на список
+дефектов). Описание поведения — в ADR, перечисленных в скобках; пользовательский язык — `CHANGELOG.md`, `[0.9.0]` (до релиза — `[Unreleased]`).
+
+- [x] Fence-панели режима T (Win11 24H2+) всплывали поверх окон приложений — события `WM_WINDOWPOSCHANGING` +
+      `KeepInDesktopBand`, диагностика один раз за сессию ([ADR-049](../adr/ADR-049-desktop-band-top-level-fence-panels.md),
+      ADR-034, ADR-020).
+- [x] Read-only сессия была невидима и двигала файлы при drop: `IsWritable` как единственная точка правды, drop без `MoveIn`
+      с эффектом `Copy`, `ReadOnlySessionNotice`, hint, суффикс tooltip трея ([ADR-024](../adr/ADR-024-versioned-json-persistence.md),
+      Amendment 2026-10-09).
+- [x] Restore снапшота оставлял сирот в `PanelItems\<guid>\`: managed-элементы панелей вне снимка возвращаются на исходное
+      место, fail-visibly, Success/Critical, слияние в панель-двойника ([ADR-004](../adr/ADR-004-phase5-pages-snapshots-multimonitor.md),
+      [ADR-048](../adr/ADR-048-panel-item-lifecycle-release-rules.md)).
+- [x] Корзина боковой панели: общие `RecycleFlags` с `FOF_WANTNUKEWARNING` без `FOF_SILENT`, отложенный запуск из OLE `Drop`
+      (`RecycleBinFileDrop.TryQueue`), владелец `IntPtr.Zero`, эффект `None`, очистка мёртвых ссылок после recycle
+      ([ADR-035](../adr/ADR-035-panel-deletion-recycle-bin.md)).
+- [x] Деинсталляция удаляла корень `PanelItems` при сбое перечисления каталога: теперь невосстановленный элемент, код 7
+      ([ADR-041](../adr/ADR-041-first-run-panel-and-uninstall-restore.md)).
+- [x] Операционные события конвейера иконок не попадали в always-on лог: дублирование в `IAppLog`, `AppLogEventThrottle` K=5
+      ([ADR-033](../adr/ADR-033-crash-safety-and-app-log.md), [ADR-046](../adr/ADR-046-background-icon-loading.md)).
+- [x] Смена `NormalModeLayoutGestures` не доходила до открытых панелей: третий триггер re-gate
+      ([ADR-026](../adr/ADR-026-edit-layout-mode.md)).
+- [x] «Сырые» `Left`/`Top` в `ChildWindow.ContentSizing/Sizing` и `RollUpBehavior`: через `PanelWindowCoordinates.ToDesktopBounds`
+      ([ADR-037](../adr/ADR-037-permonitor-v2-dual-mode-desktop-scale.md)).
+- [x] `SnapWidthToGrid` игнорировал приоритет `GridSize > 1`: единое правило `ResizeConstraintsFactory.IsIconGridSnapActive`,
+      тумблер «размер по сетке значков» отключён при позиционной привязке
+      ([ADR-011](../adr/ADR-011-manual-drag-with-magnetic-grid-snap.md), ADR-015/018/029).
+
+Остаток, оставленный открытым (стабильные ID — в [docs/Refactoring/BACKLOG.md](Refactoring/BACKLOG.md); ни один не
+блокирует 1.0 и не требует изменения замороженного контура persistence):
+
+- [ ] **DO-044 — Hint read-only при drop показывается один раз на экземпляр панели, а не на сессию** (in-memory guard в
+      `ChildWindowViewModel`; открытие нескольких панелей показывает hint в каждой).
+- [ ] **DO-045 — Уведомление о read-only — только InfoBar окна настроек.** Баннер, привязанный к `IsWritable` и видимый без
+      открытия настроек, не построен (`ReadOnlySessionNotice`, ADR-024).
+- [ ] **DO-046 — Удаление панели/страницы в read-only сессии по-прежнему отправляет managed-файлы в Корзину** (изменение
+      панелей не сохраняется, файлы уходят) — не гейтится по `IsWritable` (ADR-035, ADR-048).
+- [ ] **DO-047 — `FOF_NOCONFIRMATION` обходит настройку Корзины «запрашивать подтверждение»** (остаются только собственные
+      подтверждения приложения; ADR-035).
+- [ ] **DO-048 — Дефолт `NormalModeLayoutGestures = MoveOnly` vs Fences** (продуктовый вопрос о соответствии
+      поведению Fences по умолчанию — move разрешён, resize запрещён вне Edit Layout; ADR-026 D-2).
+- [ ] **DO-049 — Порядок панелей при клике фиксирован — решение оркестратора: «как в Fences»** (клик по панели не
+      меняет её положение в Z-order относительно окон приложений и других панелей; ADR-049). Пересматривается только по
+      запросу пользователя.
+- [ ] **DO-050 — мёртвый код native-пути:** `NativeSizingCoordinateMapper` без production-вызовов (**используется только
+      тестами** и комментариями; ADR-022, Amendment 2026-10-09, подтверждено после Фазы 1 2026-10-10) и
+      `NativePanelResizeController.Detach()` без единого вызывающего — удалить (класс вместе с тестами) либо оставить как эталон
+      округления. **Остаётся открытым.**
+- [ ] **DO-052 — hover панели «гаснет» над полосой ресайза** (край — non-client, `IsMouseOver` = false) в Normal+MoveAndResize и в Edit
+      Layout; known, фикс по результату ручной проверки (ADR-022, G-8).
+- [ ] **DO-053 — курсоры краёв — системные (`DefWindowProc`)**, проверить все 8 на Windows 11 (ADR-022, G-9).
+- [ ] **DO-054 — ресайз только мышью (mouse-only):** touch/pen-ресайз через системный sizing loop не проверен — принятое ограничение
+      (ADR-022).
+
+---
+
+## Решения, ожидающие пользователя
+
+Это не задачи для агентов: каждое — развилка, которую без явного «да» пользователя в самой задаче **не
+реализуют**.
+
+> **2026-10-10 пользователь принял решения по пунктам 1–5 ниже** (ветка `bugfix/adr-audit-fixes`); тексты исходных
+> развилок сохранены как история, итог каждого — в строке «**Решение 2026-10-10**».
+
+1. **Forward-compatible расширение схемы ADR-024** (round-trip неизвестных полей, толерантный enum).
+   Сегодня сборка, открывшая документ новее своей схемы, уходит в read-only (rung 7), а неизвестное значение enum
+   падает в дефолт. Forward-compatible парсинг позволил бы откатным сборкам не терять данные, но меняет
+   семантику загрузки/сохранения замороженного контура (`CLAUDE.md`, инцидент 2026-09-24). **Без явного разрешения
+   не делать.**
+   - [x] **Решение 2026-10-10 — закрыто, реализовано** (коммит `5633bb4`): «Аддитивная ревизия схемы» — `schemaVersion = 7`
+     + envelope-ключ `schemaRevision` (`CurrentSchemaRevision = 0`), round-trip неизвестных полей, толерантные enum,
+     `V6ToV7Migration` (тождественная). [ADR-024](../adr/ADR-024-versioned-json-persistence.md) Amendment 2026-10-10, план
+     [schema-additive-revision-v7.md](PLANS/schema-additive-revision-v7.md), `CLAUDE.md` обновлён. Каждое новое
+     persisted-поле по-прежнему требует отдельного «да». Последствие (однократно — как событие major-bump): каждый запуск ≤0.8.0 на
+     v7-файле → пустая read-only сессия без уведомления, пока файл не восстановлен из `application-state.premigration-v6.json`
+     или не возвращена сборка ≥v7; строка в `CHANGELOG.md`. Хотфиксы
+     v6-линии после v7 не выпускать. `user.config`/`IAppSettings` forward-compat не покрыт (вне scope).
+2. **Move-семантика ADR-009 vs режим «ссылка без перемещения».** Move (файл физически уезжает в
+   `PanelItems\<guid>\`) порождает весь контур release/restore ([ADR-048](../adr/ADR-048-panel-item-lifecycle-release-rules.md)),
+   ограничение «файл из Корзины не возвращается на панель» и две расходящиеся политики restore. Режим ссылки
+   (как у Fences — иконки остаются на столе) убрал бы это, но потребует отдельного ADR и миграции ожиданий
+   пользователей.
+   - [x] **Решение 2026-10-10 — закрыто: Move остаётся**, режим «ссылка» не вводится (коммит `574ae18`,
+     [ADR-009](../adr/ADR-009-drag-drop-move-semantics.md) Amendment 7, [ADR-048](../adr/ADR-048-panel-item-lifecycle-release-rules.md)
+     сценарий 11). Добавлены: hint при drop из облачной папки (`CloudPathClassifier`, `ICloudDropHintGate`, раз за сессию,
+     Move не блокируется) и ручной поиск/возврат файлов без панели (`IManagedStorageOrphanScanner`, карточка в «Резервном
+     копировании»). **DO-046** (удаление панели в read-only сессии двигает файлы в Корзину) остаётся открытым. Текст
+     OneDrive-подсказки исправляется на «перетащите файл обратно в папку» (сценарий 7 ADR-048; удаление панели файл не
+     возвращает) параллельным фиксом.
+3. **ADR-022: выбор одного пути ресайза и удаление второго.** *(Исходная постановка; исполнено полностью 2026-10-10.)* Параллельно
+   жили легаси-путь (`PanelResizeController` + `ResizeOverlay` Thumbs, по умолчанию) и нативный (`NativePanelResizeController`,
+   флаг `NativePanelSizing`, по умолчанию `False`); два контроллера приходилось синхронизировать вручную
+   (golden-эквивалентность). Решение: включить нативный путь по умолчанию и удалить `ResizeOverlay`, либо
+   отказаться от нативного.
+   - **Решение 2026-10-10 — native-путь единственный** ([ADR-022](../adr/ADR-022-native-panel-sizing.md) Amendment 2026-10-10,
+     план [native-resize-single-path.md](PLANS/native-resize-single-path.md)):
+     - [x] **Фаза 0** (коммиты `e0b7fe8`, `36aece3`): дефолт `NativePanelSizing = True`, карточка скрыта; закрыты пробелы
+       G-1 (`WM_DPICHANGED` не обрывает жест), G-2 (`CancelSizingLoop`/`CancelActiveSizing`), G-3 (`ResizeGripVisuals`),
+       G-4 (ESC с неизменным rect → `Canceled`), G-5 (`MA_NOACTIVATE` только на HT 10–17), G-6 (`WM_NCLBUTTONDBLCLK` на краях).
+     - [x] **Фаза 1 — удаление Thumb-пути и ключа `NativePanelSizing`** (коммит `bc60c8e`, 2026-10-10, после гейта «native проверен»
+       пользователем по списку MV-0…MV-13): `PanelResizeController`, `ThumbOverlayAffordance`, `NativeSizingSwitch` (env/CLI),
+       `ResizeOverlay` + 8 `Thumb`, `ResizeHandleStyle`, `CaptureGot`/`CaptureLost` удалены; ключ `NativePanelSizing` удалён из
+       `IAppSettings`/`AppSettings`/`Settings.settings`/Designer/VM/карточки/resx (явное разрешение пользователя на этот ключ);
+       `ChildWindow` строит `NativePanelResizeController` безусловно; `PanelClosing.thumbIsDragging` → `resizeActive`; golden →
+       regression-golden `ExpectedPipelineOracle`; старый `user.config` с ключом игнорируется молча. **Остаётся известным
+       открытым риском MV-7** (порядок `WM_EXITSIZEMOVE` и восстановления исходного rect при ESC — только живая Windows).
+     - [x] **Фаза 2 — документация** (2026-10-10): ADR-022 Amendment «Фаза 1» + пометки ADR-005/021/026/030/037, `diagnostics-log-events.md`
+       (категория `capture` удалена, `PanelClosing.resizeActive`), `resize-repro-matrix.md`, `edit-layout-manual-matrix.md`, CHANGELOG
+       `[0.9.0]`. Известные ограничения заведены как DO-052 (hover на краю), DO-053 (курсоры), DO-054 (touch/pen — mouse-only);
+       мёртвый код — DO-050.
+4. **ADR-038: CI и update-check мертвы без remote и тегов `v*`.** В репозитории 0 тегов и нет remote
+   (`.git/config` без `[remote]`), поэтому `.github/workflows/ci.yml` (в т.ч. tag-triggered job сборки инсталлятора)
+   и `GitHubReleaseUpdateChecker` фактически не работают. Нужно решение: связать rc-процесс с тегами `v*`
+   (например, тег на squash-коммит `vX.Y.Z` каждой rc-ветки) и завести remote.
+   - [x] **Решение 2026-10-10 — закрыто, кроме remote** (коммит `b796feb`, [ADR-038](../adr/ADR-038-release-engineering.md)
+     Amendment 2026-10-10): каждый squash-коммит `vX.Y.Z` получает annotated-тег `vX.Y.Z`; CI запускается и на `rc/**`;
+     ретро-теги v0.5.1, v0.6.0, v0.6.1, v0.7.0, v0.8.0 проставлены локально. Остаётся действие пользователя: добавить
+     remote (GitHub «messire») и запушить теги — до этого CI, tag-job инсталлятора и `GitHubReleaseUpdateChecker`
+     фактически не работают.
+5. **Даты 2026-09-30 в документации (бэклог 1.x).** Расхождение между датой завершения бэклога 1.x (2026-09-30) и датой
+   коммита принято пользователем.
+   - [x] **Решение 2026-10-10 — закрыто: даты 2026-09-30 остаются** (это дата завершения бэклога); не править.
+
+### Follow-up после решений 2026-10-10
+
+- [x] **DO-051 — `ReadOnlySessionNotice` не различает причину read-only** (закрыт 2026-10-10, коммит `6db774f`: текст по `LastLoadStatus == NewerSchema` / lock; при 0 панелях окно настроек открывается само) (новее ли схема, или потерян advisory lock).
+      После перехода на v7 откат на ≤0.8.0 даёт read-only сессию без уведомления в самой 0.8.0, а в текущей сборке текст
+      одинаков для обеих причин. Намерение: различать по `IApplicationStateService.LastLoadStatus == NewerSchema` (интерфейс
+      стора не меняется) — делается параллельным фиксом той же ветки; статус `[x]` выставить после слияния фикса
+      (в этом worktree не проверено — в `ReadOnlySessionNotice` ссылки на `LastLoadStatus` нет). Связан с DO-045.
 
 ---
 

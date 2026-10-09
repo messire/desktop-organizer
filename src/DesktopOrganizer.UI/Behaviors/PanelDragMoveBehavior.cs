@@ -15,8 +15,8 @@ namespace DesktopOrganizer.UI.Behaviors;
 /// <c>EndDrag</c> (REFACTORING_PLAN.md §5.3). Replaces <see cref="Window.DragMove()"/>, which blocks the
 /// calling thread and hands movement off to the native OS move loop until mouse-up — incompatible with
 /// per-mouse-move magnetic grid snapping (see docs/PLANS/grid-snap-during-drag.md). Also owns the
-/// drop-time grid-snap (<see cref="SnapToGrid"/>), which is shared with <see cref="PanelResizeController"/>'s
-/// resize-completed handler (see its remarks).
+/// drop-time grid-snap (<see cref="SnapToGrid"/>), which is shared with <see cref="NativePanelResizeController"/>'s
+/// end-of-gesture handler (see its remarks).
 /// </summary>
 public sealed class PanelDragMoveBehavior
 {
@@ -199,7 +199,7 @@ public sealed class PanelDragMoveBehavior
 
     /// <summary>
     /// Clears the drag-obstacle and monitor snapshots without ending a drag. Used by
-    /// <see cref="PanelResizeController"/>'s <c>Resize_DragStarted</c> so a resize gesture can never
+    /// <see cref="NativePanelResizeController"/> at the start of a resize gesture so a resize gesture can never
     /// inherit a stale snapshot left behind by a drag that ended through some path other than
     /// <see cref="EndDrag"/> (finalization MINOR m-1; MINOR-7, fix-cycle round 2 — <see cref="_dragMonitors"/>
     /// was missing from this cleanup, unlike <see cref="EndDrag"/>'s own).
@@ -366,7 +366,7 @@ public sealed class PanelDragMoveBehavior
             // Diagnostics geometry deliberately reads Width/Height, not ActualWidth/ActualHeight: Width/
             // Height is what ChildWindow.OnRenderSizeChanged actually persists into
             // ChildWindowModel.Size (see that method's remarks), so it matches both the value that gets
-            // saved to disk and PanelResizeController's own diagnostics convention — unified here rather
+            // saved to disk and the resize controller's own diagnostics convention — unified here rather
             // than left to differ per gesture type (finalization M-5 cleanup). This does not touch the
             // `current` Rect below, which intentionally still reads ActualWidth/ActualHeight for the
             // real anti-overlap clamp — only the log-only diagnostics reads change. Position is the
@@ -513,7 +513,7 @@ public sealed class PanelDragMoveBehavior
     /// pre-feature saved layout) never blocks the snap, because <c>CreatesNewOverlap</c> only reports
     /// overlaps that are new relative to <c>before</c>.
     /// <para>
-    /// Also called by <see cref="PanelResizeController"/>'s resize-completed handler, but no drag gesture
+    /// Also called by <see cref="NativePanelResizeController"/>'s end-of-gesture handler, but no drag gesture
     /// (and therefore no <see cref="OnTitleBarMouseLeftButtonDown"/>) runs before a resize, so
     /// <see cref="_dragObstacles"/> is empty there and <c>CreatesNewOverlap</c> always returns
     /// <see langword="false"/> for both axes — the snap behaves exactly as it did before this feature for
@@ -648,7 +648,7 @@ public sealed class PanelDragMoveBehavior
 
         // Diagnostics is recorded AFTER SnapToGrid()/SaveWindowsState() (not before, as originally
         // written) so it reads the post-snap, actually-committed/persisted geometry rather than the
-        // raw pre-snap drag result (finalization M-5) — mirrors PanelResizeController.OnResizeDragCompleted.
+        // raw pre-snap drag result (finalization M-5).
         // Purely a reordering of the log-only diagnostics call; the real control flow above (capture
         // release, SnapToGrid, obstacle clear, SaveWindowsState, and their internal order) is
         // unchanged. Width/Height (not ActualWidth/ActualHeight) for the same reason as DragStarted/

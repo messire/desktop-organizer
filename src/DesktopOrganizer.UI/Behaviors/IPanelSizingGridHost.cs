@@ -89,10 +89,9 @@ public interface IPanelSizingGridHost
     /// <summary>
     /// P06 fix-cycle MAJOR-4 (adr/ADR-029-icon-layout-policy.md "Fix-цикл P06"): notifies the panel that
     /// a user resize gesture affecting its HEIGHT (<see cref="Interaction.ResizeEdgeParser.AffectsHeight"/>)
-    /// has just been committed. This is the single additive seam <see cref="PanelResizeController"/>
-    /// (Thumb) and <see cref="NativePanelResizeController"/> (native <c>WM_SIZING</c>) both call through
-    /// <see cref="PanelSizingGridSupport.NotifyHeightResizeCommitted"/> at their shared end-of-gesture
-    /// point, so neither controller needs its own copy of the "was this a vertical resize" check — a
+    /// has just been committed. This is the single additive seam <see cref="NativePanelResizeController"/>
+    /// (native <c>WM_SIZING</c>) calls through <see cref="PanelSizingGridSupport.NotifyHeightResizeCommitted"/>
+    /// at its end-of-gesture point, so the controller needs no copy of the "was this a vertical resize" check — a
     /// width-only resize (<see cref="Interaction.ResizeEdge.Left"/>/<see cref="Interaction.ResizeEdge.Right"/>)
     /// never reaches this member. The implementation (<c>Views.ChildWindow.ContentSizing.cs</c>)
     /// transitions <c>ChildWindowModel.SizingMode</c> from <see cref="Models.PanelSizingMode.AutoContent"/>

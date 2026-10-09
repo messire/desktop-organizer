@@ -1,6 +1,6 @@
 # ADR-025: Ambient Accent Visual Language
 
-Status: Accepted
+**Статус:** Accepted — Amended 2026-09-22 ×3 (P07-visual + 2 fix-циклов: border radius 6→8 DIP, resize-grip hit-test/OS alpha click-through, hover-wash contrast, List ellipsis); Amended 2026-09-22 (P09 release-gate fix: corner resize-grip 8×8 на WPF-пути); Amended 2026-09-25 (ADR-030: hit catcher закрывает MAJOR-1 click-through-линзу, колонка акцента 8 DIP → отступы 2|*|2, `PART_AccentIndicator` стал `Path`); Amended 2026-09-28 (ADR-042: вторая, светлая нейтральная база `#F3F5F8` — `SurfaceComposer.ResolveNeutralBase`); Amended 2026-09-30 (ADR-047: `Color.Settings.*`/`Brush.Settings.*` и `Control.ContextMenu`/`MenuItem`/`Popup.Chrome` выведены в Palette T; Palette P и её HC «только при старте» не изменены)
 
 Фаза 5 «Ambient Accent visual system» (`docs/Refactoring/PHASES/PHASE-5-ambient-accent-ui.md`,
 `docs/Refactoring/ROADMAP.md`). Ветка `ui/ambient-accent-design-tokens` (от `rc/0.4.0`). Мастер-план
@@ -157,8 +157,9 @@ User can override.
 ## Manual verify (Win10/Win11)
 
 Полный чек-лист — `docs/PLANS/phase-5-ambient-accent-ui.md` §7.2 (V-1..V-18) и
-`docs/Refactoring/Testing/ambient-accent-visual-matrix.md`. Не выполнено в этой среде разработки
-(нет живого Windows GUI). Наивысший приоритет: нейтральная поверхность vs заливка категории (V-2),
+`docs/Refactoring/Testing/ambient-accent-visual-matrix.md`. **Выполнено пользователем на Windows 11 24H2
+2026-09-27, признано достаточным** (V-1..V-18, P07-visual fix-cycle 1 — `docs/ROADMAP.md`, строки 6–8, 903–909;
+Windows 10 не проверяется); ниже — исторический приоритет. Наивысший приоритет: нейтральная поверхность vs заливка категории (V-2),
 все 4 состояния High Contrast (V-14 + «Известные проблемы» выше), Dragging/Resizing различимость по
 курсору (V-11/V-12), selected+hover на разных `SurfaceOpacity` (V-5..V-8), DPI 125%/150% (V-15),
 отсутствие layout-shift акцент-полосы при смене interaction-состояния.
@@ -583,3 +584,30 @@ catchable area before/after, at 100%/125%/150% DPI, is the highest-value manual 
   и комментарий в `ChildWindow.xaml` над `FileListHost` описывают `Margin="0,0,0,4"`; фактический XAML —
   `Margin="0,0,0,0"`. Не относится к решениям этого ADR-025, зафиксировано как `docs/Refactoring/BACKLOG.md`
   DO-022.
+
+---
+
+## Amendment 2026-09-28 (ADR-042): вторая нейтральная база
+
+[ADR-042](ADR-042-color-presets-rgb-picker-stepped-size.md): для пар (accent, text), где акцент светлый и свой
+текст читается на светлой базе лучше, поверхность панели использует вторую нейтральную базу `#F3F5F8`
+(`SurfaceComposer.ResolveNeutralBase`, `PanelThemeMode {Dark, Light}`); все legacy-пары остаются byte-identical.
+Допущение «поверхность панели всегда тёмная» (база `#1E1E1E`) больше не абсолютно — отсюда luminance-адаптивные
+токены хрома (ADR-030/042).
+
+## Amendment 2026-09-30 (ADR-047): Palette P и Palette T
+
+[ADR-047](ADR-047-unified-design-system.md): `Color.Settings.*`/`Brush.Settings.*` выведены из Ambient Accent в
+новую Palette T (хром — окно настроек, Customize, WPF-меню, диалоги, InfoBar, трей) и удалены оттуда;
+`Control.ContextMenu`/`Control.MenuItem`/`Control.Popup.Chrome` заменены theme-aware `Theme.ContextMenu`/
+`Theme.MenuItem`/`Theme.Popup.Chrome`. Palette P (панели, этот ADR) и её HC «только при старте» (D-12)
+**не изменены** и не распространяются на Palette T.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | P07-visual (+ fix-циклы 1–2, P09) | Радиус 6→8 DIP, resize-grip, hover-wash, ellipsis в List | Значения, переопределённые в соответствующих Amendment-разделах выше |
+| 2026-09-25 | [ADR-030](ADR-030-reference-panel-chrome.md) | `PART_HitCatcher`; колонка акцента 8 DIP → симметричные отступы; `PART_AccentIndicator` — `Path` | Колонка `PART_AccentIndicator` шириной 8 DIP (MAJOR-1 этой фазы) |
+| 2026-09-28 | [ADR-042](ADR-042-color-presets-rgb-picker-stepped-size.md) | Вторая светлая нейтральная база | Допущение «поверхность панели всегда тёмная» |
+| 2026-09-30 | [ADR-047](ADR-047-unified-design-system.md) | Palette T для хрома | Размещение `Color.Settings.*`/`Brush.Settings.*`/`Control.ContextMenu`/`Control.MenuItem`/`Control.Popup.Chrome` в Ambient Accent |

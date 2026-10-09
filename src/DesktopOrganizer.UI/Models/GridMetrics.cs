@@ -17,7 +17,7 @@ public static class GridMetrics
     /// Total vertical chrome of FileListHost outside the icon grid itself
     /// (<c>FileListHost.Margin="0,0,0,4"</c> in ChildWindow.xaml). Analogous to
     /// <see cref="FileListHPadding"/> but for the vertical axis. As of the adaptive-icon-grid feature
-    /// this is subtracted before quantising panel height (<c>Resize_DragDelta</c> in
+    /// this is subtracted before quantising panel height (<c>NativePanelResizeController</c> in
     /// ChildWindow.xaml.cs) — previously only <c>TitleBarHeight</c> was subtracted, which left a
     /// systematic 4px off-by-four between the quantised height and the actual content height.
     /// </summary>
@@ -52,7 +52,7 @@ public static class GridMetrics
     /// Total horizontal chrome, as a WINDOW-width value, that sits between
     /// <see cref="System.Windows.FrameworkElement.Width"/> and the icon grid's own content width — i.e. what every
     /// caller of this constant (<c>MinPanelWidth</c>,
-    /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
+    /// <c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
     /// <c>ResizeConstraintsFactory.BuildConstraints</c>'s <c>HorizontalChrome</c>) adds back after
     /// quantising CONTENT width, or subtracts before quantising it, to convert between the two.
     /// <para>
@@ -109,7 +109,7 @@ public static class GridMetrics
     /// <see cref="System.Windows.SystemParameters.VerticalScrollBarWidth"/> read inside this method, so
     /// this class (and <see cref="AdaptiveGridLayout"/>) stay free of any WPF runtime dependency and
     /// fully unit-testable with an arbitrary injected value — callers (<see cref="Controls.AdaptiveIconGridPanel"/>,
-    /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
+    /// <c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
     /// <c>ResizeConstraintsFactory.BuildConstraints</c>) are the ones that read the real system metric.
     /// </para>
     /// </summary>
@@ -125,7 +125,7 @@ public static class GridMetrics
     /// <see cref="ReservedVerticalScrollBarWidth"/> reservation
     /// (<c>= FileListHPadding + ReservedVerticalScrollBarWidth(policy, verticalScrollBarWidth)</c>).
     /// This is the single function every window-width&lt;-&gt;content-width conversion in the snap-code
-    /// path (<c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
+    /// path (<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>,
     /// <see cref="MinPanelWidth(double, IconLayoutPolicy, double)"/>,
     /// <c>ResizeConstraintsFactory.BuildConstraints</c>'s <c>HorizontalChrome</c>) must use once
     /// <see cref="IconLayoutPolicy"/> is in scope — using bare <see cref="FileListHPadding"/> in any of
@@ -206,7 +206,7 @@ public static class GridMetrics
     /// <para>
     /// <c>+ FileListHPadding</c> promotes the content-only Extent to a WINDOW-width value, matching
     /// the contract every caller of this method compares it against (e.g.
-    /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c> compare
+    /// <c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c> compare
     /// it directly against <c>SnapExtent(...) + FileListHPadding</c>, itself a window-width value). As
     /// of ADR-029's F-3 fix this is NO LONGER a numeric no-op — <see cref="FileListHPadding"/> is now
     /// <see cref="PanelMetrics.ContentLeftInset"/> (8), not <c>0</c> — this term is exactly what keeps
@@ -219,7 +219,7 @@ public static class GridMetrics
     /// <c>Window.MinWidth</c> floor. As of docs/PLANS/color-presets-and-size-step.md (§2.1 D-S1), the
     /// slider's step is 8, so the low end it can actually reach is now only
     /// <c>IconSize ∈ {16, 24}</c> (<see cref="SizeStepPolicy.Step"/>) — the same clamp still applies to
-    /// both. Without this clamp, <c>ChildWindow.Resize_DragDelta</c> could
+    /// both. Without this clamp, <c>NativePanelResizeController</c>'s resize step could
     /// compute a <see cref="System.Windows.FrameworkElement.Width"/> below what WPF will actually coerce the
     /// window to, desynchronizing the code's own <see cref="System.Windows.Window.Left"/> math (set
     /// from the uncoerced value) from the window's real, coerced <c>Width</c> — visibly jumping the
@@ -236,7 +236,7 @@ public static class GridMetrics
     /// window-width value via <see cref="ContentHorizontalChrome"/> instead of the bare
     /// <see cref="FileListHPadding"/>, so a <see cref="IconLayoutPolicy.FixedGap"/> panel's minimum
     /// window width also reserves M-2's scrollbar width — keeping this floor consistent with what
-    /// <c>PanelResizeController</c>/<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c> and
+    /// <c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c> and
     /// <c>ResizeConstraintsFactory.BuildConstraints</c> now compute for the same policy.
     /// <see cref="IconLayoutPolicy.LegacyStretch"/> passed here is numerically identical to the
     /// three-argument overload above (<see cref="ContentHorizontalChrome"/> reduces to

@@ -45,7 +45,7 @@ public sealed class AdaptiveIconGridPanel : Panel
     /// <see cref="AdaptiveGridLayout.DefaultMinGap"/>. Deliberately left unset in
     /// <c>GridViewTemplate</c>'s <c>ItemsPanelTemplate</c> — the default lives solely in
     /// <see cref="AdaptiveGridLayout"/> so <c>ChildWindow.xaml.cs</c>'s resize-snap code
-    /// (<c>Resize_DragDelta</c>/<c>SnapWidthToGrid</c>) and this panel always agree on the same value.
+    /// (<c>NativePanelResizeController</c>'s <c>SnapWidthToGrid</c>) and this panel always agree on the same value.
     /// If this is ever overridden in XAML, update the resize-snap code's constant too (plan §4, "R5").
     /// </summary>
     public static readonly DependencyProperty MinGapProperty = DependencyProperty.Register(
@@ -85,7 +85,7 @@ public sealed class AdaptiveIconGridPanel : Panel
     /// (<c>0</c> — no top/bottom padding). See <see cref="EdgePaddingRatioProperty"/>'s doc comment for
     /// why this is a separate DP from the horizontal ratio, and <see cref="MinGapProperty"/>'s doc
     /// comment for why this is left unset in XAML (the default lives solely in
-    /// <see cref="AdaptiveGridLayout"/> so <see cref="Behaviors.PanelResizeController"/>'s height-snap
+    /// <see cref="AdaptiveGridLayout"/> so <see cref="Behaviors.NativePanelResizeController"/>'s height-snap
     /// stays in agreement with this panel's actual rendered height).
     /// </summary>
     public static readonly DependencyProperty VerticalEdgePaddingRatioProperty = DependencyProperty.Register(

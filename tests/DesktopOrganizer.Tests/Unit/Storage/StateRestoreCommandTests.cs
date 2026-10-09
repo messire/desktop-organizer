@@ -424,6 +424,58 @@ public class StateRestoreCommandTests
         }
     }
 
+    // ── schemaRevision (ADR-024 Amendment, schema v7) ────────────────────────
+
+    /// <summary>
+    /// Verifies that restoring a <c>.bak</c> keeps its <c>schemaRevision</c> — both when the document is already at
+    /// the current major (written as-is) and when it is migrated up first (the runner carries the key).
+    /// </summary>
+    /// <param name="fromOlderSchema"><see langword="true"/> to seed the backup one major below current and migrate it.</param>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Restore_KeepsSchemaRevision(bool fromOlderSchema)
+    {
+        var (root, paths) = BuildPaths();
+        try
+        {
+            var schemaVersion = fromOlderSchema ? StateEnvelope.CurrentSchemaVersion - 1 : StateEnvelope.CurrentSchemaVersion;
+            var backup = FullDocument(schemaVersion, "from-bak");
+            backup["schemaRevision"] = 4;
+            SeedFile(paths, paths.BackupFilePath, backup);
+            var runner = fromOlderSchema
+                ? new StateMigrationRunner(new ISettingsMigration[] { new PassThroughMigration(schemaVersion, StateEnvelope.CurrentSchemaVersion) })
+                : null;
+            var command = BuildCommand(paths, runner: runner);
+
+            var result = command.Restore();
+
+            Assert.Equal(StateRestoreOutcome.Restored, result.Outcome);
+            var primary = (JsonObject)JsonNode.Parse(File.ReadAllText(paths.PrimaryFilePath))!;
+            Assert.Equal(StateEnvelope.CurrentSchemaVersion, primary["schemaVersion"]!.GetValue<int>());
+            Assert.Equal(4, primary["schemaRevision"]!.GetValue<int>());
+        }
+        finally
+        {
+            SafeDeleteDirectory(root);
+        }
+    }
+
+    private sealed class PassThroughMigration : ISettingsMigration
+    {
+        public PassThroughMigration(int fromVersion, int toVersion)
+        {
+            FromVersion = fromVersion;
+            ToVersion = toVersion;
+        }
+
+        public int FromVersion { get; }
+
+        public int ToVersion { get; }
+
+        public JsonObject Migrate(JsonObject document) => (JsonObject)document.DeepClone();
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
     private static (string Root, StateStorePaths Paths) BuildPaths()
     {
@@ -445,15 +497,16 @@ public class StateRestoreCommandTests
     private static StateRestoreCommand BuildCommand(
         StateStorePaths paths,
         FakeDiagnosticsLog? diagnostics = null,
-        Func<StateWriteStage, bool>? testForceWriteFailureAt = null) =>
+        Func<StateWriteStage, bool>? testForceWriteFailureAt = null,
+        StateMigrationRunner? runner = null) =>
         new(
             paths,
-            new StateMigrationRunner(Array.Empty<ISettingsMigration>()),
+            runner ?? new StateMigrationRunner(Array.Empty<ISettingsMigration>()),
             () => diagnostics is not null ? diagnostics : NullDiagnosticsLog.Instance,
             testForceWriteFailureAt);
 
     private static JsonObject FullDocument(int schemaVersion, string marker) =>
-        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, schemaVersion, DateTimeOffset.UtcNow, "test");
+        StateEnvelope.Wrap(new JsonObject { ["marker"] = marker }, schemaVersion, DateTimeOffset.UtcNow, "test", StateEnvelope.CurrentSchemaRevision);
 
     private static void SeedFile(StateStorePaths paths, string path, JsonObject fullDocument)
     {

@@ -26,11 +26,11 @@ namespace DesktopOrganizer.UI.Converters;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>WPF-internal hit-test scoping (verified, still true after fix-cycle 1):</b> <c>ResizeOverlay</c>
+/// <b>WPF-internal hit-test scoping (verified, still true after fix-cycle 1):</b> <c>ResizeGripVisuals</c>
 /// (<c>Views/ChildWindow.xaml</c>) is a SIBLING of <c>PanelChrome</c>, not a descendant —
 /// <see cref="UIElement.Clip"/> only ever affects the element it is set on and that element's own
-/// subtree, so this converter's output can never reach the WPF <c>Thumb</c> resize handles' OWN
-/// hit-test routing. Nor does it touch the native <c>WM_NCHITTEST</c> path (<c>NativeHitTestMapper</c>),
+/// subtree, so this converter's output can never reach the visual-only resize grips. Nor does it touch
+/// the native <c>WM_NCHITTEST</c> path (<c>NativeHitTestMapper</c>),
 /// which classifies purely against the window's rectangular <c>GetWindowRect</c>/border-strip geometry
 /// and has no notion of corner radius at all. <see cref="UIElement.Clip"/> DOES affect hit-testing for
 /// whatever it IS set on (<c>PART_Chrome</c>'s own children — the header/title bar and content host): a
@@ -47,9 +47,9 @@ namespace DesktopOrganizer.UI.Converters;
 /// converter's <see cref="UIElement.Clip"/> is even applied, since <c>Border.Background</c> paints a
 /// rounded shape natively — routes the mouse-down straight through to whatever is beneath this window
 /// (the desktop), and this window's WPF message loop never sees it at all. This affects the resize
-/// <c>Thumb</c> sitting at that same screen location too: its own <c>Background="Transparent"</c>
-/// (<c>Controls.xaml</c>'s <c>ResizeHandleStyle</c>) paints nothing opaque there either, so nothing in
-/// either layer gives the OS a non-zero-alpha pixel to route the click to. The always-transparent lens'
+/// edge sitting at that same screen location too (historically the resize <c>Thumb</c>s, whose
+/// <c>Background="Transparent"</c> painted nothing opaque there either): nothing in either layer gave
+/// the OS a non-zero-alpha pixel to route the click to. The always-transparent lens'
 /// area (<c>r² · (1 - π/4)</c>, ≈13.7 DIP² at the widened <c>r=8</c> — see
 /// <see cref="DesktopOrganizer.UI.Models.PanelMetrics.ResizeCornerThickness"/>'s own remarks) GREW when
 /// <c>Radius.Panel</c> widened 6 -&gt; 8 in this same fix-cycle; widening the resize grip to match (also
@@ -59,8 +59,8 @@ namespace DesktopOrganizer.UI.Converters;
 /// <para>
 /// <b>ADR-030 update (D-5):</b> <c>PART_HitCatcher</c> (<c>Resources/Styles/Panels.xaml</c>, a
 /// near-invisible but OPAQUE <see cref="System.Windows.Controls.Border"/> spanning the WHOLE window rect, underneath everything
-/// else) closes this always-transparent lens on BOTH the WPF <c>Thumb</c> path and the native
-/// <c>WM_NCHITTEST</c> path: the OS now always finds a non-zero-alpha pixel to route the click to,
+/// else) closes this always-transparent lens for the native
+/// <c>WM_NCHITTEST</c> sizing path: the OS now always finds a non-zero-alpha pixel to route the click to,
 /// regardless of where the panel's own rounded corner leaves the composited bitmap transparent. The
 /// click-through risk this remark describes is therefore closed at the WINDOW level, not by anything this
 /// converter's own output does.

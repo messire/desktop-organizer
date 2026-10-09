@@ -85,5 +85,93 @@
                 </ListView>
             </Border>
         </controls:SettingsCard>
+
+        <!-- ADR-009 amendment 2026-10-10 (O2): managed-storage items no panel uses any more. Scan is manual
+             (never at startup) and returning an item is an explicit per-row action - nothing is deleted or
+             moved automatically. Visible even in a read-only session so the reason it is unavailable shows. -->
+        <controls:SettingsCard Header="{loc:Loc Settings_Backup_Orphans_Header}"
+                                Description="{loc:Loc Settings_Backup_Orphans_Description}">
+            <controls:SettingsCard.ActionContent>
+                <Button Content="{loc:Loc Settings_Backup_Orphans_Scan_Button}" VerticalAlignment="Center"
+                        Command="{Binding StorageOrphans.ScanCommand}"/>
+            </controls:SettingsCard.ActionContent>
+            <StackPanel>
+                <TextBlock Text="{Binding StorageOrphans.StatusText}" Style="{StaticResource Settings.CardDescription}"
+                           TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                <Border BorderBrush="{DynamicResource Theme.Stroke.Card}" BorderThickness="1" Margin="0,8,0,0"
+                        CornerRadius="{StaticResource Radius.Control}" Height="200"
+                        Visibility="{Binding StorageOrphans.HasItems, Converter={StaticResource BooleanToVisibility}}">
+                    <ListView Style="{StaticResource Theme.ListView}"
+                              ItemsSource="{Binding StorageOrphans.Items}" BorderThickness="0" SelectionMode="Single"
+                              AutomationProperties.Name="{loc:Loc Settings_Backup_Orphans_Header}">
+                        <ListView.View>
+                            <GridView>
+                                <!-- Columns total 380 (150 + 120 + 110): fits the section content width without a horizontal
+                                     scrollbar, same budget as the snapshots card above (190 + 120 + 110). -->
+                                <GridViewColumn Header="{loc:Loc Settings_Backup_NameColumn_Header}" Width="150">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Name}" ToolTip="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{loc:LocBinding StoredAt, FormatKey=Settings_Backup_Orphans_Moved_Format}"
+                                                           Visibility="{Binding HasStoredAt, Converter={StaticResource BooleanToVisibility}}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource Theme.Text.Secondary}"
+                                                           FontSize="{DynamicResource Font.Size.Caption}"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Header="{loc:Loc Settings_Backup_Orphans_OriginalColumn_Header}" Width="120">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <!-- The parent folder's name ("Desktop"); the full path is the tooltip. -->
+                                            <TextBlock Text="{Binding OriginalFolderName}" ToolTip="{Binding OriginalPath}"
+                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource Theme.Text.Secondary}"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Header="" Width="110">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <!-- Same row shape as the snapshots card: the main action ("Return") + "..." for the
+                                                 secondary one ("Open folder"). The button is disabled (not an error after the
+                                                 click) when the manifest does not remember the original location; its tooltip
+                                                 is the full path it would return to. -->
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Content="{loc:Loc Settings_Backup_Orphans_Return_Button}" Margin="0,0,4,0"
+                                                        Style="{StaticResource Theme.Button.Subtle}"
+                                                        ToolTip="{Binding OriginalPath}" ToolTipService.ShowOnDisabled="True"
+                                                        AutomationProperties.Name="{loc:LocBinding Name, FormatKey=Settings_Backup_Orphans_Return_Format}"
+                                                        Command="{Binding DataContext.StorageOrphans.ReturnCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}"/>
+                                                <controls:DropDownButton Style="{StaticResource Backup.RowMoreButton}"
+                                                                          Content="{StaticResource Icon.Glyph.Overflow}"
+                                                                          FontFamily="Segoe MDL2 Assets, Segoe Fluent Icons"
+                                                                          AutomationProperties.Name="{loc:LocBinding Name, FormatKey=Settings_Backup_Orphans_More_A11y_Format}"
+                                                                          Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                                    <controls:DropDownButton.Menu>
+                                                        <ContextMenu Style="{StaticResource Theme.ContextMenu}">
+                                                            <ContextMenu.Resources>
+                                                                <Style TargetType="MenuItem" BasedOn="{StaticResource Theme.MenuItem}"/>
+                                                            </ContextMenu.Resources>
+                                                            <MenuItem Header="{loc:Loc Settings_Backup_Orphans_OpenFolder_Button}"
+                                                                      AutomationProperties.Name="{loc:LocBinding Name, FormatKey=Settings_Backup_Orphans_OpenFolder_Format}"
+                                                                      Command="{Binding PlacementTarget.Tag.StorageOrphans.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                                      CommandParameter="{Binding}"/>
+                                                        </ContextMenu>
+                                                    </controls:DropDownButton.Menu>
+                                                </controls:DropDownButton>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </Border>
+            </StackPanel>
+        </controls:SettingsCard>
     </StackPanel>
 </UserControl>

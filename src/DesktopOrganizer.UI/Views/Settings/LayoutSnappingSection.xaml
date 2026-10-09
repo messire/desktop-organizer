@@ -110,6 +110,7 @@
                 <CheckBox VerticalAlignment="Center"
                           Style="{StaticResource Theme.ToggleSwitch}"
                           AutomationProperties.Name="{loc:Loc Settings_Layout_SnapResizeToIconGrid_Header}"
+                          IsEnabled="{Binding IsSnapResizeToIconGridAvailable}"
                           IsChecked="{Binding SnapResizeToIconGrid, Mode=TwoWay}"/>
             </controls:SettingsCard.ActionContent>
         </controls:SettingsCard>

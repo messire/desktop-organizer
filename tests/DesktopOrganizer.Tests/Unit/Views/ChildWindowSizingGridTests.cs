@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Windows;
@@ -5,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using DesktopOrganizer.Services.Abstractions;
 using DesktopOrganizer.UI.Diagnostics;
+using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.ViewModels;
@@ -347,6 +349,132 @@ public class ChildWindowSizingGridTests
         Assert.Equal(400d - G, width);
     }
 
+    // ── ADR-audit WP-C / C3: SnapWidthToGrid honours GridSize (ADR-011 amendment 2026-09-24). ────────
+
+    /// <summary>
+    /// With an active <c>GridSize</c> the resize gesture quantises by <c>GridSize</c> and suppresses the
+    /// icon-grid snap (<c>ResizeConstraintsFactory</c>); the post-change <c>SnapWidthToGrid</c> must follow
+    /// the same priority and leave a <see cref="PanelGeometryMode.LegacyFreeform"/> panel's width alone —
+    /// pulling it onto the icon grid would take it off the GridSize lattice.
+    /// </summary>
+    [Fact]
+    public void IconSizeChange_OnALegacyPanel_WithGridSizeActive_LeavesTheWidthUntouched()
+    {
+        var (before, after) = RunOnStaThread(() =>
+        {
+            using var harness = Harness.Build();
+            harness.AppSettings.Object.GridSize = 16;
+            var model = GridAlignedModel();
+            model.GeometryMode = PanelGeometryMode.LegacyFreeform;
+            harness.Window.Initialize(model);
+            var before = harness.Window.Width;
+
+            model.IconSize = 96d;
+
+            return (before, harness.Window.Width);
+        });
+
+        Assert.Equal(before, after);
+    }
+
+    // ── ADR-audit WP-C / C1: a Normal-mode gesture-policy change re-gates resize live (ADR-026 D-2/D-5). ──
+
+    /// <summary>
+    /// Switching <c>NormalModeLayoutGestures</c> to "Move and resize" (relayed through
+    /// <see cref="ILayoutEditModeService.NotifyNormalModeGesturesChanged"/>) must make the panel's resize
+    /// gate receive <c>CanResize == true</c> without an Edit-layout toggle or restart; switching back
+    /// removes it again.
+    /// </summary>
+    [Fact]
+    public void NormalModeGesturesChange_ReAppliesTheResizeGate()
+    {
+        var (initial, afterMoveAndResize, afterMoveOnly) = RunOnStaThread(() =>
+        {
+            using var harness = Harness.Build();
+            var overlay = (FrameworkElement)harness.Window.FindName("ResizeGripVisuals")!;
+            harness.Window.Initialize(GridAlignedModel());
+
+            var initial = overlay.Visibility;
+
+            harness.AppSettings.Object.NormalModeLayoutGestures = nameof(NormalModeLayoutGestures.MoveAndResize);
+            harness.RaiseNormalModeGesturesChanged();
+            var afterMoveAndResize = overlay.Visibility;
+
+            harness.AppSettings.Object.NormalModeLayoutGestures = nameof(NormalModeLayoutGestures.MoveOnly);
+            harness.RaiseNormalModeGesturesChanged();
+            var afterMoveOnly = overlay.Visibility;
+
+            return (initial, afterMoveAndResize, afterMoveOnly);
+        });
+
+        Assert.Equal(Visibility.Collapsed, initial);
+        Assert.Equal(Visibility.Visible, afterMoveAndResize);
+        Assert.Equal(Visibility.Collapsed, afterMoveOnly);
+    }
+
+    // ── ADR-audit WP-C / C2: sizing paths hand desktop-DIP bounds to PanelGeometryWriter (ADR-037). ────
+
+    /// <summary>
+    /// On a snapshot whose scale differs from the window's own (mixed-DPI TopLevel desktop), "Fit panel
+    /// to content" must not move the panel: the persisted desktop-DIP position stays, and the window's
+    /// <c>Left</c>/<c>Top</c> are re-derived from it unchanged.
+    /// </summary>
+    /// <param name="geometryMode">The panel's geometry mode.</param>
+    [Theory]
+    [InlineData(PanelGeometryMode.LegacyFreeform)]
+    [InlineData(PanelGeometryMode.GridAligned)]
+    public void FitToContent_OnAMixedScaleSnapshot_KeepsTheDesktopPosition(PanelGeometryMode geometryMode)
+    {
+        var (modelBefore, modelAfter, windowBefore, windowAfter) = RunOnStaThread(() =>
+        {
+            using var harness = Harness.Build();
+            var model = MixedScaleModel(geometryMode);
+            harness.Window.Initialize(model);
+            var (modelBefore, windowBefore) = harness.SeatUnderMixedScaleSnapshot(model);
+
+            harness.InvokePrivate("FitPanelToContentMenu_Click");
+
+            return (modelBefore, model.Position, windowBefore, new Point(harness.Window.Left, harness.Window.Top));
+        });
+
+        Assert.Equal(modelBefore, modelAfter);
+        Assert.Equal(windowBefore.X, windowAfter.X, 6);
+        Assert.Equal(windowBefore.Y, windowAfter.Y, 6);
+    }
+
+    /// <summary>
+    /// Same invariant for the "Size" preset command: a preset changes the size only, never the
+    /// desktop-DIP position, even when the window's own scale differs from the snapshot's.
+    /// </summary>
+    [Fact]
+    public void SizePreset_OnAMixedScaleSnapshot_KeepsTheDesktopPosition()
+    {
+        var (modelBefore, modelAfter, windowBefore, windowAfter) = RunOnStaThread(() =>
+        {
+            using var harness = Harness.Build();
+            var model = MixedScaleModel(PanelGeometryMode.LegacyFreeform);
+            harness.Window.Initialize(model);
+            var (modelBefore, windowBefore) = harness.SeatUnderMixedScaleSnapshot(model);
+
+            harness.InvokeSizePreset(PanelSizePreset.Small);
+
+            return (modelBefore, model.Position, windowBefore, new Point(harness.Window.Left, harness.Window.Top));
+        });
+
+        Assert.Equal(modelBefore, modelAfter);
+        Assert.Equal(windowBefore.X, windowAfter.X, 6);
+        Assert.Equal(windowBefore.Y, windowAfter.Y, 6);
+    }
+
+    private static ChildWindowModel MixedScaleModel(PanelGeometryMode geometryMode)
+    {
+        var model = GridAlignedModel();
+        model.GeometryMode = geometryMode;
+        model.ViewMode = PanelViewMode.Grid;
+        model.Position = new DrawingPoint(300, 150);
+        return model;
+    }
+
     private static ChildWindowModel GridAlignedModel() => new()
     {
         ViewMode = PanelViewMode.Grid,
@@ -358,6 +486,24 @@ public class ChildWindowSizingGridTests
         Position = new DrawingPoint(0, 0),
         Size = new DrawingSize((int)GridWidth, (int)GridHeight),
     };
+
+    /// <summary>A swappable <see cref="IDesktopScaleProvider"/>: starts uniform at 1.0, replaceable mid-test.</summary>
+    private sealed class ScaleHolder
+    {
+        public ScaleHolder()
+        {
+            Current = DesktopScaleModel.Create(DesktopLayerMode.Embedded, 1d, 1d, []);
+            Provider = new Mock<IDesktopScaleProvider>();
+            Provider.SetupGet(p => p.Current).Returns(() => Current);
+            Provider.SetupGet(p => p.Mode).Returns(() => Current.Mode);
+        }
+
+        public Mock<IDesktopScaleProvider> Provider { get; }
+
+        public DesktopScaleModel Current { get; private set; }
+
+        public void Set(DesktopScaleModel model) => Current = model;
+    }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════
     // STA/resource-chain infrastructure — duplicated from Unit.Views.ChildWindowInitializeTests,
@@ -382,6 +528,12 @@ public class ChildWindowSizingGridTests
         public List<Rect> Obstacles { get; } = [];
 
         public int SaveCount { get; private set; }
+
+        public Mock<IAppSettings> AppSettings { get; private init; } = null!;
+
+        public Mock<ILayoutEditModeService> LayoutEditMode { get; private init; } = null!;
+
+        public ScaleHolder Scale { get; private init; } = null!;
 
         public static Harness Build(bool layoutLocked = false)
         {
@@ -415,9 +567,9 @@ public class ChildWindowSizingGridTests
                 Mock.Of<IGestureDiagnostics>());
 
             var appSettings = new Mock<IAppSettings>();
-            appSettings.SetupProperty(s => s.NativePanelSizing, false);
             appSettings.SetupProperty(s => s.SnapResizeToIconGrid, true);
             appSettings.SetupProperty(s => s.NormalModeLayoutGestures, string.Empty);
+            appSettings.SetupProperty(s => s.GridSize, 1);
 
             var monitors = new Mock<IMonitorService>();
             monitors.Setup(m => m.GetMonitors()).Returns(
@@ -438,6 +590,7 @@ public class ChildWindowSizingGridTests
                         buffer.Add(obstacle);
                 });
 
+            var scaleHolder = new ScaleHolder();
             var window = new ChildWindow(
                 viewModel,
                 windowManager.Object,
@@ -450,9 +603,14 @@ public class ChildWindowSizingGridTests
                 Mock.Of<IConfirmationService>(),
                 Mock.Of<IPanelCustomizeService>(),
                 Mock.Of<IPanelItemDragOutSession>(),
-                FakeDesktopScale.Uniform().Object);
+                scaleHolder.Provider.Object);
 
-            var harness = new Harness(app, originalResources, ownsApplication, window);
+            var harness = new Harness(app, originalResources, ownsApplication, window)
+            {
+                AppSettings = appSettings,
+                LayoutEditMode = layoutEditMode,
+                Scale = scaleHolder,
+            };
             harnessBox[0] = harness;
 
             return harness;
@@ -481,6 +639,40 @@ public class ChildWindowSizingGridTests
             menu.IsOpen = false;
 
             return enabled;
+        }
+
+        /// <summary>Raises the property-changed notification <c>MainWindowViewModel</c> relays for <c>NormalModeLayoutGestures</c>.</summary>
+        public void RaiseNormalModeGesturesChanged() =>
+            LayoutEditMode.Raise(
+                l => l.PropertyChanged += null,
+                new PropertyChangedEventArgs(ILayoutEditModeService.NormalModeGesturesPropertyName));
+
+        /// <summary>
+        /// Swaps in a uniform TopLevel snapshot whose scale is 1.5 times the window's own current DPI
+        /// scale (so every <c>PanelWindowCoordinates</c> conversion is non-identity, independent of the
+        /// machine's DPI) and re-seats the window from the model's desktop-DIP position under it.
+        /// </summary>
+        /// <returns>The model position and the window's Left/Top after seating.</returns>
+        public (DrawingPoint ModelPosition, Point WindowPosition) SeatUnderMixedScaleSnapshot(ChildWindowModel model)
+        {
+            var windowScale = PanelWindowCoordinates.GetWindowScale(Window, Scale.Current);
+            Scale.Set(DesktopScaleModel.Create(DesktopLayerMode.TopLevel, windowScale * 1.5d, windowScale * 1.5d, []));
+
+            var seated = PanelWindowCoordinates.ToWindowPosition(
+                Window, new Point(model.Position.X, model.Position.Y), Scale.Current);
+            Window.Left = seated.X;
+            Window.Top = seated.Y;
+            model.Position = new DrawingPoint(300, 150);
+
+            return (model.Position, new Point(Window.Left, Window.Top));
+        }
+
+        public void InvokePrivate(string name)
+        {
+            var method = typeof(ChildWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(method);
+
+            method!.Invoke(Window, [this, new RoutedEventArgs()]);
         }
 
         public void InvokeSizePreset(PanelSizePreset preset)

@@ -45,7 +45,51 @@ public class HintPopupControllerTests
         });
     }
 
-    private static HintPopupController BuildSut(out TextBlock renameErrorText, out Popup renameErrorPopup)
+    /// <summary>
+    /// F5: the read-only drop hint and the Move-semantics hint share one popup; each show sets its own
+    /// localized text (the English defaults here), so a read-only hint never leaks into a later Move hint.
+    /// </summary>
+    [Fact]
+    public void ShowReadOnlyDropHint_ThenShowMoveHint_SetsEachLocalizedText()
+    {
+        StaTestRunner.Run(() =>
+        {
+            var moveHintText = new TextBlock();
+            var sut = BuildSut(out _, out _, moveHintText);
+
+            sut.ShowReadOnlyDropHint();
+            Assert.Equal("Read-only mode: the file stayed in place and the panel will not be saved.", moveHintText.Text);
+
+            sut.ShowMoveHint();
+            Assert.Equal("The file was moved into the panel — the original was removed from the desktop.", moveHintText.Text);
+
+            sut.StopTimers();
+        });
+    }
+
+    /// <summary>
+    /// ADR-009 amendment 2026-10-10: the cloud-folder hint joins its message and action lines into the shared
+    /// popup text (English defaults here).
+    /// </summary>
+    [Fact]
+    public void ShowCloudDropHint_SetsMessageAndActionLines()
+    {
+        StaTestRunner.Run(() =>
+        {
+            var moveHintText = new TextBlock();
+            var sut = BuildSut(out _, out _, moveHintText);
+
+            sut.ShowCloudDropHint();
+
+            Assert.Equal(
+                "A file or folder from OneDrive was moved into panel storage and is no longer synced. To return it, drag it out of the panel back into its folder.",
+                moveHintText.Text);
+
+            sut.StopTimers();
+        });
+    }
+
+    private static HintPopupController BuildSut(out TextBlock renameErrorText, out Popup renameErrorPopup, TextBlock? moveHintText = null)
     {
         var moveHintPopup = new Popup();
         renameErrorPopup = new Popup();
@@ -58,6 +102,7 @@ public class HintPopupControllerTests
             renameErrorPopup,
             renameErrorText,
             searchRoot,
-            getEditingItem: () => null);
+            getEditingItem: () => null,
+            moveHintText: moveHintText);
     }
 }

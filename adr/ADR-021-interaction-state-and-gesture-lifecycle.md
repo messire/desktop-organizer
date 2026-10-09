@@ -1,7 +1,13 @@
 # ADR-021: Explicit Panel Interaction State and Gesture Lifecycle
 
-Status: Accepted (Phase 1, `fix/resize-lifecycle`, commits C1–C9; see
-`docs/PLANS/phase-1-resize-stabilization.md` for the implementation plan this ADR now reflects)
+**Статус:** Accepted (Phase 1, `fix/resize-lifecycle`, commits C1–C9; see
+`docs/PLANS/phase-1-resize-stabilization.md` for the implementation plan this ADR now reflects) — Amended 2026-09-24 (ADR-011 amendment: `ResizeConstraints.SizeGridStep`, resize honors `GridSize`); Amended 2026-09-22 (ADR-028: `GridAligned` входит в resize-конвейер через `ResizeConstraintsFactory` и `ResizeGestureSession.TryUpdate`, сам `ResizeGeometryCalculator` не меняется); Amended 2026-10-10 (ADR-022: `ResizeEndReason.Canceled` теперь приходит и с native-пути — ESC с неизменным rect); Amended 2026-10-10 (ADR-022 Фаза 1: `Thumb`-путь удалён — семантика `Thumb`-capture/`CancelDrag`/`RecoverStaleDrag` и `PanelResizeController` исторические; жизненный цикл жеста обслуживает только `NativePanelResizeController`, `CaptureLost` = `SizeMoveAborted`, `Canceled` приходит от native ESC)
+
+> **Историческая оговорка (2026-10-10).** Разделы ниже про `Thumb.DragCompleted`/`CancelDrag`/`LostMouseCapture`,
+> `PanelResizeController` и стадию-регрессию H4 описывают удалённый WPF-путь. Не изменились и продолжают действовать
+> `PanelInteractionTracker`, `ResizeGestureSession`, `ResizeGeometryCalculator`, `ResizeEndReason` (все члены) и правило
+> `ShouldPersist`; `Canceled` теперь порождает native-контроллер (ESC с неизменным rect), а событие `CaptureLost` в
+> диагностике больше не пишется (категория `capture` удалена вместе с Thumb-путём).
 
 ## Context
 
@@ -205,3 +211,30 @@ equivalence this ADR/ADR-022 already establish extends to `SizeGridStep` gesture
 implementation — see `ResizeGeometryCalculatorSizeGridStepTests`, `ResizeGestureSessionSizeGridStepTests`,
 `ResizeConstraintsFactorySizeGridStepTests`, `PanelSizingGridSupportSizeGridStepTests`, and
 `NativePanelResizeControllerTests.RealController_GridSizeMode_MatchesLegacyPath_BitForBit_WithNonZeroOriginOffset`.
+
+## Amendment 2026-09-22 (ADR-028): `GridAligned` в resize-конвейере
+
+[ADR-028](ADR-028-workspace-grid.md) подключает режим `GridAligned` без правки `ResizeGeometryCalculator.Apply`
+(инвариант D-2/R6 этого ADR сохранён): правила кадра задаёт `ResizeConstraintsFactory.BuildConstraints(...,
+PanelGridState)`, а квантование (`SnapBounds` → `ClampResizeToWorkArea` → `ClampResizeToSlots`) выполняет
+`ResizeGestureSession.TryUpdate` вторым шагом того же кадра; `Alt` пропускает квантование кадра (читается
+свежим каждый кадр), commit всегда квантует.
+
+## Amendment 2026-10-10 (ADR-022, native-путь единственный): `Canceled` и персист на native-пути
+
+Правило персиста «`ShouldPersist = AppliedDeltaCount > 0` независимо от `Reason`» (раздел выше) описывает Thumb-путь, где
+WPF не откатывает записанную геометрию. На native-пути (единственном после решения пользователя 2026-10-10,
+[ADR-022](ADR-022-native-panel-sizing.md) Amendment 2026-10-10, G-4) система при ESC восстанавливает исходный rect, поэтому
+`NativePanelResizeController` на `SizeMoveExited` с `finalRect == _startWindowRectPx` завершает жест как
+`ResizeEndReason.Canceled` и вызывает `EndResize(Canceled, persist: false)` — **без** `PersistAfterGesture` и без демоции
+`AutoContent → Manual`. `Canceled` — значит, снова используемый член enum (раньше его порождал только `Thumb`-путь, удалённый
+в Фазе 1 ADR-022, 2026-10-10). Семантика `Thumb`-capture в этом ADR — историческая. Открытый риск порядка сообщений — MV-7 в ADR-022.
+
+## Amendments (сводка)
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | [ADR-028](ADR-028-workspace-grid.md) | `GridAligned`: квантование в `ResizeGestureSession.TryUpdate`, `Alt`-пропуск кадра, commit-квантование | — (Apply не менялся); `ShouldPersist = AppliedDeltaCount > 0` по-прежнему определяет, есть ли что персистить |
+| 2026-09-24 | ADR-011 amendment | `ResizeConstraints.SizeGridStep` (восьмое поле, по умолчанию `0d`); `IsFreeResizeFrame` теперь `true` и при `SizeGridStep > 0`; `PanelSizingGridSupport.NormalizeCommittedSize` | Утверждение «`ResizeConstraints` — семь полей» (до амендмента) |
+| 2026-10-10 | [ADR-022](ADR-022-native-panel-sizing.md) | Native ESC с неизменным rect → `Canceled`, `persist: false`, без демоции `AutoContent` | Допущение «любой жест с `AppliedDeltaCount > 0` персистит» — для native-`Canceled`; «`Canceled` приходит только из Thumb `DragCompleted`» |
+| 2026-10-10 | [ADR-022](ADR-022-native-panel-sizing.md) Фаза 1 | `Thumb`-путь, `PanelResizeController`, `CaptureGot`/`CaptureLost` удалены; единственный источник жеста — `NativePanelResizeController`; `PanelClosing.thumbIsDragging` → `resizeActive` | Описание `Thumb`-capture/`CancelDrag`/`RecoverStaleDrag`/`PanelResizeController` как действующего механизма (стало историческим); диагностический сигнал «`CaptureLost` без `ResizeCompleted` = утечка capture» |

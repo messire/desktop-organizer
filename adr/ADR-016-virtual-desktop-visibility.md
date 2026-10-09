@@ -3,6 +3,17 @@
 **Статус:** ~~Accepted~~ → **Superseded by [ADR-019](ADR-019-sidebar-top-level-virtual-desktop.md)** (2026-09-02)
 **Дата:** 2026-09-01
 
+> **Что из этого ADR остаётся действующим (ADR-audit WP-E, 2026-10-09).** Статус `Superseded by ADR-019`
+> относится к *подложке* (встраивание боковой панели в `WorkerW`), но **не** к механизму и контрактам ниже:
+> `IVirtualDesktopManager` через `IVirtualDesktopService`/`VirtualDesktopService` (`IsSupported`,
+> `IsWindowOnCurrentDesktop`, `TryMoveWindowToCurrentDesktop`, STA-контракт, жизненный цикл RCW), poll-таймер,
+> circuit breaker `MaxIneffectiveMoves = 3` и **обоснование COM-исключения из инварианта «P/Invoke только за
+> `INativeApi`»** (раздел «Осознанное отступление…» ниже) продолжают действовать и используются
+> [ADR-019](ADR-019-sidebar-top-level-virtual-desktop.md); обоснование COM-исключения продублировано в
+> ADR-019 (раздел «Инвариант P/Invoke и COM виртуальных столов»), чтобы действующий контракт не жил
+> только в superseded-документе. Не действует: re-embed-логика/`IsEmbedded` (удалены ADR-019) и
+> допущение «исход A безопасен».
+
 > ⚠️ **Superseded.** Механизм, зафиксированный здесь (poll + `IVirtualDesktopManager.
 > MoveWindowToDesktop`), сам по себе остался верным и переиспользован без изменений в ADR-019. Но
 > **подложка**, к которой этот механизм применялся, — панель как child `WorkerW` — оказалась
@@ -142,7 +153,7 @@ guard перед перемещением.
 
 **Thread affinity.** Все члены `IVirtualDesktopService` вызываются **только со STA-потока** (в этом
 приложении — WPF UI-поток): за интерфейсом стоит apartment-threaded shell-COM. Это тот же контракт,
-что у `NativeApi.ShowShellContextMenu` ([ADR-008](ADR-008-shell-context-menu-and-file-operations.md)),
+что у `NativeApi.ShowShellContextMenu` ([ADR-008](ADR-008-shell-com-sta-threading-and-pidl-marshaling.md)),
 и он зафиксирован в XML-doc интерфейса и проверяется `Debug.Assert` в каждом публичном методе
 реализации.
 
@@ -251,7 +262,10 @@ P/Invoke-вызов не объявлен в обход `INativeApi`.
 ## Manual verify (Win10 / Win11)
 
 Перенесено из `docs/PLANS/ui-polishing-1.md` §8, пп. 14–17 — не покрывается автотестами, требует
-интерактивной Windows-сессии, **не выполнено в этой сессии**:
+интерактивной Windows-сессии. **Manual verify выполнена на Windows 11 24H2 2026-09-27 (для актуального
+механизма — ADR-019), признана достаточной; Windows 10 не проверяется** — см. [docs/ROADMAP.md](../docs/ROADMAP.md)
+(строки 6–8). Пункты ниже — исторический чек-лист (пп. 5–6 относились к удалённой re-embed-логике и
+неприменимы):
 
 1. **E0** — панель на другом виртуальном столе: видна / не видна (зафиксировать фактический исход A/B
    на обеих ОС — до сих пор проверено только статически/через COM-зонд на Win11 26200, не через
@@ -315,5 +329,6 @@ P/Invoke-вызов не объявлен в обход `INativeApi`.
   архитектура (E-A + тихая деградация) корректна при любом из двух исходов по построению, а не
   зависит от того, какой из них окажется верным.
 
-**Manual verify (Win10/Win11) — не выполнено, среда разработки ограничена `dotnet build`/`dotnet
-test`.** Полный список — раздел выше и `docs/ROADMAP.md`, раздел «Полировочный батч polishing/ui-1».
+**Manual verify** — см. раздел выше и [docs/ROADMAP.md](../docs/ROADMAP.md) (строки 6–8; раздел
+«Полировочный батч polishing/ui-1»): выполнена на Windows 11 24H2 2026-09-27 для актуального механизма
+(ADR-019).

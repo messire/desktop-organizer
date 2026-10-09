@@ -1,0 +1,393 @@
+{
+  "schemaVersion": 7,
+  "schemaRevision": 99,
+  "writtenAtUtc": "2026-12-01T09:00:00.0000000+00:00",
+  "appVersion": "9.9.9",
+  "panels": [
+    {
+      "id": "a7a7a7a7-0000-0000-0000-000000000001",
+      "title": "Current Panel",
+      "pageId": "default",
+      "geometry": {
+        "x": 0,
+        "y": 0,
+        "width": 300,
+        "height": 400,
+        "monitorDeviceId": "\\\\.\\DISPLAY1",
+        "windowState": "Normal",
+        "isRolledUp": false,
+        "isVisible": true,
+        "geometryMode": "LegacyFreeform",
+        "sizingMode": "Manual",
+        "futureGeometry": {
+          "level": "Geometry",
+          "nested": {
+            "values": [
+              1,
+              "two",
+              null
+            ]
+          }
+        },
+        "futureNullGeometry": null
+      },
+      "appearance": {
+        "accentColor": "#6B7280",
+        "surfaceOpacity": 0.8,
+        "surfaceStyle": "Ambient",
+        "textColor": "#DDDDDD",
+        "iconSize": 48,
+        "iconLayoutPolicy": "LegacyStretch",
+        "futureAppearance": {
+          "level": "Appearance",
+          "nested": {
+            "values": [
+              1,
+              "two",
+              null
+            ]
+          }
+        },
+        "futureNullAppearance": null
+      },
+      "content": {
+        "viewMode": "List",
+        "contentFilter": "ShowAll",
+        "sortMode": "Manual",
+        "sourceFolderPath": null,
+        "filePaths": [
+          "C:\\Desktop\\a.txt"
+        ],
+        "futureContent": {
+          "level": "Content",
+          "nested": {
+            "values": [
+              1,
+              "two",
+              null
+            ]
+          }
+        },
+        "futureNullContent": null
+      },
+      "futurePanel": {
+        "level": "Panel",
+        "nested": {
+          "values": [
+            1,
+            "two",
+            null
+          ]
+        }
+      },
+      "futureNullPanel": null
+    },
+    {
+      "id": "a7a7a7a7-0000-0000-0000-000000000002",
+      "title": "Games",
+      "pageId": "default",
+      "geometry": {
+        "x": 320,
+        "y": 0,
+        "width": 264,
+        "height": 248,
+        "monitorDeviceId": null,
+        "windowState": "Normal",
+        "isRolledUp": false,
+        "isVisible": true,
+        "geometryMode": "GridAligned",
+        "widthSpanUnits": 32,
+        "heightSpanUnits": 30,
+        "sizingMode": "AutoContent"
+      },
+      "appearance": {
+        "accentColor": "#A855F7",
+        "surfaceOpacity": 0.65,
+        "surfaceStyle": "Solid",
+        "textColor": "#DDDDDD",
+        "iconSize": 48,
+        "iconLayoutPolicy": "FixedGap"
+      },
+      "content": {
+        "viewMode": "Grid",
+        "contentFilter": "ShowAll",
+        "sortMode": "Name",
+        "sourceFolderPath": null,
+        "filePaths": [
+          "C:\\Games\\game.exe"
+        ]
+      }
+    },
+    {
+      "id": "a7a7a7a7-0000-0000-0000-000000000003",
+      "title": "Portal",
+      "pageId": "work",
+      "geometry": {
+        "x": 0,
+        "y": 420,
+        "width": 260,
+        "height": 300,
+        "monitorDeviceId": null,
+        "windowState": "Floating",
+        "isRolledUp": true,
+        "isVisible": true,
+        "geometryMode": "Masonry",
+        "sizingMode": "AutoWidth"
+      },
+      "appearance": {
+        "accentColor": "#06B6D4",
+        "surfaceOpacity": 0.5,
+        "surfaceStyle": "Mica",
+        "textColor": "#FFFFFF",
+        "iconSize": 32,
+        "iconLayoutPolicy": "Packed"
+      },
+      "content": {
+        "viewMode": "Tiles",
+        "contentFilter": "ImagesOnly",
+        "sortMode": "Newest",
+        "sourceFolderPath": "G:\\Portal4",
+        "filePaths": []
+      }
+    },
+    {
+      "id": "a7a7a7a7-0000-0000-0000-000000000004",
+      "title": "Projects",
+      "pageId": "3f2a9c0e5b7d4e1a9c3b2d1e0f4a5b6c",
+      "geometry": {
+        "x": 40,
+        "y": 40,
+        "width": 280,
+        "height": 320,
+        "monitorDeviceId": null,
+        "windowState": "Normal",
+        "isRolledUp": false,
+        "isVisible": true,
+        "geometryMode": "LegacyFreeform",
+        "sizingMode": "Manual"
+      },
+      "appearance": {
+        "accentColor": "#22C55E",
+        "surfaceOpacity": 0.75,
+        "surfaceStyle": "Ambient",
+        "textColor": "#DDDDDD",
+        "iconSize": 48,
+        "iconLayoutPolicy": "LegacyStretch"
+      },
+      "content": {
+        "viewMode": "List",
+        "contentFilter": "ShowAll",
+        "sortMode": "Name",
+        "sourceFolderPath": "D:\\Projects",
+        "filePaths": []
+      }
+    }
+  ],
+  "pages": {
+    "items": [
+      {
+        "id": "default"
+      },
+      {
+        "id": "work",
+        "name": "Renamed Work",
+        "futurePage": {
+          "level": "Page",
+          "nested": {
+            "values": [
+              1,
+              "two",
+              null
+            ]
+          }
+        },
+        "futureNullPage": null
+      },
+      {
+        "id": "3f2a9c0e5b7d4e1a9c3b2d1e0f4a5b6c",
+        "name": "Проекты"
+      }
+    ],
+    "currentPageId": "3f2a9c0e5b7d4e1a9c3b2d1e0f4a5b6c",
+    "futurePages": {
+      "level": "Pages",
+      "nested": {
+        "values": [
+          1,
+          "two",
+          null
+        ]
+      }
+    },
+    "futureNullPages": null
+  },
+  "layoutSnapshots": [
+    {
+      "id": "snap-v6-1",
+      "name": "Baseline",
+      "createdAt": "2026-09-29T08:00:00.0000000",
+      "panels": [
+        {
+          "id": "a7a7a7a7-0000-0000-0000-000000000005",
+          "title": "Snap G",
+          "pageId": "default",
+          "geometry": {
+            "x": 50,
+            "y": 60,
+            "width": 100,
+            "height": 100,
+            "monitorDeviceId": null,
+            "windowState": "Maximized",
+            "isRolledUp": false,
+            "isVisible": true,
+            "geometryMode": "LegacyFreeform",
+            "sizingMode": "Manual",
+            "futureSnapGeometry": {
+              "level": "SnapGeometry",
+              "nested": {
+                "values": [
+                  1,
+                  "two",
+                  null
+                ]
+              }
+            },
+            "futureNullSnapGeometry": null
+          },
+          "appearance": {
+            "accentColor": "#6B7280",
+            "surfaceOpacity": 0.8,
+            "surfaceStyle": "Ambient",
+            "textColor": "#DDDDDD",
+            "iconSize": 48,
+            "iconLayoutPolicy": "LegacyStretch",
+            "futureSnapAppearance": {
+              "level": "SnapAppearance",
+              "nested": {
+                "values": [
+                  1,
+                  "two",
+                  null
+                ]
+              }
+            },
+            "futureNullSnapAppearance": null
+          },
+          "content": {
+            "viewMode": "Grid",
+            "contentFilter": "HideShortcuts",
+            "sortMode": "Name",
+            "sourceFolderPath": null,
+            "filePaths": [],
+            "futureSnapContent": {
+              "level": "SnapContent",
+              "nested": {
+                "values": [
+                  1,
+                  "two",
+                  null
+                ]
+              }
+            },
+            "futureNullSnapContent": null
+          },
+          "futureSnapPanel": {
+            "level": "SnapPanel",
+            "nested": {
+              "values": [
+                1,
+                "two",
+                null
+              ]
+            }
+          },
+          "futureNullSnapPanel": null
+        },
+        {
+          "id": "a7a7a7a7-0000-0000-0000-000000000006",
+          "title": "Snap H",
+          "pageId": "work",
+          "geometry": {
+            "x": 70,
+            "y": 80,
+            "width": 110,
+            "height": 110,
+            "monitorDeviceId": null,
+            "windowState": "Minimized",
+            "isRolledUp": true,
+            "isVisible": false,
+            "geometryMode": "LegacyFreeform",
+            "sizingMode": "Manual"
+          },
+          "appearance": {
+            "accentColor": "#F59E0B",
+            "surfaceOpacity": 1.0,
+            "surfaceStyle": "Frosted",
+            "textColor": "#DDDDDD",
+            "iconSize": 48,
+            "iconLayoutPolicy": "LegacyStretch"
+          },
+          "content": {
+            "viewMode": "List",
+            "contentFilter": "FoldersOnly",
+            "sortMode": "Manual",
+            "sourceFolderPath": "G:\\Portal3",
+            "filePaths": []
+          }
+        }
+      ],
+      "futureSnapshot": {
+        "level": "Snapshot",
+        "nested": {
+          "values": [
+            1,
+            "two",
+            null
+          ]
+        }
+      },
+      "futureNullSnapshot": null
+    }
+  ],
+  "systemIconsPanel": {
+    "isEnabled": true,
+    "showOnAllVirtualDesktops": false,
+    "iconSize": "Gigantic",
+    "anchorVirtualDesktopId": "ffffffff-1111-1111-1111-111111111111",
+    "items": [
+      {
+        "kind": "RecycleBin",
+        "isVisible": true,
+        "order": 0,
+        "futureItemFlag": "keep-me"
+      },
+      {
+        "kind": "Printers",
+        "isVisible": true,
+        "order": 7,
+        "futureKindField": "x"
+      }
+    ],
+    "futureSystemIconsPanel": {
+      "level": "SystemIconsPanel",
+      "nested": {
+        "values": [
+          1,
+          "two",
+          null
+        ]
+      }
+    },
+    "futureNullSystemIconsPanel": null
+  },
+  "futureRoot": {
+    "flag": true,
+    "nested": {
+      "deep": [
+        1,
+        2,
+        3
+      ]
+    }
+  }
+}

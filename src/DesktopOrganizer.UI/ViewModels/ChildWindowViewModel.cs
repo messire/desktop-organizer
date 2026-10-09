@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.IO;
 using DesktopOrganizer.Core;
+using DesktopOrganizer.Services.Abstractions.Storage;
 using DesktopOrganizer.Services.Diagnostics;
 using DesktopOrganizer.UI.Commands;
 using DesktopOrganizer.UI.Diagnostics;
@@ -122,6 +123,23 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// </summary>
     private readonly IPanelCloneFlow? _panelCloneFlow;
 
+    /// <summary>
+    /// ADR-audit WP-B (B1): the single source of truth for "is this session read-only" — a live read of
+    /// <see cref="IApplicationStateStore.IsWritable"/> (newer on-disk schema, or the advisory storage lock
+    /// was not acquired), never a cached copy and never a new persisted field. <see langword="null"/>
+    /// (tests that don't care) is treated as writable.
+    /// </summary>
+    private readonly IApplicationStateStore? _stateStore;
+
+    /// <summary>
+    /// O1 (ADR-009 amendment 2026-10-10): classifies drop sources as cloud-synced; <see langword="null"/>
+    /// turns the cloud hint off.
+    /// </summary>
+    private readonly ICloudFolderDetector? _cloudFolderDetector;
+
+    /// <summary>The process-wide "once per session" latch for <see cref="CloudDropHintRequested"/>.</summary>
+    private readonly ICloudDropHintGate _cloudDropHintGate;
+
     private readonly DataTemplate _listTemplate;
     private readonly DataTemplate _gridTemplate;
     private readonly System.Threading.Timer _existenceTimer;
@@ -207,6 +225,9 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     private SiblingAdoptionWatch? _siblingWatch;
 
     private bool _disposed;
+
+    // In-memory only (F5): the read-only drop hint shows once per panel per run; never persisted.
+    private bool _readOnlyDropHintShown;
     private FileItem? _editingItem;
     private string _editingName = string.Empty;
     private RenameOutcome? _renameError;
@@ -516,6 +537,24 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     public event EventHandler? MoveHintRequested;
 
     /// <summary>
+    /// Raised the first time, for this panel, that an external drop lands in a read-only session
+    /// (<see cref="MovesDroppedItemsIntoStorage"/> is <see langword="false"/>): the file stayed where it
+    /// was and the panel will not be saved (ADR-audit WP-B review F5). Unlike <see cref="MoveHintRequested"/>
+    /// this is NOT persisted anywhere (<see cref="IAppSettings.HasShownMoveHint"/> is untouched) — the guard
+    /// is an in-memory flag, so it repeats once per panel per app run, which is the whole session.
+    /// </summary>
+    public event EventHandler? ReadOnlyDropHintRequested;
+
+    /// <summary>
+    /// Raised the first time in the session (shared <see cref="ICloudDropHintGate"/>, all panels) that an
+    /// external drop actually MOVED a file out of a cloud-synchronized location (OneDrive folder or a cloud
+    /// placeholder - <see cref="ICloudFolderDetector"/>): from then on the cloud client no longer syncs it
+    /// (ADR-009 amendment 2026-10-10). Informational only - the move is never blocked. Like
+    /// <see cref="ReadOnlyDropHintRequested"/> it is in-memory: <see cref="IAppSettings.HasShownMoveHint"/> is untouched.
+    /// </summary>
+    public event EventHandler? CloudDropHintRequested;
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="ChildWindowViewModel"/> class.
     /// </summary>
     /// <param name="iconProvider">Provider for fetching file icons.</param>
@@ -593,6 +632,16 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// <param name="panelCloneFlow">See <see cref="_panelCloneFlow"/>. Deliberately the LAST constructor
     /// parameter (after the ADR-046 queue parameters), for the same "keep existing positional call sites
     /// compiling" reason as <paramref name="windowManager"/>/<paramref name="pageManager"/>.</param>
+    /// <param name="stateStore">See <see cref="_stateStore"/>. Appended AFTER <paramref name="panelCloneFlow"/>
+    /// for the same "keep existing positional call sites compiling" reason.</param>
+    /// <param name="cloudFolderDetector">
+    /// Classifies drop sources as cloud-synced (<see cref="CloudDropHintRequested"/>). <see langword="null"/>
+    /// disables the cloud hint.
+    /// </param>
+    /// <param name="cloudDropHintGate">
+    /// The process-wide once-per-session latch for <see cref="CloudDropHintRequested"/>; <see langword="null"/>
+    /// gives this panel a private one (tests, standalone use).
+    /// </param>
     public ChildWindowViewModel(
         IIconProvider iconProvider,
         IFileLauncher fileLauncher,
@@ -609,9 +658,14 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         IItemProbeQueue? itemProbeQueue = null,
         TimeProvider? timeProvider = null,
         Func<IDebounceTimer?>? probeRefilterDebounceTimerProvider = null,
-        IPanelCloneFlow? panelCloneFlow = null)
+        IPanelCloneFlow? panelCloneFlow = null,
+        IApplicationStateStore? stateStore = null,
+        ICloudFolderDetector? cloudFolderDetector = null,
+        ICloudDropHintGate? cloudDropHintGate = null)
         : base(iconProvider, iconLoadQueue, itemProbeQueue)
     {
+        _cloudFolderDetector = cloudFolderDetector;
+        _cloudDropHintGate = cloudDropHintGate ?? new CloudDropHintGate();
         _timeProvider = timeProvider ?? TimeProvider.System;
         _fileLauncher = fileLauncher;
         _folderWatcherFactory = folderWatcherFactory;
@@ -632,6 +686,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         _windowManager = windowManager;
         _pageManager = pageManager;
         _panelCloneFlow = panelCloneFlow;
+        _stateStore = stateStore;
         _iconResizeDebounceTimerProvider = iconResizeDebounceTimerProvider ?? ResolveDefaultIconResizeDebounceTimer;
 
         // MINOR 8 (release-polish 1.0 final review): remembered so Dispose() can stop the PRODUCTION
@@ -762,6 +817,15 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     }
 
     /// <summary>
+    /// Gets a value indicating whether an external drop may physically move the dropped items into
+    /// app-managed storage (<see cref="AddDroppedFiles"/>). <see langword="false"/> in a read-only session
+    /// (<see cref="IApplicationStateStore.IsWritable"/> is <see langword="false"/>): nothing would be
+    /// persisted, so files must stay where they are and the drop effect must be Copy, not Move (a Move
+    /// effect would let the drag source delete the originals). Evaluated live on every access.
+    /// </summary>
+    public bool MovesDroppedItemsIntoStorage => _stateStore?.IsWritable ?? true;
+
+    /// <summary>
     /// Adds files dropped onto the panel from an external source (desktop, Explorer). Unlike
     /// <see cref="BaseViewModel.AddFiles"/> — which is also used to mirror a live Folder Portal and
     /// must keep pointing at the real files — this moves each dropped file or folder into
@@ -789,10 +853,27 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
             .ToArray();
         var resolved = new string[sources.Length];
         var anyMoved = false;
+        var anyCloudMoved = false;
+
+        // ADR-audit WP-B (B1): in a read-only session (newer schema / no storage lock) every Save() is a
+        // silent no-op, so a MoveIn would take the file off the desktop into hidden storage while the panel
+        // referencing it is never persisted — after a restart the file would be orphaned. Reference the
+        // original path instead and leave the file exactly where it is. Read once per drop.
+        var moveIntoStorage = MovesDroppedItemsIntoStorage;
 
         for (var i = 0; i < sources.Length; i++)
         {
             var source = sources[i];
+            if (!moveIntoStorage)
+            {
+                resolved[i] = source;
+                continue;
+            }
+
+            // O1: classify BEFORE the move - afterwards the source is gone. Attribute/env reads only (no
+            // content access), so a cloud placeholder is never hydrated by this check.
+            var isCloud = _cloudFolderDetector?.Classify(source) is CloudPathKind.SyncedFolder or CloudPathKind.Placeholder;
+
             var result = Directory.Exists(source)
                 ? _itemStorage.MoveInDirectory(source) ?? source
                 : _itemStorage.MoveIn(source) ?? source;
@@ -800,12 +881,20 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
             resolved[i] = result;
 
             if (!string.Equals(result, source, StringComparison.OrdinalIgnoreCase) && _itemStorage.IsManaged(result))
+            {
                 anyMoved = true;
+                if (isCloud) anyCloudMoved = true;
+            }
         }
 
         AddFiles(resolved);
 
         MaybeRaiseMoveHint(anyMoved);
+
+        // After the generic Move hint on purpose: the view shows the last-raised hint, and the cloud text is
+        // the more specific (and more consequential) one.
+        MaybeRaiseCloudDropHint(anyCloudMoved);
+        if (!moveIntoStorage && sources.Length > 0) MaybeRaiseReadOnlyDropHint();
     }
 
     /// <summary>
@@ -1478,6 +1567,29 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
         _appSettings.Save();
 
         MoveHintRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Raises <see cref="CloudDropHintRequested"/> when <paramref name="anyCloudMoved"/> and this is the
+    /// session's first such drop (<see cref="ICloudDropHintGate"/>). Touches no persisted state.
+    /// </summary>
+    /// <param name="anyCloudMoved">Whether a cloud-synced source was actually moved into managed storage by this drop.</param>
+    private void MaybeRaiseCloudDropHint(bool anyCloudMoved)
+    {
+        if (!anyCloudMoved || !_cloudDropHintGate.TryClaim()) return;
+
+        CloudDropHintRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Raises <see cref="ReadOnlyDropHintRequested"/> once per panel instance (in-memory guard only).
+    /// </summary>
+    private void MaybeRaiseReadOnlyDropHint()
+    {
+        if (_readOnlyDropHintShown) return;
+
+        _readOnlyDropHintShown = true;
+        ReadOnlyDropHintRequested?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>

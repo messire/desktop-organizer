@@ -77,6 +77,12 @@ public class MainWindowViewModel : INotifyPropertyChanged
     public AboutViewModel About { get; }
 
     /// <summary>
+    /// ViewModel for the Backup section's "Files without a panel" card (ADR-009 amendment 2026-10-10) -
+    /// DI-provided, <see langword="null"/> only for a host that never shows the Backup section (unit tests).
+    /// </summary>
+    public ManagedStorageOrphansViewModel? StorageOrphans { get; }
+
+    /// <summary>
     /// Global default settings for new panels and grid/snap behavior (REFACTORING_PLAN.md §5.3).
     /// </summary>
     public GlobalDefaultsViewModel GlobalDefaults { get; }
@@ -198,16 +204,6 @@ public class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// When <see langword="true"/>, panels resize via the native <c>WM_SIZING</c> loop instead of the
-    /// legacy WPF <c>Thumb</c> path. Experimental — applies to panels created after the app restarts.
-    /// </summary>
-    public bool NativePanelSizing
-    {
-        get => GlobalDefaults.NativePanelSizing;
-        set => GlobalDefaults.NativePanelSizing = value;
-    }
-
-    /// <summary>
     /// Magnetic pull distance (px) applied while dragging a panel. 0 disables the live drag-time
     /// magnet (movement stays free until drop, where <see cref="GridSize"/> quantisation still applies).
     /// </summary>
@@ -234,6 +230,9 @@ public class MainWindowViewModel : INotifyPropertyChanged
         set => GlobalDefaults.SnapToGridEnabled = value;
     }
 
+    /// <summary><see langword="false"/> while position snapping is on — the icon-grid size toggle has no effect then.</summary>
+    public bool IsSnapResizeToIconGridAvailable => GlobalDefaults.IsSnapResizeToIconGridAvailable;
+
     /// <summary>The grid step shown by the "Snap panel position to grid" card's slider.</summary>
     public int GridStep
     {
@@ -242,7 +241,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
     }
 
     // ── Layout editing (docs/PLANS/phase-6-edit-layout-ux.md §1 D-9 #3) ─────────────────────────────
-    // Forwards directly to the injected ILayoutEditModeService singleton — unlike GridSize/NativePanelSizing
+    // Forwards directly to the injected ILayoutEditModeService singleton — unlike GridSize
     // above, there is no per-concern sub-ViewModel wrapping it (the service already owns its own
     // persistence for IsLayoutLocked and its own INotifyPropertyChanged — see OnLayoutEditModePropertyChanged
     // below, which re-raises that notification on this ViewModel exactly like GlobalDefaults/
@@ -603,6 +602,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <param name="statusNotifier">See <see cref="Status"/>.</param>
     /// <param name="desktopIcons">Backs <see cref="DesktopIconsVisible"/> (the "Show desktop icons" toggle in General).</param>
     /// <param name="appLog">See <see cref="Log"/>.</param>
+    /// <param name="storageOrphans">See <see cref="StorageOrphans"/>. Appended last to keep existing positional call sites compiling.</param>
     public MainWindowViewModel(
         IWindowManager windowManager,
         IAppSettings appSettings,
@@ -621,8 +621,10 @@ public class MainWindowViewModel : INotifyPropertyChanged
         IPanelCloneFlow panelCloneFlow,
         IStatusNotifier statusNotifier,
         IDesktopIconsService desktopIcons,
-        IAppLog? appLog = null)
+        IAppLog? appLog = null,
+        ManagedStorageOrphansViewModel? storageOrphans = null)
     {
+        StorageOrphans = storageOrphans;
         _windowManager = windowManager;
         _appSettings = appSettings;
         _autostart = autostart;
@@ -666,7 +668,16 @@ public class MainWindowViewModel : INotifyPropertyChanged
         // names match exactly (see the forwarding properties above), so no name translation is needed.
         // Never unsubscribed: both sub-ViewModels are owned for the lifetime of this (DI-singleton)
         // ViewModel.
-        GlobalDefaults.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName!);
+        GlobalDefaults.PropertyChanged += (_, e) =>
+        {
+            OnPropertyChanged(e.PropertyName!);
+
+            // ADR-026 D-2/D-5: the Normal-mode gesture preference is the third input of every open
+            // panel's resize gate. IAppSettings has no change notification, so relay it over the shared
+            // layout-edit service the panels already subscribe to (no new persisted state).
+            if (e.PropertyName == nameof(NormalModeLayoutGestures))
+                _layoutEditMode.NotifyNormalModeGesturesChanged();
+        };
         SystemIconsSettings.PropertyChanged += (_, e) => OnPropertyChanged(e.PropertyName!);
 
         // D-9 #3: ILayoutEditModeService is a DI singleton shared with every ChildWindow — this

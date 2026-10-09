@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Animation;
+using DesktopOrganizer.UI.Interaction;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.Services;
 using DesktopOrganizer.UI.Theming;
@@ -29,6 +30,11 @@ public sealed class RollUpBehavior
     // IPanelSizingGridHost. Null (a plain Window, or a test that does not supply one) means
     // LegacyFreeform, i.e. the pre-P04 title-bar/remembered-height behaviour, unchanged.
     private readonly IPanelSizingGridHost? _gridHost;
+
+    // ADR-audit WP-C / C2 (ADR-037): the grid host and PanelGeometryWriter both speak desktop-DIP, so
+    // Window.Left/Top must pass through PanelWindowCoordinates before they reach them. Null (tests that
+    // do not care about DPI) means "no conversion", i.e. the identity every uniform snapshot yields anyway.
+    private readonly IDesktopScaleProvider? _desktopScale;
 
     // Seeded from the same constant ChildWindow.xaml's own Window.Height binds to, rather than a bare
     // 300 literal that silently duplicated it (P02b verify finding). Only ever read before the first
@@ -64,10 +70,9 @@ public sealed class RollUpBehavior
     /// <param name="fileListHost">The file-list host element, hidden while rolled up.</param>
     /// <param name="resizeAffordance">
     /// The resize affordance to disable while rolled up (docs/PLANS/phase-2-native-panel-sizing.md
-    /// §1.6, R-9) — a <see cref="ThumbOverlayAffordance"/> wrapping the resize-thumb overlay on the
-    /// legacy path, or a <see cref="NativeSizingAffordance"/> gating <see cref="NativePanelResizeController"/>'s
-    /// hit-testing on the native path. This is the single point that toggles resize availability; the
-    /// underlying <c>Thumb</c> overlay/native hit-test gate is never touched anywhere else.
+    /// §1.6, R-9) — a <see cref="NativeSizingAffordance"/> gating <see cref="NativePanelResizeController"/>'s
+    /// hit-testing and the visual-only grips. This is the single point that toggles resize availability;
+    /// the native hit-test gate is never touched anywhere else.
     /// </param>
     /// <param name="titleBarHeight">The panel's fixed title-bar height — the collapsed target height.</param>
     /// <param name="getModel">Accessor for the current <see cref="ChildWindowModel"/> (may return <see langword="null"/> before <c>Initialize</c>).</param>
@@ -77,6 +82,10 @@ public sealed class RollUpBehavior
     /// <see cref="IPanelSizingGridHost"/> (the production path — <c>Views.ChildWindow</c> does) — so
     /// <c>ChildWindow</c>'s constructor needs no new argument. Tests pass a fake directly.
     /// </param>
+    /// <param name="desktopScale">
+    /// ADR-037: supplies the desktop-scale snapshot used to convert <see cref="Window.Left"/>/<see cref="Window.Top"/>
+    /// to desktop-DIP before they are handed to <paramref name="gridHost"/>. <see langword="null"/> = no conversion.
+    /// </param>
     public RollUpBehavior(
         Window window,
         IWindowManager windowManager,
@@ -85,7 +94,8 @@ public sealed class RollUpBehavior
         IResizeAffordance resizeAffordance,
         double titleBarHeight,
         Func<ChildWindowModel?> getModel,
-        IPanelSizingGridHost? gridHost = null)
+        IPanelSizingGridHost? gridHost = null,
+        IDesktopScaleProvider? desktopScale = null)
     {
         _window = window;
         _windowManager = windowManager;
@@ -95,11 +105,12 @@ public sealed class RollUpBehavior
         _titleBarHeight = titleBarHeight;
         _getModel = getModel;
         _gridHost = gridHost ?? window as IPanelSizingGridHost;
+        _desktopScale = desktopScale;
     }
 
     /// <summary>
     /// The panel height remembered immediately before collapsing, used to restore it on roll-down.
-    /// Also read/written by resize-snap code (<c>PanelResizeController.SnapWidthToGrid</c> does not need
+    /// Also read/written by resize-snap code (<c>NativePanelResizeController.SnapWidthToGrid</c> does not need
     /// it, but <see cref="Views.ChildWindow.Initialize"/> seeds it from the loaded model's height).
     /// </summary>
     public double ExpandedHeight
@@ -149,9 +160,8 @@ public sealed class RollUpBehavior
         _contentRow.Height = collapsed ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
         _fileListHost.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
 
-        // R-9: routed through IResizeAffordance instead of touching ResizeOverlay directly — on the
-        // native path there is no overlay to hide (it was already disabled once, up front, when that
-        // path was selected — see ChildWindow's constructor), only the hit-test gate to flip.
+        // R-9: routed through IResizeAffordance (NativeSizingAffordance): flips the hit-test gate and the
+        // visual-only grips together.
         _resizeAffordance.SetEnabled(!collapsed);
 
         var (collapsedHeight, expandedHeight) = ResolveRollUpHeights();
@@ -192,8 +202,8 @@ public sealed class RollUpBehavior
         // docs/PLANS/phase-1-resize-stabilization.md §3.3): DoubleAnimation defaults to
         // FillBehavior.HoldEnd, which keeps the animation clock — and therefore its animated value —
         // attached to HeightProperty forever after Completed. Any LATER plain assignment
-        // (`_window.Height = x`, including every vertical resize delta in
-        // PanelResizeController.OnResizeDragDelta) becomes a local value with lower priority than that
+        // (`_window.Height = x`, including every vertical resize step in
+        // NativePanelResizeController) becomes a local value with lower priority than that
         // still-active animated value, so WPF silently ignores it: vertical resize visually stops
         // working the first time a panel is rolled up/down. Detaching the animation
         // (BeginAnimation(..., null)) and re-asserting toHeight as a plain local value, right after the
@@ -262,7 +272,7 @@ public sealed class RollUpBehavior
     {
         if (_gridHost is null) return;
 
-        var bounds = new Rect(_window.Left, _window.Top, _window.Width, _window.Height);
+        var bounds = ToDesktopBounds(new Rect(_window.Left, _window.Top, _window.Width, _window.Height));
         PanelSizingGridSupport.PersistSpans(_gridHost, bounds);
     }
 
@@ -274,6 +284,11 @@ public sealed class RollUpBehavior
     {
         var height = double.IsFinite(_expandedHeight) && _expandedHeight > 0d ? _expandedHeight : _window.Height;
 
-        return new Rect(_window.Left, _window.Top, _window.Width, height);
+        return ToDesktopBounds(new Rect(_window.Left, _window.Top, _window.Width, height));
     }
+
+    /// <summary>Window-space rectangle to desktop-DIP (ADR-037); identity when no scale provider was supplied.</summary>
+    private Rect ToDesktopBounds(Rect windowSpaceBounds) => _desktopScale is null
+        ? windowSpaceBounds
+        : PanelWindowCoordinates.ToDesktopBounds(_window, windowSpaceBounds, _desktopScale.Current);
 }

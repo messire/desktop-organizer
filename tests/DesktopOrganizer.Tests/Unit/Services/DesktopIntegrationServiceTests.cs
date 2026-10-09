@@ -555,6 +555,27 @@ public class DesktopIntegrationServiceTests
     }
 
     /// <summary>
+    /// ADR-audit review cycle 1 (G2): the swallowed failure is logged — but once per session, never once per
+    /// 300 ms timer tick.
+    /// </summary>
+    [Fact]
+    public void SendToBackOfZOrder_WhenNativeCallKeepsThrowing_WarnsOncePerSession()
+    {
+        _nativeApiMock
+            .Setup(api => api.FindWindow("Progman", null))
+            .Throws(new InvalidOperationException("Explorer went away"));
+
+        for (var i = 0; i < 5; i++) _service.SendToBackOfZOrder(Hwnd);
+
+        _appLogMock.Verify(
+            l => l.Warn(
+                nameof(DesktopIntegrationService),
+                "SendToBackFailed",
+                It.Is<KeyValuePair<string, object?>[]>(d => d.Any(kv => kv.Key == "errorType" && Equals(kv.Value, nameof(InvalidOperationException))))),
+            Times.Once);
+    }
+
+    /// <summary>
     /// The anchor lookup runs inside the same try/catch as the placement itself: a throwing
     /// <c>FindWindow</c>/<c>GetWindow</c> (e.g. Explorer dying mid-tick) must not escape either.
     /// </summary>

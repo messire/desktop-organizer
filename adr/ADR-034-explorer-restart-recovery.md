@@ -1,7 +1,10 @@
 # ADR-034: Explorer Restart Recovery
 
-Status: Accepted (2026-09-27) — amends ADR-001, ADR-019/ADR-020; Amended 2026-10-09 (ADR-031 amendment:
-`IDesktopIconsService.VisibilityChanged`, tray checkmark is now event-driven — see the end of this document)
+**Статус:** Accepted (2026-09-27) — amends ADR-001, ADR-019/ADR-020; Amended 2026-10-09 (ADR-031 amendment:
+`IDesktopIconsService.VisibilityChanged`, tray checkmark is now event-driven — see the end of this document);
+Amended 2026-10-09 (ADR-audit WP-D: top-level fence panels are held in the desktop band — `WM_WINDOWPOSCHANGING`
+filter + `KeepInDesktopBand`; corrects the former "kept back by the ADR-020 timer" claim; **the mechanism is now an
+ADR of its own: [ADR-049](ADR-049-desktop-band-top-level-fence-panels.md)**)
 
 ## Context
 
@@ -16,9 +19,13 @@ need to be reopened manually" — this package replaces that gap with automatic 
 The release-hardening F0 DPI spike (`docs/PLANS/release-hardening-1.0-f0-results.md`) measured a second,
 independent fact that this ADR's recovery must tolerate rather than assume away: on Windows 11 24H2+
 (measured on build 26200), `DesktopIntegrationService`'s `WorkerW` search returns `0` — panels are never
-re-parented at all, they are **top-level** windows kept at the back of the Z-order by the existing
-`SendToBackOfZOrder` timer (ADR-020), not by window-tree membership. Recovery must produce a good outcome
-in both layouts without knowing in advance which one it is running on.
+re-parented at all, they are **top-level** windows, not `WorkerW` children. (Correction 2026-10-09, ADR-audit
+WP-D: this paragraph used to claim they were kept at the back of the Z-order by "the existing
+`SendToBackOfZOrder` timer (ADR-020)" — that timer only ever served the system icons sidebar; fence panels
+were pushed back once, during recovery, and otherwise not at all. What actually holds them in the desktop band
+now is described in the amendment "2026-10-09: top-level fence panels are held in the desktop band" at the end
+of this document.) Recovery must produce a good outcome in both layouts without knowing in advance which one it
+is running on.
 
 ## Decision
 
@@ -95,9 +102,10 @@ ADR-037) is the expected, working state on that shell layout, not a failure of r
 The F0 spike's key finding stands as an amendment to the architectural assumption underlying all three:
 ADR-001's "Progman/WorkerW approach" and ADR-019/ADR-020's Z-order management assumed panels are always
 `WorkerW` children. On Windows 11 24H2+, `DesktopIntegrationService.GetOrCreateWorkerW()` returns `0` and
-panels are, and remain, top-level windows kept at the back of the Z-order purely by `SendToBackOfZOrder`
-(ADR-020) — this is not a bug in this recovery package, it is the documented behavior of the current OS
-layout. See ADR-037 for the full two-mode DPI consequence.
+panels are, and remain, top-level windows — this is not a bug in this recovery package, it is the documented
+behavior of the current OS layout. They are held in the desktop band (above wallpaper/icons, below application
+windows) by the event-driven mechanism of the 2026-10-09 amendment below — **not** by ADR-020's sidebar timer,
+as an earlier revision of this paragraph claimed. See ADR-037 for the full two-mode DPI consequence.
 
 ## Consequences
 
@@ -122,7 +130,9 @@ Negative:
 
 Graceful restart of Explorer from Task Manager and `taskkill /f` ×3 in a row; with panels on 2 monitors;
 with a rolled-up panel; with "Show on all virtual desktops" enabled; during a panel drag; with the Settings
-window open. See `docs/PLANS/release-hardening-1.0.md` §4 DoD for the full checklist.
+window open. See `docs/PLANS/release-hardening-1.0.md` §4 DoD for the full checklist. Status of the manual
+verification (Windows 11 24H2, 2026-09-27; Windows 10 is not checked separately) — `docs/ROADMAP.md`,
+«Сквозные задачи».
 
 ## Related
 
@@ -144,3 +154,97 @@ not raised when it returns `false` and will be retried). Subscribers keep the tr
 net rather than the only path. The recovery algorithm, the session-only `DesiredVisible` intent and "zero
 new persisted state" are unchanged (ADR-034 intent preserved). Changes made by Explorer itself are still
 not observed.
+
+## Amendment (2026-10-09): top-level fence panels are held in the desktop band (ADR-audit WP-D)
+
+> The decision below was later extracted into [ADR-049](ADR-049-desktop-band-top-level-fence-panels.md), which is now the
+> primary description of the mechanism (definition of the band, rejected alternatives, diagnostics, manual verify). The
+> text here is kept as the original amendment; if the two ever differ, ADR-049 wins.
+
+**Defect.** The ADR audit found that in mode T (Windows 11 24H2+, no `WorkerW`, `EmbedInDesktop` →
+`NoDesktopLayer`) nothing kept fence panels at the back of the Z-order: `SendToBackOfZOrder`'s 300 ms timer
+exists only in `SystemIconsPanelManager` (sidebar, ADR-020), and `ChildWindow` called `SendToBackOfZOrder` once,
+only from shell-restart recovery. A new, re-created or page-switched panel (a fresh HWND is linked at the top of
+the Z-order; `Show()` keeps it there) appeared **above** the user's application windows and sank only as other
+windows were activated.
+
+**Decision — event-driven, no timer, no global hook** (`ChildWindow.ZOrder.cs`, attached by `WindowManager`
+next to `AttachShellRecoveryTracking`, before the first `Show()`):
+
+1. **`WM_WINDOWPOSCHANGING` filter** on the panel's own `HwndSource` →
+   `IDesktopIntegrationService.ConstrainWindowPosChangingToDesktopBand`. When the panel itself is about to change
+   Z-order (or be shown — `SWP_SHOWWINDOW`), the proposed `hwndInsertAfter` in `WINDOWPOS` is rewritten in place
+   to the top of the desktop band (plus `SWP_NOOWNERZORDER`, ADR-020), or the Z-order half is vetoed with
+   `SWP_NOZORDER` when the panel already is inside the band. Move/resize frames (`SWP_NOZORDER`) and hide
+   requests return after one structure read. Covers `ShowWindow`'s raise, activation during inline rename and
+   anything else that raises the panel — before it happens, so there is no flash.
+2. **Deferred re-assert after every transition to visible** (`IsVisibleChanged` → `Dispatcher.BeginInvoke` at
+   `Loaded`) → `IDesktopIntegrationService.KeepInDesktopBand`: the safety net for a freshly created window (linked
+   at the top without any `WM_WINDOWPOSCHANGING`) and for a show the filter could not redirect. Idempotent: zero
+   `SetWindowPos` calls when the panel already is in the band.
+3. Shell-restart recovery (`ChildWindow.RecoverAfterShellRestart`, `NoDesktopLayer` branch) now calls
+   `KeepInDesktopBand` instead of `SendToBackOfZOrder`.
+
+**Desktop band** = the contiguous run of windows directly above `Progman` (walked with `GW_HWNDPREV`) made of
+Explorer's `WorkerW` siblings and **this process's** windows carrying `WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`
+(fence panels — including hidden ones of other pages — and the sidebar). A panel inside the run stays put; a
+panel outside it is inserted directly below the first window above the run (or at `HWND_TOP` when the run
+reaches the always-on-top windows / the top of the list). Our Settings window and dialogs lack
+`WS_EX_NOACTIVATE` and end the run, so a panel never rises above them. Walk cap `MaxPanelBandWalk = 512`; no
+`Progman` or cap exceeded → "unknown" → the Z-order is left alone. All reads are message-free (`FindWindow`,
+`GetWindow`, `GetWindowLongPtr`, `GetClassName`, `GetWindowThreadProcessId`) and therefore safe inside a window
+procedure; every native call stays behind `INativeApi` (new: `GetWindowProcessId`, `TryReadWindowPosZOrder`,
+`WriteWindowPosZOrder`).
+
+**Applicability is a fact, not an OS version**: every call first checks `GetAncestor(GA_ROOT) == hwnd`. A
+`WorkerW` child (mode E, Windows 10/≤23H2) has Explorer's window as its root and is never touched; because the
+check is made at message time, `SetParent`'s own internal repositioning (made after the new parent is linked) is
+ignored as well.
+
+**Rejected alternatives.**
+- *Reuse the sidebar's 300 ms timer for N panels* — `SendToBackOfZOrder`'s single "one slot above `Progman`"
+  target makes N windows (and the sidebar) take that slot from each other on every tick: endless Z-order churn,
+  N × 3.3 `SetWindowPos`/s, and a periodic re-assert could also fight Win+D while the user looks at the desktop.
+- *`HWND_BOTTOM` for everyone* — ADR-001 "Variant 2" / ADR-020: "below everything" is not "above the wallpaper".
+- *`SetWinEventHook(EVENT_SYSTEM_FOREGROUND)`* — a second global hook next to `WH_MOUSE_LL` (ADR-020 Variant B);
+  unnecessary anyway: another window being activated moves only that window, never the panel.
+- *Re-assert only on `Show()`/`WM_ACTIVATE`* (alone) — leaves a one-frame flash on top and misses raises that are
+  not activations; kept only as the safety net (part 2).
+
+**Interaction with the sidebar (ADR-020).** The sidebar keeps its timer and its slot directly above `Progman`;
+fence panels land at the top of the band, above it. The sidebar's tick finds itself in place (zero writes) and
+the band walk treats the sidebar as a member — the two mechanisms never swap places.
+
+**Win+D.** Unchanged: a panel reacts only to its own Z-order changes, never to other windows (or `Progman`)
+being raised.
+
+**Walk cap and diagnostics (ADR-audit review cycle 1).** `MaxPanelBandWalk = 512` bounds the `GW_HWNDPREV`
+walk; it is generous because the run legitimately holds every fence panel of every page plus the sidebar, and
+exists only so a corrupted/racing sibling list (Explorer restarting mid-walk) can never loop unboundedly inside a
+window procedure. The "no decision" outcomes are now distinct (`DesktopBandPlacementKind.ProgmanMissing`,
+`WalkCapExceeded`; `Unknown` only for the window being `Progman` itself) so that each is visible in the app log
+— **once per session**, as `DesktopBandProgmanMissing` / `DesktopBandWalkCapExceeded`; the Z-order is still left
+alone. Every previously empty `catch` of the mechanism now writes one Warn per session per kind
+(`DesktopBandKeepFailed`, `DesktopBandFilterFailed`, `SendToBackFailed` in the service; `ZOrderHookInstallFailed`,
+`ZOrderFilterFailed`, `ZOrderReassertFailed`, `ZOrderHookRemoveFailed` in `ChildWindow.ZOrder.cs`), carrying only
+the exception type. Nothing is ever written from inside the `WM_WINDOWPOSCHANGING` hook: the service's filter
+only ORs a flag (and keeps the last exception), which the next `KeepInDesktopBand` — UI thread, outside any
+window procedure — writes; `ChildWindow`'s own hook boundary posts its single entry to the dispatcher at
+`Background` priority the first time and does one interlocked exchange per failure after that. The `Progman`
+lookup is not cached between calls: `FindWindow` on a class name is an in-kernel lookup, a cache would need a
+dispatcher-frame notion in the Services layer, and a stale handle after an Explorer restart is exactly the case
+this ADR exists for. `INativeApi.TryReadWindowPosZOrder`/`WriteWindowPosZOrder` no longer pretend to catch an
+access violation (the .NET 8 runtime never delivers one to a managed `catch`): the `lParam` is valid by the
+`WM_WINDOWPOSCHANGING` contract.
+
+**Manual verify (Windows 11 24H2+).** New panel / page switch / re-created panel appears behind the active
+application windows without a flash; clicking a panel still works and neither raises nor activates it; inline
+rename still gets keyboard focus; several panels and the sidebar do not visibly reorder; the Settings window is
+never covered by a panel; Win+D and Explorer restart behave as before; Windows 10 (mode E) unchanged.
+
+## Amendments
+
+| Date | Source | What changed | Which sections/decisions no longer apply |
+|---|---|---|---|
+| 2026-10-09 | [ADR-031](ADR-031-settings-window-navigation-and-panel-customize.md) amendment | `IDesktopIconsService.VisibilityChanged`; tray checkmark and Settings toggle are event-driven, the recovery step-2 resync is a safety net | "the explicit tray resync is the only path" |
+| 2026-10-09 | ADR-audit WP-D + review cycle 1, [ADR-049](ADR-049-desktop-band-top-level-fence-panels.md) | Top-level fence panels (mode T) are held in the desktop band by a `WM_WINDOWPOSCHANGING` filter + deferred `KeepInDesktopBand`; shell-restart recovery calls `KeepInDesktopBand` instead of `SendToBackOfZOrder`; diagnostics and the walk cap | The claim that mode-T panels are "kept at the back of the Z-order by the existing `SendToBackOfZOrder` timer (ADR-020)" — that timer serves only the sidebar |

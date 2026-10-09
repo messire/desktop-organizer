@@ -23,7 +23,8 @@ internal delegate IDisposable? SizingHookInstaller(IntPtr hwnd, HwndSourceHook h
 /// <summary>
 /// Translates the messages of the system sizing loop (<c>WM_NCHITTEST</c>, <c>WM_ENTERSIZEMOVE</c>,
 /// <c>WM_SIZING</c>, <c>WM_EXITSIZEMOVE</c>, <c>WM_CAPTURECHANGED</c>, <c>WM_DPICHANGED</c>[<c>_AFTERPARENT</c>]
-/// plus <c>WM_MOUSEACTIVATE</c>) into calls on an <see cref="INativePanelSizingClient"/>.
+/// plus <c>WM_MOUSEACTIVATE</c> and <c>WM_NCLBUTTONDBLCLK</c> on the sizing edges) into calls on an
+/// <see cref="INativePanelSizingClient"/>.
 /// See ADR-022 / <c>docs/PLANS/phase-2-native-panel-sizing.md</c> §1.2.
 /// </summary>
 /// <remarks>
@@ -52,10 +53,12 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
     private const int WmEnterSizeMove = 0x0231;
     private const int WmExitSizeMove = 0x0232;
     private const int WmNcHitTest = 0x0084;
+    private const int WmNcLButtonDblClk = 0x00A3;
     private const int WmDpiChanged = 0x02E0;
     private const int WmDpiChangedAfterParent = 0x02E3;
 
     // ── WM_NCHITTEST results (WinUser.h HT*) ────────────────────────────────────────────────────
+    private const int HtClient = 1;
     private const int HtLeft = 10;
     private const int HtRight = 11;
     private const int HtTop = 12;
@@ -75,7 +78,10 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
     private const int WmszBottomLeft = 7;
     private const int WmszBottomRight = 8;
 
-    /// <summary>WinUser.h <c>MA_NOACTIVATE</c> — activate nothing, deliver the click (R-2).</summary>
+    /// <summary>
+    /// WinUser.h <c>MA_NOACTIVATE</c> — activate nothing, deliver the click (R-2). Answered ONLY for a click on
+    /// a sizing edge (G-5, ADR-022 phase 0-B).
+    /// </summary>
     private const int MaNoActivate = 3;
 
     /// <summary>Return value of a handled <c>WM_SIZING</c> (<c>TRUE</c>).</summary>
@@ -159,10 +165,46 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
         }
         catch (Exception ex)
         {
-            // Native sizing degrades to "unavailable" (the legacy Thumb path still exists) instead of
-            // taking the panel down with it.
+            // Native sizing degrades to "unavailable" (the panel simply has no edge resize - there is
+            // no fallback path since ADR-022, G-11) instead of taking the panel down with it.
             Log.Error("NativePanelSizingService", "AttachFailed", ex);
             return NoOpToken.Instance;
+        }
+    }
+
+    /// <inheritdoc />
+    public bool CancelActiveSizing(IntPtr hwnd)
+    {
+        try
+        {
+            PanelSizingAttachment? attachment;
+            lock (_gate)
+            {
+                _attachments.TryGetValue(hwnd, out attachment);
+            }
+
+            return attachment?.CancelActiveCycle() ?? false;
+        }
+        catch (Exception ex)
+        {
+            // Reached from dispatcher operations nested inside the sizing loop — never throw.
+            Log.Error("NativePanelSizingService", "CancelActiveSizingFailed", ex);
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public bool TryGetWindowRect(IntPtr hwnd, out NativeRectPx rect)
+    {
+        try
+        {
+            return _nativeApi.GetWindowRect(hwnd, out rect);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("NativePanelSizingService", "TryGetWindowRectFailed", ex);
+            rect = default;
+            return false;
         }
     }
 
@@ -174,6 +216,15 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
         source.AddHook(hook);
         return new HookRegistration(source, hook);
     }
+
+    /// <summary>
+    /// Whether <paramref name="hitTestCode"/> is one of the eight sizing codes this service itself answers
+    /// <c>WM_NCHITTEST</c> with (<c>HTLEFT</c>..<c>HTBOTTOMRIGHT</c>, 10..17). <c>HTCAPTION</c> is never
+    /// among them (D-5).
+    /// </summary>
+    /// <param name="hitTestCode">A <c>WM_NCHITTEST</c> result, as carried by <c>WM_MOUSEACTIVATE</c>/<c>WM_NCLBUTTONDBLCLK</c>.</param>
+    /// <returns><see langword="true"/> for a sizing edge or corner.</returns>
+    private static bool IsSizingHitTestCode(int hitTestCode) => hitTestCode is >= HtLeft and <= HtBottomRight;
 
     /// <summary>Signed X coordinate packed into the low word of a message <c>lParam</c>.</summary>
     private static int LoWord(IntPtr value) => unchecked((short)(value.ToInt64() & 0xFFFF));
@@ -217,6 +268,25 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
         NativeSizingEdge.BottomRight => HtBottomRight,
         _ => 0,
     };
+
+    /// <summary>
+    /// Answers <c>WM_NCHITTEST</c> with an explicit <c>HTCLIENT</c> when <paramref name="point"/> lies inside
+    /// <paramref name="windowRect"/> (right/bottom exclusive, as a <c>RECT</c>); otherwise leaves the message
+    /// unhandled for <c>DefWindowProc</c>.
+    /// </summary>
+    /// <param name="point">The hit-tested point, screen pixels.</param>
+    /// <param name="windowRect">The window rectangle, screen pixels.</param>
+    /// <param name="handled">Set only when the point is inside the window.</param>
+    /// <returns><c>HTCLIENT</c> for an inside point, otherwise zero.</returns>
+    private static IntPtr AnswerClientArea(NativePointPx point, NativeRectPx windowRect, ref bool handled)
+    {
+        var inside = point.X >= windowRect.Left && point.X < windowRect.Right
+            && point.Y >= windowRect.Top && point.Y < windowRect.Bottom;
+        if (!inside) return IntPtr.Zero;
+
+        handled = true;
+        return new IntPtr(HtClient);
+    }
 
     private void Detach(IntPtr hwnd, PanelSizingAttachment attachment)
     {
@@ -301,10 +371,10 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
                         return OnNcHitTest(hwnd, lParam, ref handled);
 
                     case WmMouseActivate:
-                        // R-2: the panel is WS_EX_NOACTIVATE and must never steal focus — not even when
-                        // DefWindowProc is about to enter the sizing loop on WM_NCLBUTTONDOWN.
-                        handled = true;
-                        return new IntPtr(MaNoActivate);
+                        return OnMouseActivate(lParam, ref handled);
+
+                    case WmNcLButtonDblClk:
+                        return OnNcLButtonDblClk(wParam, ref handled);
 
                     case WmEnterSizeMove:
                         OnEnterSizeMove(hwnd);
@@ -345,24 +415,123 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
         }
 
         /// <summary>
+        /// G-2 (ADR-022 phase 0-B): closes the running, client-accepted cycle WITHOUT a terminal client
+        /// notification (the client asked for this and ends its own gesture), then asks the system loop to
+        /// stop. The cycle is closed first, so every message the unwinding loop still delivers re-entrantly
+        /// (<c>WM_CAPTURECHANGED</c> inside <c>WM_CANCELMODE</c>) or afterwards (<c>WM_SIZING</c>,
+        /// <c>WM_EXITSIZEMOVE</c>) finds no cycle and is left alone.
+        /// </summary>
+        /// <returns><see langword="true"/> when a cycle was running and the native cancel request went out.</returns>
+        internal bool CancelActiveCycle()
+        {
+            if (_disposed || !_cycleActive || !_cycleAccepted) return false;
+
+            EndCycle(out _);
+
+            var requested = _owner._nativeApi.CancelSizingLoop(_hwnd);
+            if (!requested)
+            {
+                // The window did not own the capture: the loop is already unwinding (or was never ours) —
+                // nothing left to stop. Logged so a manual-verify session can see it.
+                _owner.Log.Warn(
+                    "NativePanelSizingService",
+                    "CancelSizingLoopNotRequested",
+                    new KeyValuePair<string, object?>("hwnd", _hwnd.ToInt64()));
+            }
+
+            return requested;
+        }
+
+        /// <summary>
         /// Stores the hook registration token so it can be disposed alongside this attachment.
         /// </summary>
         /// <param name="registration">The hook registration to own and dispose together with this attachment.</param>
         internal void SetRegistration(IDisposable registration) => _registration = registration;
 
+        /// <summary>
+        /// <c>WM_MOUSEACTIVATE</c>. R-2: a click on a sizing edge must never activate anything — not even when
+        /// <c>DefWindowProc</c> is about to enter the sizing loop on <c>WM_NCLBUTTONDOWN</c>. G-5 (ADR-022
+        /// phase 0-B): ONLY there. Any other hit (client area, <c>HTNOWHERE</c>, …) is left unhandled so
+        /// activation stays exactly what it was without this hook — in mode E (a <c>WorkerW</c> child) the
+        /// default walks up to the desktop's top-level window, which keyboard handling (F2/Delete/Esc) and
+        /// "click outside closes the menu" rely on.
+        /// </summary>
+        /// <param name="lParam">LOWORD = hit-test code, HIWORD = the mouse message.</param>
+        /// <param name="handled">Set only for a sizing hit.</param>
+        /// <returns><c>MA_NOACTIVATE</c> for a sizing hit, otherwise zero (unhandled).</returns>
+        private static IntPtr OnMouseActivate(IntPtr lParam, ref bool handled)
+        {
+            if (!IsSizingHitTestCode(LoWord(lParam))) return IntPtr.Zero;
+
+            handled = true;
+            return new IntPtr(MaNoActivate);
+        }
+
+        /// <summary>
+        /// <c>WM_NCLBUTTONDBLCLK</c>. G-6 (ADR-022 phase 0-B): a double click on a sizing edge would make
+        /// <c>DefWindowProc</c> run its "maximize vertically" (Aero Snap) action for the top/bottom edge — a
+        /// panel must never jump to the full monitor height. Swallowed on all eight sizing codes (no default
+        /// action there is wanted); anything else is left to <c>DefWindowProc</c>/WPF.
+        /// </summary>
+        /// <param name="wParam">The hit-test code of the double click.</param>
+        /// <param name="handled">Set only for a sizing hit.</param>
+        /// <returns>Always zero.</returns>
+        /// <remarks>
+        /// Side effect, accepted: the second press of a fast double click does not start a sizing loop — the
+        /// user presses again. MANUAL VERIFY (MV-11): dragging the top edge to the top of the screen is a
+        /// separate Aero Snap trigger inside the loop itself and is not covered by this.
+        /// </remarks>
+        private static IntPtr OnNcLButtonDblClk(IntPtr wParam, ref bool handled)
+        {
+            if (!IsSizingHitTestCode(unchecked((int)wParam.ToInt64()))) return IntPtr.Zero;
+
+            handled = true;
+            return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// <c>WM_NCHITTEST</c> — the hottest message of this hook: it arrives on every mouse move over the panel.
+        /// </summary>
+        /// <param name="hwnd">The panel window.</param>
+        /// <param name="lParam">The cursor position, packed screen pixels.</param>
+        /// <param name="handled">Set for a sizing hit and for an explicit <c>HTCLIENT</c> answer.</param>
+        /// <returns>A sizing <c>HT*</c> code, <c>HTCLIENT</c>, or zero (unhandled).</returns>
+        /// <remarks>
+        /// <para>
+        /// Order matters (ADR-022 phase 1 review, N2): the client's cheap gate is read FIRST. With the gate off
+        /// (the default move-only mode, Lock, a rolled-up panel) neither the DPI query nor the client's
+        /// geometric hit-test runs — only the window rectangle is read, because the explicit answer below is
+        /// given strictly for points inside the window.
+        /// </para>
+        /// <para>
+        /// No sizing edge ⇒ <c>HTCLIENT</c> answered EXPLICITLY for a point inside the window (N1): left to
+        /// <c>DefWindowProc</c>, the window's own area resolves to <c>HTCLIENT</c> only as long as the window
+        /// has no sizing frame. Should a sizing frame ever appear on some build/layer mode, <c>DefWindowProc</c>
+        /// would hand out <c>HT*</c> sizing codes the client never reported, and the resulting system loop
+        /// would run with <c>edge=None</c> — rejected by the client, i.e. without snapping and without
+        /// persistence. A point outside the window (a <c>WM_NCHITTEST</c> sent explicitly, or a failed
+        /// <c>GetWindowRect</c>) stays unhandled, exactly as before.
+        /// </para>
+        /// </remarks>
         private IntPtr OnNcHitTest(IntPtr hwnd, IntPtr lParam, ref bool handled)
         {
+            var point = new NativePointPx(LoWord(lParam), HiWord(lParam));
+            var hitTestEnabled = _client.IsHitTestEnabled;
+
             if (!_owner._nativeApi.GetWindowRect(hwnd, out var windowRect))
                 return IntPtr.Zero;
 
-            var point = new NativePointPx(LoWord(lParam), HiWord(lParam));
+            if (!hitTestEnabled)
+                return AnswerClientArea(point, windowRect, ref handled);
+
             var dpiScale = _owner._nativeApi.GetDpiScaleForWindow(hwnd);
             var edge = _client.HitTest(point, windowRect, dpiScale);
 
             if (edge == NativeSizingEdge.None)
             {
-                // Not a border: leave it to DefWindowProc (HTCLIENT) so WPF keeps its own hit testing.
-                return IntPtr.Zero;
+                // Not a border: an explicit HTCLIENT (see remarks) — WPF still does its own element hit
+                // testing inside the client area.
+                return AnswerClientArea(point, windowRect, ref handled);
             }
 
             // Seed for the next WM_ENTERSIZEMOVE. Only sizing hits are remembered, and only outside a
@@ -472,8 +641,10 @@ internal sealed class NativePanelSizingService : INativePanelSizingService
             }
 
             // handled stays false: geometry of a DPI change is the system's business (D-6), this path is
-            // observational only. MANUAL VERIFY (Win10/Win11): R-7 — a WorkerW-embedded child may never
-            // receive either message; IMonitorService.MonitorsChanged is the source of truth.
+            // observational only — also mid-cycle, where the cycle deliberately stays active (G-1, ADR-022
+            // phase 0-B: the client keeps the gesture in desktop-DIP and goes on snapping it).
+            // MANUAL VERIFY (Win10/Win11): R-7 — a WorkerW-embedded child may never receive either message;
+            // IMonitorService.MonitorsChanged is the source of truth.
             _client.DpiChanged(newScale, suggestedRect);
         }
 

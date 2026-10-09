@@ -14,7 +14,7 @@ namespace DesktopOrganizer.Tests.Helpers;
 /// own private <c>MergeResourceDictionaries(Application)</c> methods
 /// (<c>Unit.Views.ChildWindowContentSizingTests</c>, <c>ChildWindowInitializeTests</c>,
 /// <c>ChildWindowSizingGridTests</c>, <c>PanelChromeLayeredGeometryTests</c>,
-/// <c>ResizeOverlayGeometryTests</c>) — a sixth near-twin,
+/// <c>ResizeGripVisualsTests</c>) — a sixth near-twin,
 /// <c>Unit.Views.PanelCustomizeWindowClosingTests</c>, is a DIFFERENT (nine-entry, Settings.xaml-inclusive)
 /// list and is deliberately NOT folded into this same helper (its window's controls genuinely need
 /// <c>Settings.*</c> keys post-ADR-042; see that fixture's own remarks).

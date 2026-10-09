@@ -3,8 +3,9 @@ using System.Text.Json.Nodes;
 namespace DesktopOrganizer.Services.Storage;
 
 /// <summary>
-/// Reads and writes the three reserved envelope keys of the versioned JSON application-state
-/// document (ADR-024 D-5: <c>schemaVersion</c>, <c>writtenAtUtc</c>, <c>appVersion</c>), and draws
+/// Reads and writes the four reserved envelope keys of the versioned JSON application-state
+/// document (ADR-024 D-5: <c>schemaVersion</c>, <c>writtenAtUtc</c>, <c>appVersion</c>, and since v7
+/// <c>schemaRevision</c> — see the Additive revisions amendment), and draws
 /// the line between those and everything else, which is payload. Every other component in
 /// <c>Storage</c> — <see cref="AtomicJsonFileWriter"/>, <see cref="JsonApplicationStateStore"/>, the
 /// migration chain (ADR-024 D-9) — goes through this type rather than hard-coding the reserved key
@@ -30,8 +31,22 @@ internal static class StateEnvelope
     /// <see cref="Migrations.V5ToV6Migration"/>. Purely a <c>pages</c>-section reshape; every other
     /// payload key (<c>panels</c>/<c>layoutSnapshots</c>/<c>systemIconsPanel</c>), including every
     /// <c>pageId</c> reference inside them, is unaffected.
+    /// <para>
+    /// v7 (ADR-024 Amendment "Additive revisions", docs/PLANS/schema-additive-revision-v7.md): the payload
+    /// is identical to v6 (<see cref="Migrations.V6ToV7Migration"/> is an identity migration). The bump is the
+    /// "line in the sand" that introduces <c>schemaRevision</c> and the unknown-field round-trip: every build
+    /// able to write v7 is revision-safe, every older (revision-unsafe) writer is cut off by rung 7.
+    /// </para>
     /// </remarks>
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 7;
+
+    /// <summary>
+    /// The additive revision (minor) this build writes and fully understands within
+    /// <see cref="CurrentSchemaVersion"/>. A document with the same major but a higher revision is opened
+    /// writable (unknown fields are preserved on save); the revision written back is
+    /// <c>max(revisionOnDisk, CurrentSchemaRevision)</c> — a monotonic high-water mark.
+    /// </summary>
+    public const int CurrentSchemaRevision = 0;
 
     /// <summary>
     /// The synthetic schema version legacy <c>user.config</c> data is treated as being "at" once
@@ -42,21 +57,22 @@ internal static class StateEnvelope
     private const string SchemaVersionKey = "schemaVersion";
     private const string WrittenAtUtcKey = "writtenAtUtc";
     private const string AppVersionKey = "appVersion";
+    private const string SchemaRevisionKey = "schemaRevision";
 
-    private static readonly string[] ReservedKeysArray = { SchemaVersionKey, WrittenAtUtcKey, AppVersionKey };
+    private static readonly string[] ReservedKeysArray = { SchemaVersionKey, WrittenAtUtcKey, AppVersionKey, SchemaRevisionKey };
 
     /// <summary>The reserved envelope key names, in no particular order.</summary>
     public static IReadOnlyCollection<string> ReservedKeys => ReservedKeysArray;
 
-    /// <summary>Whether <paramref name="key"/> is one of the three reserved envelope keys.</summary>
+    /// <summary>Whether <paramref name="key"/> is one of the four reserved envelope keys.</summary>
     /// <param name="key">The key to test.</param>
     public static bool IsReservedKey(string key) =>
-        key is SchemaVersionKey or WrittenAtUtcKey or AppVersionKey;
+        key is SchemaVersionKey or WrittenAtUtcKey or AppVersionKey or SchemaRevisionKey;
 
     /// <summary>
     /// Wraps <paramref name="payload"/> (payload keys only — must not contain any reserved key; see
     /// <see cref="IsReservedKey"/>) in a fresh envelope carrying <paramref name="schemaVersion"/>,
-    /// <paramref name="writtenAtUtc"/>, and <paramref name="appVersion"/>. Returns a brand-new
+    /// <paramref name="writtenAtUtc"/>, <paramref name="appVersion"/>, and <paramref name="schemaRevision"/>. Returns a brand-new
     /// <see cref="JsonObject"/> — <paramref name="payload"/> itself is not mutated, and its nodes are
     /// deep-cloned (a <see cref="JsonNode"/> can only ever be attached under one parent at a time).
     /// </summary>
@@ -64,7 +80,8 @@ internal static class StateEnvelope
     /// <param name="schemaVersion">The schema version to record in the envelope.</param>
     /// <param name="writtenAtUtc">The write timestamp to record in the envelope.</param>
     /// <param name="appVersion">The application version to record in the envelope.</param>
-    public static JsonObject Wrap(JsonObject payload, int schemaVersion, DateTimeOffset writtenAtUtc, string appVersion)
+    /// <param name="schemaRevision">The additive schema revision to record in the envelope (high-water mark).</param>
+    public static JsonObject Wrap(JsonObject payload, int schemaVersion, DateTimeOffset writtenAtUtc, string appVersion, int schemaRevision)
     {
         ArgumentNullException.ThrowIfNull(payload);
         ArgumentNullException.ThrowIfNull(appVersion);
@@ -74,6 +91,7 @@ internal static class StateEnvelope
             [SchemaVersionKey] = schemaVersion,
             [WrittenAtUtcKey] = writtenAtUtc.ToString("O"),
             [AppVersionKey] = appVersion,
+            [SchemaRevisionKey] = schemaRevision,
         };
 
         foreach (var (key, value) in payload)
@@ -89,7 +107,7 @@ internal static class StateEnvelope
 
     /// <summary>
     /// Returns a new <see cref="JsonObject"/> containing every key of <paramref name="document"/>
-    /// except the three reserved envelope keys — i.e. payload only.
+    /// except the four reserved envelope keys — i.e. payload only.
     /// </summary>
     /// <param name="document">The full envelope document to strip.</param>
     public static JsonObject StripEnvelope(JsonObject document)
@@ -130,6 +148,35 @@ internal static class StateEnvelope
         {
             // Wrong JSON kind (string/array/object) or out of int range — treat as corrupt/invalid,
             // never throw out of a read-path helper.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads <c>schemaRevision</c> from <paramref name="document"/> tolerantly: a missing key, a non-integer
+    /// value, or a negative number all count as revision <c>0</c> (never corrupt, never quarantined).
+    /// </summary>
+    /// <param name="document">The envelope document to read from.</param>
+    /// <param name="schemaRevision">The decoded revision, or <c>0</c>.</param>
+    /// <returns><see langword="true"/> when a well-formed, non-negative revision was present; <see langword="false"/> when the value was missing or malformed (and treated as <c>0</c>).</returns>
+    public static bool TryGetSchemaRevision(JsonObject document, out int schemaRevision)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        schemaRevision = 0;
+        if (!document.TryGetPropertyValue(SchemaRevisionKey, out var node) || node is null) return false;
+
+        try
+        {
+            var value = node.GetValue<int>();
+            if (value < 0) return false;
+
+            schemaRevision = value;
+            return true;
+        }
+        catch (Exception)
+        {
+            // Wrong JSON kind or out of int range — treated as revision 0, never thrown out of a read path.
             return false;
         }
     }

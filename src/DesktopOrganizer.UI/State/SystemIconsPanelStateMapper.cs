@@ -1,3 +1,4 @@
+using DesktopOrganizer.Core;
 using DesktopOrganizer.UI.Models;
 using DesktopOrganizer.UI.State.Dto;
 
@@ -12,11 +13,15 @@ internal static class SystemIconsPanelStateMapper
 {
     /// <summary>Maps the live <see cref="SystemIconsPanelModel"/> to its schema-v3 DTO.</summary>
     /// <param name="model">The system-icons panel model to map.</param>
-    public static SystemIconsPanelStateDto ToDto(SystemIconsPanelModel model)
+    /// <param name="ledger">
+    /// When supplied, the unknown fields captured at load (section/item extras, an unrecognised icon size,
+    /// items of an unknown kind) are written back into the DTO (ADR-024 Amendment "Additive revisions").
+    /// </param>
+    public static SystemIconsPanelStateDto ToDto(SystemIconsPanelModel model, UnknownFieldLedger? ledger = null)
     {
         ArgumentNullException.ThrowIfNull(model);
 
-        return new SystemIconsPanelStateDto
+        var dto = new SystemIconsPanelStateDto
         {
             IsEnabled = model.IsEnabled,
             ShowOnAllVirtualDesktops = model.ShowOnAllVirtualDesktops,
@@ -24,18 +29,22 @@ internal static class SystemIconsPanelStateMapper
             AnchorVirtualDesktopId = model.AnchorVirtualDesktopId?.ToString(),
             Items = model.Items.Select(item => new SystemIconsPanelItemStateDto
             {
-                Kind = item.Kind,
+                Kind = item.Kind.ToString(),
                 IsVisible = item.IsVisible,
                 Order = item.Order,
             }).ToList(),
         };
+
+        ledger?.ApplyToSystemIconsPanel(dto);
+        return dto;
     }
 
     /// <summary>
     /// Applies <paramref name="dto"/> onto <paramref name="model"/> in place — mirrors the former
     /// <c>SystemIconsPanelManager.Load</c> deserialisation logic exactly, including its
     /// per-field-isolated defaults (a single bad field must never discard the rest — see
-    /// <see cref="Dto.SystemIconsPanelStateDto"/>'s remarks on <c>AnchorVirtualDesktopId</c>).
+    /// <see cref="Dto.SystemIconsPanelStateDto"/>'s remarks on <c>AnchorVirtualDesktopId</c>). An item whose
+    /// <c>kind</c> this build does not know is skipped here (the ledger keeps it for the next save).
     /// </summary>
     /// <param name="dto">The persisted system-icons panel DTO to apply.</param>
     /// <param name="model">The live model to update in place.</param>
@@ -66,7 +75,18 @@ internal static class SystemIconsPanelStateMapper
 
         foreach (var itemDto in dto.Items)
         {
-            var existing = model.Items.FirstOrDefault(i => i.Kind == itemDto.Kind);
+            if (itemDto is null)
+            {
+                continue;
+            }
+
+            var kind = TolerantEnumParser.Parse(itemDto.Kind, SystemIconKind.ThisPc, out var recognized);
+            if (!recognized)
+            {
+                continue;
+            }
+
+            var existing = model.Items.FirstOrDefault(i => i.Kind == kind);
             if (existing is null) continue;
             existing.IsVisible = itemDto.IsVisible;
             existing.Order = itemDto.Order;

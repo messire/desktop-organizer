@@ -1,6 +1,6 @@
 # ADR-005: UX-улучшения панели — ресайз по сетке, фильтр содержимого, roll-up кнопка
 
-**Статус:** Accepted  
+**Статус:** Accepted — Amended 2026-09-22 (ADR-018: `GridMetrics.Quantize` удалён, ресайз по сетке иконок через `AdaptiveGridLayout`); Amended 2026-09-22 (ADR-021: аккумулятор `_resizeDeltaX/Y` заменён `ResizeGestureSession`/`ResizeGeometryCalculator`); Amended 2026-10-10 (ADR-022 Фаза 1: ресайз по сетке идёт только по native-пути `WM_SIZING` — `Resize_DragDelta`, 8 `Thumb` и `ResizeOverlay` удалены)  
 **Дата:** 2026-06-28
 
 ---
@@ -112,3 +112,13 @@ Portals (они не сохраняют файлы на диск, а читаю�
 - Все персистируемые свойства `ChildWindowModel` должны использовать `SetField` — нарушение
   теперь явно задокументировано как дефект (см. `IsRolledUp`).
 - `EnumEqualsConverter` становится общим компонентом для будущих enum-биндингов в UI.
+
+---
+
+## Amendments
+
+| Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
+|---|---|---|---|
+| 2026-09-22 | [ADR-018](ADR-018-adaptive-icon-grid-layout.md) | `AdaptiveGridLayout`/`AdaptiveIconGridPanel` заменили `WrapPanel`; `GridMetrics.Quantize` удалён; ячейка/ряд считаются аналитически (`CellSize`, `RowHeight`, `SnapExtent`) | Решение 1 в части метода `Quantize(double value, double cell)`; `GridMetrics.CellSize(double iconSize)` остаётся |
+| 2026-09-22 | [ADR-021](ADR-021-interaction-state-and-gesture-lifecycle.md) | Жизненный цикл resize вынесен в `ResizeGestureSession` + чистый `ResizeGeometryCalculator`; в коде нет полей `_resizeDeltaX`/`_resizeDeltaY` | Решение 2 (аккумулятор в code-behind `Resize_DragDelta`): принцип «квантовать суммарное смещение от начала жеста» сохранён, реализация — иная |
+| 2026-10-10 | [ADR-022](ADR-022-native-panel-sizing.md) Фаза 1 | Единственный путь ресайза — native: квантование по сетке иконок делает `ResizeGestureSession`/`ResizeGeometryCalculator` из `NativePanelResizeController.ProposeBounds` на каждом `WM_SIZING`; обработчик `DragStarted` на 8 Thumb-ах исчез вместе с `ResizeOverlay` | Решение 2 в части «обработчик `DragStarted` на всех 8 Thumb-ах» и «поля-аккумуляторы в code-behind» (уже снято ADR-021; теперь и сами Thumb'ы удалены); Решение 1: «клавиатурный ресайз» как будущее расширение не затронуто |

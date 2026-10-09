@@ -11,7 +11,7 @@ namespace DesktopOrganizer.UI.Diagnostics;
 /// <remarks>
 /// One instance is created per <see cref="Views.ChildWindow"/> (transient — see the DI registration in
 /// <see cref="Configuration.DiConfig"/>) and shared between that panel's
-/// <see cref="Behaviors.PanelResizeController"/> and <see cref="Behaviors.PanelDragMoveBehavior"/>, so
+/// <see cref="Behaviors.NativePanelResizeController"/> and <see cref="Behaviors.PanelDragMoveBehavior"/>, so
 /// per-gesture throttling/aggregation state never needs to be keyed by panel.
 /// </remarks>
 public interface IGestureDiagnostics
@@ -27,7 +27,7 @@ public interface IGestureDiagnostics
     /// <summary>Recorded once, during application shutdown, before the diagnostics log is disposed.</summary>
     void SessionExiting();
 
-    /// <summary>Recorded when a resize-thumb drag gesture begins (<c>Thumb.DragStarted</c>).</summary>
+    /// <summary>Recorded when a resize gesture begins (native <c>WM_ENTERSIZEMOVE</c>).</summary>
     /// <param name="panelId">The panel's id.</param>
     /// <param name="direction"><c>Interaction.ResizeEdge.ToString()</c> — the edge/corner being resized.</param>
     /// <param name="bounds">The panel's geometry when the gesture began.</param>
@@ -49,7 +49,7 @@ public interface IGestureDiagnostics
         string? captureOwner);
 
     /// <summary>
-    /// Recorded on <c>Thumb.DragDelta</c>, throttled to at most once per
+    /// Recorded on every native sizing-loop step (<c>WM_SIZING</c>), throttled to at most once per
     /// <see cref="GestureDiagnostics.DefaultDeltaSampleIntervalMs"/> (the first delta of a gesture is
     /// always recorded). <paramref name="rawWidth"/>/<paramref name="rawHeight"/> are the unquantised
     /// accumulators; <paramref name="applied"/> is the actual (possibly grid-snapped) window geometry
@@ -57,8 +57,8 @@ public interface IGestureDiagnostics
     /// </summary>
     /// <param name="panelId">The panel's id.</param>
     /// <param name="direction"><c>Interaction.ResizeEdge.ToString()</c> — the edge/corner being resized.</param>
-    /// <param name="hChange">The horizontal delta reported by this <c>Thumb.DragDelta</c>.</param>
-    /// <param name="vChange">The vertical delta reported by this <c>Thumb.DragDelta</c>.</param>
+    /// <param name="hChange">The horizontal delta reported by this step.</param>
+    /// <param name="vChange">The vertical delta reported by this step.</param>
     /// <param name="rawWidth">The unquantised accumulated width for this gesture.</param>
     /// <param name="rawHeight">The unquantised accumulated height for this gesture.</param>
     /// <param name="applied">The actual (possibly grid-snapped) window geometry after this delta was applied.</param>
@@ -73,9 +73,8 @@ public interface IGestureDiagnostics
 
     /// <summary>
     /// Recorded whenever a resize gesture actually ends (Phase 1 resize stabilization,
-    /// docs/PLANS/phase-1-resize-stabilization.md §3.6, commit C8) — not just on
-    /// <c>Thumb.DragCompleted</c> anymore, but for every <c>Interaction.ResizeEndReason</c>
-    /// (capture loss, stale-drag self-heal, panel unload/closing, a mid-delta exception, and the
+    /// docs/PLANS/phase-1-resize-stabilization.md §3.6, commit C8) — for every
+    /// <c>Interaction.ResizeEndReason</c> (aborted sizing loop, source change, panel unload/closing, a mid-delta exception, and the
     /// ordinary/canceled mouse-up). <paramref name="canceled"/> is kept for backward compatibility with
     /// the Phase 0 schema (<see langword="true"/> only for <c>Interaction.ResizeEndReason.Canceled</c>);
     /// <paramref name="endReason"/> is the full picture — <c>Interaction.ResizeEndReason.ToString()</c>,
@@ -84,9 +83,8 @@ public interface IGestureDiagnostics
     /// <param name="panelId">The panel's id.</param>
     /// <param name="direction">The edge/corner that was being resized.</param>
     /// <param name="canceled">
-    /// Mirrors <see cref="System.Windows.Controls.Primitives.DragCompletedEventArgs.Canceled"/> — WPF
-    /// raises a canceled <c>DragCompleted</c> when the <see cref="System.Windows.Controls.Primitives.Thumb"/>
-    /// loses mouse capture mid-gesture, which is purely observed here, never reacted to.
+    /// Kept for backward compatibility with the Phase 0 log schema — <see langword="true"/> only for
+    /// <c>Interaction.ResizeEndReason.Canceled</c>; purely observed here, never reacted to.
     /// </param>
     /// <param name="bounds">The panel's geometry when the gesture ended.</param>
     /// <param name="endReason">
@@ -118,33 +116,13 @@ public interface IGestureDiagnostics
     void DragCompleted(Guid? panelId, Rect bounds);
 
     /// <summary>
-    /// Recorded from the <c>ResizeOverlay</c>'s bubbling <c>Mouse.GotMouseCapture</c> handler — observes
-    /// which element/source actually obtained capture for a resize-thumb gesture.
+    /// Recorded from <see cref="Views.ChildWindow.OnClosing"/>. <paramref name="resizeActive"/>
+    /// observes whether the panel is closing while a resize gesture is still active
+    /// (<c>PanelInteractionTracker.State == Resizing</c>).
     /// </summary>
     /// <param name="panelId">The panel's id.</param>
-    /// <param name="sourceName">The type name of the element that raised the capture event.</param>
-    /// <param name="captureOwner">The type name of the element that now owns mouse capture, or <see langword="null"/> if nothing holds capture.</param>
-    void CaptureGot(Guid? panelId, string sourceName, string? captureOwner);
-
-    /// <summary>
-    /// Recorded from the <c>ResizeOverlay</c>'s bubbling <c>Mouse.LostMouseCapture</c> handler.
-    /// <paramref name="thumbIsDragging"/> observes whether the originating <see cref="System.Windows.Controls.Primitives.Thumb"/>
-    /// still considered itself mid-drag at the moment capture was lost — a canceled-gesture signal, not
-    /// acted on here.
-    /// </summary>
-    /// <param name="panelId">The panel's id.</param>
-    /// <param name="sourceName">The type name of the element that raised the lost-capture event.</param>
-    /// <param name="captureOwner">The type name of the element that now owns mouse capture, or <see langword="null"/> if none.</param>
-    /// <param name="thumbIsDragging">Whether the originating <see cref="System.Windows.Controls.Primitives.Thumb"/> still considered itself mid-drag.</param>
-    void CaptureLost(Guid? panelId, string sourceName, string? captureOwner, bool thumbIsDragging);
-
-    /// <summary>
-    /// Recorded from <see cref="Views.ChildWindow.OnClosing"/>. <paramref name="thumbIsDragging"/>
-    /// observes whether the panel is closing while a resize-thumb gesture is still (apparently) active.
-    /// </summary>
-    /// <param name="panelId">The panel's id.</param>
-    /// <param name="thumbIsDragging">Whether a resize-thumb gesture still (apparently) considers itself in progress.</param>
-    void PanelClosing(Guid? panelId, bool thumbIsDragging);
+    /// <param name="resizeActive">Whether a resize gesture is still in progress as the panel closes.</param>
+    void PanelClosing(Guid? panelId, bool resizeActive);
 
     /// <summary>
     /// Recorded when <c>ViewModels.ChildWindowViewModel</c>'s background existence-liveness poll

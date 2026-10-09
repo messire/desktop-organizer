@@ -72,8 +72,10 @@
 | **E5 (SYSTEM_AWARE → Progman)** | `SetParent` успешен; **awareness окна `SYSTEM_AWARE` → `PER_MONITOR_AWARE (V2)` и остаётся PMv2 даже после `SetParent(NULL)`** |
 
 Выводы из измерений:
-- **Режим T подтверждён на целевой ОС**: продукт на 24H2+ не встраивает панели; они top-level и держатся внизу Z-order таймером
-  `SendToBackOfZOrder` (ADR-020), а не иерархией окон.
+- **Режим T подтверждён на целевой ОС**: продукт на 24H2+ не встраивает панели; они top-level, а не дети `WorkerW`.
+  (Исправлено 2026-10-09, ADR-audit WP-D: здесь ранее утверждалось, что их «держит внизу Z-order таймер `SendToBackOfZOrder`
+  (ADR-020)» — это неверно, 300-мс таймер есть только у боковой панели. Fence-панели в нижней полосе рабочего стола теперь
+  удерживает фильтр `WM_WINDOWPOSCHANGING` + `KeepInDesktopBand` после показа — см. ADR-034, amendment 2026-10-09.)
 - **Cross-process `SetParent` работает на 26200** (E3/E4) и делает корнем чужой (Explorer) top-level `Progman` — значит в режиме E
   DPI ребёнка определяется DPI окна Explorer, а не нашим процессом.
 - **Forced reset подтверждён (E5)**: cross-process `SetParent` system-aware окна в PMv2-окно Explorer **необратимо** переводит

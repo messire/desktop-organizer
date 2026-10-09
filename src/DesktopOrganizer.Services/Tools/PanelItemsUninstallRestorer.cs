@@ -12,6 +12,7 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
     private readonly string _manifestPath;
     private readonly string _desktopDirectory;
     private readonly IAppLog? _appLog;
+    private readonly Func<string, string[]> _enumerateEntries;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PanelItemsUninstallRestorer"/> class for production
@@ -35,7 +36,15 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
     /// <param name="storageRoot">The <c>PanelItems</c> folder to restore from.</param>
     /// <param name="desktopDirectory">The folder items with no usable original location are moved to.</param>
     /// <param name="appLog">See <see cref="Log"/>.</param>
-    internal PanelItemsUninstallRestorer(string storageRoot, string desktopDirectory, IAppLog? appLog = null)
+    /// <param name="enumerateEntries">
+    /// Test seam: lists the entries of a directory (defaults to <see cref="Directory.GetFileSystemEntries(string)"/>).
+    /// Lets tests simulate an unreadable directory deterministically, without relying on ACLs.
+    /// </param>
+    internal PanelItemsUninstallRestorer(
+        string storageRoot,
+        string desktopDirectory,
+        IAppLog? appLog = null,
+        Func<string, string[]>? enumerateEntries = null)
     {
         ArgumentNullException.ThrowIfNull(storageRoot);
         ArgumentNullException.ThrowIfNull(desktopDirectory);
@@ -44,6 +53,7 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
         _manifestPath = Path.Combine(_storageRoot, PanelItemStorageService.ManifestFileName);
         _desktopDirectory = desktopDirectory;
         _appLog = appLog;
+        _enumerateEntries = enumerateEntries ?? Directory.GetFileSystemEntries;
     }
 
     /// <summary>
@@ -70,10 +80,14 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
             return new PanelItemsRestoreResult(0, 0, "No managed PanelItems storage folder found — nothing to restore.");
 
         var manifestByPath = BuildManifestLookup(ReadManifestTolerant());
-        var items = EnumerateManagedItems();
+        var (items, enumerationFailures) = EnumerateManagedItems();
 
         var restored = 0;
-        var failed = 0;
+
+        // ADR-041 §RestoreAll p.4: a directory whose content could not even be listed holds items that were
+        // never seen, let alone restored — each such directory counts as one failed item, so the storage
+        // root (and the unread user files in it) is kept and the run reports a partial failure.
+        var failed = enumerationFailures;
 
         foreach (var (itemPath, isDirectory) in items)
         {
@@ -106,7 +120,7 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
         return new PanelItemsRestoreResult(
             restored,
             failed,
-            $"Restored {restored} item(s); {failed} item(s) could not be moved and remain under '{_storageRoot}' — see the diagnostics log.");
+            $"Restored {restored} item(s); {failed} item(s) or location(s) could not be restored and remain under '{_storageRoot}' — see the diagnostics log.");
     }
 
     private static bool PathExists(string path, bool isDirectory) =>
@@ -256,22 +270,24 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
     /// Enumerates every leaf item under <see cref="_storageRoot"/>: a legacy flat-layout file directly
     /// under the root, or an item (file or directory) directly inside a per-item GUID directory (see
     /// <see cref="PanelItemStorageService.BuildDestinationPath"/>/<see cref="PanelItemStorageService.BuildDestinationDirectoryPath"/>).
-    /// Never throws — any enumeration failure is logged and simply yields fewer items rather than
-    /// aborting the whole run.
+    /// Never throws — an enumeration failure is logged and does not abort the whole run, but it is
+    /// reported back as an unreadable location (<c>Failures</c>) so the caller treats it as an
+    /// unrestored item and never deletes the storage root over content it could not read.
     /// </summary>
-    private List<(string Path, bool IsDirectory)> EnumerateManagedItems()
+    private (List<(string Path, bool IsDirectory)> Items, int Failures) EnumerateManagedItems()
     {
         var result = new List<(string, bool)>();
+        var failures = 0;
 
         string[] topEntries;
         try
         {
-            topEntries = Directory.GetFileSystemEntries(_storageRoot);
+            topEntries = _enumerateEntries(_storageRoot);
         }
         catch (Exception ex)
         {
             Log.Error("PanelItemsUninstallRestorer", "EnumerateStorageRootFailed", ex, new KeyValuePair<string, object?>("path", _storageRoot));
-            return result;
+            return (result, 1);
         }
 
         foreach (var entry in topEntries)
@@ -281,8 +297,10 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
             {
                 full = Path.GetFullPath(entry).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Log.Error("PanelItemsUninstallRestorer", "EnumerateEntryPathInvalid", ex, new KeyValuePair<string, object?>("path", entry));
+                failures++;
                 continue;
             }
 
@@ -293,11 +311,12 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
                 string[] children;
                 try
                 {
-                    children = Directory.GetFileSystemEntries(full);
+                    children = _enumerateEntries(full);
                 }
                 catch (Exception ex)
                 {
                     Log.Error("PanelItemsUninstallRestorer", "EnumerateItemDirectoryFailed", ex, new KeyValuePair<string, object?>("path", full));
+                    failures++;
                     continue;
                 }
 
@@ -308,8 +327,10 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
                     {
                         childFull = Path.GetFullPath(child).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
+                        Log.Error("PanelItemsUninstallRestorer", "EnumerateEntryPathInvalid", ex, new KeyValuePair<string, object?>("path", child));
+                        failures++;
                         continue;
                     }
 
@@ -333,7 +354,7 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
             }
         }
 
-        return result;
+        return (result, failures);
     }
 
     /// <summary>

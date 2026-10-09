@@ -100,13 +100,12 @@
                             at each screen location, entirely independent of WPF's own hit-test tree. Once
                             the chrome inset makes the outer 2 DIP ring nearly transparent (only a faint
                             glow tail paints there), a click there would be routed straight through to the
-                            desktop, bypassing the resize Thumbs (ChildWindow.xaml's ResizeOverlay, a
-                            SIBLING of this control) entirely — the very risk ADR-025 MAJOR-1 already
+                            desktop, bypassing the native resize hit-test (WM_NCHITTEST edges/corners) entirely — the very risk ADR-025 MAJOR-1 already
                             documented for the panel's rounded corners. This Border spans the WHOLE window
                             rect (no Margin) with a near-invisible (alpha=1/255) but OPAQUE fill, so the OS
                             always routes the click to this window; IsHitTestVisible="False" keeps it out of
                             WPF's OWN hit-test tree, so routing within this window still falls through to
-                            whichever WPF element (a Thumb, a header button) actually sits at that point.
+                            whichever WPF element (a header button, a file item) actually sits at that point.
                         -->
                         <Border x:Name="PART_HitCatcher"
                                 Background="{StaticResource Brush.HitTest.Catcher}"
@@ -478,7 +477,7 @@
                                 VisualState. IsHitTestVisible="False" is load-bearing (R-5) — this element
                                 sits on top of the whole chrome (last child = highest z-order within
                                 PART_SurfaceLayer) and must never intercept a mouse event ChildWindow.xaml's
-                                own ResizeOverlay/drag/drop siblings, or this template's own header
+                                own ResizeGripVisuals/drag/drop siblings, or this template's own header
                                 buttons/title editor, need to receive. Relocated (ADR-030) from the old
                                 two-row Grid (Grid.RowSpan="2") to PART_SurfaceLayer directly (its parent's
                                 own single cell already spans the whole inset area, rolled-up included) —
@@ -601,7 +600,7 @@
         a Border with no Padding adds its BorderThickness to its own measured (desired) size, which
         would otherwise inflate every ListBoxItem in grid mode by 2px beyond its DataTemplate content
         — desynchronising the WrapPanel's actual per-item footprint from GridMetrics.CellSize/BoxSize
-        (grid-snap math, see Resize_DragDelta/SnapWidthToGrid in ChildWindow.xaml.cs). The negative
+        (grid-snap math, see NativePanelResizeController.ProposeBounds/SnapWidthToGrid). The negative
         Margin cancelled that out in measurement, but it also pushed the 1px border stroke *outside*
         the ListBoxItem's own arrange box — for the first row/column, that stroke fell outside the
         ScrollViewer's clip region and was silently cut off (ADR-015, ui-polishing-1 §3.3).

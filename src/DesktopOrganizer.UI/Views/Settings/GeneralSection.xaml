@@ -60,16 +60,6 @@
                 <TextBlock Text="{loc:Loc Settings_General_Advanced_Header}" Style="{StaticResource Settings.CardHeader}"/>
             </Expander.Header>
             <StackPanel>
-                <controls:SettingsCard Header="{loc:Loc Settings_General_NativeResize_Header}"
-                                        Description="{loc:Loc Settings_General_NativeResize_Description}">
-                    <controls:SettingsCard.ActionContent>
-                        <CheckBox VerticalAlignment="Center"
-                                  Style="{StaticResource Theme.ToggleSwitch}"
-                                  AutomationProperties.Name="{loc:Loc Settings_General_NativeResize_Header}"
-                                  IsChecked="{Binding NativePanelSizing, Mode=TwoWay}"/>
-                    </controls:SettingsCard.ActionContent>
-                </controls:SettingsCard>
-
                 <controls:SettingsCard Header="{loc:Loc Settings_General_ResetHints_Header}"
                                         Description="{loc:Loc Settings_General_ResetHints_Description}">
                     <controls:SettingsCard.ActionContent>

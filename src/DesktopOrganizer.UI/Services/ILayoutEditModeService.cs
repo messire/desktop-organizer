@@ -53,6 +53,9 @@ public sealed class LayoutModeChangedEventArgs(LayoutInteractionMode from, Layou
 /// </summary>
 public interface ILayoutEditModeService : INotifyPropertyChanged
 {
+    /// <summary>The <see cref="INotifyPropertyChanged.PropertyChanged"/> name raised by <see cref="NotifyNormalModeGesturesChanged"/>.</summary>
+    const string NormalModeGesturesPropertyName = nameof(IAppSettings.NormalModeLayoutGestures);
+
     /// <summary>
     /// The current mode. <b>Never persisted</b> (D-8/R-11) — always <see cref="LayoutInteractionMode.Normal"/>
     /// immediately after construction, regardless of what the previous session ended in.
@@ -94,6 +97,16 @@ public interface ILayoutEditModeService : INotifyPropertyChanged
     /// </summary>
     /// <param name="source">Where this transition originated, for diagnostics/subscribers.</param>
     bool Toggle(LayoutModeChangeSource source);
+
+    /// <summary>
+    /// Tells every subscriber that <see cref="IAppSettings.NormalModeLayoutGestures"/> — the third input of
+    /// <see cref="LayoutGesturePolicy.Resolve"/> besides <see cref="Mode"/>/<see cref="IsLayoutLocked"/> —
+    /// was just changed (ADR-026 D-2/D-5). The value itself stays in <see cref="IAppSettings"/> (no new
+    /// persisted state); this only raises <see cref="INotifyPropertyChanged.PropertyChanged"/> with
+    /// <see cref="NormalModeGesturesPropertyName"/> so each open panel re-applies its resize gate instead of
+    /// waiting for the next Edit-layout toggle or restart. Idempotent and cheap; call it after writing the setting.
+    /// </summary>
+    void NotifyNormalModeGesturesChanged();
 
     /// <summary>
     /// Raised AFTER <see cref="Mode"/> changes — exactly once per real transition, never for a no-op

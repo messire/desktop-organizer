@@ -18,6 +18,16 @@ internal class DesktopIntegrationService(INativeApi nativeApi, IAppLog? appLog =
     /// </summary>
     internal const uint ProgmanMsgTimeoutMs = 1000;
 
+    /// <summary>
+    /// Upper bound on how many windows <see cref="ResolveDesktopBandPlacement"/> walks up from <c>Progman</c>
+    /// (ADR-034 amendment 2026-10-09). Unlike <see cref="MaxDesktopBandWalk"/> the run legitimately contains
+    /// every fence panel of this process — visible and hidden (other pages) — plus the sidebar, so the cap is
+    /// generous; it exists only so a corrupted/racing sibling list can never loop unboundedly inside a
+    /// window procedure. Exceeding it answers <see cref="DesktopBandPlacementKind.WalkCapExceeded"/>, which leaves
+    /// the Z-order alone and is logged once per session (ADR-audit review cycle 1, G2).
+    /// </summary>
+    internal const int MaxPanelBandWalk = 512;
+
     private const uint ProgmanMsg = 0x052C;
     private const int GwlExStyle = -20;
     private const uint WsExToolWindow = 0x00000080;
@@ -25,7 +35,19 @@ internal class DesktopIntegrationService(INativeApi nativeApi, IAppLog? appLog =
 
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
+
+    /// <summary><c>SWP_NOZORDER</c> — the request does not change the Z-order.</summary>
+    private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
+
+    /// <summary><c>SWP_SHOWWINDOW</c> — the request shows the window (<c>ShowWindow</c> goes through it).</summary>
+    private const uint SwpShowWindow = 0x0040;
+
+    /// <summary><c>SWP_HIDEWINDOW</c> — the request hides the window; its Z-order is irrelevant then.</summary>
+    private const uint SwpHideWindow = 0x0080;
+
+    /// <summary><c>WS_EX_TOPMOST</c> — the start of the always-on-top run ends the desktop-band walk.</summary>
+    private const uint WsExTopmost = 0x00000008;
 
     /// <summary>
     /// <c>SWP_NOOWNERZORDER</c> — do not reorder the owner window. WPF implements
@@ -59,8 +81,51 @@ internal class DesktopIntegrationService(INativeApi nativeApi, IAppLog? appLog =
     /// </summary>
     private const int MaxDesktopBandWalk = 8;
 
+    /// <summary>
+    /// <c>HWND_TOP</c> — for a non-topmost window: the top of the non-topmost run. Used when everything
+    /// non-topmost above <c>Progman</c> already belongs to the desktop band.
+    /// </summary>
+    private static readonly IntPtr HwndTop = IntPtr.Zero;
+
+    /// <summary>This process's id — the desktop band contains only OUR desktop windows (plus Explorer's <c>WorkerW</c>).</summary>
+    private static readonly uint OwnProcessId = (uint)Environment.ProcessId;
+
     // SetWindowPos: place the window just above the shell desktop window, changing nothing else.
     private static readonly IntPtr HwndBottom = new (1);
+
+    /// <summary>
+    /// Once-per-session gate for the Z-order diagnostics (ADR-audit review cycle 1, G2; ADR-034 amendment
+    /// 2026-10-09): every swallowed failure and every "no decision" anomaly is written once — never per tick or
+    /// per window message. The service is a DI singleton, so its lifetime is the session.
+    /// </summary>
+    private readonly AppLogEventThrottle _onceLog = new (limitPerEvent: 1, announceSuppression: false);
+
+    /// <summary>
+    /// <see cref="DeferredBandDiagnostics"/> bits recorded inside the <c>WM_WINDOWPOSCHANGING</c> filter, which
+    /// must not write a log entry itself; written by the next <see cref="KeepInDesktopBand"/> call (UI thread,
+    /// outside any window procedure).
+    /// </summary>
+    private int _deferredBandDiagnostics;
+
+    /// <summary>The last exception the window-procedure filter swallowed, for the deferred entry.</summary>
+    private Exception? _deferredFilterFailure;
+
+    /// <summary>Anomalies the window-procedure filter records for deferred logging.</summary>
+    [Flags]
+    private enum DeferredBandDiagnostics
+    {
+        /// <summary>Nothing recorded.</summary>
+        None = 0,
+
+        /// <summary>The filter found no <c>Progman</c>.</summary>
+        ProgmanMissing = 1,
+
+        /// <summary>The filter's walk hit <see cref="MaxPanelBandWalk"/>.</summary>
+        WalkCapExceeded = 2,
+
+        /// <summary>The filter swallowed an exception (<see cref="_deferredFilterFailure"/>).</summary>
+        FilterFailed = 4,
+    }
 
     /// <inheritdoc />
     public DesktopEmbedResult EmbedInDesktop(IntPtr hwnd)
@@ -201,9 +266,108 @@ internal class DesktopIntegrationService(INativeApi nativeApi, IAppLog? appLog =
                     SwpNoMove | SwpNoSize | SwpNoActivate | SwpNoOwnerZOrder);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Degrade silently — same policy as the rest of this service.
+            // Degrade — same policy as the rest of this service; logged once per session (this runs off a
+            // 300 ms timer, so a persistent failure must not write an entry per tick).
+            WarnFailureOnce("SendToBackFailed", ex);
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Also writes the diagnostics the <c>WM_WINDOWPOSCHANGING</c> filter
+    /// (<see cref="ConstrainWindowPosChangingToDesktopBand"/>) recorded but may not log itself — each anomaly
+    /// once per session.
+    /// </remarks>
+    public void KeepInDesktopBand(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+
+        try
+        {
+            if (!IsTopLevelWindow(hwnd)) return;
+
+            var placement = ResolveDesktopBandPlacement(hwnd);
+            WarnNoDecisionOnce(placement.Kind);
+            if (placement.Kind != DesktopBandPlacementKind.InsertAfter) return;
+
+            nativeApi.SetWindowPos(
+                hwnd,
+                placement.InsertAfter,
+                0,
+                0,
+                0,
+                0,
+                SwpNoMove | SwpNoSize | SwpNoActivate | SwpNoOwnerZOrder);
+        }
+        catch (Exception ex)
+        {
+            // Degrade — a panel that stays too high until the next show is cosmetic. Logged once per session.
+            WarnFailureOnce("DesktopBandKeepFailed", ex);
+        }
+        finally
+        {
+            FlushDeferredBandDiagnostics();
+        }
+    }
+
+    /// <inheritdoc />
+    public void ConstrainWindowPosChangingToDesktopBand(IntPtr hwnd, IntPtr windowPos)
+    {
+        if (hwnd == IntPtr.Zero || windowPos == IntPtr.Zero) return;
+
+        try
+        {
+            if (!nativeApi.TryReadWindowPosZOrder(windowPos, out var requestedInsertAfter, out var flags)) return;
+
+            // Hot path first: move/resize frames carry SWP_NOZORDER and must cost nothing more than this read.
+            if ((flags & SwpHideWindow) != 0) return;
+            var changesZOrder = (flags & SwpNoZOrder) == 0;
+            var shows = (flags & SwpShowWindow) != 0;
+            if (!changesZOrder && !shows) return;
+
+            // Mode E (a WorkerW child) is never touched: the decision is the fact of THIS window's root, read
+            // at message time — which also covers SetParent's own internal re-positioning, made after the new
+            // parent is already linked.
+            if (!IsTopLevelWindow(hwnd)) return;
+
+            var placement = ResolveDesktopBandPlacement(hwnd);
+            switch (placement.Kind)
+            {
+                case DesktopBandPlacementKind.InBand:
+                    // Already in the band: veto the Z-order half of the request (activation, ShowWindow's
+                    // HWND_TOP) and keep everything else — panels never churn among themselves.
+                    if (changesZOrder) nativeApi.WriteWindowPosZOrder(windowPos, requestedInsertAfter, flags | SwpNoZOrder);
+                    return;
+
+                case DesktopBandPlacementKind.InsertAfter:
+                    // Already exactly what we want (e.g. KeepInDesktopBand's own SetWindowPos): leave it.
+                    if (changesZOrder && requestedInsertAfter == placement.InsertAfter) return;
+
+                    // Redirect the raise into the band. SWP_NOZORDER is cleared for a show request so the panel
+                    // appears directly in its final slot (no one-frame flash on top); SWP_NOOWNERZORDER keeps
+                    // WPF's hidden owner window where it is (ADR-020, SWP_NOOWNERZORDER section).
+                    nativeApi.WriteWindowPosZOrder(
+                        windowPos,
+                        placement.InsertAfter,
+                        (flags & ~SwpNoZOrder) | SwpNoOwnerZOrder);
+                    return;
+
+                default:
+                    // No decision (no Progman, walk cap): leave the system's proposal alone. Inside a window
+                    // procedure nothing is logged — the anomaly is only flagged for KeepInDesktopBand to write.
+                    DeferNoDecision(placement.Kind);
+                    return;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Runs inside a window procedure — never let anything escape, and never write a log entry here
+            // (formatting/enqueueing on every message of a persistent failure). Two field writes; the entry is
+            // written by the next KeepInDesktopBand.
+            Volatile.Write(ref _deferredFilterFailure, ex);
+            Interlocked.Or(ref _deferredBandDiagnostics, (int)DeferredBandDiagnostics.FilterFailed);
         }
     }
 
@@ -279,6 +443,139 @@ internal class DesktopIntegrationService(INativeApi nativeApi, IAppLog? appLog =
         }
 
         return HwndBottom;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="hwnd"/> is a top-level window right now (mode T): <c>GA_ROOT</c> is the window
+    /// itself. A <c>WorkerW</c> child (mode E) has Explorer's top-level window as its root; a failed query
+    /// (<see cref="IntPtr.Zero"/>) counts as "not top-level", i.e. "do nothing".
+    /// </summary>
+    private bool IsTopLevelWindow(IntPtr hwnd)
+    {
+        var root = nativeApi.GetRootWindow(hwnd);
+        return root != IntPtr.Zero && root == hwnd;
+    }
+
+    /// <summary>
+    /// Walks up from <c>Progman</c> through the desktop band (see <see cref="IsDesktopBandMember"/>) and decides
+    /// where <paramref name="hwnd"/> belongs.
+    /// </summary>
+    /// <returns>
+    /// <see cref="DesktopBandPlacementKind.InBand"/> when <paramref name="hwnd"/> is met inside the run (stay put);
+    /// <see cref="DesktopBandPlacementKind.InsertAfter"/> with the first foreign window above the run — or
+    /// <c>HWND_TOP</c> when the run reaches the always-on-top windows or the top of the list — otherwise;
+    /// <see cref="DesktopBandPlacementKind.ProgmanMissing"/> / <see cref="DesktopBandPlacementKind.WalkCapExceeded"/>
+    /// when <c>Progman</c> is missing or the walk hit its cap; <see cref="DesktopBandPlacementKind.Unknown"/> when
+    /// <paramref name="hwnd"/> is <c>Progman</c> itself. The three "no decision" kinds leave the Z-order alone.
+    /// </returns>
+    /// <remarks>
+    /// Landing at the TOP of the band (just below the first application window) rather than in the single
+    /// slot above <c>Progman</c> is deliberate: N panels each claiming that one slot would swap places on
+    /// every call (the churn ADR-020 measured for the hidden owner window) and would also fight the sidebar's
+    /// 300 ms timer for it. A panel placed this way is, by construction, inside the run on the next call —
+    /// idempotent.
+    /// </remarks>
+    private DesktopBandPlacement ResolveDesktopBandPlacement(IntPtr hwnd)
+    {
+        var progman = FindProgman();
+        if (progman == IntPtr.Zero) return DesktopBandPlacement.ProgmanMissing;
+        if (progman == hwnd) return DesktopBandPlacement.Unknown;
+
+        var current = progman;
+        for (var i = 0; i < MaxPanelBandWalk; i++)
+        {
+            var above = nativeApi.GetWindow(current, GwHwndPrev);
+            if (above == IntPtr.Zero) return DesktopBandPlacement.At(HwndTop);
+            if (above == hwnd) return DesktopBandPlacement.InBand;
+
+            var exStyle = (uint)nativeApi.GetWindowLongPtr(above, GwlExStyle).ToInt64();
+            if ((exStyle & WsExTopmost) != 0) return DesktopBandPlacement.At(HwndTop);
+            if (!IsDesktopBandMember(above, exStyle)) return DesktopBandPlacement.At(above);
+
+            current = above;
+        }
+
+        return DesktopBandPlacement.WalkCapExceeded;
+    }
+
+    /// <summary>
+    /// Records a "no decision" anomaly met inside the <c>WM_WINDOWPOSCHANGING</c> filter for deferred logging —
+    /// one interlocked OR, nothing else (the filter runs inside a window procedure).
+    /// </summary>
+    private void DeferNoDecision(DesktopBandPlacementKind kind)
+    {
+        var bit = kind switch
+        {
+            DesktopBandPlacementKind.ProgmanMissing => DeferredBandDiagnostics.ProgmanMissing,
+            DesktopBandPlacementKind.WalkCapExceeded => DeferredBandDiagnostics.WalkCapExceeded,
+            _ => DeferredBandDiagnostics.None,
+        };
+
+        if (bit != DeferredBandDiagnostics.None) Interlocked.Or(ref _deferredBandDiagnostics, (int)bit);
+    }
+
+    /// <summary>
+    /// Writes what <see cref="ConstrainWindowPosChangingToDesktopBand"/> recorded since the last call. Called from
+    /// <see cref="KeepInDesktopBand"/> only — the UI thread, outside any window procedure. Never throws.
+    /// </summary>
+    private void FlushDeferredBandDiagnostics()
+    {
+        var pending = (DeferredBandDiagnostics)Interlocked.Exchange(ref _deferredBandDiagnostics, 0);
+        if (pending == DeferredBandDiagnostics.None) return;
+
+        if ((pending & DeferredBandDiagnostics.ProgmanMissing) != 0) WarnNoDecisionOnce(DesktopBandPlacementKind.ProgmanMissing);
+        if ((pending & DeferredBandDiagnostics.WalkCapExceeded) != 0) WarnNoDecisionOnce(DesktopBandPlacementKind.WalkCapExceeded);
+
+        if ((pending & DeferredBandDiagnostics.FilterFailed) != 0)
+        {
+            WarnFailureOnce("DesktopBandFilterFailed", Interlocked.Exchange(ref _deferredFilterFailure, null));
+        }
+    }
+
+    /// <summary>
+    /// Writes a "no decision" anomaly once per session: no <c>Progman</c> (Explorer down — the panels stay
+    /// wherever the system puts them until it is back) or a sibling list longer than
+    /// <see cref="MaxPanelBandWalk"/> (corrupted/racing). Any other kind is ignored.
+    /// </summary>
+    private void WarnNoDecisionOnce(DesktopBandPlacementKind kind)
+    {
+        switch (kind)
+        {
+            case DesktopBandPlacementKind.ProgmanMissing:
+                _onceLog.Warn(appLog ?? AppLog.Current, nameof(DesktopIntegrationService), "DesktopBandProgmanMissing");
+                break;
+            case DesktopBandPlacementKind.WalkCapExceeded:
+                _onceLog.Warn(
+                    appLog ?? AppLog.Current,
+                    nameof(DesktopIntegrationService),
+                    "DesktopBandWalkCapExceeded",
+                    new KeyValuePair<string, object?>("maxWalk", MaxPanelBandWalk));
+                break;
+        }
+    }
+
+    /// <summary>Writes a swallowed Z-order failure once per session per <paramref name="evt"/>.</summary>
+    private void WarnFailureOnce(string evt, Exception? ex)
+        => _onceLog.Warn(
+            appLog ?? AppLog.Current,
+            nameof(DesktopIntegrationService),
+            evt,
+            new KeyValuePair<string, object?>("errorType", ex?.GetType().Name));
+
+    /// <summary>
+    /// Desktop-band membership: Explorer's <c>WorkerW</c> wallpaper windows, and this process's own desktop
+    /// windows — fence panels and the sidebar, recognisable by the <c>WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE</c>
+    /// pair <see cref="ApplyDesktopWindowStyles"/> gives them. Our other windows (Settings, dialogs, WPF's
+    /// hidden owner windows) do not carry <c>WS_EX_NOACTIVATE</c> and end the run, so a panel is never lifted
+    /// above the Settings window.
+    /// </summary>
+    private bool IsDesktopBandMember(IntPtr window, uint exStyle)
+    {
+        const uint desktopStyles = WsExToolWindow | WsExNoActivate;
+        if ((exStyle & desktopStyles) == desktopStyles && nativeApi.GetWindowProcessId(window) == OwnProcessId)
+            return true;
+
+        return string.Equals(nativeApi.GetWindowClassName(window), WorkerWClass, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

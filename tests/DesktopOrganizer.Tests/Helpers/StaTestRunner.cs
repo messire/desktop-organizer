@@ -144,7 +144,7 @@ public static class StaTestRunner
     /// Added (P08 fix cycle 2, M-2) specifically so classes that need a VALUE back out of their STA-thread
     /// body — several fixtures across this project (<c>ResourceDictionaryMergeTests</c>,
     /// <c>ChildWindowInitializeTests</c>, <c>ChildWindowContentSizingTests</c>,
-    /// <c>ChildWindowSizingGridTests</c>, <c>ResizeOverlayGeometryTests</c>) had each hand-rolled their own
+    /// <c>ChildWindowSizingGridTests</c>, <c>ResizeGripVisualsTests</c>) had each hand-rolled their own
     /// near-identical private <c>RunOnStaThread&lt;T&gt;</c> for exactly this reason — can share this one
     /// implementation instead of duplicating the STA-thread machinery, AND, more importantly, gain the
     /// exception-absorbing <c>PumpForever</c> guard for free whenever their worker ends up owning
@@ -211,7 +211,7 @@ public static class StaTestRunner
         {
             // Best-effort cleanup only — see the remark above. Only the exception's type name is
             // recorded (never Message/StackTrace), matching this codebase's own privacy
-            // convention for swallowed exceptions (e.g. PanelResizeController.OnResizeDragDelta).
+            // convention for swallowed exceptions (e.g. NativePanelResizeController.ProposeBounds).
             Console.Error.WriteLine(
                 $"{nameof(StaTestRunner)}: ignoring {shutdownException.GetType().Name} from Dispatcher.InvokeShutdown().");
         }
@@ -241,7 +241,7 @@ public static class StaTestRunner
             Interlocked.Increment(ref _absorbedExceptionCount);
 
             // Type name only, never Message/StackTrace — this codebase's convention for swallowed
-            // exceptions (e.g. PanelResizeController.OnResizeDragDelta).
+            // exceptions (e.g. NativePanelResizeController.ProposeBounds).
             Console.Error.WriteLine(
                 $"{nameof(StaTestRunner)}: absorbed {args.Exception.GetType().Name} from a leaked background callback on the Application dispatcher.");
         };

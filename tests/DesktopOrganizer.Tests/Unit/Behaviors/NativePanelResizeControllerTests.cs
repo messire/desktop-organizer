@@ -25,7 +25,7 @@ namespace DesktopOrganizer.Tests.Unit.Behaviors;
 /// delegates, closed over the real <see cref="System.Windows.Window"/> by the public constructor but
 /// closed over a local, in-memory <see cref="System.Windows.Rect"/> by an <c>internal</c> testability-seam
 /// constructor instead (mirrors exactly how Phase 1 lifted <see cref="ResizeGeometryCalculator"/>/
-/// <see cref="ResizeGestureSession"/> out from under <c>PanelResizeController</c>'s own <c>Window</c>
+/// <see cref="ResizeGestureSession"/> out from under the controller's own <c>Window</c>
 /// dependency). This test class constructs the REAL <see cref="NativePanelResizeController"/> via that
 /// internal constructor (see <see cref="CreateHarness"/>) and drives it through its real
 /// <see cref="INativePanelSizingClient"/> surface (<c>SizeMoveEntered</c>/<c>ProposeBounds</c>/
@@ -74,6 +74,33 @@ public class NativePanelResizeControllerTests
         Assert.Equal(TitleBarHeight, constraints.TitleBarHeight);
         Assert.Equal(GridMetrics.FileListHPadding, constraints.HorizontalChrome);
         Assert.Equal(GridMetrics.FileListVPadding, constraints.VerticalChrome);
+    }
+
+    // ── IsHitTestEnabled: the cheap gate WM_NCHITTEST reads before any native call (ADR-022 phase 1 review, N2) ──
+
+    /// <summary>
+    /// Verifies that <see cref="NativePanelResizeController.IsHitTestEnabled"/> mirrors the live resize gate on
+    /// every read, and that <see cref="NativePanelResizeController.HitTest"/> keeps its own semantics: an edge
+    /// point maps to a sizing edge while the gate is on and to <see cref="NativeSizingEdge.None"/> while it is off.
+    /// </summary>
+    [Fact]
+    public void IsHitTestEnabled_MirrorsResizeGate_AndHitTestSemanticsAreUnchanged()
+    {
+        var harness = CreateHarness();
+        var windowRect = new NativeRectPx(100, 200, 500, 600);
+        var rightEdge = new NativePointPx(499, 400);
+
+        Assert.True(harness.Controller.IsHitTestEnabled);
+        Assert.Equal(NativeSizingEdge.Right, harness.Controller.HitTest(rightEdge, windowRect, 1d));
+
+        harness.ResizeEnabled = false;
+
+        Assert.False(harness.Controller.IsHitTestEnabled);
+        Assert.Equal(NativeSizingEdge.None, harness.Controller.HitTest(rightEdge, windowRect, 1d));
+
+        harness.ResizeEnabled = true;
+
+        Assert.True(harness.Controller.IsHitTestEnabled);
     }
 
     // ── List mode is free on BOTH axes even when snap is enabled — SnapResizeToIconGrid only applies
@@ -343,7 +370,7 @@ public class NativePanelResizeControllerTests
     /// test-only throw-hook to production code — the "adding test-only methods to production classes"
     /// anti-pattern the test-driven-development skill explicitly warns against — or (b) deliberately
     /// tripping <see cref="ResizeGeometryCalculator.Apply"/>'s <c>Debug.Assert</c>, which
-    /// <c>PanelResizeController.OnResizeDragDelta</c>'s own remarks document as process-terminating on
+    /// <c>ProposeBounds</c>'s own remarks document as process-terminating on
     /// .NET 8 with no debugger attached (unsafe to do inside a test run). Neither is an honest test.
     /// </para>
     /// </remarks>
@@ -381,20 +408,22 @@ public class NativePanelResizeControllerTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════
-    // Honest golden equivalence (replaces the tautological T-EQ-* suite — see
+    // Regression-golden for the native path (ADR-022 phase 1: the Thumb path is gone, the oracle is now the
+    // pure ResizeGeometryCalculator Accumulate-chain + Apply pipeline). Originally "honest golden
+    // equivalence" (replaces the tautological T-EQ-* suite — see
     // ResizeGeometryCalculatorApplyEquivalenceTests' remarks for why the old suite never actually
     // exercised this controller). Every test below drives the REAL
     // NativePanelResizeController.ProposeBounds, through a NON-ZERO WM_SIZING origin offset (the exact
     // R-3/C-1 coordinate-space scenario fixed by commit 646e04c — see NativeSizingOriginResolverTests
-    // for the same offset-simulation technique), and compares the result against the legacy
-    // Accumulate-chain + Apply path. A regression of C-1 (offset applied on the way in but never undone
+    // for the same offset-simulation technique), and compares the result against the pure
+    // Accumulate-chain + Apply pipeline oracle. A regression of C-1 (offset applied on the way in but never undone
     // on the way out) would fail every test below.
     // ══════════════════════════════════════════════════════════════════════════════════════════════
 
     // ── Grid+snap, scale 1.0, all 8 edges — the same magnitudes as the old (tautological) T-EQ table,
     // but now driven through the real controller with a non-zero origin offset. ────────────────────────
 
-    /// <summary>Verifies that the real controller's <c>WM_SIZING</c> path matches the legacy Accumulate-chain + Apply path bit-for-bit, in Grid mode with snap enabled and a non-zero origin offset.</summary>
+    /// <summary>Verifies that the real controller's <c>WM_SIZING</c> path matches the pure Accumulate-chain + Apply pipeline oracle bit-for-bit, in Grid mode with snap enabled and a non-zero origin offset.</summary>
     /// <param name="edge">The edge being dragged.</param>
     /// <param name="totalDx">The total horizontal drag delta, in DIPs.</param>
     /// <param name="totalDy">The total vertical drag delta, in DIPs.</param>
@@ -407,7 +436,7 @@ public class NativePanelResizeControllerTests
     [InlineData(ResizeEdge.TopRight, 84d, 92d)]
     [InlineData(ResizeEdge.BottomLeft, 84d, 92d)]
     [InlineData(ResizeEdge.BottomRight, 84d, 92d)]
-    public void RealController_GridSnapMode_MatchesLegacyPath_BitForBit_WithNonZeroOriginOffset(
+    public void RealController_GridSnapMode_MatchesPurePipeline_BitForBit_WithNonZeroOriginOffset(
         ResizeEdge edge, double totalDx, double totalDy)
     {
         var harness = CreateHarness(gridSnap: true, iconSize: IconSize, viewMode: PanelViewMode.Grid);
@@ -415,7 +444,7 @@ public class NativePanelResizeControllerTests
 
         var actualScreenPx = RunGestureWithOriginOffset(harness.Controller, StartBoundsDip, edge, totalDx, totalDy, scale: 1.0);
 
-        var expectedDip = LegacyApply(StartBoundsDip, edge, totalDx, totalDy, constraints);
+        var expectedDip = ExpectedPipelineOracle(StartBoundsDip, edge, totalDx, totalDy, constraints);
         var expectedScreenPx = NativeSizingCoordinateMapper.ToPx(expectedDip, 1.0);
 
         Assert.Equal(expectedScreenPx, actualScreenPx);
@@ -423,15 +452,15 @@ public class NativePanelResizeControllerTests
     }
 
     // ── MINOR-2 (fix-cycle 2): the same 8-edge Grid+snap coverage as the test above, but with
-    // IconLayoutPolicy.FixedGap instead of the default LegacyStretch — this "Honest golden equivalence"
+    // IconLayoutPolicy.FixedGap instead of the default LegacyStretch — this regression-golden
     // region never exercised a FixedGap panel before this fix-cycle, even though
     // ResizeConstraintsFactory.BuildConstraints (which the test above already drives) has read
-    // model.IconLayoutPolicy since P05. Proves the REAL native controller and the REAL legacy
-    // Accumulate-chain path still agree bit-for-bit — including the non-zero WM_SIZING origin offset —
+    // model.IconLayoutPolicy since P05. Proves the REAL native controller and the pure
+    // Accumulate-chain pipeline oracle still agree bit-for-bit — including the non-zero WM_SIZING origin offset —
     // once HorizontalChrome/MinWidth both reserve M-2's extra scrollbar width for FixedGap, closing the
     // "two SnapWidthToGrid copies could silently disagree for FixedGap" gap the fix-cycle 2 review named. ──
 
-    /// <summary>Verifies that the real controller's <c>WM_SIZING</c> path matches the legacy Accumulate-chain + Apply path bit-for-bit under <see cref="IconLayoutPolicy.FixedGap"/>, with a non-zero origin offset.</summary>
+    /// <summary>Verifies that the real controller's <c>WM_SIZING</c> path matches the pure Accumulate-chain + Apply pipeline oracle bit-for-bit under <see cref="IconLayoutPolicy.FixedGap"/>, with a non-zero origin offset.</summary>
     /// <param name="edge">The edge being dragged.</param>
     /// <param name="totalDx">The total horizontal drag delta, in DIPs.</param>
     /// <param name="totalDy">The total vertical drag delta, in DIPs.</param>
@@ -444,7 +473,7 @@ public class NativePanelResizeControllerTests
     [InlineData(ResizeEdge.TopRight, 84d, 92d)]
     [InlineData(ResizeEdge.BottomLeft, 84d, 92d)]
     [InlineData(ResizeEdge.BottomRight, 84d, 92d)]
-    public void RealController_GridSnapMode_FixedGapPolicy_MatchesLegacyPath_BitForBit_WithNonZeroOriginOffset(
+    public void RealController_GridSnapMode_FixedGapPolicy_MatchesPurePipeline_BitForBit_WithNonZeroOriginOffset(
         ResizeEdge edge, double totalDx, double totalDy)
     {
         var harness = CreateHarness(gridSnap: true, iconSize: IconSize, viewMode: PanelViewMode.Grid, iconLayoutPolicy: IconLayoutPolicy.FixedGap);
@@ -460,7 +489,7 @@ public class NativePanelResizeControllerTests
 
         var actualScreenPx = RunGestureWithOriginOffset(harness.Controller, StartBoundsDip, edge, totalDx, totalDy, scale: 1.0);
 
-        var expectedDip = LegacyApply(StartBoundsDip, edge, totalDx, totalDy, constraints);
+        var expectedDip = ExpectedPipelineOracle(StartBoundsDip, edge, totalDx, totalDy, constraints);
         var expectedScreenPx = NativeSizingCoordinateMapper.ToPx(expectedDip, 1.0);
 
         Assert.Equal(expectedScreenPx, actualScreenPx);
@@ -468,10 +497,10 @@ public class NativePanelResizeControllerTests
     }
 
     // ── List+free, all 8 edges, at DPI scale 1.0/1.25/1.5 — proves the px→DIP→px round trip at non-1.0
-    // scale introduces no drift relative to the legacy path (StartBoundsDip/deltas are multiples of 4,
+    // scale introduces no drift relative to the pure pipeline (StartBoundsDip/deltas are multiples of 4,
     // so this round trip is exactly lossless at every scale used here — see StartBoundsDip's remark). ──
 
-    /// <summary>Verifies that in List+free mode, the real controller's <c>WM_SIZING</c> path matches the legacy Accumulate-chain + Apply path bit-for-bit, with a non-zero origin offset, across DPI scales 1.0/1.25/1.5.</summary>
+    /// <summary>Verifies that in List+free mode, the real controller's <c>WM_SIZING</c> path matches the pure Accumulate-chain + Apply pipeline oracle bit-for-bit, with a non-zero origin offset, across DPI scales 1.0/1.25/1.5.</summary>
     /// <param name="edge">The edge being dragged.</param>
     /// <param name="totalDx">The total horizontal drag delta, in DIPs.</param>
     /// <param name="totalDy">The total vertical drag delta, in DIPs.</param>
@@ -501,7 +530,7 @@ public class NativePanelResizeControllerTests
     [InlineData(ResizeEdge.TopRight, 40d, 24d, 1.5)]
     [InlineData(ResizeEdge.BottomLeft, 40d, 24d, 1.5)]
     [InlineData(ResizeEdge.BottomRight, 40d, 24d, 1.5)]
-    public void RealController_ListFreeMode_MatchesLegacyPath_BitForBit_WithNonZeroOriginOffset_AcrossDpiScales(
+    public void RealController_ListFreeMode_MatchesPurePipeline_BitForBit_WithNonZeroOriginOffset_AcrossDpiScales(
         ResizeEdge edge, double totalDx, double totalDy, double scale)
     {
         var harness = CreateHarness(gridSnap: false, viewMode: PanelViewMode.List, desktopScale: scale);
@@ -509,7 +538,7 @@ public class NativePanelResizeControllerTests
 
         var actualScreenPx = RunGestureWithOriginOffset(harness.Controller, StartBoundsDip, edge, totalDx, totalDy, scale);
 
-        var expectedDip = LegacyApply(StartBoundsDip, edge, totalDx, totalDy, constraints);
+        var expectedDip = ExpectedPipelineOracle(StartBoundsDip, edge, totalDx, totalDy, constraints);
         var expectedScreenPx = NativeSizingCoordinateMapper.ToPx(expectedDip, scale);
 
         // Px-level equality: the actual wire contract WriteRect/GetWindowRect round-trip through.
@@ -521,13 +550,13 @@ public class NativePanelResizeControllerTests
     }
 
     // ── ADR-011 Amendment 2026-09-24 (resize extension): GridSize=48, List+free, all 8 edges — the
-    // native WM_SIZING path and the legacy Accumulate-chain + Apply path must still agree bit-for-bit
+    // native WM_SIZING path and the pure Accumulate-chain + Apply pipeline must still agree bit-for-bit
     // once IAppSettings.GridSize (not just the icon-grid snap) is driving per-frame quantisation. Reuses
-    // the exact harness/LegacyApply helpers every other "Honest golden equivalence" case above uses —
+    // the exact harness/ExpectedPipelineOracle helpers every other regression-golden case above uses —
     // the only difference is CreateHarness's new gridSize argument and passing it through to
     // BuildConstraints, exactly the same two call sites production code itself changed. ─────────────────
 
-    /// <summary>Verifies that with <c>IAppSettings.GridSize</c> driving per-frame quantisation, the real controller's <c>WM_SIZING</c> path still matches the legacy Accumulate-chain + Apply path bit-for-bit, with a non-zero origin offset.</summary>
+    /// <summary>Verifies that with <c>IAppSettings.GridSize</c> driving per-frame quantisation, the real controller's <c>WM_SIZING</c> path still matches the pure Accumulate-chain + Apply pipeline oracle bit-for-bit, with a non-zero origin offset.</summary>
     /// <param name="edge">The edge being dragged.</param>
     /// <param name="totalDx">The total horizontal drag delta, in DIPs.</param>
     /// <param name="totalDy">The total vertical drag delta, in DIPs.</param>
@@ -540,7 +569,7 @@ public class NativePanelResizeControllerTests
     [InlineData(ResizeEdge.TopRight, 40d, 24d)]
     [InlineData(ResizeEdge.BottomLeft, 40d, 24d)]
     [InlineData(ResizeEdge.BottomRight, 40d, 24d)]
-    public void RealController_GridSizeMode_MatchesLegacyPath_BitForBit_WithNonZeroOriginOffset(
+    public void RealController_GridSizeMode_MatchesPurePipeline_BitForBit_WithNonZeroOriginOffset(
         ResizeEdge edge, double totalDx, double totalDy)
     {
         var harness = CreateHarness(gridSnap: false, viewMode: PanelViewMode.List, gridSize: 48);
@@ -549,7 +578,7 @@ public class NativePanelResizeControllerTests
 
         var actualScreenPx = RunGestureWithOriginOffset(harness.Controller, StartBoundsDip, edge, totalDx, totalDy, scale: 1.0);
 
-        var expectedDip = LegacyApply(StartBoundsDip, edge, totalDx, totalDy, constraints);
+        var expectedDip = ExpectedPipelineOracle(StartBoundsDip, edge, totalDx, totalDy, constraints);
         var expectedScreenPx = NativeSizingCoordinateMapper.ToPx(expectedDip, 1.0);
 
         Assert.Equal(expectedScreenPx, actualScreenPx);
@@ -563,7 +592,7 @@ public class NativePanelResizeControllerTests
     // ── R-4 scenario through the real controller: the min-size clamp is hit, with a non-zero origin
     // offset in play. ────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>Verifies that when a drag would shrink the panel past the minimum size, the real controller's clamped result still matches the legacy Accumulate-chain + Apply path, with a non-zero origin offset.</summary>
+    /// <summary>Verifies that when a drag would shrink the panel past the minimum size, the real controller's clamped result still matches the pure Accumulate-chain + Apply pipeline oracle, with a non-zero origin offset.</summary>
     /// <param name="edge">The edge being dragged.</param>
     /// <param name="totalDx">The total horizontal drag delta, in DIPs.</param>
     /// <param name="totalDy">The total vertical drag delta, in DIPs.</param>
@@ -572,7 +601,7 @@ public class NativePanelResizeControllerTests
     [InlineData(ResizeEdge.Right, -250d, 0d)]
     [InlineData(ResizeEdge.Top, 0d, 200d)]
     [InlineData(ResizeEdge.Bottom, 0d, -200d)]
-    public void RealController_ListFreeMode_MatchesLegacyPath_WhenMinSizeClampIsHit_WithNonZeroOriginOffset(
+    public void RealController_ListFreeMode_MatchesPurePipeline_WhenMinSizeClampIsHit_WithNonZeroOriginOffset(
         ResizeEdge edge, double totalDx, double totalDy)
     {
         var harness = CreateHarness(gridSnap: false, viewMode: PanelViewMode.List);
@@ -580,7 +609,7 @@ public class NativePanelResizeControllerTests
 
         var actualScreenPx = RunGestureWithOriginOffset(harness.Controller, StartBoundsDip, edge, totalDx, totalDy, scale: 1.0);
 
-        var expectedDip = LegacyApply(StartBoundsDip, edge, totalDx, totalDy, constraints);
+        var expectedDip = ExpectedPipelineOracle(StartBoundsDip, edge, totalDx, totalDy, constraints);
         var expectedScreenPx = NativeSizingCoordinateMapper.ToPx(expectedDip, 1.0);
 
         Assert.Equal(expectedScreenPx, actualScreenPx);
@@ -617,6 +646,7 @@ public class NativePanelResizeControllerTests
         public int OnResizeGestureStartingCount;
         public int ClearDragObstaclesCount;
         public int SnapToGridCount;
+        public bool ResizeEnabled = true;
 
         public ControllerHarness(Rect startBounds, ChildWindowModel model, bool snapEnabled, int gridSize = 0, Func<bool>? isFreeResizeModifierDown = null, double desktopScale = 1d)
         {
@@ -640,7 +670,7 @@ public class NativePanelResizeControllerTests
                 Diagnostics.Object,
                 Tracker,
                 Mock.Of<INativePanelSizingService>(),
-                isResizeEnabled: () => true,
+                isResizeEnabled: () => ResizeEnabled,
                 desktopScale: FakeDesktopScale.Uniform(desktopScale).Object, // release-hardening F (ADR-037): must match whatever dpiScale a test drives SizeMoveEntered/ProposeBounds with.
                 gridHost: null,
                 isFreeResizeModifierDown: isFreeResizeModifierDown);
@@ -728,12 +758,12 @@ public class NativePanelResizeControllerTests
         return ShiftIntoScreenSpace(returnedSizingSpacePx);
     }
 
-    private static Rect LegacyApply(Rect start, ResizeEdge edge, double totalDx, double totalDy, ResizeConstraints constraints)
+    private static Rect ExpectedPipelineOracle(Rect start, ResizeEdge edge, double totalDx, double totalDy, ResizeConstraints constraints)
     {
         var raw = new ResizeRawExtent(start.Width, start.Height);
 
-        // 4-step accumulate chain — the exact shape PanelResizeController.OnResizeDragDelta feeds
-        // ResizeGeometryCalculator.Accumulate, one Thumb.DragDelta at a time.
+        // 4-step accumulate chain — an incremental Accumulate chain
+        // (the former Thumb.DragDelta shape), which ProposeBounds must reproduce with ONE synthetic delta.
         double[] dx = [totalDx * 0.25, totalDx * 0.25, totalDx * 0.25, totalDx * 0.25];
         double[] dy = [totalDy * 0.25, totalDy * 0.25, totalDy * 0.25, totalDy * 0.25];
         for (var i = 0; i < dx.Length; i++)

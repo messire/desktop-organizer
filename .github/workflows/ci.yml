@@ -154,3 +154,38 @@ jobs:
           files: installer/Output/*.exe
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+  # Microsoft Store channel (docs/PLANS/store-publication-implementation.md, Package 4). Builds the
+  # unsigned .msix with makeappx/makepri from the Windows SDK preinstalled on windows-latest - no Visual
+  # Studio, no .wapproj. The Store identity (Name/Publisher) comes from Partner Center; until it is set
+  # in the repo variables below, installer\build-msix.ps1 uses its development placeholders and warns.
+  # The artifact is for upload to Partner Center (the Store signs it), not for end users.
+  msix:
+    name: Build MSIX package
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    env:
+      DESKTOPORGANIZER_MSIX_IDENTITY_NAME: ${{ vars.DESKTOPORGANIZER_MSIX_IDENTITY_NAME }}
+      DESKTOPORGANIZER_MSIX_PUBLISHER: ${{ vars.DESKTOPORGANIZER_MSIX_PUBLISHER }}
+      DESKTOPORGANIZER_MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.DESKTOPORGANIZER_MSIX_PUBLISHER_DISPLAY_NAME }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build MSIX (unsigned)
+        shell: pwsh
+        run: .\installer\build-msix.ps1
+
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DesktopOrganizer-msix
+          path: installer/Output/*.msix
+          if-no-files-found: error
+          retention-days: 30

@@ -33,4 +33,13 @@ public interface IExternalLinkLauncher
     /// </summary>
     /// <param name="path">The folder path to open.</param>
     void OpenFolder(string path);
+
+    /// <summary>
+    /// Opens the Windows "Startup apps" settings page (<c>ms-settings:startupapps</c>) — where the user
+    /// enables a Microsoft Store build's startup task. Deliberately a dedicated, parameterless method and
+    /// NOT a widening of <see cref="OpenUrl"/>: that stays https-only, and no caller can make this launcher
+    /// open any other <c>ms-settings:</c> page (or any other scheme) through the public API. Failures are
+    /// logged and swallowed like every other launch.
+    /// </summary>
+    void OpenStartupAppsSettings();
 }

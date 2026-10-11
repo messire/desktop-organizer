@@ -114,13 +114,14 @@ internal sealed class PanelItemStorageService : IPanelItemStorageService
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PanelItemStorageService"/> class, using the
-    /// real per-user app-data folder as storage root (<see cref="Storage.AppStorageRoot.Default"/> —
-    /// Debug and Release builds resolve to different folders, see <see cref="Storage.AppStorageRoot"/>).
+    /// real per-user app-data folder as storage root (<see cref="Storage.AppStorageRoot.PanelItemsDirectory"/> —
+    /// Debug and Release builds, and the Inno and Store channels, resolve to different folders, see
+    /// <see cref="Storage.AppStorageRoot"/>).
     /// </summary>
     /// <param name="nativeApi">Shell access used by <see cref="ReleaseToRecycleBin"/> (Recycle Bin, ADR-035).</param>
     /// <param name="appLog">See <see cref="Log"/>.</param>
     public PanelItemStorageService(INativeApi nativeApi, IAppLog? appLog = null)
-        : this(Path.Combine(Storage.AppStorageRoot.Default, "PanelItems"), nativeApi, appLog)
+        : this(Storage.AppStorageRoot.PanelItemsDirectory, nativeApi, appLog)
     {
     }
 

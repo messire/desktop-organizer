@@ -110,6 +110,16 @@ public interface ITrayIconManager : IDisposable
     void SetReadOnlySession(bool isReadOnly);
 
     /// <summary>
+    /// Shows a one-off informational balloon (a toast on Windows 11) anchored to the tray icon — used for
+    /// the first-run "the app lives in the tray" notice. Fire-and-forget: Windows may suppress it (Focus
+    /// Assist), and nothing may depend on the user having seen it. A no-op after disposal; a failure to show
+    /// the balloon (for example an empty text) is logged and never thrown.
+    /// </summary>
+    /// <param name="title">Balloon title (already localized by the caller).</param>
+    /// <param name="text">Balloon body text (already localized by the caller).</param>
+    void ShowInfoBalloon(string title, string text);
+
+    /// <summary>
     /// (Re)builds the tray context menu's "Pages" submenu contents from the given snapshot
     /// (backlog-1x-master-plan.md §2, ADR-044) — the same "caller-supplied snapshot" shape as
     /// <see cref="UpdateContextMenu"/> (see its remarks): this layer never reads <c>IPageManager</c>

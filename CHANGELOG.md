@@ -10,6 +10,50 @@ tracked — `0.1.0` is the first tagged history point.
 
 ## [Unreleased]
 
+Version 1.0.0: first Microsoft Store release. The Store (MSIX) build runs with package identity; the Inno Setup
+installer build behaves as before except where noted. Settings and state storage did not change (ADR-024): the
+schema, the settings and the file formats are the same in both builds.
+
+- **Added: Microsoft Store build (MSIX).** A package-identity build is detected at startup; everything below that is
+  described as "Store build" applies only to it.
+- **Added (Store build): storage folder.** Panels, the files moved into them, state and logs live in
+  `%USERPROFILE%\DesktopOrganizer` (Store packages do not virtualize that location, so uninstalling the app or resetting
+  it in Windows Settings never deletes your moved files). The installer build keeps `%LOCALAPPDATA%\DesktopOrganizer`.
+  On the first run the Store build writes a short `README.txt` (English and Russian) into that folder explaining what it
+  holds and how to get files back.
+- **Added (Store build): autostart through Windows Settings.** The Windows startup entry of a Store app can only be
+  switched on by the user in Windows Settings, so General no longer shows the "Start with Windows" toggle there; it
+  explains this and has an "Open Windows startup settings" button that opens Windows Settings → Apps → Startup. The app no
+  longer touches the registry `Run` key in that build. The entry is off by default.
+- **Added: first-run tray balloon.** On the very first run (both builds) a notification says that the app lives in the
+  notification area (possibly under the "^" overflow arrow) and that the icon's right-click menu has Settings and Exit. It
+  is shown only when no saved state existed yet, and nothing is stored to remember it.
+- **Changed (Store build): no update check.** The Store delivers updates, so the "Updates" card in About is hidden and the
+  app makes no update request there.
+- **Changed: the move hint names the folder.** The one-time hint shown when a dropped file is moved into a panel now says
+  where the file is kept, and stays up for 8 seconds instead of 4 because of its length; in the Store build it also says
+  that the file stays there if the app is uninstalled (the installer build's uninstaller returns the files to the desktop,
+  so it does not say that).
+- **Changed: "Report a problem" and "Project page"** both open the author's public page (one shared address), instead of
+  the source repository's issue tracker.
+- **Changed: plainer help texts.** The diagnostics note in About no longer mentions a command-line switch and no longer
+  says to attach the file to a report, and the description of "Reset one-time hints" no longer uses an internal term.
+- **Fixed:** a failure to show the first-run balloon (for example an empty text) is logged and no longer propagates from
+  the tray icon manager.
+
+Known limitations of the Microsoft Store build:
+
+- Settings kept in the app's `user.config` (the interface language, the one-time hints already shown, the layout lock)
+  are reset to their defaults each time the Store updates the package. Panels, pages, files and everything else stored in
+  the state document are not affected. As a consequence, the one-time hint about moving a file into a panel is shown again
+  after a package update.
+- If the package is uninstalled while the app is running, the desktop icons stay hidden if they were hidden at that
+  moment; restart Explorer or sign out and in again to bring them back.
+- The installer build and the Store build use separate storage folders and do not share panels; installing both side by
+  side is not supported.
+- Autostart can be enabled only in Windows Settings → Apps → Startup, and the entry appears there only after the app has
+  been started once.
+
 ## [0.9.0] — 2026-10-10
 
 ADR audit fixes, 2026-10-09 (a review of all 47 ADRs against the code; each item below is documented in the ADR it

@@ -48,15 +48,18 @@ public static class DiConfig
     /// <see cref="StorageFileLock"/>/<see cref="JsonApplicationStateStore"/> use for the advisory lock
     /// file and the versioned JSON document (ADR-024 D-4/D-8), mirroring
     /// <paramref name="diagnosticsLogDirectory"/>'s existing pattern — so DI-composition tests (see
-    /// <c>DiConfigTests</c>) never touch the real per-user <c>%LOCALAPPDATA%\DesktopOrganizer\State</c>
-    /// or its <c>.storage-lock</c> file. <see langword="null"/> (both public paths above) keeps the
-    /// real per-user storage root.
+    /// <c>DiConfigTests</c>) never touch the real per-user storage root's <c>State</c> folder
+    /// (<c>AppStorageRoot.Default</c>: Inno channel — <c>%LOCALAPPDATA%\DesktopOrganizer</c>,
+    /// Store channel — <c>%USERPROFILE%\DesktopOrganizer</c>) or its <c>.storage-lock</c> file.
+    /// <see langword="null"/> (both public paths above) keeps the real per-user storage root.
     /// </summary>
     /// <param name="services"><see cref="IServiceCollection"/> instance.</param>
     /// <param name="diagnosticsLogDirectory">See the two-argument overload.</param>
     /// <param name="storageRoot">
-    /// Root folder to use instead of <c>%LOCALAPPDATA%\DesktopOrganizer</c>, or <see langword="null"/>
-    /// to keep the default.
+    /// Root folder to use instead of the real storage root (<c>AppStorageRoot.Default</c>:
+    /// Inno channel — <c>%LOCALAPPDATA%\DesktopOrganizer</c>,
+    /// Store channel — <c>%USERPROFILE%\DesktopOrganizer</c>),
+    /// or <see langword="null"/> to keep the default.
     /// </param>
     internal static void RegisterServices(this IServiceCollection services, string? diagnosticsLogDirectory, string? storageRoot)
     {
@@ -83,6 +86,7 @@ public static class DiConfig
         services.AddSingleton<IIconHandler, IconHandler>();
         services.AddSingleton<IIconFactory, IconFactory>();
         services.AddSingleton<INativeApi, NativeApi>();
+        services.AddSingleton<IAppPackageContext, AppPackageContext>(); // Store-channel (package identity) switch for UI/tests
         services.AddSingleton<INotifyIconAdapter, NotifyIconAdapter>();
         services.AddSingleton<IColorPickerService, ColorPickerService>();
 
@@ -290,5 +294,5 @@ public static class DiConfig
     /// Per-user folder <see cref="JsonLinesDiagnosticsLog"/> writes its JSONL session files to.
     /// </summary>
     private static string DefaultDiagnosticsLogDirectory =>
-        Path.Combine(Storage.AppStorageRoot.Default, "Logs");
+        Storage.AppStorageRoot.LogsDirectory;
 }

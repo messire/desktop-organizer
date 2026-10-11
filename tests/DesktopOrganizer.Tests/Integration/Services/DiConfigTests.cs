@@ -55,6 +55,20 @@ public class DiConfigTests
     }
 
     /// <summary>
+    /// Verifies that <see cref="IAppPackageContext"/> (Microsoft Store channel switch) resolves as a singleton
+    /// and, in the unpackaged test host, reports that the process has no package identity.
+    /// </summary>
+    [Fact]
+    public void RegisterServices_IAppPackageContext_ResolvesAsSingleton()
+    {
+        var first = _serviceProvider.GetRequiredService<IAppPackageContext>();
+        var second = _serviceProvider.GetRequiredService<IAppPackageContext>();
+
+        Assert.Same(first, second);
+        Assert.False(first.IsPackaged);
+    }
+
+    /// <summary>
     /// Verifies that <see cref="ILocalizationService"/> (docs/PLANS/localization.md §2.2/§4.0)
     /// resolves without throwing and is registered as a singleton — the same instance backs both
     /// <c>App.StartApp</c>'s <c>ApplyLanguage</c> call and every other consumer (tray, ViewModels).

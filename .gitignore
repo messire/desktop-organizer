@@ -187,6 +187,10 @@ DocProject/Help/html
 # installer/README.md are checked in.
 installer/publish/
 installer/Output/
+installer/msix/layout/
+installer/msix/staging/
+# The MSIX manifest template is source, not build output — re-include it despite the global *.xml rule above.
+!installer/msix/AppxManifest.xml
 
 # Publish Web Output
 *.[Pp]ublish.xml

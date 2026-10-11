@@ -1,6 +1,6 @@
 # DesktopOrganizer
 
-A free, open-source Windows desktop organizer in the spirit of [Stardock Fences](https://www.stardock.com/products/fences) — group your desktop icons into movable, resizable panels ("fences"), keep multiple pages of them, and get your desktop back.
+A free Windows desktop organizer in the spirit of [Stardock Fences](https://www.stardock.com/products/fences) — group your desktop icons into movable, resizable panels ("fences"), keep multiple pages of them, and get your desktop back.
 
 Windows 10/11, .NET 8, WPF. No account, no telemetry, no ads.
 

@@ -717,6 +717,54 @@ public class TrayIconManagerTests
         _notifyIconAdapterMock.Verify(a => a.SetToolTip("DesktopOrganizer"), Times.Exactly(2));
     }
 
+    /// <summary>
+    /// Store-publication B2: <see cref="TrayIconManager.ShowInfoBalloon"/> forwards the title and text to the
+    /// adapter as an information balloon.
+    /// </summary>
+    [Fact]
+    public void ShowInfoBalloon_ForwardsTitleAndTextAsInfoBalloon()
+    {
+        _sut.Initialize();
+
+        _sut.ShowInfoBalloon("the title", "the text");
+
+        _notifyIconAdapterMock.Verify(
+            a => a.ShowBalloonTip(TrayIconManager.InfoBalloonTimeoutMilliseconds, "the title", "the text", ToolTipIcon.Info),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// <see cref="TrayIconManager.ShowInfoBalloon"/> is fire-and-forget: a failure of the underlying balloon call
+    /// (<see cref="NotifyIcon.ShowBalloonTip(int, string, string, ToolTipIcon)"/> throws <see cref="ArgumentException"/>
+    /// for an empty text) is swallowed instead of reaching the startup path.
+    /// </summary>
+    [Fact]
+    public void ShowInfoBalloon_AdapterThrows_DoesNotPropagate()
+    {
+        _notifyIconAdapterMock
+            .Setup(a => a.ShowBalloonTip(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ToolTipIcon>()))
+            .Throws<ArgumentException>();
+        _sut.Initialize();
+
+        var exception = Record.Exception(() => _sut.ShowInfoBalloon("title", string.Empty));
+
+        Assert.Null(exception);
+    }
+
+    /// <summary>A balloon requested after disposal is dropped instead of touching the disposed tray icon.</summary>
+    [Fact]
+    public void ShowInfoBalloon_AfterDispose_DoesNothing()
+    {
+        _sut.Initialize();
+        _sut.Dispose();
+
+        _sut.ShowInfoBalloon("t", "x");
+
+        _notifyIconAdapterMock.Verify(
+            a => a.ShowBalloonTip(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<ToolTipIcon>()),
+            Times.Never);
+    }
+
     private static ToolStripMenuItem FindItem(ContextMenuStrip menu, string name) =>
         Assert.IsType<ToolStripMenuItem>(Assert.Single(menu.Items.Cast<ToolStripItem>(), i => i.Name == name));
 

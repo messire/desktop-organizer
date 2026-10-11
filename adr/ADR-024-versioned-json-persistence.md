@@ -1,6 +1,6 @@
 # ADR-024: Versioned JSON Persistence for Structural Application State
 
-**Статус:** Accepted — Amended 2026-09-22 (ADR-025: схема v3→v4, `accentColor`, лоссивная миграция `#1E1E1E` → `#6B7280`); Amended 2026-09-22 (ADR-028: схема v4→v5, аддитивные `geometryMode`/`widthSpanUnits`/`heightSpanUnits`/`iconLayoutPolicy`/`sizingMode`); Amended 2026-09-25 (раздельные корни хранилища Debug/Release); Amended 2026-09-27 (ADR-032: аддитивный скаляр `IAppSettings.Language`, единственное расширение `user.config` с явного разрешения пользователя); Amended 2026-09-29 (ADR-043: схема v5→v6, `pages.ids[]` → `pages.items[{id,name?}]`, с явного разрешения пользователя); Amended 2026-10-09 (ADR-audit WP-B: read-only сессия видна пользователю — UI читает `IApplicationStateStore.IsWritable`, drop не двигает файлы, `LayoutSnapshotService.Restore` в read-only не возвращает файлы; формат и семантика записи не менялись); Amended 2026-10-10 (решение пользователя «Аддитивная ревизия схемы»: схема v7 + envelope-ключ `schemaRevision`, round-trip неизвестных полей, толерантные enum, `V6ToV7Migration` — тождественная; читаются файлы того же major с более высокой ревизией; D-5 — четыре reserved-ключа, D-7 rung 1 — см. раздел «Amendment 2026-10-10»; после перехода на v7 каждый запуск ≤0.8.0 остаётся read-only, пока файл не восстановлен из premigration-бэкапа или не возвращена сборка ≥v7 — однократно лишь событие major-bump)
+**Статус:** Accepted — Amended 2026-09-22 (ADR-025: схема v3→v4, `accentColor`, лоссивная миграция `#1E1E1E` → `#6B7280`); Amended 2026-09-22 (ADR-028: схема v4→v5, аддитивные `geometryMode`/`widthSpanUnits`/`heightSpanUnits`/`iconLayoutPolicy`/`sizingMode`); Amended 2026-09-25 (раздельные корни хранилища Debug/Release); Amended 2026-09-27 (ADR-032: аддитивный скаляр `IAppSettings.Language`, единственное расширение `user.config` с явного разрешения пользователя); Amended 2026-09-29 (ADR-043: схема v5→v6, `pages.ids[]` → `pages.items[{id,name?}]`, с явного разрешения пользователя); Amended 2026-10-09 (ADR-audit WP-B: read-only сессия видна пользователю — UI читает `IApplicationStateStore.IsWritable`, drop не двигает файлы, `LayoutSnapshotService.Restore` в read-only не возвращает файлы; формат и семантика записи не менялись); Amended 2026-10-10 (решение пользователя «Аддитивная ревизия схемы»: схема v7 + envelope-ключ `schemaRevision`, round-trip неизвестных полей, толерантные enum, `V6ToV7Migration` — тождественная; читаются файлы того же major с более высокой ревизией; D-5 — четыре reserved-ключа, D-7 rung 1 — см. раздел «Amendment 2026-10-10»; после перехода на v7 каждый запуск ≤0.8.0 остаётся read-only, пока файл не восстановлен из premigration-бэкапа или не возвращена сборка ≥v7 — однократно лишь событие major-bump); Amended 2026-10-10 (ADR-050: путь корня хранилища зависит от канала — под package identity (Store) корень `%USERPROFILE%\DesktopOrganizer`, с явного разрешения владельца; схема, DTO, миграции и `IAppSettings` не менялись)
 
 Branch `refactor/versioned-json-store` (from `rc/0.4.0`). Implementation master plan:
 `docs/PLANS/phase-4-versioned-json-store.md` (D-0..D-13, risks R-1..R-14). Commits `131f009`(plan)
@@ -724,6 +724,44 @@ read-only без уведомления. Формулировка вынесен
 пути, `LayoutSnapshotService`, `PageManagerService`, `SystemIconsPanelManager`, `StateJson`, миграции V1–V5.
 `user.config`/`IAppSettings` forward-compat этим Amendment **не покрыт** (R12).
 
+## Amendment 2026-10-10 (ADR-050, решение владельца D-1=A): путь корня хранилища зависит от канала распространения
+
+**Контекст.** Второй канал распространения — Microsoft Store (MSIX, [ADR-050](ADR-050-microsoft-store-channel-msix.md)).
+`%LOCALAPPDATA%` процесса с package identity виртуализируется в `LocalCache` пакета, поэтому корень Amendment
+2026-09-25 (`%LOCALAPPDATA%\DesktopOrganizer`) в Store-сборке привёл бы к потере файлов пользователя при Uninstall/Reset
+(Move-семантика, [ADR-009](ADR-009-drag-drop-move-semantics.md) Amendment 8).
+
+**Явное разрешение владельца (2026-10-10).** Путь корня хранилища входит в замороженный контур persistence
+(`CLAUDE.md`); владелец разрешил его изменить **ровно в объёме пути корня для процесса с package identity**.
+
+**Решение.** `AppStorageRoot.Default` выбирает родителя по identity, имя папки — по конфигурации сборки (Amendment
+2026-09-25 не отменяется, а дополняется):
+
+| Identity | Debug | Корень |
+|---|---|---|
+| нет | нет | `%LOCALAPPDATA%\DesktopOrganizer` |
+| нет | да | `%LOCALAPPDATA%\DesktopOrganizer.Dev` |
+| есть | нет | `%USERPROFILE%\DesktopOrganizer` |
+| есть | да | `%USERPROFILE%\DesktopOrganizer.Dev` |
+
+При пустом `%USERPROFILE%` упакованный процесс откатывается на `%LOCALAPPDATA%` (`AppStorageRoot.IsPackagedLocation`
+= `false`). `State\`, `PanelItems\`, `Logs\` и `.storage-lock` (D-8) по-прежнему выводятся из единого
+`AppStorageRoot.Default`; одна установка использует только один корень, миграции данных между каналами нет.
+Identity определяется одной пробой (`GetCurrentPackageFullName`, статический `Lazy` в `NativeApi`, читается только
+`AppStorageRoot` — задокументированное исключение из «P/Invoke только за `INativeApi`», [ADR-050](ADR-050-microsoft-store-channel-msix.md) D-1).
+
+**Что НЕ менялось (границы разрешения).** `schemaVersion` (7), `schemaRevision` (0), `StateEnvelope`, DTO и маппинги,
+миграции (лестница до `V6ToV7Migration` включительно), `JsonApplicationStateStore` (протокол записи D-6, `.bak`, карантин, advisory lock D-8,
+recovery-лестница D-7, rung «newer schema → read-only»), `ApplicationStateService`, `PanelStateMapper`, round-trip неизвестных
+полей и толерантные enum, `IAppSettings`/`AppSettings`/`Settings.settings`/`user.config`, `LayoutSnapshotService`,
+семантика загрузки/сохранения. **Новых persisted-полей нет**: баннер первого запуска не сохраняет признак показа,
+`README.txt` в корне — не состояние (никто не читает, нет в схеме и бэкапах). Inno-корень не тронут. Это разрешение не
+открывает общего права на будущие изменения контура: каждое новое поле/настройка по-прежнему требует отдельного «да».
+
+**Известное последствие вне разрешения (P1).** `user.config` Store-сборки сбрасывается при каждом обновлении пакета
+(`_Url_<hash>` от пути exe, новая папка `WindowsApps\<Name>_<Version>_…`). Исправление меняет `IAppSettings`/`user.config` и
+отложено до отдельного явного «да» ([ADR-050](ADR-050-microsoft-store-channel-msix.md), Known limitations).
+
 ## Amendments (сводка)
 
 | Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
@@ -735,6 +773,7 @@ read-only без уведомления. Формулировка вынесен
 | 2026-09-29 | [ADR-043](ADR-043-page-display-names.md) | v5→v6: `pages.items[{id,name?}]` | Описание `pages.ids[]` |
 | 2026-10-09 | ADR-audit WP-B | Read-only сессия: UI читает `IsWritable` (drop без `MoveIn`, эффект `Copy`, `ReadOnlySessionNotice`, hint, суффикс tooltip трея); `LayoutSnapshotService.Restore` в read-only не возвращает файлы. Формат/семантика записи не менялись | Допущение «read-only сессия невидима пользователю» (D-7 rung 7, D-8) |
 | 2026-10-10 | Решение пользователя «Аддитивная ревизия схемы» (коммит `5633bb4`, [план](../docs/PLANS/schema-additive-revision-v7.md)) | v6→v7 (тождественная) + envelope-ключ `schemaRevision` (`CurrentSchemaRevision = 0`); round-trip неизвестных полей (`[JsonExtensionData]` на 10 DTO, `ChildWindowModel.PersistedExtras`, `UnknownFieldLedger`); толерантные enum (`TolerantEnumParser`, `PreservedEnumValue`); файл того же major с более высокой ревизией открывается writable; `MigrationJson.CloneAllExcept` обязателен для миграций ≥v6; дефект `StateMigrationRunner` (терял бы `schemaRevision`) исправлен | D-5 «три reserved-ключа» (теперь четыре); D-7 rung 1 «`schemaVersion ≤ Current`» как единственное условие (теперь и любая ревизия того же major); допущение «любое новое поле = bump major»; «версия схемы — 6» |
+| 2026-10-10 | [ADR-050](ADR-050-microsoft-store-channel-msix.md), явное разрешение владельца D-1=A | Корень хранилища зависит от identity: Store (package identity) → `%USERPROFILE%\DesktopOrganizer[.Dev]`, иначе `%LOCALAPPDATA%\DesktopOrganizer[.Dev]`; fallback на `%LOCALAPPDATA%` при пустом профиле; схема/DTO/миграции/`IAppSettings` не менялись | Допущение Amendment 2026-09-25 «Release → `%LOCALAPPDATA%\DesktopOrganizer`» как единственного корня (теперь это Inno-канал) |
 
 Текущая версия схемы — **7, ревизия 0** (`schemaVersion = 7`, `schemaRevision = 0`); механизм хранения заморожен
 (`CLAUDE.md`): bump major, новые миграции, **каждое** новое persisted-поле (даже аддитивное через `schemaRevision`) и

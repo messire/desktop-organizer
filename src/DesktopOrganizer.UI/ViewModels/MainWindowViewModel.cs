@@ -343,6 +343,19 @@ public class MainWindowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Whether Windows itself owns the autostart decision (Microsoft Store / package-identity build): the
+    /// General section then shows <see cref="OpenStartupSettingsCommand"/> instead of the
+    /// <see cref="AutostartEnabled"/> toggle. A process-lifetime constant, so no change notification.
+    /// </summary>
+    public bool AutostartManagedBySystem => _autostart.IsManagedBySystem;
+
+    /// <summary>Whether the General section shows the <see cref="AutostartEnabled"/> toggle — the exact complement of <see cref="AutostartManagedBySystem"/>.</summary>
+    public bool AutostartToggleAvailable => !_autostart.IsManagedBySystem;
+
+    /// <summary>Opens the Windows "Startup apps" settings page — General section, shown when <see cref="AutostartManagedBySystem"/>.</summary>
+    public ICommand OpenStartupSettingsCommand { get; }
+
+    /// <summary>
     /// Whether the real desktop icons (the shell's <c>SHELLDLL_DefView</c>) are currently visible.
     /// Session-only, never persisted: the live state is read from <see cref="IDesktopIconsService"/>
     /// every time, and <see cref="IDesktopIconsService.VisibilityChanged"/> re-raises this property when
@@ -517,7 +530,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
     /// <summary>The app's informational version string, for the About section.</summary>
     public string AppVersion { get; } = ResolveAppVersion();
 
-    /// <summary>The per-user storage root (<c>%LOCALAPPDATA%\DesktopOrganizer</c>), for the About section.</summary>
+    /// <summary>The per-user storage root (Inno channel <c>%LOCALAPPDATA%\DesktopOrganizer</c>, Store channel <c>%USERPROFILE%\DesktopOrganizer</c>), for the About section.</summary>
     public string StorageFolderPath { get; } = AppStorageRoot.Default;
 
     // ── System Icons Panel ───────────────────────────────────────────────────
@@ -705,6 +718,7 @@ public class MainWindowViewModel : INotifyPropertyChanged
         TakeDefaultsFromSelectedPanelCommand = new RelayCommand(TakeDefaultsFromSelectedPanel, () => _selectedPanel is not null);
         ResetOneTimeHintsCommand = new RelayCommand(ResetOneTimeHints, () => _appSettings.HasShownMoveHint);
         OpenStorageFolderCommand = new RelayCommand(OpenStorageFolder);
+        OpenStartupSettingsCommand = new RelayCommand(_autostart.OpenSystemStartupSettings);
 
         _windowManager.OnChildWindowAdded += OnPanelAdded;
         _windowManager.OnChildWindowRemoved += OnPanelRemoved;

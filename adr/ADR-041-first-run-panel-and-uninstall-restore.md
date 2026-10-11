@@ -1,6 +1,6 @@
 # ADR-041: First-Run Panel and Uninstall Restore of Panel Items
 
-**Статус:** Accepted (2026-09-27) — Amended 2026-10-09 (ADR-audit WP-A: a failed directory enumeration counts as an unrestored item — the storage root is kept, exit code 7). **Current consolidated release rules for managed items (incl. which restore policy applies where): [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md).**
+**Статус:** Accepted (2026-09-27) — Amended 2026-10-09 (ADR-audit WP-A: a failed directory enumeration counts as an unrestored item — the storage root is kept, exit code 7) — Amended 2026-10-10 (ADR-050: uninstall-restore exists only in the Inno channel; the Microsoft Store channel has no such hook, files stay in `%USERPROFILE%\DesktopOrganizer\PanelItems`). **Current consolidated release rules for managed items (incl. which restore policy applies where): [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md).**
 
 ## Context
 
@@ -177,3 +177,23 @@ see the diagnostics log.` — "or location(s)" because a failed enumeration is a
 
 Unchanged: the manifest format, the persistence contour (`State`/`Logs`), `ResolveTarget` (policy U, ADR-048), the exit
 codes `0/6/7/8` and the "no early deletion of the root" guard.
+
+## Amendment (2026-10-10, ADR-050): the Microsoft Store channel has no uninstall-restore
+
+*(Раздел на русском, как другие поздние amendments.)* Механизм `--restore-panel-items` (`PanelItemsUninstallRestorer`,
+коды выхода `0/6/7/8`, шаг `[UninstallRun]`) принадлежит **только Inno-каналу** и в нём не изменился. У MSIX/Store нет
+хука деинсталляции: Uninstall и Settings → Apps → Reset просто удаляют пакет и его виртуализированные данные, но не
+корень хранилища, который для процесса с package identity лежит в профиле — `%USERPROFILE%\DesktopOrganizer`
+([ADR-050](ADR-050-microsoft-store-channel-msix.md) D-2, [ADR-024](ADR-024-versioned-json-persistence.md) Amendment
+2026-10-10). Поэтому перемещённые файлы **не теряются и не возвращаются автоматически** — они остаются в
+`%USERPROFILE%\DesktopOrganizer\PanelItems`. Компенсация вместо restore:
+
+- `README.txt` в корне при первом запуске (`StorageRootReadme`, [ADR-050](ADR-050-microsoft-store-channel-msix.md) D-3): что
+  это за папка, что она переживает удаление, как вернуть файлы;
+- подсказка о перемещении называет папку и говорит, что файл останется там после удаления приложения (только при
+  `AppStorageRoot.IsPackagedLocation`; в Inno-канале фраза была бы ложью, потому что деинсталлятор возвращает файлы);
+- возврат вручную: drag-out ([ADR-036](ADR-036-panel-item-drag-out.md)) или карточка «Файлы без панели» в Backup
+  ([ADR-009](ADR-009-drag-drop-move-semantics.md), Amendment 7).
+
+Неизменно: формат манифеста, политика `ResolveTarget` (политика U, [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md)),
+панель первого запуска (`StateLoadStatus.FirstRun` && 0 панелей) — работает в обоих каналах.

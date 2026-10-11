@@ -159,6 +159,37 @@ public class ResxConsistencyTests
     }
 
     /// <summary>
+    /// Store-publication B5: user-facing text must not leak developer jargon - the <c>--diag</c> command-line
+    /// switch (unavailable to a Store user) or the internal "Move-semantics" term - in either language.
+    /// </summary>
+    [Fact]
+    public void AllValues_ContainNoCliSwitchOrInternalJargon()
+    {
+        var forbidden = new[] { "--diag", "Move-semantics" };
+        var offenders = new List<string>();
+
+        foreach (var (dict, label) in new[] { (Neutral, "Strings.resx"), (Russian, "Strings.ru.resx") })
+        {
+            offenders.AddRange(
+                dict.Where(kv => forbidden.Any(f => kv.Value.Contains(f, StringComparison.OrdinalIgnoreCase)))
+                    .Select(kv => $"{label}:{kv.Key}"));
+        }
+
+        Assert.True(offenders.Count == 0, $"Value(s) mention a CLI switch or internal jargon: {string.Join(", ", offenders)}.");
+    }
+
+    /// <summary>
+    /// Store-publication B4: the Move hint's folder placeholder must exist in both languages (the pairwise
+    /// placeholder check above covers parity; this pins that the format actually takes the folder).
+    /// </summary>
+    [Fact]
+    public void MoveHintFormat_TakesTheFolderPlaceholderInBothLanguages()
+    {
+        Assert.Contains("{0}", Neutral["Hint_Move_Message_Format"], StringComparison.Ordinal);
+        Assert.Contains("{0}", Russian["Hint_Move_Message_Format"], StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Verifies that <see cref="LoadResx"/> — and therefore every other test in this class — only ever
     /// treats <c>&lt;data name="..."&gt;</c> elements as keys, never the schema's own
     /// <c>&lt;resheader name="..."&gt;</c> elements (<c>resmimetype</c>/<c>version</c>/<c>reader</c>/

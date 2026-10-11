@@ -77,4 +77,30 @@ public class UpdateEndpointsTests
     {
         Assert.Null(UpdateEndpoints.TryGetTrustedReleaseUrl("https://github.com/someone-else/SomeOtherRepo/releases/tag/v1.0.0"));
     }
+
+    /// <summary>The centralized public links are absolute https URLs.</summary>
+    [Fact]
+    public void PublicLinks_AreAbsoluteHttpsUrls()
+    {
+        foreach (var url in new[] { UpdateEndpoints.PublicSiteUrl, UpdateEndpoints.SupportUrl, UpdateEndpoints.PrivacyPolicyUrl })
+        {
+            Assert.True(Uri.TryCreate(url, UriKind.Absolute, out var uri), url);
+            Assert.Equal(Uri.UriSchemeHttps, uri!.Scheme);
+        }
+    }
+
+    /// <summary>The "Project page" link resolves through the single public-site constant.</summary>
+    [Fact]
+    public void ProjectPageUrl_EqualsPublicSiteUrl()
+    {
+        Assert.Equal(UpdateEndpoints.PublicSiteUrl, UpdateEndpoints.ProjectPageUrl);
+    }
+
+    /// <summary>"Report a problem" no longer points at the private repository's issue tracker.</summary>
+    [Fact]
+    public void SupportUrl_IsNotThePrivateIssueTracker()
+    {
+        Assert.NotEqual(UpdateEndpoints.IssuesUrl, UpdateEndpoints.SupportUrl);
+        Assert.Equal(UpdateEndpoints.PublicSiteUrl, UpdateEndpoints.SupportUrl);
+    }
 }

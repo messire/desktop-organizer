@@ -47,13 +47,17 @@ public static class DiConfig
     /// store's storage root (ADR-024 D-4), forwarded to <c>DesktopOrganizer.Services</c>' internal
     /// three-argument <see cref="DiConfig"/> overload — mirrors <paramref name="diagnosticsLogDirectory"/>'s
     /// existing pattern so DI-composition tests never touch the real per-user
-    /// <c>%LOCALAPPDATA%\DesktopOrganizer\State</c>.
+    /// storage root's <c>State</c> folder (<c>AppStorageRoot.Default</c>:
+    /// Inno channel — <c>%LOCALAPPDATA%\DesktopOrganizer</c>,
+    /// Store channel — <c>%USERPROFILE%\DesktopOrganizer</c>).
     /// </summary>
     /// <param name="services"><see cref="IServiceCollection"/> instance.</param>
     /// <param name="diagnosticsLogDirectory">See the two-argument overload.</param>
     /// <param name="storageRoot">
-    /// Root folder to use instead of <c>%LOCALAPPDATA%\DesktopOrganizer</c>, or <see langword="null"/>
-    /// to keep the default.
+    /// Root folder to use instead of the real storage root (<c>AppStorageRoot.Default</c>:
+    /// Inno channel — <c>%LOCALAPPDATA%\DesktopOrganizer</c>,
+    /// Store channel — <c>%USERPROFILE%\DesktopOrganizer</c>),
+    /// or <see langword="null"/> to keep the default.
     /// </param>
     internal static void ConfigureServices(this IServiceCollection services, string? diagnosticsLogDirectory, string? storageRoot)
     {
@@ -172,6 +176,9 @@ public static class DiConfig
 
         // ADR-audit WP-B (B1): one-shot "this session is read-only" InfoBar notice, shown from App.StartApp.
         services.AddSingleton<ReadOnlySessionNotice>();
+
+        // Store-publication B2: one-off "the app lives in the tray" balloon on the first run, shown from App.StartApp.
+        services.AddSingleton<FirstRunTrayNotice>();
 
         // backlog-1x-master-plan.md §1/§2: round-robin page switching for the tray icon's double-click
         // and the tray context menu's "Pages" submenu (ADR-044). Singleton, IDisposable — constructed

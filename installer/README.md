@@ -123,3 +123,126 @@ GitHub Actions secrets — их отсутствие не останавлива
 сертификат из хранилища в шаге с `if: always()` сразу после сборки — так что весь путь `.pfx`+пароль в
 CI используется только один раз, для самого импорта, и никогда не доходит ни до `build.ps1`, ни тем
 более до строки, которую видит ISCC.
+
+## MSIX для Microsoft Store
+
+Store-канал (`docs/PLANS/store-publication-implementation.md`, Пакет 4) собирается **без Visual Studio и без
+`.wapproj`**: ручной манифест `installer/msix/AppxManifest.xml` + `makepri.exe` + `makeappx.exe` из Windows SDK
+(скрипт сам находит новейший `Windows Kits\10\bin\10.0.*\x64`; нужен установленный Windows 10/11 SDK).
+Inno-инсталлятор выше не затрагивается, это отдельный канал.
+
+### Как собрать
+
+```powershell
+.\installer\build-msix.ps1
+```
+
+Скрипт: публикует приложение через `build.ps1 -SkipInstaller` (self-contained win-x64), собирает layout
+`installer\msix\layout` (publish-выход без `*.pdb` и XML-документации — `*.xml` рядом с одноимённой `.dll`/`.exe`,
+остальные XML остаются — + `installer\msix\Assets`), подставляет в манифест версию, Identity и DisplayName через
+XML DOM, строит `resources.pri` (`makepri`, по отдельной staging-папке только с манифестом и Assets, чтобы папку
+`ru\` с .NET-сателлитами не приняли за языковой ресурс пакета) и упаковывает
+`installer\Output\DesktopOrganizer-<версия>.msix` (`makeappx pack`).
+
+Версия берётся из FILEVERSION `DesktopOrganizer.UI.exe` (как в `.iss`, источник один — `<Version>` в
+`Directory.Build.props`): Store резервирует четвёртую секцию, поэтому ревизия обязана быть `0` (иначе скрипт
+останавливается с ошибкой, а не обнуляет её молча), а major должен быть >= 1.
+
+Скрипты `build-msix.ps1` и `msix\Generate-Assets.ps1` работают под `Set-StrictMode -Version Latest`
+(вложенный `build.ps1` вызывается с выключенным strict mode — он на него не рассчитан).
+
+#### Отклонения от плана `store-publication-implementation.md` (Пакет 4)
+
+- **Имена параметров и переменных окружения** — `-IdentityName` / `-Publisher` / `-PublisherDisplayName` / `-DisplayName`
+  ↔ `DESKTOPORGANIZER_MSIX_IDENTITY_NAME` / `_PUBLISHER` / `_PUBLISHER_DISPLAY_NAME` / `_DISPLAY_NAME` (префикс как у
+  `DESKTOPORGANIZER_SIGN_*`); параметры сильнее переменных.
+- **Имя выхода** — `installer\Output\DesktopOrganizer-<major.minor.build>.msix` (рядом с Inno-инсталлятором; в имени файла —
+  трёхсекционная версия).
+- **Условие CI** — job `msix` запускается на тегах `v*` и вручную (`workflow_dispatch`), `needs: build-and-test`; артефакт
+  `DesktopOrganizer-msix` хранится 30 дней. При dev-заглушках Identity на раннере скрипт выводит аннотацию `::warning::`.
+- **`_altform-lightunplated`** — к наборам `Square44x44Logo.targetsize-N` и `_altform-unplated` добавлены копии
+  `_altform-lightunplated`, для светлой темы панели задач/Пуска (без плитки-подложки).
+- **`makepri createconfig /dq en-US_ru-RU`** — языки пакета (`en-US`, `ru-RU`) совпадают с `<Resources>` манифеста; в
+  сгенерированном `priconfig.xml` удаляется секция `<packaging>` (иначе `makepri new` режет ресурсы на
+  `resources.scale-*.pri`, а в layout попадал бы только `resources.pri` — на HiDPI плитки брались бы из scale-100).
+  После `makepri new` стоит guard: появление `resources.*.pri` в staging останавливает сборку.
+- **Нет `.wapproj`** — упаковка только скриптами (закреплено тестом `MsixManifestContractTests`).
+
+### Что подставить из Partner Center
+
+Без параметров скрипт использует **dev-заглушки** (`khagendev.DesktopOrganizer.Dev` / `CN=DesktopOrganizer Dev`) и
+печатает предупреждение: такой пакет ставится sideload-ом, но Store его отклонит. Для загрузки в Store значения
+берутся из Partner Center (Product management → Product identity) **символ в символ**:
+
+| Параметр | Переменная окружения | Поле в Partner Center |
+|---|---|---|
+| `-IdentityName` | `DESKTOPORGANIZER_MSIX_IDENTITY_NAME` | Package/Identity/Name |
+| `-Publisher` | `DESKTOPORGANIZER_MSIX_PUBLISHER` | Package/Identity/Publisher (`CN=…`) |
+| `-PublisherDisplayName` | `DESKTOPORGANIZER_MSIX_PUBLISHER_DISPLAY_NAME` | Package/Properties/PublisherDisplayName |
+| `-DisplayName` | `DESKTOPORGANIZER_MSIX_DISPLAY_NAME` | Package/Properties/DisplayName (имя продукта; дефолт `DesktopOrganizer`) |
+
+`DisplayName` подставляется в трёх местах манифеста (`Properties/DisplayName`, `uap:VisualElements/@DisplayName`,
+`desktop:StartupTask/@DisplayName`) — это пятый токен `$DISPLAY_NAME$` шаблона.
+
+```powershell
+.\installer\build-msix.ps1 -IdentityName "<Name>" -Publisher "CN=<GUID>" -PublisherDisplayName "<имя издателя>" -DisplayName "<имя продукта>"
+```
+
+- На **каждый язык** из `<Resources>` манифеста (`en-US`, `ru-RU`) в Partner Center нужен свой Store listing.
+- Для capability `runFullTrust` при сабмите требуется обоснование — текст в `docs/store/notes-for-certification.md`
+  (лежит в основном дереве репозитория).
+
+Store-пакет **не подписывается** — подпись ставит сам Store; в Partner Center загружается `.msix` напрямую
+(`.msixupload` не нужен). В CI job `msix` (`.github/workflows/ci.yml`, на тегах `v*` и вручную) значения берутся из
+repository variables с теми же именами, что и переменные окружения выше; артефакт `DesktopOrganizer-msix`.
+
+### Sideload и WACK
+
+Проверка пакета на своей машине (сначала удали Inno-сборку, иначе у приложения будет два корня хранилища):
+
+```powershell
+.\installer\build-msix.ps1 -SignForSideload
+# затем из ПОВЫШЕННОГО PowerShell (скрипт сертификат сам не импортирует):
+Import-Certificate -FilePath .\installer\Output\DesktopOrganizer-sideload.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Add-AppxPackage -Path .\installer\Output\DesktopOrganizer-<версия>.msix
+```
+
+`-SignForSideload` создаёт (или переиспользует) self-signed сертификат в `Cert:\CurrentUser\My` с Subject =
+`-Publisher` и подписывает им пакет через `signtool`. Это только для разработки: подписанный так пакет раздавать нельзя.
+Сертификат: FriendlyName `DesktopOrganizer sideload`, EKU Code Signing (`1.3.6.1.5.5.7.3.3`), ключ `NonExportable`,
+срок 1 год. Переиспользуется только сертификат с тем же FriendlyName, тем же Subject (сравнение как
+distinguished name, а не строки), EKU Code Signing и действующим сроком. С не-dev `-Publisher` (то есть с реальным
+Subject из Partner Center) скрипт откажется подписывать и остановится; обойти можно только явным `-Force`.
+
+#### Как удалить sideload-сертификат
+
+После проверки пакета сертификат стоит убрать (доверенный self-signed сертификат в `TrustedPeople` позволяет ставить
+любые пакеты, подписанные им):
+
+```powershell
+# пакет
+Get-AppxPackage <IdentityName> | Remove-AppxPackage
+
+# доверие (ПОВЫШЕННЫЙ PowerShell) - по отпечатку из .cer
+$thumbprint = (Get-PfxCertificate -FilePath .\installer\Output\DesktopOrganizer-sideload.cer).Thumbprint
+Remove-Item Cert:\LocalMachine\TrustedPeople\$thumbprint
+
+# сам сертификат с приватным ключом
+Get-ChildItem Cert:\CurrentUser\My | Where-Object FriendlyName -eq 'DesktopOrganizer sideload' | Remove-Item
+```
+
+Windows App Certification Kit: `.\installer\build-msix.ps1 -SignForSideload -RunWack` из повышенной оболочки
+(WACK устанавливает пакет, поэтому сертификат должен быть уже доверенным). Отчёт —
+`installer\Output\wack-report.xml`, ищем `OVERALL_RESULT="PASS"`. Если `appcert.exe` не найден — предупреждение, не ошибка.
+
+### Ассеты
+
+PNG-набор плиток и логотипов лежит в `installer\msix\Assets` и **закоммичен**; сборка его не пересоздаёт.
+После смены `src\DesktopOrganizer.UI\Resources\app.ico` перегенерируй и закоммить результат:
+
+```powershell
+.\installer\msix\Generate-Assets.ps1
+```
+
+Скрипт берёт PNG-кадр 256×256 из `app.ico` и масштабирует его через System.Drawing (HighQualityBicubic,
+прозрачный фон). Контракт набора (имена, размеры, лимит 200 КБ) закреплён тестом `MsixManifestContractTests`.

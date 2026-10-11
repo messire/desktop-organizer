@@ -6,7 +6,7 @@
 (все 8 пунктов, см. раздел «Бэклог 1.x» ниже) закрыт целиком; manual verify по Фазам 0–10 выполнена
 пользователем на Windows 11 24H2 (сборка 26200), 2026-09-27, признана достаточной — Windows 10 отдельно не
 проверяется; manual verify по бэклогу 1.x — см. соответствующие ADR (043–047) и сводный список в разделе
-«Бэклог 1.x». Реализованы: встраивание панелей в слой рабочего стола (Progman/WorkerW), убирание из taskbar/Alt+Tab, перетаскивание за заголовок, привязка к сетке, два вида (список/плитка), drag&drop файлов, сохранение состояния в JSON, окно настроек и трей; файловые операции, поведение панелей, внешний вид, десктоп-жесты, Folder Portals, страницы/swipe, снапшоты раскладки, multi-monitor; ресайз кратно сетке иконок, фильтр содержимого панели, кнопка roll-up; скрытие/показ иконок рабочего стола (единый переключатель, без выборочного режима — см. ADR-006); панель системных иконок (SystemIconsPanel) как второй независимый тип desktop-window. Плюс 2026-07-26 (см. `docs/prompts/outstanding-followups.md`, пункты 1–4): one-time Move-хинт, тест кросс-volume `Restore`, очистка managed-копий при удалении панели ([ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md)) и re-clamp панелей при уменьшении рабочей области монитора. Плюс ещё 2026-07-26 (см. `docs/prompts/grid-snap-drag-and-settings-order.md`, [ADR-011](../adr/ADR-011-manual-drag-with-magnetic-grid-snap.md)): магнитное покадровое прилипание к сетке во время перетаскивания панели (не только на drop), новая настройка `GridSnapDistance`, и реорганизация окна настроек (порядок групп + перенос «Привязки к сетке» в «Автозапуск и рабочий стол»). Плюс 2026-08-15 — **Фаза 7 «Производительность, память и отказоустойчивость»** ([docs/PLANS/phase-7-performance-hardening.md](PLANS/phase-7-performance-hardening.md), [ADR-012](../adr/ADR-012-performance-and-resilience-hardening.md)): все 11 находок [docs/PERFORMANCE_AUDIT.md](PERFORMANCE_AUDIT.md) закрыты 6 блоками (A–F) — debounced persistence с синхронным flush для структурных изменений, try/catch вокруг колбэка глобального хука жестов + вынос чистой машины состояний, ограниченный LRU-кеш иконок и замороженные кеш-кисти конвертеров, batch-уведомления и O(1) дедуп коллекций ViewModel, авторитетный in-memory кеш манифеста `PanelItemStorageService` с write-through. Плюс 2026-08-16 — **Фаза 8 «UX-паритет значков: выделение и переименование»** ([docs/PLANS/icon-selection-and-rename.md](PLANS/icon-selection-and-rename.md), [ADR-013](../adr/ADR-013-panel-item-selection-and-rename.md)): визуальное выделение значка в обоих видах панели (`ListBox`-контейнеры, подсветка не зависит от `IsSelectionActive`) и честные имена + inline-переименование значков (F2/контекстное меню, физическое переименование на диске, GUID перенесён из имени файла в имя каталога, синхронизация manifest). Плюс ещё 2026-08-16 — **Фаза 9 «Сортировка и ручной порядок значков панели»** ([docs/PLANS/panel-item-sorting.md](PLANS/panel-item-sorting.md), [ADR-014](../adr/ADR-014-panel-item-sorting-and-manual-order.md)): новая настройка `PanelSortMode` (Manual/Name) в окне настроек и контекстном меню заголовка, немутирующая сортировка по имени (собственный natural-order компаратор, папки вперёд), drag-to-reorder значков мышью в обоих видах панели с трансляцией видимого индекса в полный набор при активном `ContentFilter` и авто-переключением в `Manual`. Остаются сквозные задачи (см. ниже). **2026-09-28** поставлен бэклог 1.x «UX-полировка» (семь пунктов: единый стиль UI, страницы в меню трея, переименование страниц, round-robin страниц по двойному клику трея, упрощение настройки цветов, цвет текста в пресетах, фоновая загрузка иконок вместо UI-потока; 2026-09-29 добавлен восьмой — копирование панели на другую страницу полным клоном) — см. раздел «Бэклог 1.x» ниже. **2026-09-29** пункты 1, 2, 3, 4, 5 и 8 бэклога 1.x закрыты (schema v6 — [ADR-043](../adr/ADR-043-page-display-names.md); навигация по страницам из трея — [ADR-044](../adr/ADR-044-tray-page-navigation.md); копирование панели на страницу — [ADR-045](../adr/ADR-045-panel-clone-to-page.md); пресеты цвета и упрощённый редактор — amendments [ADR-042](../adr/ADR-042-color-presets-rgb-picker-stepped-size.md)). **2026-09-30** пункт 7 (фоновая загрузка иконок) закрыт — [ADR-046](../adr/ADR-046-background-icon-loading.md) (amends ADR-039/ADR-012/ADR-008). **2026-09-30** пункт 6 (единая дизайн-система) тоже закрыт — [ADR-047](../adr/ADR-047-unified-design-system.md) (amends ADR-025/ADR-031/ADR-042/ADR-040/ADR-044/ADR-013/ADR-001/ADR-033/ADR-002). **Бэклог 1.x закрыт целиком** — все 8 пунктов реализованы, покрыты тестами и прошли ревью.
+«Бэклог 1.x». Реализованы: встраивание панелей в слой рабочего стола (Progman/WorkerW), убирание из taskbar/Alt+Tab, перетаскивание за заголовок, привязка к сетке, два вида (список/плитка), drag&drop файлов, сохранение состояния в JSON, окно настроек и трей; файловые операции, поведение панелей, внешний вид, десктоп-жесты, Folder Portals, страницы/swipe, снапшоты раскладки, multi-monitor; ресайз кратно сетке иконок, фильтр содержимого панели, кнопка roll-up; скрытие/показ иконок рабочего стола (единый переключатель, без выборочного режима — см. ADR-006); панель системных иконок (SystemIconsPanel) как второй независимый тип desktop-window. Плюс 2026-07-26 (см. `docs/prompts/outstanding-followups.md`, пункты 1–4): one-time Move-хинт, тест кросс-volume `Restore`, очистка managed-копий при удалении панели ([ADR-010](../adr/ADR-010-managed-storage-cleanup-on-panel-removal.md)) и re-clamp панелей при уменьшении рабочей области монитора. Плюс ещё 2026-07-26 (см. `docs/prompts/grid-snap-drag-and-settings-order.md`, [ADR-011](../adr/ADR-011-manual-drag-with-magnetic-grid-snap.md)): магнитное покадровое прилипание к сетке во время перетаскивания панели (не только на drop), новая настройка `GridSnapDistance`, и реорганизация окна настроек (порядок групп + перенос «Привязки к сетке» в «Автозапуск и рабочий стол»). Плюс 2026-08-15 — **Фаза 7 «Производительность, память и отказоустойчивость»** ([docs/PLANS/phase-7-performance-hardening.md](PLANS/phase-7-performance-hardening.md), [ADR-012](../adr/ADR-012-performance-and-resilience-hardening.md)): все 11 находок [docs/PERFORMANCE_AUDIT.md](PERFORMANCE_AUDIT.md) закрыты 6 блоками (A–F) — debounced persistence с синхронным flush для структурных изменений, try/catch вокруг колбэка глобального хука жестов + вынос чистой машины состояний, ограниченный LRU-кеш иконок и замороженные кеш-кисти конвертеров, batch-уведомления и O(1) дедуп коллекций ViewModel, авторитетный in-memory кеш манифеста `PanelItemStorageService` с write-through. Плюс 2026-08-16 — **Фаза 8 «UX-паритет значков: выделение и переименование»** ([docs/PLANS/icon-selection-and-rename.md](PLANS/icon-selection-and-rename.md), [ADR-013](../adr/ADR-013-panel-item-selection-and-rename.md)): визуальное выделение значка в обоих видах панели (`ListBox`-контейнеры, подсветка не зависит от `IsSelectionActive`) и честные имена + inline-переименование значков (F2/контекстное меню, физическое переименование на диске, GUID перенесён из имени файла в имя каталога, синхронизация manifest). Плюс ещё 2026-08-16 — **Фаза 9 «Сортировка и ручной порядок значков панели»** ([docs/PLANS/panel-item-sorting.md](PLANS/panel-item-sorting.md), [ADR-014](../adr/ADR-014-panel-item-sorting-and-manual-order.md)): новая настройка `PanelSortMode` (Manual/Name) в окне настроек и контекстном меню заголовка, немутирующая сортировка по имени (собственный natural-order компаратор, папки вперёд), drag-to-reorder значков мышью в обоих видах панели с трансляцией видимого индекса в полный набор при активном `ContentFilter` и авто-переключением в `Manual`. Остаются сквозные задачи (см. ниже). **2026-09-28** поставлен бэклог 1.x «UX-полировка» (семь пунктов: единый стиль UI, страницы в меню трея, переименование страниц, round-robin страниц по двойному клику трея, упрощение настройки цветов, цвет текста в пресетах, фоновая загрузка иконок вместо UI-потока; 2026-09-29 добавлен восьмой — копирование панели на другую страницу полным клоном) — см. раздел «Бэклог 1.x» ниже. **2026-09-29** пункты 1, 2, 3, 4, 5 и 8 бэклога 1.x закрыты (schema v6 — [ADR-043](../adr/ADR-043-page-display-names.md); навигация по страницам из трея — [ADR-044](../adr/ADR-044-tray-page-navigation.md); копирование панели на страницу — [ADR-045](../adr/ADR-045-panel-clone-to-page.md); пресеты цвета и упрощённый редактор — amendments [ADR-042](../adr/ADR-042-color-presets-rgb-picker-stepped-size.md)). **2026-09-30** пункт 7 (фоновая загрузка иконок) закрыт — [ADR-046](../adr/ADR-046-background-icon-loading.md) (amends ADR-039/ADR-012/ADR-008). **2026-09-30** пункт 6 (единая дизайн-система) тоже закрыт — [ADR-047](../adr/ADR-047-unified-design-system.md) (amends ADR-025/ADR-031/ADR-042/ADR-040/ADR-044/ADR-013/ADR-001/ADR-033/ADR-002). **Бэклог 1.x закрыт целиком** — все 8 пунктов реализованы, покрыты тестами и прошли ревью. **2026-10-10** реализован канал Microsoft Store (MSIX, пакеты 1–4, [ADR-050](../adr/ADR-050-microsoft-store-channel-msix.md)) — см. раздел «Публикация в Microsoft Store»; процессные пункты AP1–AP4 (аккаунт, политика, листинг) — за владельцем.
 
 Легенда: `[ ]` — не сделано, `[~]` — частично, `[x]` — готово.
 
@@ -1286,6 +1286,77 @@ worktree на ветке `feature/background-icon-loading`, смёржен в `r
 Сквозное для всех пунктов: 0 warnings, тесты на новую логику (переключение страниц по кругу, валидация
 имени страницы, применение пресета в обоих режимах текста, фоновая очередь иконок), manual verify на
 Windows 11 24H2.
+
+---
+
+## Публикация в Microsoft Store (2026-10-10)
+
+Второй канал распространения (MSIX, Microsoft Store) — не фаза паритета с Fences, а релизная инженерия; ветка
+`feature/store-publication`. Анализ готовности: [docs/PLANS/store-first-publication.md](PLANS/store-first-publication.md)
+(v4), технический план: [docs/PLANS/store-publication-implementation.md](PLANS/store-publication-implementation.md),
+решение: [ADR-050](../adr/ADR-050-microsoft-store-channel-msix.md) (amends ADR-009/024/027/038/041).
+
+**Решения владельца 2026-10-10:** D-1 = A (корень хранилища Store-сборки в `%USERPROFILE%\DesktopOrganizer` — явное
+разрешение на изменение замороженного контура **только в объёме пути корня**, схема/миграции/`IAppSettings` не менялись);
+D-2 — продуктовая `Version` 1.0.0; D-3 — имя «DesktopOrganizer»; D-4 — P1 отложен (known limitation); D-5 — `startupTask`
+`Enabled="false"`; D-6 — код закрытый.
+
+### Реализация (пакеты плана)
+
+Реализовано и покрыто тестами (критерий плана — `dotnet build`/`dotnet test`: 0 errors / 0 warnings). Установка и запуск под package
+identity проверяются вручную на Windows 11 (сценарий — ADR-050, раздел «Manual verify»).
+
+- [x] **Пакет 1 — A1: корень хранилища + identity-probe.** `GetCurrentPackageFullName` (статический `Lazy` в `NativeApi`,
+      исключение из инварианта «P/Invoke только за `INativeApi`», `PackageProbeUsageGuardTests`), `IAppPackageContext`,
+      `AppStorageRoot.Resolve`/`PanelItemsDirectory`/`LogsDirectory`/`IsPackagedLocation`, `README.txt` в корне
+      (`StorageRootReadme`). Закрывает B7 (папки логов/хранилища, crash-диалог, Orphans). ADR-050 D-1…D-3; amendments ADR-009
+      (Amendment 8), ADR-024, ADR-027, ADR-041.
+- [x] **Пакет 2 — A2: автозапуск под identity.** `IAutostartService.IsManagedBySystem`, `HKCU\Run` не читается и не пишется,
+      карточка со ссылкой `ms-settings:startupapps` (узкий `IExternalLinkLauncher.OpenStartupAppsSettings()`). ADR-050 D-4.
+- [x] **Пакет 3 — A4, B2, B4, B5, B9.** Карточка Updates скрыта под identity (`AboutViewModel.IsUpdateCheckAvailable`), баннер
+      первого запуска (`FirstRunTrayNotice`, без persisted-флагов), Move-hint с путём (`MoveHintText`), тексты без жаргона,
+      known limitations в `CHANGELOG.md` (правит параллельный агент). ADR-050 D-5.
+- [~] **B6 — ссылки «Project page» / «Report a problem» / политика.** `UpdateEndpoints.PublicSiteUrl` — временное значение
+      (`https://github.com/messire`), заменяется одной константой, когда владелец даст URL публичной страницы (AP2).
+- [x] **Пакет 4 — A3: упаковка MSIX.** `installer/msix/AppxManifest.xml` (шаблон) + `installer/build-msix.ps1`
+      (`makepri` без `<packaging>`, `makeappx`, без `.wapproj`), ассеты из `app.ico` (`Generate-Assets.ps1`), CI job `msix`,
+      `MsixManifestContractTests`, `Version` 1.0.0, «open-source» убрано из `<Description>`/`README.md`. ADR-050 D-6, D-7;
+      amendment ADR-038.
+
+### Процесс (владелец, не код)
+
+- [ ] **AP1 — резервация имени «DesktopOrganizer» в Partner Center** (индивидуальный аккаунт); значения Identity
+      (Name/Publisher/PublisherDisplayName) копируются посимвольно в параметры `build-msix.ps1` / repo variables
+      `DESKTOPORGANIZER_MSIX_*`. Запасной бренд не задан (D-3).
+- [ ] **AP2 — публичная страница** с политикой конфиденциальности и контактом поддержки (обязательна для Desktop Bridge,
+      политика 10.5.1); код закрытый ⇒ отдельная страница/репозиторий только с сайтом. После получения URL — заменить
+      `UpdateEndpoints.PublicSiteUrl` (B6).
+- [ ] **AP3 — Notes for certification** (≤2000 знаков): приложение живёт в трее, шаги проверки, обоснование `runFullTrust`.
+- [ ] **AP4 — листинг:** описание с ограничениями (слой рабочего стола, глобальный хук мыши, жест скрытия иконок, файлы
+      перемещаются в `%USERPROFILE%\DesktopOrganizer`), скриншоты PNG ≥1366×768, логотип 300×300, категория, IARC; License
+      terms — Standard Application License Terms (не MIT).
+
+### Бэклог (roadmap после первой публикации)
+
+Источник — [store-first-publication.md](PLANS/store-first-publication.md) §5.
+
+- [ ] **C1** — полная интеграция WinRT `StartupTask` (TFM `net8.0-windows10.0.19041.0`), отображение `DisabledByUser`.
+- [ ] **C2** — side-by-side Inno + Store: детект uninstall-ключа, миграция данных (общие имена mutex/pipe ⇒ второй экземпляр
+      активирует первый, ADR-023).
+- [ ] **C3** — `appExecutionAlias` для CLI-ключей.
+- [ ] **C4** — `RegisterApplicationRestart` / self-heal иконок после принудительного завершения пакета.
+- [ ] **C5** — пакет arm64.
+- [ ] **C6** — `msstore` CLI / автопубликация из GitHub Actions.
+- [ ] **C7** — страница лицензий/третьих сторон в приложении.
+- [ ] **C8** — настройка отключения жеста «двойной клик скрывает иконки»; toast при первом скрытии.
+- [ ] **C9** — placeholder «Перетащите значки сюда» в пустой панели.
+- [ ] **C10** — команда «Вернуть все файлы на рабочий стол» в Settings → Backup.
+- [ ] **C11** — расширение контрактных тестов манифеста (базовые `MsixManifestContractTests` уже есть, см. Пакет 4).
+- [ ] **C12** — README: раздел для Store / разделение инструкций установки (правит параллельный агент).
+- [ ] **C13** — P1: `user.config` Store-сборки сбрасывается при каждом обновлении пакета (`_Url_<hash>` от пути exe); любое
+      исправление меняет контур `IAppSettings`/`user.config` ⇒ **нужно отдельное явное «да» владельца** (D-4 — ответа нет,
+      действует «отложить»).
+- [ ] **C14** — обфускация сборок в Store-пакете (защита закрытого кода от декомпиляции); отдельное решение владельца.
 
 ---
 

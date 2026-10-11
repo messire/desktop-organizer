@@ -1,7 +1,7 @@
 <Project>
 
     <PropertyGroup>
-        <Version>0.9.0</Version>
+        <Version>1.0.0</Version>
         <!-- DesktopOrganizer.UI's user settings (ChildWindowsState, panel layout, etc. — see
              Properties\Settings.settings) are System.Configuration "User"-scoped, which .NET keys by
              AssemblyVersion: %LocalAppData%\...\<AssemblyVersion>\user.config. If AssemblyVersion moved
@@ -37,7 +37,7 @@
         <Company>khagendev</Company>
         <Authors>khagen</Authors>
         <Copyright>Copyright (c) 2024-2026 khagen</Copyright>
-        <Description>A free, open-source Windows desktop organizer that groups your desktop icons into movable, resizable panels.</Description>
+        <Description>A free Windows desktop organizer that groups your desktop icons into movable, resizable panels.</Description>
     </PropertyGroup>
 
     <ItemGroup>

@@ -808,6 +808,13 @@ internal interface INativeApi
     /// <param name="rootPath">Drive root, e.g. <c>"Z:\\"</c>.</param>
     /// <returns>The drive's kind, or <see cref="DriveKind.Unknown"/> on failure. Never throws.</returns>
     DriveKind GetDriveKind(string rootPath);
+
+    /// <summary>
+    /// Gets a value indicating whether this process runs with package identity (MSIX / Microsoft Store),
+    /// probed once per process via <c>GetCurrentPackageFullName</c> (zero-length buffer). Never throws; any
+    /// failure to probe reads as <see langword="false"/> (not packaged).
+    /// </summary>
+    bool IsPackagedProcess { get; }
 }
 
 /// <summary>

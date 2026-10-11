@@ -21,7 +21,7 @@ internal sealed class PanelItemsUninstallRestorer : IPanelItemsUninstallRestorer
     /// <param name="appLog">See <see cref="Log"/>.</param>
     public PanelItemsUninstallRestorer(IAppLog? appLog = null)
         : this(
-            Path.Combine(Storage.AppStorageRoot.Default, "PanelItems"),
+            Storage.AppStorageRoot.PanelItemsDirectory,
             Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
             appLog)
     {

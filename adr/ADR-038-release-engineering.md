@@ -5,7 +5,7 @@ Amended 2026-09-28 (Company = khagendev, user.config migration; supersedes the 2
 "Company pinned to DesktopOrganizer.UI" decision). **Open (ADR-audit WP-E):** CI and the update check are inert while
 the repository has no remote and no `v*` tags — see `docs/ROADMAP.md`, "Решения, ожидающие пользователя", item 4. — Amended 2026-10-10 (user decision, ROADMAP item 4: RC convention extended with an
 annotated `vX.Y.Z` tag per squash commit; CI also runs on `rc/**`; retro tags v0.5.1…v0.8.0 created locally; the remote is still
-to be added by the user — the "Open" note above is therefore narrowed to "no remote yet").
+to be added by the user — the "Open" note above is therefore narrowed to "no remote yet"). — Amended 2026-10-10 (ADR-050: second distribution channel — Microsoft Store/MSIX; CI job `msix`; product `Version` 1.0.0; closed-source repository).
 
 ## Context
 
@@ -285,6 +285,34 @@ preferences intact (not reset to defaults); the old folder is still present afte
 | 2026-09-28 | user approval in task | `Company` = `khagendev` (inherited); one-time `UserConfigFolderMigration` of `user.config`; GitHub URL "messire" confirmed, question closed | The 2026-09-27 amendment's "`Company` pinned to `DesktopOrganizer.UI`" |
 | 2026-10-09 | ADR-audit WP-E (clarification, no behavior change) | **What "pinned" means in `ci.yml` (verified):** only the Inno Setup tool version (`--version=6.7.1`) and `softprops/action-gh-release` (commit SHA, `# v2.6.2`) are pinned; `actions/checkout@v4`, `actions/setup-dotnet@v4` and `actions/upload-artifact@v4` track a major tag. The README row previously said "pinned actions/tool versions" (overstated) and has been aligned with this text | — |
 | 2026-10-10 | user decision (ROADMAP item 4, commit `b796feb`) | RC convention: annotated tag `vX.Y.Z` on each rc squash commit; CI on `rc/**`; retro tags v0.5.1…v0.8.0 (local); remote — user action | "CI and update check are inert while there are no `v*` tags" (tags exist locally; remote still pending) |
+| 2026-10-10 | [ADR-050](ADR-050-microsoft-store-channel-msix.md) (Store channel, owner decisions D-2/D-6) | Second channel: MSIX for Microsoft Store (`installer/build-msix.ps1`, `installer/msix/**`, CI job `msix` on `v*` tags / `workflow_dispatch`); product `<Version>` 1.0.0 (Store package version needs first section ≥ 1, fourth = 0); "open-source" removed from `<Description>`/`README.md` (repository stays private); update check hidden under package identity | "The installer is the only distribution artifact" (implicit); the 0.x version line for new builds |
+
+## Amendment 2026-10-10 (ADR-050): второй канал — Microsoft Store (MSIX)
+
+*(Раздел на русском, как другие поздние amendments.)* Полное решение — [ADR-050](ADR-050-microsoft-store-channel-msix.md);
+здесь — только то, что меняет релизную инженерию.
+
+- **Второй артефакт релиза.** Рядом с Inno-инсталлятором (`installer/Output/*.exe`) собирается неподписанный `.msix`:
+  `installer/build-msix.ps1` переиспользует self-contained публикацию `installer/build.ps1 -SkipInstaller`, собирает
+  layout из `installer/msix/AppxManifest.xml` + `installer/msix/Assets/*.png`, `resources.pri` (`makepri`, без секции
+  `<packaging>`) и пакует `makeappx` в `installer/Output/DesktopOrganizer-X.Y.Z.msix`. Без `.wapproj`, `DesktopOrganizer.sln`
+  не менялся. Store подписывает пакет сам; для sideload-теста есть `-SignForSideload` (self-signed, только placeholder-издатель).
+- **CI.** Новый job `msix` в `.github/workflows/ci.yml`: `needs: build-and-test`, `windows-latest`, запускается на тегах
+  `v*` и `workflow_dispatch`, выкладывает артефакт `DesktopOrganizer-msix` (30 дней). Identity (Name/Publisher/
+  PublisherDisplayName) — из repo variables `DESKTOPORGANIZER_MSIX_*` (Partner Center); пока не заданы, скрипт использует
+  development-placeholder и пишет предупреждение. Ручная отправка в Partner Center — вне CI (автопубликация — C6).
+- **Версия 1.0.0 (решение D-2).** `Directory.Build.props` `<Version>1.0.0</Version>`: версия пакета MSIX обязана иметь первую
+  секцию ≠ 0 и четвёртую = 0, `build-msix.ps1` проверяет `FILEVERSION` по `^[1-9]\d*\.\d+\.\d+\.0$`. `AssemblyVersion`
+  закреплён на `1.0.0.0` (путь `user.config`), так что bump `Version` его не двигает. RC-конвенция (squash-коммит и
+  annotated-тег `vX.Y.Z`) не меняется.
+- **Закрытый код (решение D-6).** Репозиторий остаётся приватным: «open-source» убрано из `<Description>` и `README.md:3`,
+  `LICENSE` (MIT) остаётся, но Store-листинг не ссылается на MIT. Публичной должна быть только страница политики
+  конфиденциальности/поддержки (AP2); пока URL нет, «Report a problem»/«Project page» ведут на `UpdateEndpoints.PublicSiteUrl`.
+- **Проверка обновлений** (`GitHubReleaseUpdateChecker`, G2) под package identity скрыта и не вызывается; для Inno-канала
+  без изменений.
+
+Не менялись: Inno-инсталлятор и его контракты (мьютексы, `Run`-значение, `--restore-panel-items`), `IAppSettings`,
+persistence (кроме пути корня под identity — [ADR-024](ADR-024-versioned-json-persistence.md) Amendment 2026-10-10).
 
 ## Amendment 2026-10-10 (user decision): release tags and CI on `rc/**`
 

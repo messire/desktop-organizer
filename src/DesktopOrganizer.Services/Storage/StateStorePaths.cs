@@ -11,7 +11,8 @@ namespace DesktopOrganizer.Services.Storage;
 /// </summary>
 /// <remarks>
 /// The advisory lock (<see cref="LockFilePath"/>) deliberately lives at the storage
-/// <b>root</b> (<c>%LOCALAPPDATA%\DesktopOrganizer\.storage-lock</c>), one level above
+/// <b>root</b> (<c>.storage-lock</c> directly under <see cref="StorageRoot"/> — Inno channel
+/// <c>%LOCALAPPDATA%\DesktopOrganizer\</c>, Store channel <c>%USERPROFILE%\DesktopOrganizer\</c>), one level above
 /// <see cref="StateDirectory"/> (<c>...\DesktopOrganizer\State\</c>) — see ADR-024 D-8: it
 /// conceptually covers both this store's <c>State\</c> directory and
 /// <c>PanelItems\.manifest.json</c>, the other surface named by ADR-023 R-15.
@@ -45,7 +46,7 @@ internal sealed class StateStorePaths
     /// root-override constructor).
     /// </summary>
     /// <param name="storageRoot">
-    /// The root folder the state store, and everything else under <c>%LOCALAPPDATA%\DesktopOrganizer</c>
+    /// The root folder the state store, and everything else under the storage root
     /// (e.g. <c>PanelItems</c>), lives under.
     /// </param>
     internal StateStorePaths(string storageRoot)
@@ -57,7 +58,7 @@ internal sealed class StateStorePaths
         LockFilePath = Path.Combine(storageRoot, LockFileName);
     }
 
-    /// <summary>Root of all DesktopOrganizer per-user app-data storage (<c>%LOCALAPPDATA%\DesktopOrganizer</c>).</summary>
+    /// <summary>Root of all DesktopOrganizer per-user app-data storage (<see cref="AppStorageRoot.Default"/>: Inno channel <c>%LOCALAPPDATA%\DesktopOrganizer</c>, Store channel <c>%USERPROFILE%\DesktopOrganizer</c>).</summary>
     public string StorageRoot { get; }
 
     /// <summary>Folder the versioned JSON document lives under (<c>...\DesktopOrganizer\State</c>).</summary>

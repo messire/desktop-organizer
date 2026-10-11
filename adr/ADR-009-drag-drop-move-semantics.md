@@ -1,6 +1,6 @@
 # ADR-009: Drag&drop в панель — Move-семантика через managed storage + JSON-manifest
 
-**Статус:** Accepted — Amended 2026-09-22 ×3 (P08 icon loading fix cycles); Amended 2026-09-27 (ADR-036: drag-out); Amended 2026-09-27 (ADR-040: команда «Убрать из панели» удалена, `Restore` переиспользован `RecycleManagedItem`); Amended 2026-09-29 (ADR-045: неоднозначный manifest у копии панели); Amended 2026-10-10 (решение пользователя: Move остаётся; предупреждение об облачной папке и поиск файлов без панели). **Действующий свод правил судьбы managed-файлов — [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md).**
+**Статус:** Accepted — Amended 2026-09-22 ×3 (P08 icon loading fix cycles); Amended 2026-09-27 (ADR-036: drag-out); Amended 2026-09-27 (ADR-040: команда «Убрать из панели» удалена, `Restore` переиспользован `RecycleManagedItem`); Amended 2026-09-29 (ADR-045: неоднозначный manifest у копии панели); Amended 2026-10-10 (решение пользователя: Move остаётся; предупреждение об облачной папке и поиск файлов без панели); Amended 2026-10-10 (ADR-050: в Store-канале managed-хранилище лежит в `%USERPROFILE%\DesktopOrganizer\PanelItems` и переживает удаление пакета). **Действующий свод правил судьбы managed-файлов — [ADR-048](ADR-048-panel-item-lifecycle-release-rules.md).**
 **Дата:** 2026-07-07
 
 ---
@@ -500,6 +500,27 @@ Copy-семантика не вводится. Добавлены два защ�
 политика возврата кнопки «Вернуть» — политика R (`Restore`, Решения 4–5 этого ADR). `ROADMAP`, «Решения, ожидающие
 пользователя», п. 2 — закрыт; DO-046 (удаление панели в read-only сессии двигает файлы в Корзину) остаётся открытым.
 
+## Amendment 8 (2026-10-10, ADR-050 — канал Microsoft Store: расположение managed-хранилища)
+
+Решения 1–6 и Move-семантика не меняются. Меняется только **родительская папка** managed-хранилища для процесса с
+package identity (MSIX / Store); формат манифеста, схема состояния и пути внутри `PanelItems\<guid>\` прежние.
+
+- **Корень по каналу.** Решение 1 («Managed-copy в `%LocalAppData%`») действует для Inno-канала и разработки без
+  изменений. Для Store-сборки `AppStorageRoot.PanelItemsDirectory` = `%USERPROFILE%\DesktopOrganizer\PanelItems`
+  (`.Dev` для Debug); при пустом `%USERPROFILE%` — откат на `%LOCALAPPDATA%` ([ADR-050](ADR-050-microsoft-store-channel-msix.md), D-2).
+- **Зачем.** `%LOCALAPPDATA%` упакованного процесса виртуализируется в `LocalCache` пакета: файлы, перемещённые в
+  панель, были бы невидимы для Explorer и процессов без identity (drag-out, «Открыть папку», уже запущенные
+  приложения) и удалялись бы вместе с пакетом при Uninstall и Settings → Apps → Reset — это потеря данных при
+  Move-семантике.
+- **Последствия для правил релиза ([ADR-048](ADR-048-panel-item-lifecycle-release-rules.md)).** В Store-канале у
+  деинсталляции нет шага `--restore-panel-items` ([ADR-041](ADR-041-first-run-panel-and-uninstall-restore.md)): файлы
+  **остаются** в `%USERPROFILE%\DesktopOrganizer\PanelItems`, пока пользователь не заберёт их drag-out'ом, кнопкой
+  «Вернуть» в карточке «Файлы без панели» (Amendment 7, O2) или вручную. Для первого запуска в корень кладётся
+  `README.txt`, подсказка о перемещении называет папку и говорит о сохранности файла после удаления **только** когда
+  `AppStorageRoot.IsPackagedLocation` (в Inno-канале эта фраза была бы ложью).
+- Не менялось: `IPanelItemStorageService`, формат `.manifest.json`, `Restore`/`RecycleManagedItem`/`TryClaim`/
+  `ForgetMovedOut`, поведение Inno-канала.
+
 ## Amendments (сводка)
 
 | Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
@@ -510,3 +531,4 @@ Copy-семантика не вводится. Добавлены два защ�
 | 2026-09-29 | [ADR-045](ADR-045-panel-clone-to-page.md) | Неоднозначный manifest у копии панели — явный отказ | — |
 | 2026-10-09 | ADR-048 | Свод правил судьбы managed-файлов; расхождение двух политик restore (Решения 4–5 vs ADR-041) зафиксировано как открытый вопрос | Решения 4–5 перестают быть единственной политикой restore (ADR-041 при деинсталляции применяет fallback на рабочий стол) |
 | 2026-10-10 | Решение пользователя (Amendment 7) | Move остаётся; hint при drop из облачной папки (O1; действующий текст подсказки — «перетащите обратно в папку», не «удалите панель»); сканер файлов без панели в «Резервном копировании» (O2); ссылки из ADR-048 (сценарий 11) | Закрыт вопрос Q2 ADR-048 / п. 2 «Решений, ожидающих пользователя» (режим «ссылка без перемещения» не вводится); «очистка осиротевших копий отдельной задачей не решена» (долг ADR-009, ADR-048 ограничение 6) — теперь есть ручной поиск и «Вернуть» |
+| 2026-10-10 | [ADR-050](ADR-050-microsoft-store-channel-msix.md) (Amendment 8) | Store-канал: managed-хранилище под identity лежит в `%USERPROFILE%\DesktopOrganizer\PanelItems` (не в виртуализированном `%LOCALAPPDATA%`) и переживает удаление пакета; README.txt + подсказка с путём; Inno-канал не менялся | Допущение Решения 1 «managed-копия всегда в `%LocalAppData%`» — для Store-канала |

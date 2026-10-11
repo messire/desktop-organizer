@@ -108,7 +108,7 @@ fences-feature-planner (мастер-план всей фазы)
   `Services` (реализации, нативный interop в `Tools/`) → `UI` (Views/ViewModels/Models/Converters/Commands).
 - **Инварианты:** P/Invoke только за `INativeApi`; колбэк хука `WH_MOUSE_LL` — минимум работы + try/catch;
   единый источник правды вида панели — `ChildWindowModel` (INPC); битые пути не валят загрузку.
-- **Готовность:** ROADMAP Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» (ADR-033–038) закрыта; manual verify выполнена на Windows 11 (2026-09-27); открыты сквозные задачи. Бэклог 1.x закрыт 2026-09-30, ADR-043–047.
+- **Готовность:** ROADMAP Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» (ADR-033–038) закрыта; manual verify выполнена на Windows 11 (2026-09-27); открыты сквозные задачи. Бэклог 1.x закрыт 2026-09-30, ADR-043–047. Канал Microsoft Store (MSIX, ADR-050) реализован 2026-10-10 на `feature/store-publication`, версия 1.0.0; код закрытый (D-6).
 
 ## 🔒 Настройки и persistence — ЗАМОРОЖЕНЫ (не трогать без явного разрешения пользователя)
 
@@ -119,7 +119,9 @@ ADR-024: `application-state.json` (`StateEnvelope`, **schemaVersion = 7**, `sche
 enum при записи; сборка того же major открывает файл более новой ревизии на запись без потерь. Лестница миграций
 (`Migrations/V*To*`), `JsonApplicationStateStore` (атомарная запись, бэкапы, карантин, advisory lock,
 rung «newer schema → read-only»), `PanelStateMapper`/DTO, `ApplicationStateService`, `IAppSettings`/
-`AppSettings`/`Settings.settings`/`user.config`, `LayoutSnapshotService`, путей в `%LOCALAPPDATA%\DesktopOrganizer`.
+`AppSettings`/`Settings.settings`/`user.config`, `LayoutSnapshotService`, путей корня хранилища: `%LOCALAPPDATA%\DesktopOrganizer`
+для Inno-сборки и — с 2026-10-10 по явному решению владельца D-1=A (ADR-050, amendment ADR-024) — `%USERPROFILE%\DesktopOrganizer`
+для сборки с package identity (Microsoft Store); выбор корня — только `AppStorageRoot.Resolve`, схема/DTO/миграции при этом не менялись.
 С 2026-09-28 (явное разрешение пользователя, ADR-038 amendment) `user.config`-папка — `%LOCALAPPDATA%\
 khagendev\...`, а не `%LOCALAPPDATA%\DesktopOrganizer.UI\...`; старая папка мигрируется один раз при
 старте (`UserConfigFolderMigration`) — не «чините» это обратно и не переносите снова без такого же явного

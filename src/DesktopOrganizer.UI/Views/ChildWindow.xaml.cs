@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using DesktopOrganizer.Core;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.UI.Behaviors;
 using DesktopOrganizer.UI.Diagnostics;
 using DesktopOrganizer.UI.Interaction;
@@ -296,7 +297,15 @@ public partial class ChildWindow : Window
             isForeignPanelDrag: () => _dragOutSession.IsActive && _dragOutSession.SourcePanelId != _model?.Id);
 
         _hintPopups = new HintPopupController(
-            Dispatcher, MoveHintPopup, RenameErrorPopup, RenameErrorText, FileListHost, () => _viewModel.EditingItem, MoveHintText);
+            Dispatcher,
+            MoveHintPopup,
+            RenameErrorPopup,
+            RenameErrorText,
+            FileListHost,
+            () => _viewModel.EditingItem,
+            MoveHintText,
+            AppStorageRoot.PanelItemsDirectory,
+            AppStorageRoot.IsPackagedLocation);
 
         // Persist whenever the user changes the file list from the panel (e.g. removes an item).
         _viewModel.FilesChanged += (_, _) => _windowManager.SaveWindowsState();

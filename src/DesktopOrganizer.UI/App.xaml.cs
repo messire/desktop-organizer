@@ -59,7 +59,7 @@ public partial class App : Application
     private TrayPagesAdapter? _trayPagesAdapter;
 
     /// <summary>The same <c>Logs</c> folder <see cref="JsonLinesDiagnosticsLog"/> writes its JSONL sessions to (see <c>DiConfig.DefaultDiagnosticsLogDirectory</c>).</summary>
-    private static string CrashLogDirectory => Path.Combine(AppStorageRoot.Default, "Logs");
+    private static string CrashLogDirectory => AppStorageRoot.LogsDirectory;
 
     private ITrayIconManager TrayIconManager
         => (_trayIconManager ??= _serviceProvider.GetService<ITrayIconManager>())!;
@@ -537,6 +537,11 @@ public partial class App : Application
         // once, on the non-blocking InfoBar (a Caution status persists until dismissed, so it is waiting in the
         // settings window). After MarkConsumersReady so it never shadows the startup load itself.
         _serviceProvider.GetRequiredService<ReadOnlySessionNotice>().ShowIfReadOnly();
+
+        // Store-publication B2: a tray-only app has no window to announce itself - on the very first run
+        // (StateLoadStatus.FirstRun, the same signal that seeds the first panel) say once where it lives.
+        // Not persisted: the next start loads an existing document, so it never repeats.
+        _serviceProvider.GetRequiredService<FirstRunTrayNotice>().ShowIfFirstRun();
 
         // F5: the same live flag also marks the tray icon's tooltip "(read-only)", so the state is
         // discoverable without opening the settings window. Nothing is persisted.

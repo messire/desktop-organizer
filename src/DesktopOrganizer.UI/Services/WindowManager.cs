@@ -963,7 +963,7 @@ public class WindowManager : IWindowManager
 
                 // B-6 (ADR-046 7c): manifest lookup FIRST — FindManagedCandidates is a purely in-memory
                 // manifest scan (its own File.Exists/Directory.Exists calls only ever touch LOCAL managed
-                // candidates under %LOCALAPPDATA%, never `path` itself) — and only THEN check whether the
+                // candidates under the local storage root, never `path` itself) — and only THEN check whether the
                 // original `path` still exists. The remap condition itself is unchanged (original missing
                 // AND exactly one unclaimed candidate — an AND of two checks, whose result cannot depend on
                 // evaluation order), but at startup, with every saved panel's paths checked before any

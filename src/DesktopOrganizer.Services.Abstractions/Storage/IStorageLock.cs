@@ -2,7 +2,8 @@ namespace DesktopOrganizer.Services.Abstractions.Storage;
 
 /// <summary>
 /// Advisory, process-lifetime lock over the root of the on-disk application storage
-/// (<c>%LOCALAPPDATA%\DesktopOrganizer\</c>), closing ADR-023 R-15. Deliberately taken on the
+/// (the storage root: Inno channel <c>%LOCALAPPDATA%\DesktopOrganizer\</c>, Store channel
+/// <c>%USERPROFILE%\DesktopOrganizer\</c>), closing ADR-023 R-15. Deliberately taken on the
 /// storage root rather than on <c>State\</c> alone (ADR-024 D-8), because it conceptually covers
 /// both <see cref="IApplicationStateStore"/>'s <c>State\</c> directory and
 /// <c>PanelItems\.manifest.json</c> — the two surfaces R-15 named as shared, concurrently-written

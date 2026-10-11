@@ -512,8 +512,11 @@
   </data>
   <!-- ==== END WP-2 ==== -->
   <!-- ==== BEGIN WP-3 Panel surfaces (Panel_, Hint_) ==== -->
-  <data name="Hint_Move_Message" xml:space="preserve">
-    <value>Файл перемещён в панель — исходный файл удалён с рабочего стола.</value>
+  <data name="Hint_Move_Message_Format" xml:space="preserve">
+    <value>Файл перемещён в панель и хранится в папке {0}.</value>
+  </data>
+  <data name="Hint_Move_PackagedRetention" xml:space="preserve">
+    <value>Файл останется там и после удаления приложения.</value>
   </data>
   <data name="Hint_Rename_Failed" xml:space="preserve">
     <value>Не удалось переименовать файл.</value>
@@ -629,7 +632,7 @@
   <!-- ==== END WP-3 ==== -->
   <!-- ==== BEGIN WP-4a Settings window (Settings_) ==== -->
   <data name="Settings_About_Diagnostics_Message" xml:space="preserve">
-    <value>Диагностика: запустите с --diag для подробного журналирования. Откройте папку логов ниже, чтобы посмотреть файлы журнала.</value>
+    <value>Файлы журнала помогают найти причину проблемы. Откройте папку журналов ниже и найдите в ней самый свежий файл.</value>
   </data>
   <data name="Settings_About_OpenFolder_Button" xml:space="preserve">
     <value>Открыть папку</value>
@@ -732,6 +735,12 @@
   <data name="Settings_General_Autostart_Header" xml:space="preserve">
     <value>Запускать при старте Windows</value>
   </data>
+  <data name="Settings_General_Autostart_Managed_Description" xml:space="preserve">
+    <value>Автозапуск приложений из Microsoft Store настраивается в Windows. Чтобы DesktopOrganizer запускался при входе, включите его в разделе «Параметры Windows» → «Приложения» → «Автозагрузка».</value>
+  </data>
+  <data name="Settings_General_Autostart_OpenSystemSettings_Button" xml:space="preserve">
+    <value>Открыть автозагрузку Windows</value>
+  </data>
   <data name="Settings_General_DesktopIcons_Description" xml:space="preserve">
     <value>Показывает или скрывает значки рабочего стола Windows. При закрытии приложения они возвращаются.</value>
   </data>
@@ -742,7 +751,7 @@
     <value>Сбросить</value>
   </data>
   <data name="Settings_General_ResetHints_Description" xml:space="preserve">
-    <value>Показывает одноразовую подсказку о перемещении снова при следующем перетаскивании файла в панель.</value>
+    <value>Снова показывает подсказку о перемещении файлов при следующем добавлении файла в панель.</value>
   </data>
   <data name="Settings_General_ResetHints_Header" xml:space="preserve">
     <value>Сбросить одноразовые подсказки</value>
@@ -1154,4 +1163,12 @@
   <data name="Settings_Backup_Orphans_More_A11y_Format" xml:space="preserve">
     <value>Дополнительные действия для «{0}»</value>
   </data>
+  <!-- ==== BEGIN Store channel / first run (FirstRun_) ==== -->
+  <data name="FirstRun_TrayBalloon_Message" xml:space="preserve">
+    <value>Перетащите файлы с рабочего стола на панель. Значок в области уведомлений (возможно, под «^»): щёлкните правой кнопкой — Параметры или Выход.</value>
+  </data>
+  <data name="FirstRun_TrayBalloon_Title" xml:space="preserve">
+    <value>DesktopOrganizer готов к работе</value>
+  </data>
+  <!-- ==== END Store channel / first run ==== -->
 </root>

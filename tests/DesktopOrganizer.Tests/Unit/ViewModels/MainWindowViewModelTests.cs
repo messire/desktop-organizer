@@ -1072,6 +1072,41 @@ public class MainWindowViewModelTests
         Assert.False(sut.TakeDefaultsFromSelectedPanelCommand.CanExecute(null));
     }
 
+    // ── Autostart under package identity (Store-publication A2) ─────────────────────────────────────
+
+    /// <summary>Verifies that outside package identity the General section keeps its toggle and hides the "managed by Windows" card.</summary>
+    [Fact]
+    public void AutostartManagedBySystem_WhenServiceIsNotManaged_ShowsToggle()
+    {
+        _autostartMock.Setup(a => a.IsManagedBySystem).Returns(false);
+        var sut = BuildSut();
+
+        Assert.False(sut.AutostartManagedBySystem);
+        Assert.True(sut.AutostartToggleAvailable);
+    }
+
+    /// <summary>Verifies that under package identity the toggle is replaced by the "managed by Windows" card.</summary>
+    [Fact]
+    public void AutostartManagedBySystem_WhenServiceIsManaged_HidesToggle()
+    {
+        _autostartMock.Setup(a => a.IsManagedBySystem).Returns(true);
+        var sut = BuildSut();
+
+        Assert.True(sut.AutostartManagedBySystem);
+        Assert.False(sut.AutostartToggleAvailable);
+    }
+
+    /// <summary>Verifies that <see cref="MainWindowViewModel.OpenStartupSettingsCommand"/> asks the service to open the system page exactly once.</summary>
+    [Fact]
+    public void OpenStartupSettingsCommand_Execute_OpensSystemStartupSettingsOnce()
+    {
+        var sut = BuildSut();
+
+        sut.OpenStartupSettingsCommand.Execute(null);
+
+        _autostartMock.Verify(a => a.OpenSystemStartupSettings(), Times.Once);
+    }
+
     // ── ResetOneTimeHintsCommand / HasOneTimeHintsToReset (fix-cycle finding 7) ─────────────────────
 
     /// <summary>
@@ -2287,7 +2322,7 @@ public class MainWindowViewModelTests
         // Package G2 wiring fixup only (release-hardening-1.0.md §G2): MainWindowViewModel's constructor
         // gained an AboutViewModel parameter, same category as WP-C's own IInputDialogService fixup above
         // — no MainWindowViewModel behavior under test here changed.
-        var about = new AboutViewModel(_updateCheckServiceMock.Object, _linkLauncherMock.Object, localization ?? _localization);
+        var about = new AboutViewModel(_updateCheckServiceMock.Object, _linkLauncherMock.Object, localization ?? _localization, Mock.Of<IAppPackageContext>());
 
         return new MainWindowViewModel(
             _windowManagerMock.Object,

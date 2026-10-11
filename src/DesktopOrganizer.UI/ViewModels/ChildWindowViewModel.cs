@@ -742,7 +742,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
     /// menu ended. The shell's "Rename" command starts this panel's own inline rename (the same one
     /// <c>F2</c> starts); any other invoked command is followed by <see cref="ReconcileAfterShellCommand()"/>,
     /// since shell verbs (Delete, Cut, "Create shortcut", …) act directly on the file — for a moved-in item, on
-    /// the managed copy under <c>%LOCALAPPDATA%\DesktopOrganizer\PanelItems\{guid}\</c>.
+    /// the managed copy under <c>PanelItems\{guid}\</c> of the storage root (<c>AppStorageRoot.PanelItemsDirectory</c>).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -2183,7 +2183,7 @@ public class ChildWindowViewModel : BaseViewModel, IDisposable
 
             // B-5 (ADR-046 7c): manifest lookup FIRST — TryFindManagedPath is a purely in-memory dictionary
             // scan (its own File.Exists/Directory.Exists calls, if any, only ever touch LOCAL managed
-            // candidates under %LOCALAPPDATA%, never `path` itself) — and only THEN check whether the
+            // candidates under the local storage root, never `path` itself) — and only THEN check whether the
             // original `path` still exists. The remap condition itself is unchanged (original missing AND
             // exactly one unclaimed candidate — an AND of two checks, whose result cannot depend on the
             // order they're evaluated in), but a path with no managed candidate at all (the common case for

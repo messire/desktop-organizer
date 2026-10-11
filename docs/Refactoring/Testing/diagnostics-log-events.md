@@ -16,7 +16,10 @@ gesture lifecycle, полный список событий и privacy-инва�
 
 ## Где лежит лог
 
-`%LOCALAPPDATA%\DesktopOrganizer\Logs\app-{yyyyMMdd-HHmmss}-{pid}.jsonl`.
+`<корень хранилища>\Logs\app-{yyyyMMdd-HHmmss}-{pid}.jsonl`, где корень (`AppStorageRoot.LogsDirectory`) зависит от канала
+(ADR-050, ADR-024 Amendment 2026-10-10): Inno-сборка — `%LOCALAPPDATA%\DesktopOrganizer`, Store-сборка (package identity) —
+`%USERPROFILE%\DesktopOrganizer`; Debug-сборка добавляет суффикс `.Dev`. Везде ниже в этом документе
+`%LOCALAPPDATA%\DesktopOrganizer\Logs` читается как «`Logs\` под корнем канала».
 
 - Ротация: файл сессии переключается на `-1`/`-2` суффиксы при превышении 10 МБ; хранится не более
   10 файлов сессий (старые удаляются при старте).
@@ -370,6 +373,11 @@ do not apply to them.
 | `ImmersiveDarkModeFailed` (backlog 1.x item 6, ADR-047) | `WindowFrameTheming.TryApply` — `DwmSetWindowAttribute` either threw or returned a failing `HRESULT`; rate-limited to one entry per window handle per minute (a window that keeps failing does not spam the log every `ThemeChanged`) | `attribute` (20 or 19), `dark` (bool, failing-HRESULT case only), `hresult` (`"0x{hr:X8}"`, failing-HRESULT case only), `suppressedSinceLast` (int, how many further failures for the same window were rate-limited away since the last entry) |
 | `NativeMenuModeApplied` (backlog 1.x item 6, ADR-047, phase 6.4b) | `NativeMenuTheming.TryApply` — the process's classic Win32 menus (a panel item's shell context menu, a window's system menu) were switched to `ForceDark`/`Default` via the undocumented `SetPreferredAppMode` uxtheme ordinal; idempotent (a repeat call for the same `dark` value logs nothing) | `dark` (bool) |
 | `SetPreferredAppModeUnavailable` / `FlushMenuThemesUnavailable` (backlog 1.x item 6, ADR-047, phase 6.4b) | `NativeMenuTheming.TryApply` — the corresponding `uxtheme.dll` ordinal (135/136) could not be resolved or the call itself failed; logged once per process (not once per request), the feature then silently no-ops for the rest of the session | `windowsBuild` (int) |
+| `PackageIdentity` (Microsoft Store channel, ADR-050) | `Program.Main` — `Info`, один раз за запуск сразу после `applicationState.Load()`, только в Primary (Secondary не создаёт писателя лога); записывает канал распространения и сырой результат пробы | `packaged` (bool — `IAppPackageContext.IsPackaged`), `underUserProfile` (bool — `AppStorageRoot.IsPackagedLocation`; `false` у Inno и у упакованного процесса, откатившегося на `%LOCALAPPDATA%` из-за пустого профиля), `probeResultCode` (int — код `GetCurrentPackageFullName`: `0`/`122` — упакован, `15700` — нет, `-1` — вызов невозможен), `storageRoot` (путь корня; `LogScrubber` заменяет его на `<path>`, имя учётной записи — на `%USERPROFILE%`) |
+| `WriteIgnoredPackaged` (`AutostartService`, ADR-050) | Сеттер `IAutostartService.IsEnabled` под package identity — `Warn`; запись в `HKCU\Run` не выполняется (автозапуск Store-сборки — манифест `startupTask`, меняется только в Параметрах Windows); в штатной работе недостижим (UI показывает ссылку на «Автозагрузку» вместо переключателя) | — |
+| `WriteFailed` (`StorageRootReadme`, ADR-050) | `StorageRootReadme.TryWrite` — `Warn`; `README.txt` в корне Store-хранилища не создан из-за `IOException`/`UnauthorizedAccessException`; файл — любезность, приложение продолжает работу | `root` (путь корня), `error` (`Exception.GetType().Name`), `message` (`Exception.Message`) — оба строковых поля проходят `LogScrubber` на записи; исключение из «никогда не `Exception.Message`», принято: событие редкое, а сообщение нужно, чтобы понять причину отказа записи в профиль |
+| `ResourceMissing` (`StorageRootReadme`, ADR-050) | `StorageRootReadme.TryWrite` — `Warn`; embedded-ресурс `DesktopOrganizer.Services.Storage.StorageRootReadme.txt` отсутствует в сборке (ошибка упаковки), README не создан | `resource` (имя ресурса) |
+| `ShowInfoBalloonFailed` (`TrayIconManager`, ADR-050) | `TrayIconManager.ShowInfoBalloon` — `Error`; `NotifyIcon.ShowBalloonTip` бросил исключение; баннер первого запуска (`FirstRunTrayNotice`) fire-and-forget, наружу не пробрасывается | исключение передаётся в `IAppLog.Error` |
 
 ## Использование при диагностике зависания
 

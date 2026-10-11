@@ -61,7 +61,29 @@ public class HintPopupControllerTests
             Assert.Equal("Read-only mode: the file stayed in place and the panel will not be saved.", moveHintText.Text);
 
             sut.ShowMoveHint();
-            Assert.Equal("The file was moved into the panel — the original was removed from the desktop.", moveHintText.Text);
+            Assert.Equal($"The file was moved into the panel and is kept in {TestFolder}.", moveHintText.Text);
+
+            sut.StopTimers();
+        });
+    }
+
+    /// <summary>
+    /// Store-publication B4: under package identity the Move hint also says the file stays in the folder after
+    /// uninstall; outside it (Inno - the uninstaller returns the files) it must not.
+    /// </summary>
+    [Fact]
+    public void ShowMoveHint_Packaged_AppendsRetentionSentence()
+    {
+        StaTestRunner.Run(() =>
+        {
+            var moveHintText = new TextBlock();
+            var sut = BuildSut(out _, out _, moveHintText, isPackagedStorage: true);
+
+            sut.ShowMoveHint();
+
+            Assert.Equal(
+                $"The file was moved into the panel and is kept in {TestFolder}. It stays there even if you uninstall the app.",
+                moveHintText.Text);
 
             sut.StopTimers();
         });
@@ -89,7 +111,35 @@ public class HintPopupControllerTests
         });
     }
 
-    private static HintPopupController BuildSut(out TextBlock renameErrorText, out Popup renameErrorPopup, TextBlock? moveHintText = null)
+    /// <summary>
+    /// The Move hint is 150-170 characters (full path, plus the retention sentence in the Store build), so it must
+    /// stay up as long as the cloud hint (8 s), not the 4 s of the one-line read-only hint.
+    /// </summary>
+    [Fact]
+    public void ShowMoveHint_ArmsTheLongerTimer_ThanTheOneLineReadOnlyHint()
+    {
+        StaTestRunner.Run(() =>
+        {
+            var sut = BuildSut(out _, out _, new TextBlock(), isPackagedStorage: true);
+
+            sut.ShowReadOnlyDropHint();
+            Assert.Equal(TimeSpan.FromSeconds(4), sut.TitleHintTimerInterval);
+
+            sut.ShowMoveHint();
+            Assert.Equal(TimeSpan.FromSeconds(8), sut.TitleHintTimerInterval);
+            Assert.Equal(HintPopupController.CloudHintDuration, sut.TitleHintTimerInterval);
+
+            sut.StopTimers();
+        });
+    }
+
+    private const string TestFolder = @"C:\Users\someone\DesktopOrganizer\PanelItems";
+
+    private static HintPopupController BuildSut(
+        out TextBlock renameErrorText,
+        out Popup renameErrorPopup,
+        TextBlock? moveHintText = null,
+        bool isPackagedStorage = false)
     {
         var moveHintPopup = new Popup();
         renameErrorPopup = new Popup();
@@ -103,6 +153,8 @@ public class HintPopupControllerTests
             renameErrorText,
             searchRoot,
             getEditingItem: () => null,
-            moveHintText: moveHintText);
+            moveHintText: moveHintText,
+            panelItemsFolder: TestFolder,
+            isPackagedStorage: isPackagedStorage);
     }
 }

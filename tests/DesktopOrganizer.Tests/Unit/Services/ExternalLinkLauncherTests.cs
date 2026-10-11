@@ -97,4 +97,35 @@ public class ExternalLinkLauncherTests
             l => l.Warn("ExternalLinkLauncher", "OpenUrlRejected", It.IsAny<KeyValuePair<string, object?>[]>()),
             Times.Once);
     }
+
+    /// <summary>
+    /// Regression (M4): <see cref="ExternalLinkLauncher.OpenUrl"/> stays https-only - the dedicated
+    /// <c>ms-settings:startupapps</c> method must not have widened it to arbitrary schemes.
+    /// </summary>
+    /// <param name="value">A non-https shell URI.</param>
+    [Theory]
+    [InlineData("ms-settings:startupapps")]
+    [InlineData("ms-settings:privacy")]
+    [InlineData("ms-settings:")]
+    public void OpenUrl_MsSettingsScheme_RejectedNoThrow(string value)
+    {
+        var sut = new ExternalLinkLauncher(_appLogMock.Object);
+
+        var exception = Record.Exception(() => sut.OpenUrl(value));
+
+        Assert.Null(exception);
+        _appLogMock.Verify(
+            l => l.Warn("ExternalLinkLauncher", "OpenUrlRejected", It.IsAny<KeyValuePair<string, object?>[]>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Verifies the URI <see cref="ExternalLinkLauncher.OpenStartupAppsSettings"/> hands to the shell is the fixed
+    /// "Startup apps" page (the method itself is not invoked here: it would open the real Settings app).
+    /// </summary>
+    [Fact]
+    public void StartupAppsSettingsUri_IsTheStartupAppsPage()
+    {
+        Assert.Equal("ms-settings:startupapps", ExternalLinkLauncher.StartupAppsSettingsUri);
+    }
 }

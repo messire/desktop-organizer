@@ -8,8 +8,18 @@ namespace DesktopOrganizer.Services.Tools;
 /// <inheritdoc />
 internal sealed partial class NativeApi : INativeApi, IDisposable
 {
+    /// <summary>
+    /// <see cref="PackageProbeResultCode"/> when <c>GetCurrentPackageFullName</c> could not be called at all.
+    /// </summary>
+    internal const int PackageProbeUnavailableCode = -1;
+
     private const string ExplorerAdvancedKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
     private const string ExplorerPoliciesKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
+
+    // Package-identity probe (Microsoft Store channel): evaluated once per process on first read, safe for
+    // concurrent first readers. Static — AppStorageRoot needs the answer before DI exists.
+    private static readonly Lazy<(bool IsPackaged, int ResultCode)> PackageProbe =
+        new(RunPackageProbe, LazyThreadSafetyMode.ExecutionAndPublication);
 
     /// <summary>
     /// Per-HWND rate limit for the <c>GetWindowRectFailed</c> warning (release-hardening review L11):
@@ -1226,6 +1236,56 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
         }
     }
 
+    /// <inheritdoc />
+    public bool IsPackagedProcess => HasPackageIdentity;
+
+    /// <summary>
+    /// Interprets the return code of <c>GetCurrentPackageFullName</c> called with a zero-length buffer
+    /// (the identity probe, Microsoft Store channel).
+    /// </summary>
+    /// <remarks>
+    /// <c>APPMODEL_ERROR_NO_PACKAGE</c> (15700) means the process has no package identity;
+    /// <c>ERROR_INSUFFICIENT_BUFFER</c> (122) — the expected answer for a zero-length buffer — and
+    /// <c>ERROR_SUCCESS</c> (0) both mean it has one. Any other code is not proof of identity, so it
+    /// resolves to <see langword="false"/> (the Inno layout, the one that worked before the Store channel
+    /// existed, is the safe default).
+    /// </remarks>
+    /// <param name="rc">The Win32 return code of the probe call.</param>
+    /// <returns><see langword="true"/> when the code proves the process runs with package identity.</returns>
+    internal static bool InterpretPackageProbe(int rc)
+        => rc is NativeMethods.ErrorSuccess or NativeMethods.ErrorInsufficientBuffer;
+
+    /// <summary>
+    /// Gets a value indicating whether this process runs with package identity (MSIX / Microsoft Store).
+    /// Probed once per process and cached; never throws. The only static consumer outside this file is
+    /// <c>AppStorageRoot</c> (it is needed before DI exists) — pinned by <c>PackageProbeUsageGuardTests</c>;
+    /// everything else reads it through <see cref="IsPackagedProcess"/> / <c>IAppPackageContext</c>.
+    /// </summary>
+    internal static bool HasPackageIdentity => PackageProbe.Value.IsPackaged;
+
+    /// <summary>
+    /// Gets the raw return code of the identity probe (<c>GetCurrentPackageFullName</c>), or
+    /// <see cref="PackageProbeUnavailableCode"/> when the call could not be made at all. Kept because
+    /// nothing can be logged before DI exists: <c>Program.Main</c> writes it once after the log is up.
+    /// </summary>
+    internal static int PackageProbeResultCode => PackageProbe.Value.ResultCode;
+
+    private static (bool IsPackaged, int ResultCode) RunPackageProbe()
+    {
+        try
+        {
+            uint length = 0;
+            var rc = NativeMethods.GetCurrentPackageFullName(ref length, IntPtr.Zero);
+            return (InterpretPackageProbe(rc), rc);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // DllNotFoundException / EntryPointNotFoundException (pre-Windows 8, stripped-down host: no
+            // packages exist there) or anything unexpected: not proof of identity, so "not packaged".
+            return (false, PackageProbeUnavailableCode);
+        }
+    }
+
     /// <summary>
     /// Loads the System32 copy of <c>uxtheme.dll</c> (never a same-named DLL next to the executable).
     /// </summary>
@@ -1763,6 +1823,10 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
 
     private static partial class NativeMethods
     {
+        // GetCurrentPackageFullName return codes that prove package identity (see InterpretPackageProbe).
+        public const int ErrorSuccess = 0;
+        public const int ErrorInsufficientBuffer = 122;
+
         // Shell "Properties" dialog
         public const uint SeeMaskInvokeIdList = 0x0000000C;
         public const uint SeeMaskIdList = 0x00000004;
@@ -2384,6 +2448,12 @@ internal sealed partial class NativeApi : INativeApi, IDisposable
 
         [LibraryImport("Kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
         public static partial IntPtr GetModuleHandleW(string? lpModuleName);
+
+        // Package-identity probe (Microsoft Store channel). Called with a zero-length buffer: the return
+        // code alone says whether the process has a package (see InterpretPackageProbe). It is a plain
+        // return value, not GetLastError, so no SetLastError.
+        [LibraryImport("Kernel32.dll", EntryPoint = "GetCurrentPackageFullName")]
+        public static partial int GetCurrentPackageFullName(ref uint packageFullNameLength, IntPtr packageFullName);
 
         // SetWindowsHookEx takes a managed delegate callback — DllImport required.
         [DllImport("User32.dll", EntryPoint = "SetWindowsHookExW", SetLastError = true)]

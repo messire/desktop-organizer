@@ -31,13 +31,29 @@
             </controls:SettingsCard.ActionContent>
         </controls:SettingsCard>
 
+        <!-- Autostart: a toggle over the HKCU Run value (Inno channel), or - for a package-identity
+             (Microsoft Store) build, where only the user can enable the manifest startupTask in Windows
+             Settings - a pointer to that page. The two cards are mutually exclusive on
+             AutostartManagedBySystem; the managed one is the only one that ever reaches the system page. -->
         <controls:SettingsCard Header="{loc:Loc Settings_General_Autostart_Header}"
-                                Description="{loc:Loc Settings_General_Autostart_Description}">
+                                Description="{loc:Loc Settings_General_Autostart_Description}"
+                                Visibility="{Binding AutostartToggleAvailable, Converter={StaticResource BooleanToVisibility}}">
             <controls:SettingsCard.ActionContent>
                 <CheckBox VerticalAlignment="Center"
                           Style="{StaticResource Theme.ToggleSwitch}"
                           AutomationProperties.Name="{loc:Loc Settings_General_Autostart_Header}"
                           IsChecked="{Binding AutostartEnabled, Mode=TwoWay}"/>
+            </controls:SettingsCard.ActionContent>
+        </controls:SettingsCard>
+
+        <controls:SettingsCard Header="{loc:Loc Settings_General_Autostart_Header}"
+                                Description="{loc:Loc Settings_General_Autostart_Managed_Description}"
+                                Visibility="{Binding AutostartManagedBySystem, Converter={StaticResource BooleanToVisibility}}">
+            <controls:SettingsCard.ActionContent>
+                <Button Content="{loc:Loc Settings_General_Autostart_OpenSystemSettings_Button}"
+                        Style="{StaticResource Theme.Button.Link}" VerticalAlignment="Center"
+                        AutomationProperties.Name="{loc:Loc Settings_General_Autostart_OpenSystemSettings_Button}"
+                        Command="{Binding OpenStartupSettingsCommand}"/>
             </controls:SettingsCard.ActionContent>
         </controls:SettingsCard>
 

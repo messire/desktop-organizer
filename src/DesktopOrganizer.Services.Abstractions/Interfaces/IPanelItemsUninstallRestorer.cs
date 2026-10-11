@@ -21,7 +21,9 @@ public readonly record struct PanelItemsRestoreResult(int RestoredCount, int Fai
 /// <summary>
 /// Implements the <c>--restore-panel-items</c> command-line switch: the uninstall-time counterpart to
 /// <see cref="IPanelItemStorageService"/>'s live drag&amp;drop Move semantics. Because dropped files are
-/// <b>moved</b> (not copied) into <c>%LOCALAPPDATA%\DesktopOrganizer\PanelItems</c>, simply deleting that
+/// <b>moved</b> (not copied) into the <c>PanelItems</c> folder of the storage root (Inno channel:
+/// <c>%LOCALAPPDATA%\DesktopOrganizer\PanelItems</c>; the Store channel keeps it under
+/// <c>%USERPROFILE%\DesktopOrganizer\PanelItems</c> and has no uninstall hook), simply deleting that
 /// folder on uninstall (which the installer never did in the first place — see the type this replaces
 /// stranding user files) would destroy files the user never asked to delete. This command instead
 /// returns every managed item to the user's desktop before the folder is ever removed.

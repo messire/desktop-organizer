@@ -304,7 +304,7 @@ public class MainWindowViewModelCopyPanelTests
             _localization,
             Mock.Of<DesktopOrganizer.Services.Abstractions.Storage.IApplicationStateStore>(st => st.IsWritable));
 
-        var about = new AboutViewModel(_updateCheckServiceMock.Object, _linkLauncherMock.Object, _localization);
+        var about = new AboutViewModel(_updateCheckServiceMock.Object, _linkLauncherMock.Object, _localization, Mock.Of<IAppPackageContext>());
 
         return new MainWindowViewModel(
             _windowManagerMock.Object,

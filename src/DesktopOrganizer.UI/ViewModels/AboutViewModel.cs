@@ -23,6 +23,7 @@ public class AboutViewModel : INotifyPropertyChanged
     private readonly IUpdateCheckService _updateCheckService;
     private readonly IExternalLinkLauncher _linkLauncher;
     private readonly ILocalizationService _localization;
+    private readonly IAppPackageContext _packageContext;
     private readonly IAppLog? _appLog;
 
     private bool _isChecking;
@@ -33,6 +34,14 @@ public class AboutViewModel : INotifyPropertyChanged
 
     /// <inheritdoc/>
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>
+    /// Whether the manual update check exists in this build: <see langword="false"/> for a package-identity
+    /// (Microsoft Store) build, where the Store itself delivers updates and the app must not make this
+    /// network call — <c>AboutSection.xaml</c> hides the whole "Updates" card on it, and
+    /// <see cref="CheckForUpdatesAsync"/> refuses to run (defense in depth).
+    /// </summary>
+    public bool IsUpdateCheckAvailable => !_packageContext.IsPackaged;
 
     /// <summary>
     /// Whether a check is currently in flight — disables <see cref="CheckForUpdatesCommand"/>'s button
@@ -87,14 +96,14 @@ public class AboutViewModel : INotifyPropertyChanged
     /// <summary>Command: opens <see cref="UpdateEndpoints.ProjectPageUrl"/> — the About section's "Project page" link.</summary>
     public ICommand OpenProjectPageCommand { get; }
 
-    /// <summary>Command: opens <see cref="UpdateEndpoints.IssuesUrl"/> — the About section's "Report a problem" link.</summary>
+    /// <summary>Command: opens <see cref="UpdateEndpoints.SupportUrl"/> — the About section's "Report a problem" link.</summary>
     public ICommand ReportProblemCommand { get; }
 
     /// <summary>Command: opens <see cref="LogsFolderPath"/> (creating it first if it doesn't exist yet) — the About section's "Open logs folder" link.</summary>
     public ICommand OpenLogsFolderCommand { get; }
 
-    /// <summary>The per-user diagnostics log folder (<c>%LOCALAPPDATA%\DesktopOrganizer\Logs</c>) — same path <c>Services/Configuration/DiConfig.cs</c>'s <c>JsonLinesDiagnosticsLog</c> writes to.</summary>
-    public string LogsFolderPath { get; } = Path.Combine(AppStorageRoot.Default, "Logs");
+    /// <summary>The per-user diagnostics log folder (<c>Logs</c> under the storage root: Inno channel <c>%LOCALAPPDATA%\DesktopOrganizer</c>, Store channel <c>%USERPROFILE%\DesktopOrganizer</c>) — same path <c>Services/Configuration/DiConfig.cs</c>'s <c>JsonLinesDiagnosticsLog</c> writes to.</summary>
+    public string LogsFolderPath { get; } = AppStorageRoot.LogsDirectory;
 
     /// <summary>
     /// The log this instance writes failures to: the one explicitly supplied, falling back to the
@@ -109,22 +118,25 @@ public class AboutViewModel : INotifyPropertyChanged
     /// <param name="updateCheckService">Backs <see cref="CheckForUpdatesCommand"/>.</param>
     /// <param name="linkLauncher">Opens every external URL/folder this ViewModel's commands point at.</param>
     /// <param name="localization">Localizes <see cref="StatusText"/> and reacts to a hot language switch.</param>
+    /// <param name="packageContext">Decides <see cref="IsUpdateCheckAvailable"/> (no manual update check under package identity).</param>
     /// <param name="appLog">See <see cref="Log"/>.</param>
     public AboutViewModel(
         IUpdateCheckService updateCheckService,
         IExternalLinkLauncher linkLauncher,
         ILocalizationService localization,
+        IAppPackageContext packageContext,
         IAppLog? appLog = null)
     {
         _updateCheckService = updateCheckService;
         _linkLauncher = linkLauncher;
         _localization = localization;
+        _packageContext = packageContext ?? throw new ArgumentNullException(nameof(packageContext));
         _appLog = appLog;
 
         CheckForUpdatesCommand = new RelayCommand(() => _ = CheckForUpdatesAsync());
         OpenReleaseCommand = new RelayCommand(OpenRelease, () => HasReleaseLink);
         OpenProjectPageCommand = new RelayCommand(() => _linkLauncher.OpenUrl(UpdateEndpoints.ProjectPageUrl));
-        ReportProblemCommand = new RelayCommand(() => _linkLauncher.OpenUrl(UpdateEndpoints.IssuesUrl));
+        ReportProblemCommand = new RelayCommand(() => _linkLauncher.OpenUrl(UpdateEndpoints.SupportUrl));
         OpenLogsFolderCommand = new RelayCommand(OpenLogsFolder);
 
         // Never unsubscribed: this ViewModel is a DI singleton for the app's lifetime, same rationale as
@@ -141,7 +153,8 @@ public class AboutViewModel : INotifyPropertyChanged
     /// </summary>
     internal async Task CheckForUpdatesAsync()
     {
-        if (IsChecking) return;
+        // Package identity: the Store delivers updates — never reach the network from here.
+        if (!IsUpdateCheckAvailable || IsChecking) return;
 
         IsChecking = true;
         HasReleaseLink = false;

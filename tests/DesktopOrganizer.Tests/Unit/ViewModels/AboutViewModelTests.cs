@@ -158,7 +158,7 @@ public class AboutViewModelTests
         var localization = TestLocalization.English;
         _updateCheckServiceMock.Setup(s => s.CheckForUpdatesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(UpdateCheckResult.UpToDate());
-        var sut = new AboutViewModel(_updateCheckServiceMock.Object, _linkLauncherMock.Object, localization);
+        var sut = new AboutViewModel(_updateCheckServiceMock.Object, _linkLauncherMock.Object, localization, Mock.Of<IAppPackageContext>());
 
         await sut.CheckForUpdatesAsync();
         Assert.Equal("You're up to date.", sut.StatusText);
@@ -209,16 +209,51 @@ public class AboutViewModelTests
         _linkLauncherMock.Verify(l => l.OpenUrl(UpdateEndpoints.ProjectPageUrl), Times.Once);
     }
 
-    /// <summary>Verifies that <see cref="AboutViewModel.ReportProblemCommand"/> opens exactly <see cref="UpdateEndpoints.IssuesUrl"/>.</summary>
+    /// <summary>Verifies that <see cref="AboutViewModel.ReportProblemCommand"/> opens exactly <see cref="UpdateEndpoints.SupportUrl"/> (not the private repository's issue tracker).</summary>
     [Fact]
-    public void ReportProblemCommand_OpensIssuesUrl()
+    public void ReportProblemCommand_OpensSupportUrl()
     {
-        _linkLauncherMock.Setup(l => l.OpenUrl(UpdateEndpoints.IssuesUrl));
+        _linkLauncherMock.Setup(l => l.OpenUrl(UpdateEndpoints.SupportUrl));
         var sut = BuildSut();
 
         sut.ReportProblemCommand.Execute(null);
 
-        _linkLauncherMock.Verify(l => l.OpenUrl(UpdateEndpoints.IssuesUrl), Times.Once);
+        _linkLauncherMock.Verify(l => l.OpenUrl(UpdateEndpoints.SupportUrl), Times.Once);
+        _linkLauncherMock.Verify(l => l.OpenUrl(UpdateEndpoints.IssuesUrl), Times.Never);
+    }
+
+    /// <summary>Verifies the update check exists outside package identity (Inno channel, developer run).</summary>
+    [Fact]
+    public void IsUpdateCheckAvailable_WithoutPackageIdentity_IsTrue()
+    {
+        var sut = BuildSut(isPackaged: false);
+
+        Assert.True(sut.IsUpdateCheckAvailable);
+    }
+
+    /// <summary>Verifies the update check is unavailable under package identity (Microsoft Store delivers updates).</summary>
+    [Fact]
+    public void IsUpdateCheckAvailable_WithPackageIdentity_IsFalse()
+    {
+        var sut = BuildSut(isPackaged: true);
+
+        Assert.False(sut.IsUpdateCheckAvailable);
+    }
+
+    /// <summary>
+    /// Verifies that under package identity <see cref="AboutViewModel.CheckForUpdatesAsync"/> returns at once:
+    /// no network call (the strict <see cref="IUpdateCheckService"/> mock would throw on any call), no busy state, no status text.
+    /// </summary>
+    [Fact]
+    public async Task CheckForUpdatesAsync_WithPackageIdentity_DoesNotCallTheUpdateService()
+    {
+        var sut = BuildSut(isPackaged: true);
+
+        await sut.CheckForUpdatesAsync();
+
+        _updateCheckServiceMock.Verify(s => s.CheckForUpdatesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        Assert.False(sut.IsChecking);
+        Assert.Equal(string.Empty, sut.StatusText);
     }
 
     /// <summary>Verifies that <see cref="AboutViewModel.OpenLogsFolderCommand"/> opens <see cref="AboutViewModel.LogsFolderPath"/> (the per-user <c>Logs</c> folder) via <see cref="IExternalLinkLauncher.OpenFolder"/>, never <see cref="IExternalLinkLauncher.OpenUrl"/>.</summary>
@@ -234,6 +269,10 @@ public class AboutViewModelTests
         Assert.EndsWith("Logs", sut.LogsFolderPath, StringComparison.Ordinal);
     }
 
-    private AboutViewModel BuildSut() =>
-        new(_updateCheckServiceMock.Object, _linkLauncherMock.Object, TestLocalization.English);
+    private AboutViewModel BuildSut(bool isPackaged = false) =>
+        new(
+            _updateCheckServiceMock.Object,
+            _linkLauncherMock.Object,
+            TestLocalization.English,
+            Mock.Of<IAppPackageContext>(c => c.IsPackaged == isPackaged));
 }

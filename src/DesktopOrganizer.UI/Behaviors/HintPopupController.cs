@@ -4,6 +4,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Threading;
 using DesktopOrganizer.Core;
+using DesktopOrganizer.Services.Storage;
 using DesktopOrganizer.UI.Localization;
 using DesktopOrganizer.UI.ViewModels;
 
@@ -20,8 +21,17 @@ namespace DesktopOrganizer.UI.Behaviors;
 /// </summary>
 public sealed class HintPopupController
 {
-    private static readonly TimeSpan DefaultHintDuration = TimeSpan.FromSeconds(4);
-    private static readonly TimeSpan CloudHintDuration = TimeSpan.FromSeconds(8);
+    /// <summary>How long the short, one-sentence hints (read-only drop) stay up.</summary>
+    internal static readonly TimeSpan DefaultHintDuration = TimeSpan.FromSeconds(4);
+
+    /// <summary>How long the two-sentence cloud-folder hint stays up.</summary>
+    internal static readonly TimeSpan CloudHintDuration = TimeSpan.FromSeconds(8);
+
+    /// <summary>
+    /// How long the Move hint stays up. It names a full path and, in the Store build, adds a second sentence
+    /// (150-170 characters), so it gets as long as the cloud hint rather than the 4 s of the one-line hints.
+    /// </summary>
+    internal static readonly TimeSpan MoveHintDuration = TimeSpan.FromSeconds(8);
 
     private readonly Dispatcher _dispatcher;
     private readonly Popup _moveHintPopup;
@@ -30,6 +40,8 @@ public sealed class HintPopupController
     private readonly TextBlock _renameErrorText;
     private readonly DependencyObject _renameEditorSearchRoot;
     private readonly Func<FileItem?> _getEditingItem;
+    private readonly string _panelItemsFolder;
+    private readonly bool _isPackagedStorage;
 
     // One-shot timer that auto-dismisses the Move-semantics hint popup; recreated per show.
     private DispatcherTimer? _moveHintTimer;
@@ -50,6 +62,14 @@ public sealed class HintPopupController
     /// The <see cref="TextBlock"/> inside <paramref name="moveHintPopup"/>; its text is set per show
     /// (Move-semantics vs. read-only-drop hint). <see langword="null"/> leaves the popup's own text untouched.
     /// </param>
+    /// <param name="panelItemsFolder">
+    /// The folder the Move hint names as the moved file's new home (production:
+    /// <see cref="AppStorageRoot.PanelItemsDirectory"/>).
+    /// </param>
+    /// <param name="isPackagedStorage">
+    /// Whether the Move hint also states that the file stays in that folder after uninstall (true only for the
+    /// package-identity / Store channel; production: <see cref="AppStorageRoot.IsPackagedLocation"/>).
+    /// </param>
     public HintPopupController(
         Dispatcher dispatcher,
         Popup moveHintPopup,
@@ -57,8 +77,12 @@ public sealed class HintPopupController
         TextBlock renameErrorText,
         DependencyObject renameEditorSearchRoot,
         Func<FileItem?> getEditingItem,
-        TextBlock? moveHintText = null)
+        TextBlock? moveHintText,
+        string panelItemsFolder,
+        bool isPackagedStorage)
     {
+        _panelItemsFolder = panelItemsFolder;
+        _isPackagedStorage = isPackagedStorage;
         _moveHintText = moveHintText;
         _dispatcher = dispatcher;
         _moveHintPopup = moveHintPopup;
@@ -69,11 +93,19 @@ public sealed class HintPopupController
     }
 
     /// <summary>
+    /// The interval of the currently armed auto-dismiss timer of the shared title hint popup (Move,
+    /// read-only-drop and cloud hints), or <see langword="null"/> if none was ever armed. Exposed for tests only.
+    /// </summary>
+    internal TimeSpan? TitleHintTimerInterval => _moveHintTimer?.Interval;
+
+    /// <summary>
     /// Shows the non-modal, auto-dismissing Move-semantics hint popup anchored to the title bar.
     /// Rendering only — the one-time decision (whether to show at all) already happened in the
     /// ViewModel before <see cref="ChildWindowViewModel.MoveHintRequested"/> was raised.
     /// </summary>
-    public void ShowMoveHint() => ShowTitleHint(DefaultHintDuration, "Hint_Move_Message");
+    public void ShowMoveHint() => ShowTitleHintText(
+        MoveHintDuration,
+        () => MoveHintText.Compose(LocalizationSource.Current, _panelItemsFolder, _isPackagedStorage));
 
     /// <summary>
     /// Shows the same non-modal, auto-dismissing popup with the read-only-drop text ("the file stayed in
@@ -164,12 +196,12 @@ public sealed class HintPopupController
     }
 
     private void ShowTitleHint(TimeSpan duration, params string[] messageKeys)
+        => ShowTitleHintText(duration, () => string.Join(" ", messageKeys.Select(key => LocalizationSource.Current.GetString(key))));
+
+    private void ShowTitleHintText(TimeSpan duration, Func<string> composeText)
     {
         if (_moveHintText is not null)
-        {
-            var loc = LocalizationSource.Current;
-            _moveHintText.Text = string.Join(" ", messageKeys.Select(key => loc.GetString(key)));
-        }
+            _moveHintText.Text = composeText();
 
         _moveHintTimer?.Stop();
         _moveHintPopup.IsOpen = true;

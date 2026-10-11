@@ -347,7 +347,7 @@ public static class Program
     /// MINOR 3 (release-polish 1.0 code review): before any of that, checks whether the managed
     /// <c>PanelItems</c> folder even exists — resolved the same side-effect-free way
     /// <see cref="DesktopOrganizer.Services.Tools.PanelItemsUninstallRestorer"/>'s own production
-    /// constructor does, via <see cref="AppStorageRoot.Default"/> — and returns immediately if not. On a
+    /// constructor does, via <see cref="AppStorageRoot.PanelItemsDirectory"/> — and returns immediately if not. On a
     /// machine where the app never ran (or a second uninstall re-run after a clean first one), this
     /// avoids building the DI container / initializing <see cref="IAppLog"/> / creating
     /// <c>Logs\</c>/<c>State\</c> purely to report "nothing to restore".
@@ -362,9 +362,9 @@ public static class Program
     private static int RunRestorePanelItems()
     {
         // MINOR 3: mirrors PanelItemsUninstallRestorer's own `Directory.Exists(_storageRoot)` guard, but
-        // ahead of DI/AppLog/the storage lock — Path.Combine/AppStorageRoot.Default and Directory.Exists
+        // ahead of DI/AppLog/the storage lock — AppStorageRoot.PanelItemsDirectory (a pure path computation) and Directory.Exists
         // are the only two calls made here, neither of which creates anything.
-        var panelItemsRoot = Path.Combine(AppStorageRoot.Default, "PanelItems");
+        var panelItemsRoot = AppStorageRoot.PanelItemsDirectory;
         if (!Directory.Exists(panelItemsRoot))
         {
             Console.WriteLine(RestorePanelItemsNothingToRestoreMessage); // cli-output
@@ -520,6 +520,35 @@ public static class Program
 
         var applicationState = provider.GetRequiredService<IApplicationStateService>();
         applicationState.Load();
+
+        // Microsoft Store channel: record which distribution channel this session runs in (once, from the
+        // Primary only — a Secondary must not materialize the log writer, ADR-023 R-12), then leave the
+        // bilingual README in the identity-only storage root on the very first run. Neither is persisted
+        // state; the README helper never throws. The decision comes from IAppPackageContext (DI is built
+        // by now); only the raw probe code and the root itself come from AppStorageRoot, which exists
+        // before DI. The README promises the folder survives an uninstall, so it is only written when the
+        // root really is under %USERPROFILE% (AppStorageRoot.IsPackagedLocation is false when a packaged
+        // process had to fall back to the virtualised %LOCALAPPDATA%).
+        var packaged = provider.GetRequiredService<IAppPackageContext>().IsPackaged;
+
+        // storageRoot is a full path: DiagnosticsAppLog runs every string field through LogScrubber at
+        // write time (rooted paths become "<path>", the account name becomes %USERPROFILE%), so neither the
+        // user name nor the folder layout reaches the log file and it stays safe to attach to a bug report.
+        AppLog.Current.Info(
+            "Program",
+            "PackageIdentity",
+            new KeyValuePair<string, object?>("packaged", packaged),
+            new KeyValuePair<string, object?>("underUserProfile", AppStorageRoot.IsPackagedLocation),
+            new KeyValuePair<string, object?>("probeResultCode", AppStorageRoot.PackageProbeResultCode),
+            new KeyValuePair<string, object?>("storageRoot", AppStorageRoot.Default));
+
+        if (StorageRootReadme.ShouldWrite(
+                packaged && AppStorageRoot.IsPackagedLocation,
+                applicationState.LastLoadStatus,
+                provider.GetRequiredService<IApplicationStateStore>().IsWritable))
+        {
+            StorageRootReadme.TryWrite(AppStorageRoot.Default, AppLog.Current);
+        }
 
         var app = new App(provider, coordinator, decision.Role);
         app.InitializeComponent();

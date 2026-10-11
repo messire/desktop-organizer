@@ -729,8 +729,7 @@
                 <TextBlock x:Name="MoveHintText"
                            TextWrapping="Wrap"
                            Foreground="{DynamicResource Theme.Text.Primary}"
-                           FontSize="{DynamicResource Font.Size.Caption}"
-                           Text="{loc:Loc Hint_Move_Message}"/>
+                           FontSize="{DynamicResource Font.Size.Caption}"/>
             </Border>
         </Popup>
 

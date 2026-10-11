@@ -16,11 +16,28 @@ public static class UpdateEndpoints
     /// <summary>The repository's releases page — the "View release" fallback when a release's own <c>html_url</c> isn't trusted (see <see cref="TryGetTrustedReleaseUrl"/>).</summary>
     public const string ReleasesUrl = "https://github.com/messire/DesktopOrganizer/releases";
 
-    /// <summary>Pre-filled "new issue" page — the About section's "Report a problem" link.</summary>
+    /// <summary>Pre-filled "new issue" page of the source repository. Not used anywhere in <c>src</c>: it is no longer linked from the UI (the repository is private, see <see cref="SupportUrl"/>) and only tests reference it, to pin that <see cref="SupportUrl"/> is not this page. Kept as the future public tracker address.</summary>
     public const string IssuesUrl = "https://github.com/messire/DesktopOrganizer/issues/new";
 
-    /// <summary>The author's GitHub profile — the About section's "Project page" link.</summary>
-    public const string ProjectPageUrl = "https://github.com/messire";
+    /// <summary>
+    /// The public web page of the product — the single place every user-facing "project"/"support"/
+    /// "privacy" link resolves to, so switching to the owner's real public page is a one-constant change.
+    /// </summary>
+    /// <remarks>
+    /// TODO: replace with the public page of the owner (Partner Center "Support contact info" / privacy
+    /// policy URL). Today it is the author's GitHub profile, which is reachable even though the source
+    /// repository is private (the issue tracker below it would answer 404).
+    /// </remarks>
+    public const string PublicSiteUrl = "https://github.com/messire";
+
+    /// <summary>Where "Report a problem" leads — currently <see cref="PublicSiteUrl"/>, see there.</summary>
+    public const string SupportUrl = PublicSiteUrl;
+
+    /// <summary>The privacy-policy page for the Store listing — currently <see cref="PublicSiteUrl"/>, see there. Not used by any code yet (no in-app link points at it); it only reserves the address so the owner's real policy URL is a one-constant change.</summary>
+    public const string PrivacyPolicyUrl = PublicSiteUrl;
+
+    /// <summary>The About section's "Project page" link — <see cref="PublicSiteUrl"/>.</summary>
+    public const string ProjectPageUrl = PublicSiteUrl;
 
     /// <summary>Path prefix every trusted <c>html_url</c> must have — GitHub's own API response for OUR release, never blindly trusted third-party content.</summary>
     private const string TrustedPathPrefix = "/messire/DesktopOrganizer/";

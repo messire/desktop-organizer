@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel;
 using System.IO;
 using DesktopOrganizer.Services.Abstractions;
+using DesktopOrganizer.Services.Diagnostics;
 
 namespace DesktopOrganizer.Services.Providers;
 
@@ -26,6 +27,9 @@ public class TrayIconManager : ITrayIconManager
     // EnsureContextMenuBuilt's one-time construction. Every item also gets a stable Name (below) so
     // tests — and any future caller — can find them independently of the currently-displayed,
     // language-dependent Text.
+
+    /// <summary>How long <see cref="ShowInfoBalloon"/> asks Windows to keep the balloon up (Windows 10+ may clamp it).</summary>
+    internal const int InfoBalloonTimeoutMilliseconds = 10000;
 
     /// <summary>Stable <see cref="ToolStripItem.Name"/> of the "Pages" submenu item.</summary>
     internal const string PagesItemName = "Tray.Pages";
@@ -280,6 +284,24 @@ public class TrayIconManager : ITrayIconManager
 
         _isReadOnlySession = isReadOnly;
         ApplyToolTip();
+    }
+
+    /// <inheritdoc />
+    public void ShowInfoBalloon(string title, string text)
+    {
+        if (_disposed) return;
+
+        // Fire-and-forget by contract (ITrayIconManager.ShowInfoBalloon): NotifyIcon.ShowBalloonTip throws
+        // ArgumentException for an empty text (a missing translation, say) and can fail on a half-created
+        // icon; a notice nobody may depend on must never take the startup path down with it.
+        try
+        {
+            _notifyIconAdapter.ShowBalloonTip(InfoBalloonTimeoutMilliseconds, title, text, ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Current.Error("TrayIconManager", "ShowInfoBalloonFailed", ex);
+        }
     }
 
     /// <inheritdoc />

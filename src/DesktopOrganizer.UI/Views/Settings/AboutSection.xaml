@@ -31,7 +31,10 @@
              AutomationProperties.LiveSetting="Polite" (a screen reader should notice "Checking…" turning
              into a result without focus moving), which SettingsCard's fixed Description DataTemplate has
              no hook to set. -->
-        <Border Style="{StaticResource Settings.CardBorder}">
+        <!-- Hidden under package identity (Microsoft Store build): the Store delivers updates, and the app
+             makes no network call of its own there (AboutViewModel.IsUpdateCheckAvailable). -->
+        <Border Style="{StaticResource Settings.CardBorder}"
+                Visibility="{Binding About.IsUpdateCheckAvailable, Converter={StaticResource BooleanToVisibility}}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>

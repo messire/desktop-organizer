@@ -22,6 +22,13 @@ namespace DesktopOrganizer.Tests.Unit.Localization;
 /// here would make this gate immediately, spuriously red (or silently permissive) the moment it lands,
 /// through no fault of any offending change. A future phase (6.1+) that shortens one of today's offenders
 /// below 100 characters should shrink the corresponding baseline constant in the SAME commit.
+/// <para>
+/// Store-publication review fix pack raised the baselines (16 → 18 en, 24 → 27 ru) for texts that were rewritten
+/// to be clear rather than short: the Windows-managed autostart explanation (en 132 / ru 186), the first-run tray
+/// balloon (en 146 / ru 141; limit of a <c>NotifyIcon</c> balloon is 255) and, in Russian, the diagnostics note
+/// (110). Each carries information a user needs at that moment (where the setting really lives, where the icon
+/// hides), none is a wall of text in a settings card.
+/// </para>
 /// </remarks>
 [Trait(UnitTests, nameof(DesktopOrganizer.Localization))]
 public class ResxTextLengthGuardTests
@@ -30,10 +37,10 @@ public class ResxTextLengthGuardTests
     private const int LengthThreshold = 100;
 
     /// <summary>Current, known-debt baseline for <c>Strings.resx</c> (English) — see this class's own remarks.</summary>
-    private const int NeutralBaseline = 17;
+    private const int NeutralBaseline = 18;
 
     /// <summary>Current, known-debt baseline for <c>Strings.ru.resx</c> (Russian) — see this class's own remarks.</summary>
-    private const int RussianBaseline = 26;
+    private const int RussianBaseline = 27;
 
     private static readonly Dictionary<string, string> Neutral = LoadResx("Strings.resx");
     private static readonly Dictionary<string, string> Russian = LoadResx("Strings.ru.resx");

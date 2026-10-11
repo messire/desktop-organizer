@@ -12,6 +12,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- Bilingual (en + ru) README written into the Store-channel storage root on first run. -->
+        <EmbeddedResource Include="Storage\StorageRootReadme.txt" LogicalName="DesktopOrganizer.Services.Storage.StorageRootReadme.txt"/>
+    </ItemGroup>
+
+    <ItemGroup>
       <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
       <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
       <PackageReference Include="System.IO.Pipes.AccessControl" />

@@ -512,8 +512,11 @@
   </data>
   <!-- ==== END WP-2 ==== -->
   <!-- ==== BEGIN WP-3 Panel surfaces (Panel_, Hint_) ==== -->
-  <data name="Hint_Move_Message" xml:space="preserve">
-    <value>The file was moved into the panel — the original was removed from the desktop.</value>
+  <data name="Hint_Move_Message_Format" xml:space="preserve">
+    <value>The file was moved into the panel and is kept in {0}.</value>
+  </data>
+  <data name="Hint_Move_PackagedRetention" xml:space="preserve">
+    <value>It stays there even if you uninstall the app.</value>
   </data>
   <data name="Hint_Rename_Failed" xml:space="preserve">
     <value>Failed to rename the file.</value>
@@ -629,7 +632,7 @@
   <!-- ==== END WP-3 ==== -->
   <!-- ==== BEGIN WP-4a Settings window (Settings_) ==== -->
   <data name="Settings_About_Diagnostics_Message" xml:space="preserve">
-    <value>Diagnostics: run with --diag for verbose logging. Open the logs folder below to view log files.</value>
+    <value>Log files help diagnose problems. Open the logs folder below and find the newest file.</value>
   </data>
   <data name="Settings_About_OpenFolder_Button" xml:space="preserve">
     <value>Open folder</value>
@@ -732,6 +735,12 @@
   <data name="Settings_General_Autostart_Header" xml:space="preserve">
     <value>Start with Windows</value>
   </data>
+  <data name="Settings_General_Autostart_Managed_Description" xml:space="preserve">
+    <value>Windows manages startup for Store apps. To start DesktopOrganizer when you sign in, turn it on in Windows Settings → Apps → Startup.</value>
+  </data>
+  <data name="Settings_General_Autostart_OpenSystemSettings_Button" xml:space="preserve">
+    <value>Open Windows startup settings</value>
+  </data>
   <data name="Settings_General_DesktopIcons_Description" xml:space="preserve">
     <value>Shows or hides the Windows desktop icons. They come back when the app closes.</value>
   </data>
@@ -742,7 +751,7 @@
     <value>Reset</value>
   </data>
   <data name="Settings_General_ResetHints_Description" xml:space="preserve">
-    <value>Shows the one-time Move-semantics hint again the next time a drag-drop moves a file into a panel.</value>
+    <value>Shows the one-time hint about moving files again the next time you drop a file into a panel.</value>
   </data>
   <data name="Settings_General_ResetHints_Header" xml:space="preserve">
     <value>Reset one-time hints</value>
@@ -1159,4 +1168,12 @@
   <data name="Settings_Backup_Orphans_More_A11y_Format" xml:space="preserve">
     <value>More actions for “{0}”</value>
   </data>
+  <!-- ==== BEGIN Store channel / first run (FirstRun_) ==== -->
+  <data name="FirstRun_TrayBalloon_Message" xml:space="preserve">
+    <value>Drag desktop files onto the panel to group them. The app lives in the notification area (look under ^): right-click its icon for Settings or Exit.</value>
+  </data>
+  <data name="FirstRun_TrayBalloon_Title" xml:space="preserve">
+    <value>DesktopOrganizer is ready</value>
+  </data>
+  <!-- ==== END Store channel / first run ==== -->
 </root>

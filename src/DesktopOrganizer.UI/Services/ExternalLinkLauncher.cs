@@ -8,6 +8,9 @@ namespace DesktopOrganizer.UI.Services;
 /// <inheritdoc cref="IExternalLinkLauncher"/>
 public sealed class ExternalLinkLauncher : IExternalLinkLauncher
 {
+    /// <summary>URI of the Windows "Startup apps" settings page (Windows 10 1903+ and Windows 11).</summary>
+    internal const string StartupAppsSettingsUri = "ms-settings:startupapps";
+
     private readonly IAppLog? _appLog;
 
     /// <summary>
@@ -49,6 +52,9 @@ public sealed class ExternalLinkLauncher : IExternalLinkLauncher
 
         LaunchViaShell(path);
     }
+
+    /// <inheritdoc/>
+    public void OpenStartupAppsSettings() => LaunchViaShell(StartupAppsSettingsUri);
 
     private void LaunchViaShell(string target)
     {

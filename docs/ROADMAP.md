@@ -2,7 +2,7 @@
 
 **Цель:** приблизить DesktopOrganizer по функциональности и поведению к Stardock Fences.
 
-**Статус на 2026-09-30.** Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» закрыта; бэклог 1.x «UX-полировка»
+**Статус на 2026-10-11 (версия 1.0.0).** Дистрибуция — два канала: Microsoft Store (MSIX, основной; код реализован на `feature/store-publication`, публикация за владельцем — AP1–AP4) и классический установщик Inno Setup (публичных релизов нет); код закрытый. Хронология ниже — по состоянию на 2026-09-30, дополнена записью о Store. Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» закрыта; бэклог 1.x «UX-полировка»
 (все 8 пунктов, см. раздел «Бэклог 1.x» ниже) закрыт целиком; manual verify по Фазам 0–10 выполнена
 пользователем на Windows 11 24H2 (сборка 26200), 2026-09-27, признана достаточной — Windows 10 отдельно не
 проверяется; manual verify по бэклогу 1.x — см. соответствующие ADR (043–047) и сводный список в разделе
@@ -1315,7 +1315,7 @@ identity проверяются вручную на Windows 11 (сценарий
       карточка со ссылкой `ms-settings:startupapps` (узкий `IExternalLinkLauncher.OpenStartupAppsSettings()`). ADR-050 D-4.
 - [x] **Пакет 3 — A4, B2, B4, B5, B9.** Карточка Updates скрыта под identity (`AboutViewModel.IsUpdateCheckAvailable`), баннер
       первого запуска (`FirstRunTrayNotice`, без persisted-флагов), Move-hint с путём (`MoveHintText`), тексты без жаргона,
-      known limitations в `CHANGELOG.md` (правит параллельный агент). ADR-050 D-5.
+      known limitations в `CHANGELOG.md` `[Unreleased]` и `README.md`. ADR-050 D-5.
 - [~] **B6 — ссылки «Project page» / «Report a problem» / политика.** `UpdateEndpoints.PublicSiteUrl` — временное значение
       (`https://github.com/messire`), заменяется одной константой, когда владелец даст URL публичной страницы (AP2).
 - [x] **Пакет 4 — A3: упаковка MSIX.** `installer/msix/AppxManifest.xml` (шаблон) + `installer/build-msix.ps1`
@@ -1352,7 +1352,9 @@ identity проверяются вручную на Windows 11 (сценарий
 - [ ] **C9** — placeholder «Перетащите значки сюда» в пустой панели.
 - [ ] **C10** — команда «Вернуть все файлы на рабочий стол» в Settings → Backup.
 - [ ] **C11** — расширение контрактных тестов манифеста (базовые `MsixManifestContractTests` уже есть, см. Пакет 4).
-- [ ] **C12** — README: раздел для Store / разделение инструкций установки (правит параллельный агент).
+- [x] **C12** — README: раздел для Store / разделение инструкций установки. Сделано 2026-10-11: `README.md` (EN + RU) переписан по
+      каналам (Store / классический установщик), `installer/README.md`, `docs/store/*`, `CHANGELOG.md` согласованы; плейсхолдеры
+      `<PUBLIC-URL>` / `<SUPPORT-EMAIL>` заменяет владелец одним поиском.
 - [ ] **C13** — P1: `user.config` Store-сборки сбрасывается при каждом обновлении пакета (`_Url_<hash>` от пути exe); любое
       исправление меняет контур `IAppSettings`/`user.config` ⇒ **нужно отдельное явное «да» владельца** (D-4 — ответа нет,
       действует «отложить»).

@@ -18,7 +18,7 @@ computer.
 - **Files you drag into a panel.** When you drop a file or folder from the desktop into a panel, the app *moves*
   it into `%USERPROFILE%\DesktopOrganizer\PanelItems` so that it no longer shows on the desktop. Removing the
   item from the panel moves it back. These are your files; the app never reads their contents and never
-  uploads them anywhere. The folder stays in place if you uninstall the app.
+  uploads them anywhere. The folder stays in place if you uninstall or reset the app.
 - **Folder Portals.** A panel can show the contents of a folder you choose. The app only lists the folder and
   requests icons from Windows; it does not read or index file contents.
 - **Diagnostics log.** The app keeps a small rotating log of errors and start/stop events in
@@ -74,7 +74,7 @@ DesktopOrganizer не собирает, не хранит, не передаёт
   (`%USERPROFILE%\DesktopOrganizer\State`). Ничего не покидает компьютер.
 - **Файлы, перетащенные в панель,** *перемещаются* в `%USERPROFILE%\DesktopOrganizer\PanelItems`, чтобы не
   отображаться на рабочем столе. Удаление элемента из панели возвращает файл на место. Приложение не читает
-  содержимое файлов и никуда их не отправляет. Папка остаётся на месте при удалении приложения.
+  содержимое файлов и никуда их не отправляет. Папка остаётся на месте при удалении или сбросе приложения.
 - **Папки-порталы.** Панель может показывать содержимое выбранной папки. Приложение только перечисляет файлы и
   запрашивает значки у Windows.
 - **Журнал диагностики.** Небольшой ротируемый журнал ошибок и событий запуска/остановки хранится в

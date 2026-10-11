@@ -40,7 +40,9 @@ Features
 Good to know
 • The app runs in the tray and has no main window. Right-click the tray icon for Settings and Exit.
 • Files you drop into a panel are MOVED off the desktop into C:\Users\<you>\DesktopOrganizer\PanelItems and
-  come back when you drag them out. That folder is yours and is kept if you uninstall the app.
+  come back when you drag them out. That folder is yours and is kept if you uninstall or reset the app, so
+  take your files back first if you want them on the desktop. Settings > Backup > "Files without a panel"
+  lists files no panel uses any more and returns them.
 • Double-clicking an empty area of the desktop hides the standard desktop icons; double-click again to bring
   them back. Icons are restored automatically when the app exits.
 • To start DesktopOrganizer with Windows, enable it in Settings > Apps > Startup after the first launch.
@@ -69,7 +71,9 @@ DesktopOrganizer собирает значки рабочего стола в п
 Полезно знать
 • Приложение работает в трее и не имеет главного окна. Настройки и Выход — в меню значка трея.
 • Файлы, перетащенные в панель, ПЕРЕМЕЩАЮТСЯ с рабочего стола в C:\Users\<вы>\DesktopOrganizer\PanelItems и
-  возвращаются, когда вы перетаскиваете их обратно. Папка остаётся при удалении приложения.
+  возвращаются, когда вы перетаскиваете их обратно. Папка остаётся при удалении и сбросе приложения, поэтому
+  заберите файлы заранее, если хотите видеть их на рабочем столе. Параметры > Резервные копии > «Файлы без
+  панели» показывает файлы, которые больше не использует ни одна панель, и возвращает их.
 • Двойной клик по пустому месту рабочего стола скрывает стандартные значки; повторный — возвращает.
 • Автозапуск включается в Параметры > Приложения > Автозагрузка после первого запуска.
 • Требуется Windows 10 версии 2004 (сборка 19041) и новее, x64.

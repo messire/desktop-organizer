@@ -45,7 +45,7 @@
       EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="$DISPLAY_NAME$"
-        Description="A free Windows desktop organizer that groups your desktop icons into movable, resizable panels."
+        Description="A Windows desktop organizer that groups your desktop icons into movable, resizable panels."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

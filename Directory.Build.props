@@ -37,7 +37,7 @@
         <Company>khagendev</Company>
         <Authors>khagen</Authors>
         <Copyright>Copyright (c) 2024-2026 khagen</Copyright>
-        <Description>A free Windows desktop organizer that groups your desktop icons into movable, resizable panels.</Description>
+        <Description>A Windows desktop organizer that groups your desktop icons into movable, resizable panels.</Description>
     </PropertyGroup>
 
     <ItemGroup>

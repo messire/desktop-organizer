@@ -8,7 +8,7 @@
 |---|---|
 | Category | Utilities & tools |
 | Subcategory | Personalization (если доступно) |
-| Pricing | Free |
+| Pricing | Paid — Base price задаётся в Pricing and availability; опционально Free trial. Перед отправкой платного приложения в Account settings → Payout and tax должны быть заполнены Payout account и Tax profile |
 | Markets | все |
 | Age rating (IARC) | анкета: утилита, нет контента/покупок/общения → ожидаемо «3+ / Everyone» |
 | Privacy policy URL | https://messire.github.io/desktop-organizer-site/privacy (текст — `docs/store/privacy-policy.md`) |

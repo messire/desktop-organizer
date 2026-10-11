@@ -1,6 +1,6 @@
 # ADR-027: Structured JSONL Diagnostics Logging for Gesture Lifecycle
 
-**Статус:** Accepted (2026-10-09, ADR-audit WP-E; реализован в Фазе 0 и расширялся с 2026-09-22; на нём стоят Accepted-ADR-031/033/037/045, выпущен v0.8.0) — Amended (ADR-033: always-on уровень `Standard`, `IAppLog`) — Amended 2026-09-22 (P08: категория `icon`, `IconDiagnostics.SafeExtension` allow-list) — Addendum 2026-09-27 (L12: префикс файла `gestures-` → `app-`)
+**Статус:** Accepted (2026-10-09, ADR-audit WP-E; реализован в Фазе 0 и расширялся с 2026-09-22; на нём стоят Accepted-ADR-031/033/037/045, выпущен v0.8.0) — Amended (ADR-033: always-on уровень `Standard`, `IAppLog`) — Amended 2026-09-22 (P08: категория `icon`, `IconDiagnostics.SafeExtension` allow-list) — Addendum 2026-09-27 (L12: префикс файла `gestures-` → `app-`) — Amended 2026-10-10 (ADR-050: папка `Logs\` лежит под корнем канала; новые события `IAppLog` `PackageIdentity`, `WriteIgnoredPackaged`, `StorageRootReadme/WriteFailed`)
 
 ## Context
 
@@ -203,6 +203,21 @@ the **same** single sink (`JsonLinesDiagnosticsLog`) with levels `DiagnosticsLev
 `NullDiagnosticsLog` under `Standard`, so gesture-lifecycle tracing (this ADR's subject) still only runs under
 `Verbose`. `LayoutModeChanged` (category `layout`, ADR-026) is one of its producers.
 
+## Amendment (2026-10-10, ADR-050): `Logs\` лежит под корнем канала распространения
+
+Папка логов (`Logs\app-*.jsonl`) по-прежнему выводится из единого корня `AppStorageRoot` (теперь через
+`AppStorageRoot.LogsDirectory`), а корень зависит от канала ([ADR-024](ADR-024-versioned-json-persistence.md) Amendment
+2026-10-10, [ADR-050](ADR-050-microsoft-store-channel-msix.md) D-2): Inno — `%LOCALAPPDATA%\DesktopOrganizer\Logs`, Store
+(package identity) — `%USERPROFILE%\DesktopOrganizer\Logs`. Любое упоминание `%LOCALAPPDATA%\DesktopOrganizer\Logs` в этом
+ADR и в [diagnostics-log-events.md](../docs/Refactoring/Testing/diagnostics-log-events.md) читается как «`Logs\` под корнем
+канала». Формат, sink, уровни, ротация и privacy-инвариант не менялись.
+
+Новые события `IAppLog` (sink `app-*.jsonl`, [ADR-033](ADR-033-crash-safety-and-app-log.md)); реестр — `diagnostics-log-events.md`:
+`Program/PackageIdentity` (Info: `packaged`, `underUserProfile`, `probeResultCode`, `storageRoot`),
+`AutostartService/WriteIgnoredPackaged` (Warn), `StorageRootReadme/WriteFailed` (Warn: `root`, `error`, `message`),
+`StorageRootReadme/ResourceMissing` (Warn), `TrayIconManager/ShowInfoBalloonFailed` (Error). Строковые поля с путями
+проходят через `LogScrubber` (корневые пути ⇒ `<path>`, имя учётной записи ⇒ `%USERPROFILE%`).
+
 ## Amendments (сводка)
 
 | Дата | Источник | Что изменилось | Какие разделы/решения больше не действуют |
@@ -210,6 +225,7 @@ the **same** single sink (`JsonLinesDiagnosticsLog`) with levels `DiagnosticsLev
 | 2026-09-22 | P08 fix cycle 1 (M2) | Категория `icon`; `IconDiagnostics.SafeExtension` — две защиты вместо length-only cap | — |
 | 2026-09-27 | L12 (Addendum) | Префикс файла `gestures-` → `app-` | `gestures-{yyyyMMdd-HHmmss}-{pid}.jsonl` |
 | 2026-09-27 | [ADR-033](ADR-033-crash-safety-and-app-log.md) | Единый sink обслуживает и always-on `IAppLog` (`Standard`), и `IDiagnosticsLog` (`Verbose`) | «Enablement: off by default in Release» — для самого файла-sink (теперь always-on на `Standard`); для gesture-трассировки остаётся в силе |
+| 2026-10-10 | [ADR-050](ADR-050-microsoft-store-channel-msix.md) | `Logs\` — под корнем канала (Store: `%USERPROFILE%\DesktopOrganizer\Logs`); события `PackageIdentity`, `WriteIgnoredPackaged`, `StorageRootReadme/WriteFailed`/`ResourceMissing`, `ShowInfoBalloonFailed` | Допущение, что лог всегда лежит в `%LOCALAPPDATA%\DesktopOrganizer\Logs` |
 
 ## Related
 

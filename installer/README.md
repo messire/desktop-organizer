@@ -196,9 +196,12 @@ XML DOM, строит `resources.pri` (`makepri`, по отдельной stagin
 
 ### Что подставить из Partner Center
 
-Без параметров скрипт использует **dev-заглушки** (`khagendev.DesktopOrganizer.Dev` / `CN=DesktopOrganizer Dev`) и
-печатает предупреждение: такой пакет ставится sideload-ом, но Store его отклонит. Для загрузки в Store значения
-берутся из Partner Center (Product management → Product identity) **символ в символ**:
+Без параметров скрипт собирает пакет с **зарезервированной Store-идентичностью** (Partner Center, 2026-10-11):
+`khagendev.DesktopOrganizer` / `CN=96A4E2BB-2519-41C4-9349-F738CF8EB8FB` / `khagendev` — это и есть файл для загрузки
+в Partner Center. Ключ `-DevIdentity` переключает на dev-заглушки (`khagendev.DesktopOrganizer.Dev` /
+`CN=DesktopOrganizer Dev`) для локального sideload-теста (`-DevIdentity -SignForSideload`); такой пакет Store отклонит,
+скрипт печатает предупреждение. Значения из Partner Center (Product management → Product identity) должны совпадать
+**символ в символ**; переопределение — параметрами или переменными окружения:
 
 | Параметр | Переменная окружения | Поле в Partner Center |
 |---|---|---|

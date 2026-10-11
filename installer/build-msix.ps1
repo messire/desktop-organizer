@@ -18,18 +18,19 @@
                                                     the layout would not contain.
       5. makeappx.exe pack                        - the .msix.
       6. Optional -SignForSideload                - signs with a self-signed certificate whose Subject equals Publisher
-                                                    (development placeholder Publisher only, unless -Force).
+                                                    (development placeholder Publisher only - pass -DevIdentity - unless -Force).
       7. Optional -RunWack                        - Windows App Certification Kit (needs an elevated shell).
 
     The version comes from the FILEVERSION resource of the published DesktopOrganizer.UI.exe (exactly where
     DesktopOrganizer.iss reads it) with revision required to be 0 (the Store reserves it; the script throws otherwise).
 
-    IDENTITY. Name, Publisher, PublisherDisplayName and DisplayName MUST be copied character for character
-    from Partner Center (Product management > Product identity / Store listing) for a Store submission. The
-    defaults below are development placeholders: they produce a package that can be side-loaded but the Store
-    rejects it. Values may also come from the environment variables DESKTOPORGANIZER_MSIX_IDENTITY_NAME,
-    DESKTOPORGANIZER_MSIX_PUBLISHER, DESKTOPORGANIZER_MSIX_PUBLISHER_DISPLAY_NAME and
-    DESKTOPORGANIZER_MSIX_DISPLAY_NAME (parameters win).
+    IDENTITY. Name, Publisher, PublisherDisplayName and DisplayName MUST match Partner Center (Product
+    management > Product identity / Store listing) character for character. The defaults below ARE the reserved
+    Store identity of this product (reserved 2026-10-11): a plain run produces the package to upload. Values may
+    also come from the environment variables DESKTOPORGANIZER_MSIX_IDENTITY_NAME, DESKTOPORGANIZER_MSIX_PUBLISHER,
+    DESKTOPORGANIZER_MSIX_PUBLISHER_DISPLAY_NAME and DESKTOPORGANIZER_MSIX_DISPLAY_NAME (parameters win).
+    -DevIdentity switches to the development placeholders (khagendev.DesktopOrganizer.Dev / CN=DesktopOrganizer Dev)
+    for a side-loadable test package that the Store would reject.
     The Store package is uploaded unsigned: the Store signs it.
 
 .PARAMETER SdkBinDir
@@ -38,28 +39,28 @@
 .PARAMETER SkipPublish
     Reuse the existing installer\publish\win-x64 instead of publishing again (local iteration only).
 
+.PARAMETER DevIdentity
+    Use the development placeholder identity instead of the reserved Store identity (for -SignForSideload tests).
+
 .PARAMETER Force
     Allows -SignForSideload together with a non-placeholder Publisher (normally refused: a package signed
     with a self-signed certificate that carries the real Store publisher subject must never be shipped).
 
 .EXAMPLE
-    .\installer\build-msix.ps1
+    .\installer\build-msix.ps1                       # Store identity -> installer\Output\DesktopOrganizer-<version>.msix for Partner Center
 
 .EXAMPLE
-    .\installer\build-msix.ps1 -IdentityName "12345khagendev.DesktopOrganizer" `
-        -Publisher "CN=AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" -PublisherDisplayName "khagendev"
-
-.EXAMPLE
-    .\installer\build-msix.ps1 -SignForSideload   # then follow the printed certificate-import instructions
+    .\installer\build-msix.ps1 -DevIdentity -SignForSideload   # local test install; follow the printed certificate-import instructions
 #>
 [CmdletBinding()]
 param(
     [ValidateSet("Release")]
     [string]$Configuration = "Release",
-    [string]$IdentityName = $(if ($env:DESKTOPORGANIZER_MSIX_IDENTITY_NAME) { $env:DESKTOPORGANIZER_MSIX_IDENTITY_NAME } else { "khagendev.DesktopOrganizer.Dev" }),
-    [string]$Publisher = $(if ($env:DESKTOPORGANIZER_MSIX_PUBLISHER) { $env:DESKTOPORGANIZER_MSIX_PUBLISHER } else { "CN=DesktopOrganizer Dev" }),
+    [string]$IdentityName = $(if ($env:DESKTOPORGANIZER_MSIX_IDENTITY_NAME) { $env:DESKTOPORGANIZER_MSIX_IDENTITY_NAME } else { "khagendev.DesktopOrganizer" }),
+    [string]$Publisher = $(if ($env:DESKTOPORGANIZER_MSIX_PUBLISHER) { $env:DESKTOPORGANIZER_MSIX_PUBLISHER } else { "CN=96A4E2BB-2519-41C4-9349-F738CF8EB8FB" }),
     [string]$PublisherDisplayName = $(if ($env:DESKTOPORGANIZER_MSIX_PUBLISHER_DISPLAY_NAME) { $env:DESKTOPORGANIZER_MSIX_PUBLISHER_DISPLAY_NAME } else { "khagendev" }),
     [string]$DisplayName = $(if ($env:DESKTOPORGANIZER_MSIX_DISPLAY_NAME) { $env:DESKTOPORGANIZER_MSIX_DISPLAY_NAME } else { "DesktopOrganizer" }),
+    [switch]$DevIdentity,
     [switch]$SignForSideload,
     [switch]$RunWack,
     [string]$SdkBinDir,
@@ -72,6 +73,10 @@ $ErrorActionPreference = "Stop"
 
 $placeholderIdentityName = "khagendev.DesktopOrganizer.Dev"
 $placeholderPublisher = "CN=DesktopOrganizer Dev"
+if ($DevIdentity) {
+    $IdentityName = $placeholderIdentityName
+    $Publisher = $placeholderPublisher
+}
 $msixDir = Join-Path $PSScriptRoot "msix"
 $publishDir = Join-Path $PSScriptRoot "publish\win-x64"
 $layoutDir = Join-Path $msixDir "layout"

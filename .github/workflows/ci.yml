@@ -157,8 +157,8 @@ jobs:
 
   # Microsoft Store channel (docs/PLANS/store-publication-implementation.md, Package 4). Builds the
   # unsigned .msix with makeappx/makepri from the Windows SDK preinstalled on windows-latest - no Visual
-  # Studio, no .wapproj. The Store identity (Name/Publisher) comes from Partner Center; until it is set
-  # in the repo variables below, installer\build-msix.ps1 uses its development placeholders and warns.
+  # Studio, no .wapproj. The reserved Store identity (Name/Publisher) is the script's default; the repo
+  # variables below only override it (e.g. for a second product reservation).
   # The artifact is for upload to Partner Center (the Store signs it), not for end users.
   msix:
     name: Build MSIX package

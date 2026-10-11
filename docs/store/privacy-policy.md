@@ -3,7 +3,7 @@
 _Last updated: 2026-10-10. Applies to DesktopOrganizer 1.0 and later as distributed through the Microsoft Store._
 
 > Черновик для публикации на публичной странице (AP2 в `docs/PLANS/store-first-publication.md`). Замените
-> `<SUPPORT-EMAIL>` и `<PUBLIC-URL>` перед публикацией. Русская версия — ниже.
+> e.smirnov@protonmail.com и https://messire.github.io/desktop-organizer-site/ перед публикацией. Русская версия — ниже.
 
 ## Summary
 
@@ -50,11 +50,11 @@ DesktopOrganizer is a general-purpose utility, is not directed at children and c
 
 ## Changes
 
-If this policy changes, the new version is published at `<PUBLIC-URL>` with an updated date.
+If this policy changes, the new version is published at https://messire.github.io/desktop-organizer-site/ with an updated date.
 
 ## Contact
 
-Questions about privacy or the app: `<SUPPORT-EMAIL>`.
+Questions about privacy or the app: e.smirnov@protonmail.com.
 
 ---
 
@@ -98,4 +98,4 @@ DesktopOrganizer — классическое настольное прилож�
 
 ## Контакт
 
-Вопросы о конфиденциальности и приложении: `<SUPPORT-EMAIL>`.
+Вопросы о конфиденциальности и приложении: e.smirnov@protonmail.com.

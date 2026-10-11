@@ -1,4 +1,4 @@
-namespace DesktopOrganizer.Services.Updates;
+﻿namespace DesktopOrganizer.Services.Updates;
 
 /// <summary>
 /// The fixed set of URLs the update-check feature (release-hardening-1.0.md §G2) and the About section's
@@ -23,18 +23,14 @@ public static class UpdateEndpoints
     /// The public web page of the product — the single place every user-facing "project"/"support"/
     /// "privacy" link resolves to, so switching to the owner's real public page is a one-constant change.
     /// </summary>
-    /// <remarks>
-    /// TODO: replace with the public page of the owner (Partner Center "Support contact info" / privacy
-    /// policy URL). Today it is the author's GitHub profile, which is reachable even though the source
-    /// repository is private (the issue tracker below it would answer 404).
-    /// </remarks>
-    public const string PublicSiteUrl = "https://github.com/messire";
+    /// <remarks>Owner's public site (GitHub Pages, separate public site-only repository; the source repository stays private). Changing the address is a one-constant edit here plus the Partner Center listing fields.</remarks>
+    public const string PublicSiteUrl = "https://messire.github.io/desktop-organizer-site/";
 
     /// <summary>Where "Report a problem" leads — currently <see cref="PublicSiteUrl"/>, see there.</summary>
     public const string SupportUrl = PublicSiteUrl;
 
-    /// <summary>The privacy-policy page for the Store listing — currently <see cref="PublicSiteUrl"/>, see there. Not used by any code yet (no in-app link points at it); it only reserves the address so the owner's real policy URL is a one-constant change.</summary>
-    public const string PrivacyPolicyUrl = PublicSiteUrl;
+    /// <summary>The privacy-policy page for the Store listing (<see cref="PublicSiteUrl"/> + <c>privacy</c>). Not used by any code yet (no in-app link points at it); it is the single place the address is recorded.</summary>
+    public const string PrivacyPolicyUrl = PublicSiteUrl + "privacy";
 
     /// <summary>The About section's "Project page" link — <see cref="PublicSiteUrl"/>.</summary>
     public const string ProjectPageUrl = PublicSiteUrl;

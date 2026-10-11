@@ -11,9 +11,9 @@
 | Pricing | Free |
 | Markets | все |
 | Age rating (IARC) | анкета: утилита, нет контента/покупок/общения → ожидаемо «3+ / Everyone» |
-| Privacy policy URL | `<PUBLIC-URL>/privacy` (текст — `docs/store/privacy-policy.md`) |
-| Website | `<PUBLIC-URL>` |
-| Support contact | `<SUPPORT-EMAIL>` |
+| Privacy policy URL | https://messire.github.io/desktop-organizer-site/privacy (текст — `docs/store/privacy-policy.md`) |
+| Website | https://messire.github.io/desktop-organizer-site/ |
+| Support contact | e.smirnov@protonmail.com |
 | License terms | оставить Standard Application License Terms (код закрытый, MIT в листинг не выносить) |
 | Package | `.msix`, x64, версия `1.0.0.0`, capability `runFullTrust`, расширение `windows.startupTask` (Enabled=false) |
 | Languages | en-US (обязательно), ru-RU |

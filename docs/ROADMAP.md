@@ -1316,7 +1316,7 @@ identity проверяются вручную на Windows 11 (сценарий
 - [x] **Пакет 3 — A4, B2, B4, B5, B9.** Карточка Updates скрыта под identity (`AboutViewModel.IsUpdateCheckAvailable`), баннер
       первого запуска (`FirstRunTrayNotice`, без persisted-флагов), Move-hint с путём (`MoveHintText`), тексты без жаргона,
       known limitations в `CHANGELOG.md` `[Unreleased]` и `README.md`. ADR-050 D-5.
-- [~] **B6 — ссылки «Project page» / «Report a problem» / политика.** `UpdateEndpoints.PublicSiteUrl` — временное значение
+- [x] **B6 — ссылки «Project page» / «Report a problem» / политика (закрыто 2026-10-11: https://messire.github.io/desktop-organizer-site/).** `UpdateEndpoints.PublicSiteUrl` — временное значение
       (`https://github.com/messire`), заменяется одной константой, когда владелец даст URL публичной страницы (AP2).
 - [x] **Пакет 4 — A3: упаковка MSIX.** `installer/msix/AppxManifest.xml` (шаблон) + `installer/build-msix.ps1`
       (`makepri` без `<packaging>`, `makeappx`, без `.wapproj`), ассеты из `app.ico` (`Generate-Assets.ps1`), CI job `msix`,
@@ -1354,7 +1354,7 @@ identity проверяются вручную на Windows 11 (сценарий
 - [ ] **C11** — расширение контрактных тестов манифеста (базовые `MsixManifestContractTests` уже есть, см. Пакет 4).
 - [x] **C12** — README: раздел для Store / разделение инструкций установки. Сделано 2026-10-11: `README.md` (EN + RU) переписан по
       каналам (Store / классический установщик), `installer/README.md`, `docs/store/*`, `CHANGELOG.md` согласованы; плейсхолдеры
-      `<PUBLIC-URL>` / `<SUPPORT-EMAIL>` заменяет владелец одним поиском.
+      https://messire.github.io/desktop-organizer-site/ / e.smirnov@protonmail.com заменяет владелец одним поиском.
 - [ ] **C13** — P1: `user.config` Store-сборки сбрасывается при каждом обновлении пакета (`_Url_<hash>` от пути exe); любое
       исправление меняет контур `IAppSettings`/`user.config` ⇒ **нужно отдельное явное «да» владельца** (D-4 — ответа нет,
       действует «отложить»).

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest template for the Microsoft Store channel (docs/PLANS/store-publication-implementation.md,
+  Package 4). It is NOT a finished manifest: installer/build-msix.ps1 loads it through the XML DOM and
+  substitutes the five $TOKEN$ values below (Identity Name / Publisher / Version,
+  Properties/PublisherDisplayName and the app DisplayName - the latter in three places:
+  Properties/DisplayName, uap:VisualElements/@DisplayName, desktop:StartupTask/@DisplayName), then writes
+  the result to the package layout. Keep the tokens verbatim - MsixManifestContractTests pins them.
+
+  Identity Name / Publisher / PublisherDisplayName / DisplayName must be copied character for character
+  from Partner Center (Product identity, Store listing) for a Store submission; the Store re-signs the package.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop rescap">
+
+  <Identity
+    Name="$IDENTITY_NAME$"
+    Publisher="$PUBLISHER$"
+    Version="$VERSION$"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>$DISPLAY_NAME$</DisplayName>
+    <PublisherDisplayName>$PUBLISHER_DISPLAY_NAME$</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-US" />
+    <Resource Language="ru-RU" />
+  </Resources>
+
+  <Applications>
+    <Application
+      Id="DesktopOrganizer"
+      Executable="DesktopOrganizer.UI.exe"
+      EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="$DISPLAY_NAME$"
+        Description="A free Windows desktop organizer that groups your desktop icons into movable, resizable panels."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <!-- Autostart is always user-controlled (Enabled="false"): Windows lists the task under
+             Settings > Apps > Startup and the user switches it on there. -->
+        <desktop:Extension
+          Category="windows.startupTask"
+          Executable="DesktopOrganizer.UI.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask
+            TaskId="DesktopOrganizerStartup"
+            Enabled="false"
+            DisplayName="$DISPLAY_NAME$" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

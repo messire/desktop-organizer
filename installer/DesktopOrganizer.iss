@@ -36,14 +36,17 @@
 ; "start with Windows" flag in its JSON state: AutostartService
 ; (src/DesktopOrganizer.UI/Services/AutostartService.cs) reads/writes exactly this
 ; HKCU Run value, so the checkbox on the installer's Finished page and the one in
-; the app's Settings window are literally the same setting. Both literals below
-; must match AutostartService.RunKeyPath / AutostartService.ValueName — enforced
-; by InstallerAutostartContractTests.
+; the app's Settings window are literally the same setting. The literals below
+; must match AutostartService.RunKeyPath / .StartupApprovedKeyPath /
+; .InstallerValueName — enforced by InstallerAutostartContractTests.
+; AutostartApprovedKey is where Task Manager / Settings → Startup keep the
+; per-value enabled/disabled flag (first data byte: bit 0 set = disabled); a Run
+; value flagged there is never launched, so "enabled" must clear that flag too.
 #define AutostartRunKey "Software\Microsoft\Windows\CurrentVersion\Run"
+#define AutostartApprovedKey "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 #define AutostartValueName "DesktopOrganizer"
-; NB: AutostartValueName is the *Release* build's value name (AutostartService.InstallerValueName).
-; Debug builds use "DesktopOrganizer.Dev" and a separate data root %LocalAppData%\DesktopOrganizer.Dev
-; (AppStorageRoot) so development never touches the installed application — nothing here refers to them.
+; NB: Debug builds never write autostart (session-only toggle) and use a separate data root
+; %LocalAppData%\DesktopOrganizer.Dev (AppStorageRoot), so development never touches the installed application.
 ;
 ; Single-instance / graceful-shutdown contract shared with the app (see [Code]'s EnsureAppClosed below).
 ; Both literals must always match SingleInstanceNaming.InstallerDetectionMutexName /
@@ -413,7 +416,9 @@ end;
 
   Design:
    * Single source of truth is the HKCU Run value (AutostartRunKey /
-     AutostartValueName) — the same one the app's AutostartService toggles.
+     AutostartValueName) — the same one the app's AutostartService toggles —
+     read together with the Task Manager flag under AutostartApprovedKey: a value
+     Windows has disabled there counts as "off", and enabling clears the flag.
    * Initial state: fresh install → checked (Fences-like default); upgrade →
      whatever the app currently has (value present ⟺ checked), so a user who
      turned autostart off inside the app is not silently re-opted-in.
@@ -440,23 +445,48 @@ begin
   Result := '"' + ExpandConstant('{app}\{#MyAppExeName}') + '"';
 end;
 
+{ True when Task Manager / Settings → Startup has switched the Run value off
+  (StartupApproved entry present, bit 0 of its first byte set). No entry = enabled. }
+function AutostartDisabledByWindows(): Boolean;
+var
+  Data: AnsiString;
+begin
+  Result := False;
+  if RegQueryBinaryValue(HKEY_CURRENT_USER, '{#AutostartApprovedKey}', '{#AutostartValueName}', Data) then
+    Result := (Length(Data) > 0) and ((Ord(Data[1]) and 1) <> 0);
+end;
+
 function AutostartCurrentlyEnabled(): Boolean;
 begin
-  Result := RegValueExists(HKEY_CURRENT_USER, '{#AutostartRunKey}', '{#AutostartValueName}');
+  Result := RegValueExists(HKEY_CURRENT_USER, '{#AutostartRunKey}', '{#AutostartValueName}')
+    and not AutostartDisabledByWindows();
 end;
 
 procedure WriteAutostart(Enabled: Boolean);
+var
+  EnabledFlag: AnsiString;
 begin
   if Enabled then
   begin
     if not RegWriteStringValue(HKEY_CURRENT_USER, '{#AutostartRunKey}', '{#AutostartValueName}', AutostartCommand()) then
       Log('Autostart: failed to write HKCU\{#AutostartRunKey}\{#AutostartValueName}');
+    { Same 12 bytes Windows writes for an enabled entry: 02 00 00 00 + zero FILETIME.
+      Only rewritten when an entry exists — absence already means enabled. }
+    if RegValueExists(HKEY_CURRENT_USER, '{#AutostartApprovedKey}', '{#AutostartValueName}') then
+    begin
+      EnabledFlag := #$02#$00#$00#$00#$00#$00#$00#$00#$00#$00#$00#$00;
+      if not RegWriteBinaryValue(HKEY_CURRENT_USER, '{#AutostartApprovedKey}', '{#AutostartValueName}', EnabledFlag) then
+        Log('Autostart: failed to re-enable HKCU\{#AutostartApprovedKey}\{#AutostartValueName}');
+    end;
   end
   else
   begin
-    if AutostartCurrentlyEnabled() then
+    if RegValueExists(HKEY_CURRENT_USER, '{#AutostartRunKey}', '{#AutostartValueName}') then
       if not RegDeleteValue(HKEY_CURRENT_USER, '{#AutostartRunKey}', '{#AutostartValueName}') then
         Log('Autostart: failed to delete HKCU\{#AutostartRunKey}\{#AutostartValueName}');
+    if RegValueExists(HKEY_CURRENT_USER, '{#AutostartApprovedKey}', '{#AutostartValueName}') then
+      if not RegDeleteValue(HKEY_CURRENT_USER, '{#AutostartApprovedKey}', '{#AutostartValueName}') then
+        Log('Autostart: failed to delete HKCU\{#AutostartApprovedKey}\{#AutostartValueName}');
   end;
 end;
 

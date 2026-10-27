@@ -224,18 +224,18 @@ public class AppStorageRootTests
     }
 
     /// <summary>
-    /// Verifies that <see cref="AutostartService.DebugValueName"/> and <see cref="AutostartService.InstallerValueName"/>
-    /// are distinct Run key value names, and that <see cref="AutostartService.ValueName"/> resolves to the
-    /// one matching the active build configuration.
+    /// Verifies that only a Release build persists autostart to the registry (<see cref="AutostartService.PersistsToRegistry"/>):
+    /// the Debug build's toggle is session-only, so a <c>bin\Debug</c> exe can never be what Windows launches at logon.
+    /// The legacy Debug value name stays distinct from the installer's so the one-time cleanup can never hit the real entry.
     /// </summary>
     [Fact]
-    public void AutostartValueNames_DebugAndInstallerAreDistinct()
+    public void AutostartPersistence_FollowsBuildConfiguration()
     {
-        Assert.NotEqual(AutostartService.InstallerValueName, AutostartService.DebugValueName);
+        Assert.NotEqual(AutostartService.InstallerValueName, AutostartService.LegacyDebugValueName);
 #if DEBUG
-        Assert.Equal(AutostartService.DebugValueName, AutostartService.ValueName);
+        Assert.False(AutostartService.PersistsToRegistry);
 #else
-        Assert.Equal(AutostartService.InstallerValueName, AutostartService.ValueName);
+        Assert.True(AutostartService.PersistsToRegistry);
 #endif
     }
 

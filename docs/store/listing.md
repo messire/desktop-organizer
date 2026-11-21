@@ -14,7 +14,7 @@
 | Privacy policy URL | https://messire.github.io/desktop-organizer-site/privacy (текст — `docs/store/privacy-policy.md`) |
 | Website | https://messire.github.io/desktop-organizer-site/ |
 | Support contact | e.smirnov@protonmail.com |
-| License terms | оставить Standard Application License Terms (код закрытый, MIT в листинг не выносить) |
+| License terms | MIT, ссылка на `LICENSE` в репозитории https://github.com/messire/desktop-organizer (код открыт с 2026-11-21) |
 | Package | `.msix`, x64, версия `1.0.0.0`, capability `runFullTrust`, расширение `windows.startupTask` (Enabled=false) |
 | Languages | en-US (обязательно), ru-RU |
 

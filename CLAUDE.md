@@ -108,7 +108,7 @@ fences-feature-planner (мастер-план всей фазы)
   `Services` (реализации, нативный interop в `Tools/`) → `UI` (Views/ViewModels/Models/Converters/Commands).
 - **Инварианты:** P/Invoke только за `INativeApi`; колбэк хука `WH_MOUSE_LL` — минимум работы + try/catch;
   единый источник правды вида панели — `ChildWindowModel` (INPC); битые пути не валят загрузку.
-- **Готовность:** ROADMAP Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» (ADR-033–038) закрыта; manual verify выполнена на Windows 11 (2026-09-27); открыты сквозные задачи. Бэклог 1.x закрыт 2026-09-30, ADR-043–047. Канал Microsoft Store (MSIX, ADR-050) реализован 2026-10-10 на `feature/store-publication`, версия 1.0.0; код закрытый (D-6).
+- **Готовность:** ROADMAP Фазы 0–9 закрыты; Фаза 10 «Release hardening 1.0» (ADR-033–038) закрыта; manual verify выполнена на Windows 11 (2026-09-27); открыты сквозные задачи. Бэклог 1.x закрыт 2026-09-30, ADR-043–047. Канал Microsoft Store (MSIX, ADR-050) реализован 2026-10-10 на `feature/store-publication`, версия 1.0.0; с 2026-11-21 код открыт под MIT (заменяет D-6).
 
 ## 🔒 Настройки и persistence — ЗАМОРОЖЕНЫ (не трогать без явного разрешения пользователя)
 

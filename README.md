@@ -205,8 +205,8 @@ Microsoft Store build:
 
 ## Support and license
 
-Copyright (c) 2024-2026 khagen. Support: https://messire.github.io/desktop-organizer-site/, e.smirnov@protonmail.com. The Microsoft Store build is
-licensed under the Standard Application License Terms.
+Copyright (c) 2024-2026 khagen. Support: https://messire.github.io/desktop-organizer-site/, e.smirnov@protonmail.com.
+Released under the [MIT License](LICENSE).
 
 ---
 
@@ -424,5 +424,5 @@ Store-сборка не возвращает их автоматически: д
 
 ## Поддержка и лицензия
 
-Copyright (c) 2024-2026 khagen. Поддержка: https://messire.github.io/desktop-organizer-site/, e.smirnov@protonmail.com. Сборка из Microsoft Store
-распространяется на условиях Standard Application License Terms.
+Copyright (c) 2024-2026 khagen. Поддержка: https://messire.github.io/desktop-organizer-site/, e.smirnov@protonmail.com.
+Распространяется по [лицензии MIT](LICENSE).

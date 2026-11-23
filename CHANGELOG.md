@@ -1,5 +1,7 @@
 # Changelog
 
+Versions follow SemVer: patch for fixes only, minor for backward-compatible features, major for breaking changes such as a `schemaVersion` bump (rule: [CLAUDE.md → Версии](CLAUDE.md)).
+
 ## [Unreleased]
 - Released under the MIT License; source published on GitHub.
 - Autostart honours the Task Manager "StartupApproved" flag; Debug builds no longer register autostart.
